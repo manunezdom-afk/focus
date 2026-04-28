@@ -10,13 +10,18 @@
 // sugerencias quedan en estado pending: nada se aplica al calendario hasta
 // que el dueño las apruebe.
 //
+// Cuando la sugerencia llega, se dispara una notificación push al usuario
+// en todos sus dispositivos (web + iOS) si las tiene habilitadas.
+//
 // Para evitar abuso desde IPs maliciosas mantenemos rate limit estricto por
 // IP + por focusCode. Si alguien spamea sugerencias falsas, basta con que el
 // usuario regenere el código.
 
+import webpush from 'web-push'
 import { setCorsHeaders, rejectCrossSiteUnsafe } from '../_lib/security.js'
 import { rateLimited, clientIp } from '../_lib/rateLimit.js'
 import { getSupabaseAdmin } from '../_supabaseAdmin.js'
+import { getApnsConfig, sendApnsNotification } from '../_lib/apns.js'
 
 export const maxDuration = 10
 
@@ -42,6 +47,114 @@ function validateEvent(raw) {
   const section = SECTIONS.has(raw.section) ? raw.section : null
   const icon = ICONS.has(raw.icon) ? raw.icon : 'auto_awesome'
   return { title, date, time, description, section, icon }
+}
+
+function configureWebPush() {
+  const pub = process.env.VAPID_PUBLIC_KEY
+  const priv = process.env.VAPID_PRIVATE_KEY
+  const email = process.env.VAPID_EMAIL || 'mailto:admin@focus.app'
+  if (!pub || !priv) return false
+  webpush.setVapidDetails(email, pub, priv)
+  return true
+}
+
+// Envía notificaciones push (web + iOS) cuando Kairos envía una sugerencia.
+// No falla si no hay subscripciones — solo intenta y continúa.
+async function notifyUserAboutKairosSuggestion(admin, userId, suggestion) {
+  try {
+    const { preview_title, preview_body } = suggestion
+
+    // Web Push — obtener suscripciones y enviar
+    try {
+      const { data: subs } = await admin
+        .from('push_subscriptions')
+        .select('endpoint, p256dh, auth')
+        .eq('user_id', userId)
+
+      if (subs && subs.length > 0 && configureWebPush()) {
+        const payload = JSON.stringify({
+          title: preview_title || 'Nueva sugerencia desde Kairos',
+          body: preview_body || 'Revisa tu inbox en Focus',
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/badge-72x72.png',
+          data: {
+            url: '/focus/inbox', // Ruta a Click
+          },
+        })
+
+        for (const sub of subs) {
+          try {
+            await webpush.sendNotification(
+              {
+                endpoint: sub.endpoint,
+                keys: { p256dh: sub.p256dh, auth: sub.auth },
+              },
+              payload
+            )
+          } catch (err) {
+            if (err.statusCode === 410) {
+              // Push subscription expirada — eliminar
+              await admin
+                .from('push_subscriptions')
+                .delete()
+                .eq('endpoint', sub.endpoint)
+                .catch(() => {})
+            }
+          }
+        }
+      }
+    } catch (webPushErr) {
+      console.warn('[kairos/inbox] webpush error:', webPushErr?.message)
+    }
+
+    // iOS Push (APNs) — obtener tokens nativos y enviar
+    try {
+      const { data: nativeTokens } = await admin
+        .from('native_push_tokens')
+        .select('token, platform, environment, bundle_id')
+        .eq('user_id', userId)
+        .eq('platform', 'ios')
+
+      if (nativeTokens && nativeTokens.length > 0) {
+        const apnsConfig = getApnsConfig()
+        if (apnsConfig.configured) {
+          for (const row of nativeTokens) {
+            try {
+              await sendApnsNotification(
+                {
+                  token: row.token,
+                  bundleId: row.bundle_id || apnsConfig.bundleId,
+                  environment: row.environment || 'production',
+                  jwt: null, // sendApnsNotification lo genera internamente
+                },
+                {
+                  aps: {
+                    alert: {
+                      title: preview_title || 'Nueva sugerencia desde Kairos',
+                      body: preview_body || 'Revisa tu inbox en Focus',
+                    },
+                    sound: 'default',
+                    badge: 1,
+                    'mutable-content': true,
+                  },
+                  data: {
+                    url: '/focus/inbox',
+                  },
+                }
+              )
+            } catch (apnsErr) {
+              console.warn('[kairos/inbox] apns error for token:', row.token, apnsErr?.message)
+            }
+          }
+        }
+      }
+    } catch (nativeErr) {
+      console.warn('[kairos/inbox] native push error:', nativeErr?.message)
+    }
+  } catch (err) {
+    console.error('[kairos/inbox] notifyUserAboutKairosSuggestion:', err?.message)
+    // No falla el endpoint — la notificación es best-effort
+  }
 }
 
 export default async function handler(req, res) {
@@ -114,6 +227,16 @@ export default async function handler(req, res) {
       console.error('[kairos/inbox] insert failed:', insErr.message)
       return res.status(500).json({ error: 'insert_failed' })
     }
+
+    // Dispara notificación push al usuario en paralelo (best-effort).
+    // No bloquea la respuesta.
+    const suggestion = {
+      preview_title: `Crear: ${validated.title}`,
+      preview_body: previewParts.join(' · '),
+    }
+    notifyUserAboutKairosSuggestion(admin, link.user_id, suggestion).catch(err => {
+      console.error('[kairos/inbox] notification failed:', err?.message)
+    })
 
     return res.status(200).json({ ok: true, suggestionId: id })
   } catch (err) {
