@@ -25,11 +25,11 @@ export default function InstallButton() {
   return (
     <button
       onClick={handleInstall}
-      className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-white text-[13px] font-semibold hover:bg-primary/90 active:scale-95 transition-all"
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-white text-[13px] font-semibold hover:bg-primary/90 active:scale-95 transition-all"
       style={{ WebkitAppRegion: 'no-drag' }}
     >
       <span className="material-symbols-outlined text-[16px]">download</span>
-      Instalar app
+      <span className="hidden sm:inline">Instalar app</span>
     </button>
   )
 }

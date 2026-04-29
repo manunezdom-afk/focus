@@ -9,6 +9,14 @@ function isIOS() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream
 }
 
+function isChromeMac() {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent
+  const isMac = /Macintosh/.test(ua)
+  const isChrome = /Chrome/.test(ua) && !/Edg/.test(ua)
+  return isMac && isChrome
+}
+
 // ── InstallAppCard ──────────────────────────────────────────────────────────
 // Card flotante que invita a instalar Focus como app.
 // - En Android/Chrome/Edge: usa el evento beforeinstallprompt (instalación 1 tap)
@@ -28,6 +36,7 @@ export default function InstallAppCard({ onDismissed }) {
   if (dismissed) return null
 
   const ios = isIOS()
+  const chromeMac = isChromeMac()
   // En iOS no existe beforeinstallprompt pero queremos igual ofrecer el hint
   if (!available && !ios) return null
 
@@ -69,7 +78,9 @@ export default function InstallAppCard({ onDismissed }) {
               Instala Focus como app
             </p>
             <p className="mt-0.5 text-[12px] leading-snug text-slate-500">
-              Ábrela directo desde tu pantalla, sin barra del navegador. Funciona offline.
+              {chromeMac
+                ? 'Ábrela directo desde tu Mac, sin barra del navegador. Con Microsoft Edge queda en tu carpeta Aplicaciones como app nativa.'
+                : 'Ábrela directo desde tu pantalla, sin barra del navegador. Funciona offline.'}
             </p>
             <div className="mt-2.5 flex items-center gap-1.5">
               <button
