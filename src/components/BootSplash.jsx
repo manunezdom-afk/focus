@@ -32,47 +32,20 @@ export function useBootSplash() {
   return { show }
 }
 
-// Reproduce el icono de la app (public/icons/icon.svg) inline, para que el
-// rendering sea instantáneo y no dependa de cargar un PNG.
-// Engranaje: cuerpo central + 8 protuberancias + anillo interior + punto central.
+// Icono oficial de la app como PNG para fidelidad total al diseño.
 function FocusIcon({ size = 96 }) {
   return (
-    <svg
-      viewBox="0 0 512 512"
+    <img
+      src="/icons/icon-192.png?v=3"
+      alt=""
+      aria-hidden="true"
       width={size}
       height={size}
-      aria-hidden="true"
       style={{
         filter: 'drop-shadow(0 16px 38px rgba(29,78,216,0.45))',
+        borderRadius: size * 0.22,
       }}
-    >
-      <defs>
-        <linearGradient id="bootsplash-bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#3b6ef5" />
-          <stop offset="55%" stopColor="#1d4ed8" />
-          <stop offset="100%" stopColor="#1a3db5" />
-        </linearGradient>
-      </defs>
-      {/* Fondo */}
-      <rect width="512" height="512" rx="112" fill="url(#bootsplash-bg)" />
-      {/* Cuerpo central del engranaje */}
-      <circle cx="256" cy="256" r="138" fill="#ffffff" />
-      {/* 8 protuberancias exteriores (cada 45°) */}
-      <circle cx="256" cy="78"  r="55" fill="#ffffff" />
-      <circle cx="382" cy="130" r="55" fill="#ffffff" />
-      <circle cx="434" cy="256" r="55" fill="#ffffff" />
-      <circle cx="382" cy="382" r="55" fill="#ffffff" />
-      <circle cx="256" cy="434" r="55" fill="#ffffff" />
-      <circle cx="130" cy="382" r="55" fill="#ffffff" />
-      <circle cx="78"  cy="256" r="55" fill="#ffffff" />
-      <circle cx="130" cy="130" r="55" fill="#ffffff" />
-      {/* Hueco central */}
-      <circle cx="256" cy="256" r="107" fill="url(#bootsplash-bg)" />
-      {/* Anillo interior blanco */}
-      <circle cx="256" cy="256" r="87"  fill="#ffffff" />
-      {/* Punto central azul */}
-      <circle cx="256" cy="256" r="54"  fill="url(#bootsplash-bg)" />
-    </svg>
+    />
   )
 }
 
