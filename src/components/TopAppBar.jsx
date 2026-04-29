@@ -29,12 +29,14 @@ export default function TopAppBar({
           </button>
         ) : null}
         <div className="flex items-center gap-1.5">
-          <span
-            className="material-symbols-outlined text-primary text-[22px]"
-            style={{ fontVariationSettings: "'FILL' 1" }}
-          >
-            brightness_high
-          </span>
+          <img
+            src="/icons/icon-192.png?v=3"
+            alt=""
+            aria-hidden="true"
+            width={22}
+            height={22}
+            className="rounded-[5px]"
+          />
           <span className="text-lg font-extrabold text-slate-900 dark:text-slate-100 font-headline">
             Focus
           </span>

@@ -33,8 +33,8 @@ export function useBootSplash() {
 }
 
 // Reproduce el icono de la app (public/icons/icon.svg) inline, para que el
-// rendering sea instantáneo y no dependa de cargar un PNG. Misma paleta
-// azul que el icono de instalación: #60a5fa → #1d4ed8 → #1e1b4b.
+// rendering sea instantáneo y no dependa de cargar un PNG.
+// Engranaje: cuerpo central + 8 protuberancias + anillo interior + punto central.
 function FocusIcon({ size = 96 }) {
   return (
     <svg
@@ -48,30 +48,30 @@ function FocusIcon({ size = 96 }) {
     >
       <defs>
         <linearGradient id="bootsplash-bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#60a5fa" />
+          <stop offset="0%" stopColor="#3b6ef5" />
           <stop offset="55%" stopColor="#1d4ed8" />
-          <stop offset="100%" stopColor="#1e1b4b" />
+          <stop offset="100%" stopColor="#1a3db5" />
         </linearGradient>
-        <radialGradient id="bootsplash-glow" cx="0.5" cy="0.5" r="0.5">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.6" />
-          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
-        </radialGradient>
       </defs>
+      {/* Fondo */}
       <rect width="512" height="512" rx="112" fill="url(#bootsplash-bg)" />
-      <circle cx="256" cy="256" r="180" fill="url(#bootsplash-glow)" />
-      <g fill="#ffffff" transform="translate(256 256)">
-        <circle r="68" />
-        <g>
-          <rect x="-10" y="-128" width="20" height="40" rx="10" />
-          <rect x="-10" y="88" width="20" height="40" rx="10" />
-          <rect x="-128" y="-10" width="40" height="20" rx="10" />
-          <rect x="88" y="-10" width="40" height="20" rx="10" />
-          <rect x="-10" y="-128" width="20" height="40" rx="10" transform="rotate(45)" />
-          <rect x="-10" y="88" width="20" height="40" rx="10" transform="rotate(45)" />
-          <rect x="-128" y="-10" width="40" height="20" rx="10" transform="rotate(45)" />
-          <rect x="88" y="-10" width="40" height="20" rx="10" transform="rotate(45)" />
-        </g>
-      </g>
+      {/* Cuerpo central del engranaje */}
+      <circle cx="256" cy="256" r="138" fill="#ffffff" />
+      {/* 8 protuberancias exteriores (cada 45°) */}
+      <circle cx="256" cy="78"  r="55" fill="#ffffff" />
+      <circle cx="382" cy="130" r="55" fill="#ffffff" />
+      <circle cx="434" cy="256" r="55" fill="#ffffff" />
+      <circle cx="382" cy="382" r="55" fill="#ffffff" />
+      <circle cx="256" cy="434" r="55" fill="#ffffff" />
+      <circle cx="130" cy="382" r="55" fill="#ffffff" />
+      <circle cx="78"  cy="256" r="55" fill="#ffffff" />
+      <circle cx="130" cy="130" r="55" fill="#ffffff" />
+      {/* Hueco central */}
+      <circle cx="256" cy="256" r="107" fill="url(#bootsplash-bg)" />
+      {/* Anillo interior blanco */}
+      <circle cx="256" cy="256" r="87"  fill="#ffffff" />
+      {/* Punto central azul */}
+      <circle cx="256" cy="256" r="54"  fill="url(#bootsplash-bg)" />
     </svg>
   )
 }
