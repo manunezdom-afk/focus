@@ -1,4 +1,5 @@
 import { useAuth } from '../context/AuthContext'
+import InstallButton from './InstallButton'
 
 export default function TopAppBar({
   showBack = false,
@@ -46,8 +47,9 @@ export default function TopAppBar({
         </div>
       </div>
 
-      {/* Right: account + share + bell */}
+      {/* Right: install + account + share + bell */}
       <div className="flex items-center gap-1 lg:gap-2" style={{ WebkitAppRegion: 'no-drag' }}>
+        <InstallButton />
         <button
           onClick={() => setAuthModal(true)}
           aria-label={user ? 'Tu cuenta' : 'Iniciar sesión'}
