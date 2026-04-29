@@ -1,7 +1,8 @@
 {
-  "name": "Focus · Calendario con IA",
+  "name": "Focus",
   "short_name": "Focus",
   "description": "Tu calendario con Nova, la IA que propone y nunca cambia nada sin tu aprobación.",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
