@@ -169,6 +169,15 @@ export function AuthProvider({ children }) {
     return data?.user || null
   }, [])
 
+  const signInWithGoogle = useCallback(async () => {
+    if (!supabase) throw new Error('Supabase no configurado')
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    })
+    if (error) throw error
+  }, [])
+
   const signOut = useCallback(async () => {
     if (supabase) await supabase.auth.signOut()
     setUser(null)
@@ -309,6 +318,7 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider value={{
       user, loading, authModal, setAuthModal,
       signInWithEmail, verifyOtp, signOut,
+      signInWithGoogle,
       signInWithPassword, signUpWithPassword,
       startDevicePairing, claimDevicePairing, exchangeDeviceToken,
     }}>
