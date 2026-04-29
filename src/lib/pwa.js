@@ -171,11 +171,12 @@ export async function promptInstall() {
   return choice
 }
 
-// Detecta si ya está corriendo como PWA instalada (iOS + desktop + Android)
+// Detecta si ya está corriendo como PWA instalada (iOS + desktop + Android + WCO)
 export function isStandalone() {
   if (typeof window === 'undefined') return false
   return (
     window.matchMedia?.('(display-mode: standalone)').matches ||
+    window.matchMedia?.('(display-mode: window-controls-overlay)').matches ||
     window.navigator?.standalone === true
   )
 }

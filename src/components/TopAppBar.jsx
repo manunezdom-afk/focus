@@ -15,10 +15,13 @@ export default function TopAppBar({
   return (
     <nav
       className="sticky top-0 z-50 bg-slate-50/70 dark:bg-slate-900/70 backdrop-blur-lg flex justify-between items-center w-full px-4 lg:px-6 pb-4"
-      style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 1rem)' }}
+      style={{
+        paddingTop: 'calc(env(titlebar-area-height, env(safe-area-inset-top, 0px)) + 1rem)',
+        WebkitAppRegion: 'drag',
+      }}
     >
       {/* Left: back button OR logo */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' }}>
         {showBack ? (
           <button
             onClick={onBack}
@@ -44,7 +47,7 @@ export default function TopAppBar({
       </div>
 
       {/* Right: account + share + bell */}
-      <div className="flex items-center gap-1 lg:gap-2">
+      <div className="flex items-center gap-1 lg:gap-2" style={{ WebkitAppRegion: 'no-drag' }}>
         <button
           onClick={() => setAuthModal(true)}
           aria-label={user ? 'Tu cuenta' : 'Iniciar sesión'}

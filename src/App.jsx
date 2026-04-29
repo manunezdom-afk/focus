@@ -12,6 +12,7 @@ import { actionToSuggestion, applySuggestion } from './utils/actionToSuggestion'
 
 // Eager: todo lo que se pinta en el primer render del planner (landing).
 // Mantener chicos y rápidos; lo que entra aquí penaliza cada cold start.
+import InstallGate                 from './components/InstallGate'
 import TopAppBar                   from './components/TopAppBar'
 import BottomNavBar                from './components/BottomNavBar'
 import DesktopSideBar              from './components/DesktopSideBar'
@@ -736,6 +737,7 @@ export default function App() {
   }
 
   return (
+    <InstallGate>
     <LayoutGroup>
     {/* Aurora ambiente — firma de marca, continuidad con landing.
         Renderizada fuera del wrapper principal para que el bg-surface no la tape. */}
@@ -1159,5 +1161,6 @@ export default function App() {
       </AnimatePresence>
     </div>
     </LayoutGroup>
+    </InstallGate>
   )
 }
