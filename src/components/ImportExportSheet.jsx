@@ -525,7 +525,7 @@ function SubscribeTab() {
             </div>
 
             <p className="text-[10.5px] text-outline leading-snug pt-1">
-              💡 Los calendarios se actualizan cada 1-24 h según la app. Si revocas este feed, todos los calendarios suscritos dejan de ver tus eventos.
+              Los calendarios se actualizan cada 1-24 h según la app. Si revocas este feed, todos los calendarios suscritos dejan de ver tus eventos.
             </p>
           </div>
         )

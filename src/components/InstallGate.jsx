@@ -108,7 +108,7 @@ export default function InstallGate({ children }) {
         {showIosHint && ios && (
           <div className="w-full bg-slate-900 rounded-2xl p-4 text-left text-sm text-slate-300 space-y-2">
             <p className="font-semibold text-white">Para instalar en iPhone / iPad:</p>
-            <p>1. Toca el ícono <span className="inline-block align-middle">⬆️</span> <strong>Compartir</strong> en la barra de Safari</p>
+            <p>1. Toca el ícono <strong>Compartir</strong> (cuadrado con flecha) en la barra de Safari</p>
             <p>2. Desplázate y toca <strong>"Añadir a pantalla de inicio"</strong></p>
             <p>3. Toca <strong>Agregar</strong> — ¡listo!</p>
           </div>

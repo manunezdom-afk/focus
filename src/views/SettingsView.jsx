@@ -128,7 +128,7 @@ function PushDiagnostic() {
           setStatus({ ok: false, msg: 'El servidor no tiene el token de esta app. Usa "Reconectar notificaciones" abajo.' })
           return
         }
-        setStatus({ ok: true, msg: '✅ Todo OK. Permiso activo, token nativo y servidor conectados.' })
+        setStatus({ ok: true, msg: 'Todo OK. Permiso activo, token nativo y servidor conectados.' })
         return
       }
 
@@ -173,7 +173,7 @@ function PushDiagnostic() {
         setStatus({ ok: false, msg: 'El servidor no tiene tu suscripción. Probablemente APNs la invalidó. Usa "Reconectar notificaciones" abajo.' })
         return
       }
-      setStatus({ ok: true, msg: '✅ Todo OK. Permiso activo, suscripción local y el servidor la tiene registrada.' })
+      setStatus({ ok: true, msg: 'Todo OK. Permiso activo, suscripción local y el servidor la tiene registrada.' })
     } catch (e) {
       const m = String(e?.message || e)
       if (/timeout/i.test(m)) {
@@ -195,7 +195,7 @@ function PushDiagnostic() {
         ? await registerNativePush({ prompt: true })
         : await forceResubscribe()
       if (r.ok && r.reason !== 'saved_locally_no_session') {
-        setStatus({ ok: true, msg: '✅ Reconectado. Nueva suscripción guardada en el servidor.' })
+        setStatus({ ok: true, msg: 'Reconectado. Nueva suscripción guardada en el servidor.' })
         return
       }
       if (r.reason === 'saved_locally_no_session') {
@@ -227,7 +227,7 @@ function PushDiagnostic() {
     try {
       const r = await sendTestPush()
       if (r.ok) {
-        setStatus({ ok: true, msg: `✅ Notificación de prueba enviada (${r.sent}/${r.subscriptions}). Debería aparecer en segundos.` })
+        setStatus({ ok: true, msg: `Notificación de prueba enviada (${r.sent}/${r.subscriptions}). Debería aparecer en segundos.` })
         return
       }
       const reason = r.reason || ''
