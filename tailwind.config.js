@@ -5,35 +5,36 @@ export default {
   theme: {
     extend: {
       colors: {
-        // ── Focus Nova violet — reemplaza el blue de Material Design.
-        // Todos los text-blue-xxx / bg-blue-xxx pasan a violeta sin tocar componentes.
+        // ── Focus Nova indigo-azul — reemplaza el blue de Material Design.
+        // Palette más azul que el violeta anterior (#7c6bff → #6366f1).
+        // Todos los text-blue-xxx / bg-blue-xxx pasan a índigo sin tocar componentes.
         blue: {
-          50:  '#f0eeff',
-          100: '#e1dcff',
-          200: '#c5baff',
-          300: '#a996ff',
-          400: '#9077ff',
-          500: '#8268ff',
-          600: '#7c6bff',  // anchor: Focus Nova
-          700: '#6351e6',
-          800: '#4a3bcc',
-          900: '#352b99',
-          950: '#1f1860',
+          50:  '#eef2ff',
+          100: '#e0e7ff',
+          200: '#c7d2fe',
+          300: '#a5b4fc',
+          400: '#818cf8',
+          500: '#6366f1',
+          600: '#5b5ef5',  // anchor: Focus Nova azul-índigo
+          700: '#4338ca',
+          800: '#3730a3',
+          900: '#312e81',
+          950: '#1e1b4b',
         },
 
         // ── Semantic / brand tokens ──────────────────────────────────────
-        'primary':           '#7c6bff',  // Nova violet (era #0058bc Material blue)
-        'primary-container': '#e1dcff',
+        'primary':           '#5b5ef5',  // Nova azul-índigo
+        'primary-container': '#e0e7ff',
         'on-primary':        '#ffffff',
-        'on-primary-fixed':  '#1a0060',
+        'on-primary-fixed':  '#1a006b',
 
-        'secondary':           '#6b64e8',
-        'secondary-container': '#e2dfff',
+        'secondary':           '#6366f1',
+        'secondary-container': '#e0e7ff',
         'on-secondary':        '#ffffff',
 
-        'nova':      '#7c6bff',
-        'nova-soft': '#e1dcff',
-        'nova-mid':  '#a899ff',
+        'nova':      '#6366f1',
+        'nova-soft': '#e0e7ff',
+        'nova-mid':  '#a5b4fc',
 
         // ── Surfaces (ecosystem: papel violeta-frío) ─────────────────────
         'background': '#fafafd',
@@ -64,10 +65,10 @@ export default {
         'on-error-container': '#93000a',
 
         // ── Brand gradient stops ─────────────────────────────────────────
-        'grad-1': '#7c6bff',
-        'grad-2': '#9b59ff',
-        'grad-3': '#c46fff',
-        'grad-4': '#ff8fb1',
+        'grad-1': '#5b5ef5',
+        'grad-2': '#6366f1',
+        'grad-3': '#a78bfa',
+        'grad-4': '#c084fc',
       },
 
       transitionTimingFunction: {

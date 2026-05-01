@@ -13,15 +13,15 @@
   /* Easing */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* Nova brand — violeta Focus */
-  --nova:     #7c6bff;
-  --nova-glow: 124, 107, 255;  /* formato r,g,b para uso en rgba() */
+  /* Nova brand — azul-índigo Focus */
+  --nova:      #6366f1;
+  --nova-glow: 99, 102, 241;  /* formato r,g,b para uso en rgba() */
 
-  /* Brand gradient stops (Focus: violeta → nova → magenta → rosa) */
-  --grad-1: #7c6bff;
-  --grad-2: #9b59ff;
-  --grad-3: #c46fff;
-  --grad-4: #ff8fb1;
+  /* Brand gradient stops (Focus: índigo → violeta → lila) */
+  --grad-1: #5b5ef5;
+  --grad-2: #6366f1;
+  --grad-3: #a78bfa;
+  --grad-4: #c084fc;
 }
 
 .material-symbols-outlined {
@@ -80,11 +80,11 @@ h1, h2, h3 {
   /* Scrollbar fino */
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgba(124, 107, 255, 0.20) transparent;
+    scrollbar-color: rgba(99, 102, 241, 0.20) transparent;
   }
   .scrollbar-thin::-webkit-scrollbar { width: 4px; height: 4px; }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: rgba(124, 107, 255, 0.20);
+    background-color: rgba(99, 102, 241, 0.20);
     border-radius: 999px;
   }
 
@@ -109,12 +109,12 @@ h1, h2, h3 {
   /* Glass card — superficies translúcidas con blur */
   .glass-card {
     background: rgba(255, 255, 255, 0.72);
-    border: 1px solid rgba(124, 107, 255, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.12);
     backdrop-filter: blur(20px) saturate(1.3);
   }
   .glass-card:hover {
     background: rgba(255, 255, 255, 0.88);
-    border-color: rgba(124, 107, 255, 0.20);
+    border-color: rgba(99, 102, 241, 0.20);
   }
 
   /* Gradiente de marca animado — texto */
@@ -150,8 +150,8 @@ h1, h2, h3 {
   /* Fondo con halo sutil de Nova detrás del contenido */
   .nova-ambient {
     background:
-      radial-gradient(ellipse 600px 300px at 8% -10%, rgba(124, 107, 255, 0.06) 0%, transparent 60%),
-      radial-gradient(ellipse 480px 240px at 95% -5%, rgba(196, 111, 255, 0.04) 0%, transparent 60%);
+      radial-gradient(ellipse 600px 300px at 8% -10%, rgba(99, 102, 241, 0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 480px 240px at 95% -5%, rgba(167, 139, 250, 0.04) 0%, transparent 60%);
   }
 }
 
