@@ -23,7 +23,7 @@ export default function BottomNavBar({ activeView, onNavigate }) {
               onClick={() => onNavigate(id)}
               aria-label={label}
               aria-current={isActive ? 'page' : undefined}
-              className={`relative flex-1 flex flex-col items-center justify-center gap-1 min-h-[44px] px-1 font-['Inter'] text-[10.5px] font-semibold leading-tight whitespace-nowrap transition-colors duration-300 ${
+              className={`relative flex-1 flex flex-col items-center justify-center gap-1 min-h-[44px] px-1 text-[10.5px] font-semibold leading-tight whitespace-nowrap transition-colors duration-300 ${
                 isActive ? 'text-blue-600' : 'text-slate-400 hover:text-blue-500'
               }`}
             >
