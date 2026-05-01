@@ -5,98 +5,115 @@ export default {
   theme: {
     extend: {
       colors: {
-        'outline': '#717786',
-        'surface-container': '#f0edef',
-        'on-primary-container': '#fefcff',
-        'on-primary-fixed-variant': '#004493',
-        'surface-container-high': '#eae7ea',
-        'primary-fixed': '#d8e2ff',
+        // ── Focus Nova violet — reemplaza el blue de Material Design.
+        // Todos los text-blue-xxx / bg-blue-xxx pasan a violeta sin tocar componentes.
+        blue: {
+          50:  '#f0eeff',
+          100: '#e1dcff',
+          200: '#c5baff',
+          300: '#a996ff',
+          400: '#9077ff',
+          500: '#8268ff',
+          600: '#7c6bff',  // anchor: Focus Nova
+          700: '#6351e6',
+          800: '#4a3bcc',
+          900: '#352b99',
+          950: '#1f1860',
+        },
+
+        // ── Semantic / brand tokens ──────────────────────────────────────
+        'primary':           '#7c6bff',  // Nova violet (era #0058bc Material blue)
+        'primary-container': '#e1dcff',
+        'on-primary':        '#ffffff',
+        'on-primary-fixed':  '#1a0060',
+
+        'secondary':           '#6b64e8',
+        'secondary-container': '#e2dfff',
+        'on-secondary':        '#ffffff',
+
+        'nova':      '#7c6bff',
+        'nova-soft': '#e1dcff',
+        'nova-mid':  '#a899ff',
+
+        // ── Surfaces (ecosystem: papel violeta-frío) ─────────────────────
+        'background': '#fafafd',
+        'surface':    '#ffffff',
+        'surface-bright':    '#fafafd',
+        'surface-container': '#f2f0fa',
+        'surface-container-low':    '#f7f5fc',
+        'surface-container-high':   '#ebe8f5',
+        'surface-container-highest':'#e4e1f0',
+        'surface-variant': '#e8e5f2',
+        'surface-dim':     '#dcdaeb',
+        'surface-tint':    '#7c6bff',
+
+        // ── Text / on-surface ────────────────────────────────────────────
+        'on-surface':         '#100525',
+        'on-surface-variant': '#38255c',
+        'on-background':      '#100525',
+        'outline':            '#7a6fa8',
+        'outline-variant':    '#c9c4dd',
+        'inverse-surface':    '#252030',
+        'inverse-on-surface': '#f2efff',
+        'inverse-primary':    '#c5baff',
+
+        // ── States ───────────────────────────────────────────────────────
+        'error':              '#ba1a1a',
+        'error-container':    '#ffdad6',
+        'on-error':           '#ffffff',
         'on-error-container': '#93000a',
-        'on-surface-variant': '#414755',
-        'surface-dim': '#dcd9dc',
-        'on-tertiary': '#ffffff',
-        'inverse-primary': '#adc6ff',
-        'on-secondary-fixed-variant': '#3631b4',
-        'secondary-fixed': '#e2dfff',
-        'surface-container-low': '#f6f3f5',
-        'on-secondary': '#ffffff',
-        'secondary-fixed-dim': '#c2c1ff',
-        'inverse-on-surface': '#f3f0f2',
-        'surface-bright': '#fcf8fb',
-        'on-tertiary-fixed-variant': '#7c2e00',
-        'on-primary-fixed': '#001a41',
-        'tertiary-fixed-dim': '#ffb595',
-        'error-container': '#ffdad6',
-        'outline-variant': '#c1c6d7',
-        'surface': '#fcf8fb',
-        'on-background': '#1b1b1d',
-        'primary-fixed-dim': '#adc6ff',
-        'on-primary': '#ffffff',
-        'on-secondary-fixed': '#0c006a',
-        'primary-container': '#0070eb',
-        'tertiary-container': '#c64f00',
-        'surface-tint': '#005bc1',
-        'tertiary-fixed': '#ffdbcc',
-        'error': '#ba1a1a',
-        'background': '#fcf8fb',
-        'secondary': '#4c4aca',
-        'surface-container-lowest': '#ffffff',
-        'surface-variant': '#e4e2e4',
-        'surface-container-highest': '#e4e2e4',
-        'primary': '#0058bc',
-        'on-tertiary-fixed': '#351000',
-        'on-error': '#ffffff',
-        'on-secondary-container': '#fffbff',
-        'tertiary': '#9e3d00',
-        'on-surface': '#1b1b1d',
-        'inverse-surface': '#303032',
-        'on-tertiary-container': '#fffbff',
-        'secondary-container': '#6664e4',
-        'nova': '#7c6bff',
-        'nova-soft': '#a99bff',
+
+        // ── Brand gradient stops ─────────────────────────────────────────
+        'grad-1': '#7c6bff',
+        'grad-2': '#9b59ff',
+        'grad-3': '#c46fff',
+        'grad-4': '#ff8fb1',
       },
+
       transitionTimingFunction: {
-        focus: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        focus:  'cubic-bezier(0.22, 1, 0.36, 1)',
+        spring: 'cubic-bezier(0.34, 1.4, 0.64, 1)',
       },
+
       borderRadius: {
         DEFAULT: '0.25rem',
-        lg: '1rem',
-        xl: '1.5rem',
+        lg:  '1rem',
+        xl:  '1.5rem',
         '2xl': '1.5rem',
         '3xl': '1.5rem',
         full: '9999px',
       },
+
       fontFamily: {
-        // Stack del sistema, estilo Notion: SF Pro en Mac/iOS, Segoe UI Variable
-        // en Windows, Roboto en Android. Se ve nativo, no hay FOUT y el primer
-        // paint es instantáneo (no esperamos descarga de Google Fonts). Las
-        // cuatro familias apuntan al mismo stack — antes había mezcla Manrope/
-        // Inter pero el usuario pidió uniformidad estilo Notion.
-        headline: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
-        body:     ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
-        label:    ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
-        nova:     ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+        // Plus Jakarta Sans — misma tipografía que Kairos y Spark.
+        // Fallbacks system para que la app funcione mientras carga la fuente.
+        headline: ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
+        body:     ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
+        label:    ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
+        nova:     ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
+        mono:     ['"JetBrains Mono"', 'ui-monospace', '"SF Mono"', 'Menlo', 'Consolas', 'monospace'],
       },
+
       spacing: {
-        'safe-top': 'env(safe-area-inset-top, 0px)',
+        'safe-top':    'env(safe-area-inset-top, 0px)',
         'safe-bottom': 'env(safe-area-inset-bottom, 0px)',
-        'safe-left': 'env(safe-area-inset-left, 0px)',
-        'safe-right': 'env(safe-area-inset-right, 0px)',
+        'safe-left':   'env(safe-area-inset-left, 0px)',
+        'safe-right':  'env(safe-area-inset-right, 0px)',
       },
     },
   },
   plugins: [
     function ({ addUtilities }) {
       addUtilities({
-        '.pt-safe':  { paddingTop:    'env(safe-area-inset-top, 0px)' },
-        '.pb-safe':  { paddingBottom: 'env(safe-area-inset-bottom, 0px)' },
-        '.pl-safe':  { paddingLeft:   'env(safe-area-inset-left, 0px)' },
-        '.pr-safe':  { paddingRight:  'env(safe-area-inset-right, 0px)' },
-        '.mt-safe':  { marginTop:     'env(safe-area-inset-top, 0px)' },
-        '.mb-safe':  { marginBottom:  'env(safe-area-inset-bottom, 0px)' },
-        '.top-safe': { top:           'env(safe-area-inset-top, 0px)' },
-        '.bottom-safe': { bottom:     'env(safe-area-inset-bottom, 0px)' },
-        '.h-safe-bottom': { height:   'env(safe-area-inset-bottom, 0px)' },
+        '.pt-safe':       { paddingTop:    'env(safe-area-inset-top, 0px)' },
+        '.pb-safe':       { paddingBottom: 'env(safe-area-inset-bottom, 0px)' },
+        '.pl-safe':       { paddingLeft:   'env(safe-area-inset-left, 0px)' },
+        '.pr-safe':       { paddingRight:  'env(safe-area-inset-right, 0px)' },
+        '.mt-safe':       { marginTop:     'env(safe-area-inset-top, 0px)' },
+        '.mb-safe':       { marginBottom:  'env(safe-area-inset-bottom, 0px)' },
+        '.top-safe':      { top:           'env(safe-area-inset-top, 0px)' },
+        '.bottom-safe':   { bottom:        'env(safe-area-inset-bottom, 0px)' },
+        '.h-safe-bottom': { height:        'env(safe-area-inset-bottom, 0px)' },
       })
     },
   ],
