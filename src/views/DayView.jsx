@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, lazy, Suspense } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import DayTimeGrid from '../components/DayTimeGrid'
 const QuickAddSheet = lazy(() => import('../components/QuickAddSheet'))
 import { resolveEventDate, todayISO } from '../utils/resolveEventDate'
@@ -97,7 +98,7 @@ export default function DayView({ events = [], tasks = [], onAddEvent, onOpenTas
   }
 
   return (
-    <div className="bg-surface text-on-surface min-h-screen pb-44">
+    <div className="bg-surface text-on-surface pb-36">
       <main className={isDesktop ? 'max-w-4xl mx-auto px-6 pt-4 space-y-5' : 'max-w-md mx-auto px-4 pt-4 space-y-5'}>
 
         <header className="space-y-3">
@@ -152,80 +153,79 @@ export default function DayView({ events = [], tasks = [], onAddEvent, onOpenTas
                   + seguimos mostrando el grid para que los eventos queden
                   visibles como finalizados (no los borramos).
               · Con items activos/futuros → grid normal. */}
+        <AnimatePresence>
         {!hasAnyItem && (
-          <div className="bg-surface-container-low rounded-3xl p-5 sm:p-6 space-y-4">
-            <div className="flex items-start gap-3">
+          <motion.div
+            key="empty-state"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            className="space-y-3"
+          >
+            {/* Prompt de Nova */}
+            <div className="rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3.5 flex items-start gap-3">
               <span
-                className="material-symbols-outlined text-primary text-[26px] flex-shrink-0 mt-0.5"
+                className="material-symbols-outlined text-primary text-[20px] mt-0.5 flex-shrink-0"
                 style={{ fontVariationSettings: "'FILL' 1" }}
               >
-                {isToday ? 'wb_sunny' : 'event_available'}
+                auto_awesome
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-base font-bold text-on-surface leading-tight">
-                  {isToday ? 'Día libre. ¿Por dónde arrancamos?' : 'Sin eventos en este día.'}
-                </p>
-                <p className="text-[12.5px] text-outline mt-1 leading-snug">
+                <p className="text-[13.5px] font-semibold text-on-surface leading-snug">
                   {isToday
-                    ? 'Elige una acción para poner algo en marcha.'
-                    : 'Planifica desde ya para no llegar con la agenda en blanco.'}
+                    ? 'Tu agenda de hoy está vacía.'
+                    : 'Sin eventos en este día.'}
+                </p>
+                <p className="text-[12px] text-outline mt-0.5 leading-snug">
+                  {isToday
+                    ? 'Dile a Nova qué tienes hoy, o añade algo tú mismo.'
+                    : 'Planifica con anticipación para este día.'}
                 </p>
               </div>
             </div>
 
+            {/* Acciones rápidas */}
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => { setQuickAddInitial(''); setShowAdd(true) }}
-                className="group flex flex-col items-start gap-1.5 rounded-2xl bg-surface-container-lowest hover:bg-primary/5 border border-outline-variant/40 hover:border-primary/40 p-3 text-left transition-colors active:scale-[0.98]"
+                className="flex items-center gap-2 rounded-2xl bg-surface-container-low hover:bg-surface-container border border-outline-variant/30 px-3.5 py-3 text-left transition-colors active:scale-[0.97]"
               >
-                <span className="material-symbols-outlined text-primary text-[22px]">add_circle</span>
-                <span className="text-[13px] font-semibold text-on-surface leading-tight">Añadir evento</span>
-                <span className="text-[11px] text-outline leading-snug">Lo que tengas en mente, escríbelo natural.</span>
-              </button>
-
-              <button
-                onClick={() => { setQuickAddInitial('Trabajar enfocado 90 min'); setShowAdd(true) }}
-                className="group flex flex-col items-start gap-1.5 rounded-2xl bg-surface-container-lowest hover:bg-primary/5 border border-outline-variant/40 hover:border-primary/40 p-3 text-left transition-colors active:scale-[0.98]"
-              >
-                <span className="material-symbols-outlined text-primary text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>psychology</span>
-                <span className="text-[13px] font-semibold text-on-surface leading-tight">Trabajar enfocado</span>
-                <span className="text-[11px] text-outline leading-snug">90 minutos sin interrupciones.</span>
+                <span className="material-symbols-outlined text-primary text-[20px]">add_circle</span>
+                <span className="text-[13px] font-semibold text-on-surface">Añadir</span>
               </button>
 
               <button
                 onClick={scrollToNova}
-                className="group flex flex-col items-start gap-1.5 rounded-2xl bg-surface-container-lowest hover:bg-primary/5 border border-outline-variant/40 hover:border-primary/40 p-3 text-left transition-colors active:scale-[0.98]"
+                className="flex items-center gap-2 rounded-2xl bg-surface-container-low hover:bg-surface-container border border-outline-variant/30 px-3.5 py-3 text-left transition-colors active:scale-[0.97]"
               >
-                <span className="material-symbols-outlined text-primary text-[22px]">mic</span>
-                <span className="text-[13px] font-semibold text-on-surface leading-tight">Dictar con voz</span>
-                <span className="text-[11px] text-outline leading-snug">Cuéntale tu día a Nova.</span>
+                <span className="material-symbols-outlined text-primary text-[20px]">mic</span>
+                <span className="text-[13px] font-semibold text-on-surface">Dictar</span>
               </button>
 
-              <button
-                onClick={() => (onOpenPhotoImport || onOpenImport)?.()}
-                disabled={!onOpenImport && !onOpenPhotoImport}
-                className="group flex flex-col items-start gap-1.5 rounded-2xl bg-surface-container-lowest hover:bg-primary/5 border border-outline-variant/40 hover:border-primary/40 p-3 text-left transition-colors active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <span className="material-symbols-outlined text-primary text-[22px]">{onOpenPhotoImport ? 'photo_camera' : 'download'}</span>
-                <span className="text-[13px] font-semibold text-on-surface leading-tight">
-                  {onOpenPhotoImport ? 'Foto de tu agenda' : 'Importar agenda'}
-                </span>
-                <span className="text-[11px] text-outline leading-snug">
-                  {onOpenPhotoImport ? 'Envía una foto, Nova la parsea.' : 'Desde un ICS o suscripción.'}
-                </span>
-              </button>
+              {onOpenPhotoImport && (
+                <button
+                  onClick={onOpenPhotoImport}
+                  className="flex items-center gap-2 rounded-2xl bg-surface-container-low hover:bg-surface-container border border-outline-variant/30 px-3.5 py-3 text-left transition-colors active:scale-[0.97]"
+                >
+                  <span className="material-symbols-outlined text-primary text-[20px]">photo_camera</span>
+                  <span className="text-[13px] font-semibold text-on-surface">Foto de agenda</span>
+                </button>
+              )}
+
+              {onOpenImport && (
+                <button
+                  onClick={onOpenImport}
+                  className="flex items-center gap-2 rounded-2xl bg-surface-container-low hover:bg-surface-container border border-outline-variant/30 px-3.5 py-3 text-left transition-colors active:scale-[0.97]"
+                >
+                  <span className="material-symbols-outlined text-primary text-[20px]">download</span>
+                  <span className="text-[13px] font-semibold text-on-surface">Importar</span>
+                </button>
+              )}
             </div>
-
-            {onOpenImport && onOpenPhotoImport && (
-              <button
-                onClick={onOpenImport}
-                className="w-full text-[12px] font-semibold text-primary hover:bg-primary/5 rounded-full py-2 transition-colors"
-              >
-                O importa desde un archivo .ics →
-              </button>
-            )}
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {hasAnyItem && allPast && (
           <div className="bg-surface-container-low rounded-xl px-4 py-3 flex items-center gap-3">
@@ -246,14 +246,24 @@ export default function DayView({ events = [], tasks = [], onAddEvent, onOpenTas
           </div>
         )}
 
+        <AnimatePresence>
         {dayEvents.length > 0 && (
-          <DayTimeGrid
-            events={dayEvents}
-            referenceDate={now}
-            onAdd={() => setShowAdd(true)}
-            onOpenTask={onOpenTask}
-          />
+          <motion.div
+            key="day-grid"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <DayTimeGrid
+              events={dayEvents}
+              referenceDate={now}
+              onAdd={() => setShowAdd(true)}
+              onOpenTask={onOpenTask}
+            />
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {/* Lista compacta de tareas "hoy" — sólo aparece cuando activeDate es
             hoy y hay tareas. No pretendemos reemplazar la vista de Tareas,
