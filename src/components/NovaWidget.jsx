@@ -1159,10 +1159,10 @@ export default function NovaWidget({
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 32, stiffness: 340 }}
-              className="absolute left-0 right-0 bottom-0 bg-white rounded-t-[22px] flex flex-col shadow-2xl"
+              className="absolute left-0 right-0 bottom-0 bg-white rounded-t-[22px] flex flex-col shadow-2xl kb-aware"
               style={{
                 height: 'min(82vh, 640px)',
-                paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+                paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-height, 0px))',
               }}
               role="dialog"
               aria-label="Nova"
