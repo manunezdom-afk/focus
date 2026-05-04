@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import NovaOrb from './NovaOrb'
-import AuroraBackground from './AuroraBackground'
 
 const ONBOARDING_KEY = 'focus_onboarding_completed_v1'
 const WELCOME_KEY = 'focus_welcome_last'
@@ -49,268 +48,109 @@ export function useOnboardingGate() {
   return { show, complete }
 }
 
-// ── Ilustraciones por slide ──────────────────────────────────────────────────
-// Animadas, livianas, sin imágenes externas. Firmamos la marca con el orbe.
+// ── Ilustraciones — limpias, sin blur ni glow ────────────────────────────────
 
 function SlideIllustrationHero() {
-  // Hero del tutorial — continuidad con el splash. El splash ya muestra un
-  // orbe centrado, así que aquí arrancamos con el orbe visible (opacity 1,
-  // scale 1) en vez de fade-in: el usuario no ve el frame vacío previo que
-  // parecía una segunda pantalla de carga. Solo el halo amplio hace fade
-  // sutil para dar vida sin romper la continuidad.
   return (
-    <div className="relative flex h-[220px] w-full items-center justify-center">
-      <motion.div
-        aria-hidden="true"
-        initial={{ opacity: 0, scale: 0.85 }}
-        animate={{ opacity: 0.8, scale: 1 }}
-        transition={{ duration: 1.0, ease: [0.22, 1, 0.36, 1] }}
-        style={{
-          position: 'absolute',
-          width: 260, height: 260, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(124,107,255,0.28) 0%, rgba(124,107,255,0) 65%)',
-          filter: 'blur(12px)',
-        }}
-      />
-      <NovaOrb size={110} ambient />
+    <div className="flex h-[200px] w-full items-center justify-center">
+      <NovaOrb size={104} ambient />
     </div>
   )
 }
 
-function PlannerCard({ time, title, color, delay }) {
+function EventRow({ time, title, color, delay }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-      className="flex items-center gap-3 rounded-2xl border px-3.5 py-2.5"
-      style={{
-        background: 'rgba(20, 18, 36, 0.75)',
-        borderColor: 'rgba(255,255,255,0.08)',
-        backdropFilter: 'blur(6px)',
-      }}
+      initial={{ opacity: 0, x: -12 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+      className="flex items-center gap-3 rounded-xl border px-3.5 py-2.5"
+      style={{ background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.1)' }}
     >
-      <div
-        style={{
-          width: 4, height: 28, borderRadius: 2, background: color,
-          boxShadow: `0 0 10px ${color}`,
-        }}
-      />
+      <div style={{ width: 3, height: 26, borderRadius: 2, background: color, flexShrink: 0 }} />
       <div className="flex-1 min-w-0">
-        <div className="text-[11px] font-semibold tracking-wide text-white/45">{time}</div>
-        <div className="truncate text-[13.5px] font-semibold text-white/90">{title}</div>
+        <div className="text-[10.5px] font-medium text-white/40">{time}</div>
+        <div className="truncate text-[13px] font-semibold text-white/88">{title}</div>
       </div>
-      <div
-        className="h-5 w-5 rounded-full border"
-        style={{ borderColor: 'rgba(255,255,255,0.2)' }}
-      />
     </motion.div>
   )
 }
 
 function SlideIllustrationPlanner() {
   return (
-    <div className="relative flex h-[220px] w-full items-center justify-center px-4">
+    <div className="flex h-[200px] w-full items-center justify-center px-4">
       <div className="w-full max-w-[300px] space-y-2">
-        <PlannerCard time="09:00" title="Revisar informe Q2"     color="#7c6bff" delay={0.05} />
-        <PlannerCard time="11:30" title="Reunión con Ana"        color="#3b82f6" delay={0.18} />
-        <PlannerCard time="14:00" title="Tarea: enviar propuesta" color="#ec4899" delay={0.31} />
-        <PlannerCard time="16:00" title="Clase de español"       color="#7c6bff" delay={0.44} />
+        <EventRow time="09:00" title="Revisar informe Q2"    color="#7c6bff" delay={0.05} />
+        <EventRow time="11:30" title="Reunión con Ana"       color="#3b82f6" delay={0.15} />
+        <EventRow time="14:00" title="Enviar propuesta"      color="#ec4899" delay={0.25} />
       </div>
-    </div>
-  )
-}
-
-function Pill({ icon, label, color, delay }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6, scale: 0.9 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ delay, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-      className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 whitespace-nowrap"
-      style={{
-        background: 'rgba(20, 18, 36, 0.85)',
-        borderColor: `${color}55`,
-        boxShadow: `0 0 20px ${color}33`,
-      }}
-    >
-      <span
-        className="material-symbols-outlined flex-shrink-0"
-        style={{ fontSize: 16, color, fontVariationSettings: "'FILL' 1" }}
-      >
-        {icon}
-      </span>
-      <span className="text-[12.5px] font-semibold text-white/85">{label}</span>
-    </motion.div>
-  )
-}
-
-function SlideIllustrationTasksEvents() {
-  // Layout flex para que en iPhone narrow no se corte ningún label. Antes
-  // las pills estaban absolute con x=±110 y el texto "Eventos"/"Recordatorios"
-  // se recortaba contra el borde cuando la pantalla era angosta. Ahora fila
-  // superior con Tareas · orbe · Eventos (gap acotado), abajo Recordatorios
-  // centrado. whitespace-nowrap en las pills garantiza que el texto nunca
-  // se parta en dos líneas.
-  return (
-    <div className="relative flex h-[220px] w-full flex-col items-center justify-center gap-3 px-2">
-      <div className="flex items-center justify-center gap-3">
-        <Pill icon="check_box" label="Tareas" color="#ec4899" delay={0.1} />
-        <motion.div
-          initial={{ opacity: 0, scale: 0.4 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.35, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="flex-shrink-0"
-        >
-          <NovaOrb size={42} ambient />
-        </motion.div>
-        <Pill icon="event" label="Eventos" color="#3b82f6" delay={0.25} />
-      </div>
-      <Pill icon="alarm" label="Recordatorios" color="#7c6bff" delay={0.45} />
     </div>
   )
 }
 
 function SlideIllustrationNova() {
-  // Layout: flex row con gap — el orbe queda a la izquierda y la burbuja
-  // a la derecha, sin solaparse. Antes la burbuja estaba `absolute` con
-  // `left-1/2 ml-6` pero el orbe de 84px (radio 42) invadía esos 24 px de
-  // margen y se veía montado sobre el círculo. El flex elimina eso y se
-  // adapta a cualquier ancho sin choques.
   return (
-    <div className="relative h-[220px] w-full">
-      <div className="absolute inset-0 flex items-center justify-center gap-4 px-3">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.7 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-          className="flex-shrink-0"
-        >
-          <NovaOrb size={76} pulse ambient />
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, x: -10, y: 8 }}
-          animate={{ opacity: 1, x: 0, y: 0 }}
-          transition={{ delay: 0.4, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-          className="relative max-w-[210px] rounded-2xl rounded-bl-md border px-3.5 py-2.5"
-          style={{
-            background: 'rgba(20, 18, 36, 0.92)',
-            borderColor: 'rgba(124, 107, 255, 0.3)',
-          }}
-        >
-          <div className="mb-1 text-[10.5px] font-bold uppercase tracking-wide text-white/40">
-            Nova propone
-          </div>
-          <div className="text-[12.5px] leading-snug text-white/90">
-            Tu reunión pisa el evento de las 11. ¿La muevo a las 15?
-          </div>
-          <div className="mt-2 flex items-center gap-1.5">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.9, duration: 0.35 }}
-              className="rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
-              style={{ background: 'var(--nova)' }}
-            >
-              Aprobar
-            </motion.div>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 1.05, duration: 0.35 }}
-              className="rounded-full border px-2 py-0.5 text-[10px] font-medium text-white/60"
-              style={{ borderColor: 'rgba(255,255,255,0.15)' }}
-            >
-              Descartar
-            </motion.div>
-          </div>
-        </motion.div>
-      </div>
-
-      {/* Nota sutil reforzando el principio */}
+    <div className="flex h-[200px] w-full items-center justify-center gap-4 px-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.75 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+        className="flex-shrink-0"
+      >
+        <NovaOrb size={72} pulse ambient />
+      </motion.div>
       <motion.div
         initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 0.55, y: 0 }}
-        transition={{ delay: 1.2, duration: 0.5 }}
-        className="absolute bottom-1 left-0 right-0 text-center text-[10.5px] font-medium uppercase tracking-[0.14em] text-white/40"
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.35, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        className="max-w-[190px] rounded-2xl rounded-tl-sm border px-3.5 py-3"
+        style={{ background: 'rgba(255,255,255,0.07)', borderColor: 'rgba(124,107,255,0.25)' }}
       >
-        Nunca mueve nada sin tu confirmación
-      </motion.div>
-    </div>
-  )
-}
-
-function SlideIllustrationStart() {
-  return (
-    <div className="relative flex h-[220px] w-full items-center justify-center">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-        className="relative"
-      >
-        <NovaOrb size={96} pulse ambient />
-        {/* Marcas de inicio — checkmark con entrada tardía */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.3 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.8, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-          className="absolute -right-3 -top-3 flex h-10 w-10 items-center justify-center rounded-full"
-          style={{
-            background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
-            boxShadow: '0 0 24px rgba(34,197,94,0.5)',
-          }}
-        >
+        <p className="text-[12.5px] leading-snug text-white/85">
+          "Reunión con Ana" pisa el evento de las 11:30. ¿La muevo a las 15?
+        </p>
+        <div className="mt-2.5 flex gap-2">
           <span
-            className="material-symbols-outlined text-white"
-            style={{ fontSize: 22, fontVariationSettings: "'FILL' 1" }}
+            className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+            style={{ background: 'var(--nova)' }}
           >
-            check
+            Mover
           </span>
-        </motion.div>
+          <span
+            className="rounded-full border px-2.5 py-1 text-[11px] font-medium text-white/50"
+            style={{ borderColor: 'rgba(255,255,255,0.15)' }}
+          >
+            Descartar
+          </span>
+        </div>
       </motion.div>
     </div>
   )
 }
 
-// ── Definición de slides ────────────────────────────────────────────────────
+// ── Slides — 3 en total ──────────────────────────────────────────────────────
 
 const SLIDES = [
   {
     id: 'hero',
     illustration: <SlideIllustrationHero />,
-    eyebrow: 'Bienvenido',
-    title: 'Focus es tu día, con una IA a tu lado.',
-    body: 'Nova ve tu calendario, te ayuda a organizarlo y crea al momento. Cualquier cambio lo puedes deshacer en un toque.',
+    eyebrow: 'Bienvenido a Focus',
+    title: 'Tu día. Con IA a tu lado.',
+    body: 'Organiza eventos y tareas en un solo lugar. Nova te ayuda a armarlo en segundos.',
   },
   {
     id: 'planner',
     illustration: <SlideIllustrationPlanner />,
-    eyebrow: 'El planner',
-    title: 'Tu día en una sola vista.',
-    body: 'Eventos y tareas en la misma línea de tiempo. Ves qué sigue y qué puedes mover.',
-  },
-  {
-    id: 'tasks',
-    illustration: <SlideIllustrationTasksEvents />,
-    eyebrow: 'Todo junto',
-    title: 'Tareas y eventos, sin apps aparte.',
-    body: 'Lo que quieres hacer y el tiempo para hacerlo, en el mismo lugar. Nova también te recuerda los dos.',
+    eyebrow: 'Tu agenda',
+    title: 'Todo en una vista limpia.',
+    body: 'Eventos y tareas juntos en la misma línea de tiempo. Sin apps aparte.',
   },
   {
     id: 'nova',
     illustration: <SlideIllustrationNova />,
     eyebrow: 'Nova',
-    title: 'Actúa rápido. Tú siempre mandas.',
-    body: 'Nova crea eventos, tareas y bloques al instante. Cada acción trae un "Deshacer" visible y puedes editarlo después sin perder ritmo.',
-  },
-  {
-    id: 'start',
-    illustration: <SlideIllustrationStart />,
-    eyebrow: 'Listo',
-    title: 'Armamos tu primer día.',
-    body: 'Añade una tarea o evento, o pídele a Nova que organice tu día. Tu día arranca aquí.',
+    title: 'Actúa rápido. Tú mandas.',
+    body: 'Nova crea, mueve y organiza. Cada cambio tiene un "Deshacer" y tú siempre confirmas.',
     cta: 'Empezar',
   },
 ]
@@ -393,7 +233,6 @@ export default function FirstLaunchOnboarding({ onDone }) {
       aria-modal="true"
       aria-label="Bienvenida a Focus"
     >
-      <AuroraBackground variant="threshold" intensity={0.85} />
 
       {/* Top bar: progress + skip */}
       <div className="relative z-10 flex items-center justify-between px-5 pt-4">
