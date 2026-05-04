@@ -628,7 +628,14 @@ export default function App() {
   // Todos los flotantes (hints, install card, brief) esperan a que tanto el
   // onboarding como el welcome terminen. Así la primera impresión no satura.
   const gatesBlocking = showWelcome || showOnboardingNow
-  const showInstallCard = firstRun.step === 'install' && !gatesBlocking
+  // En mobile la card de instalar es flotante (z-55, bottom 104px) y tapa los
+  // CTAs de Calendario ("Añadir evento", "Trabajar enfocado") y de Tareas.
+  // La gateamos a planner-only en mobile; en desktop vive en la esquina
+  // derecha con su propio espacio, así que se mantiene en todas las vistas.
+  const showInstallCard =
+    firstRun.step === 'install'
+    && !gatesBlocking
+    && (isDesktop || activeView === 'planner')
   const hasNovaConflictHint = (events?.length ?? 0) >= 2
   const hasNovaEmptyHint = (events?.length ?? 0) === 0 && activeView === 'planner'
 
