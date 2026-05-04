@@ -844,7 +844,7 @@ function NovaWidget({
       </div>
 
       {/* Chat history */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2 min-h-0">
+      <div className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2 min-h-0 scroll-contain">
         {chatHistory.length === 0 && !isLoading && (
           <div className="flex-1 flex flex-col items-center justify-center px-4 py-8">
             <span
@@ -1155,13 +1155,16 @@ function NovaWidget({
             />
             {/* Bottom sheet */}
             <motion.div
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 32, stiffness: 340 }}
+              initial={{ y: '100%', opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: '100%', opacity: 0 }}
+              transition={{
+                y: { type: 'spring', damping: 32, stiffness: 340 },
+                opacity: { duration: 0.08 },
+              }}
               className="absolute left-0 right-0 bottom-0 bg-white rounded-t-[22px] flex flex-col shadow-2xl kb-aware"
               style={{
-                height: 'min(82vh, 640px)',
+                height: 'min(85dvh, 640px)',
                 paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-height, 0px))',
               }}
               role="dialog"
