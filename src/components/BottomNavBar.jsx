@@ -11,8 +11,8 @@ export default function BottomNavBar({ activeView, onNavigate }) {
   return (
     <nav
       aria-label="Navegación principal"
-      className="fixed left-1/2 -translate-x-1/2 w-[92%] max-w-md rounded-[24px] z-50 flex justify-around items-center px-2 py-3 bg-slate-50/70 backdrop-blur-2xl shadow-[0_12px_32px_rgba(0,0,0,0.06)]"
-      style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
+      className="fixed bottom-0 left-0 right-0 w-full z-50 flex justify-around items-center px-2 pt-3 bg-slate-50/70 backdrop-blur-2xl border-t border-slate-200/50 gpu-layer"
+      style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.5rem)' }}
     >
       <LayoutGroup id="bottom-nav">
         {navItems.map(({ id, icon, label }) => {

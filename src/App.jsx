@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion'
 import { useEvents }        from './hooks/useEvents'
 import { useTasks }         from './hooks/useTasks'
@@ -475,13 +475,18 @@ export default function App() {
   }
 
   // Callback que Nova invoca con sus propuestas → encolamos
-  function handleProposeActions(actions, { reply } = {}) {
+  // useCallback para que NovaWidget (memo) no re-renderice cada vez que App
+  // re-renderiza por estado no relacionado (paletteOpen, notifPanelOpen, etc.).
+  const handleProposeActions = useCallback((actions, { reply } = {}) => {
     const batchId = `batch-${Date.now()}`
     for (const action of actions) {
       const sug = actionToSuggestion(action, { reason: reply, batchId, events, tasks })
       if (sug) addSuggestion(sug)
     }
-  }
+  }, [events, tasks, addSuggestion])
+
+  // Estable para que el shallow-compare de NovaWidget memo lo respete.
+  const openInbox = useCallback(() => setInboxOpen(true), [])
 
   const {
     notifLog, unreadCount,
@@ -623,7 +628,14 @@ export default function App() {
   // Todos los flotantes (hints, install card, brief) esperan a que tanto el
   // onboarding como el welcome terminen. Así la primera impresión no satura.
   const gatesBlocking = showWelcome || showOnboardingNow
-  const showInstallCard = firstRun.step === 'install' && !gatesBlocking
+  // En mobile la card de instalar es flotante (z-55, bottom 104px) y tapa los
+  // CTAs de Calendario ("Añadir evento", "Trabajar enfocado") y de Tareas.
+  // La gateamos a planner-only en mobile; en desktop vive en la esquina
+  // derecha con su propio espacio, así que se mantiene en todas las vistas.
+  const showInstallCard =
+    firstRun.step === 'install'
+    && !gatesBlocking
+    && (isDesktop || activeView === 'planner')
   const hasNovaConflictHint = (events?.length ?? 0) >= 2
   const hasNovaEmptyHint = (events?.length ?? 0) === 0 && activeView === 'planner'
 
@@ -908,7 +920,7 @@ export default function App() {
             onToggleTask={toggleTask}
             onDeleteTask={deleteTask}
             onProposeActions={handleProposeActions}
-            onOpenInbox={() => setInboxOpen(true)}
+            onOpenInbox={openInbox}
             proposeMode={true}
             isDesktop={isDesktop}
           />

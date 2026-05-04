@@ -10,6 +10,10 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left:   env(safe-area-inset-left, 0px);
 
+  /* Altura del teclado nativo iOS — actualizada por src/lib/iosKeyboard.js
+     desde keyboardWillShow/Hide. 0px en web y cuando el teclado está oculto. */
+  --keyboard-height: 0px;
+
   /* Easing */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 
@@ -155,6 +159,33 @@ h1, h2, h3 {
     background:
       radial-gradient(ellipse 600px 300px at 8% -10%, rgba(99, 102, 241, 0.06) 0%, transparent 60%),
       radial-gradient(ellipse 480px 240px at 95% -5%, rgba(167, 139, 250, 0.04) 0%, transparent 60%);
+  }
+
+  /* Containers que deben respirar cuando aparece el teclado nativo iOS.
+     `--keyboard-height` se setea en <body> desde src/lib/iosKeyboard.js.
+     La curva de easing matchea la animación nativa del teclado iOS. */
+  .kb-aware {
+    transition: padding-bottom 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  /* Fuerza una capa de composición GPU. Útil para containers con animaciones
+     continuas (BottomNavBar fija con backdrop-blur, blobs de aurora) donde el
+     repaint del CPU genera frame drops en iOS WebView. */
+  .gpu-layer {
+    transform: translateZ(0);
+    will-change: transform;
+  }
+
+  /* Aurora blobs — `filter: blur(120-140px)` es carísimo en iOS WebView.
+     En mobile bajamos a 60px (mismo look general, mucho más barato). */
+  .aurora-blob {
+    will-change: transform;
+    transform: translateZ(0);
+  }
+  @media (max-width: 768px) {
+    .aurora-blob {
+      filter: blur(60px) !important;
+    }
   }
 }
 

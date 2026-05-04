@@ -195,8 +195,8 @@ export default function QuickAddSheet({ onSave, onCancel, targetDate, targetDate
 
       {/* Sheet */}
       <div
-        className="relative w-full max-w-lg max-h-[92dvh] overflow-y-auto bg-surface rounded-t-[32px] px-6 pt-5 shadow-2xl z-10"
-        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 2.5rem)' }}
+        className="relative w-full max-w-lg max-h-[92dvh] overflow-y-auto bg-surface rounded-t-[32px] px-6 pt-5 shadow-2xl z-10 kb-aware"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 2.5rem + var(--keyboard-height, 0px))' }}
       >
 
         {/* Handle bar */}

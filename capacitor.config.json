@@ -4,7 +4,7 @@
   "webDir": "dist",
   "ios": {
     "scheme": "Focus",
-    "contentInset": "always",
+    "contentInset": "never",
     "limitsNavigationsToAppBoundDomains": false
   },
   "server": {
@@ -21,11 +21,15 @@
     },
     "StatusBar": {
       "style": "DARK",
-      "backgroundColor": "#0a0a0f",
-      "overlaysWebView": false
+      "overlaysWebView": true
     },
     "PushNotifications": {
       "presentationOptions": ["badge", "sound", "alert"]
+    },
+    "Keyboard": {
+      "resize": "native",
+      "resizeOnFullScreen": true,
+      "style": "DARK"
     }
   }
 }

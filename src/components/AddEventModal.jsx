@@ -47,7 +47,10 @@ export default function AddEventModal({ onSave, onCancel }) {
       onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}
     >
       {/* Sheet */}
-      <div className="w-full max-w-md max-h-[92dvh] overflow-y-auto bg-surface rounded-t-[28px] p-6 space-y-5 shadow-2xl animate-[slideUp_0.25s_ease-out]">
+      <div
+        className="w-full max-w-md max-h-[92dvh] overflow-y-auto bg-surface rounded-t-[28px] px-6 pt-6 space-y-5 shadow-2xl animate-[slideUp_0.25s_ease-out] kb-aware"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.5rem + var(--keyboard-height, 0px))' }}
+      >
         <div className="flex justify-between items-center">
           <h2 className="text-xl font-extrabold font-headline text-on-surface">Nuevo Evento</h2>
           <button

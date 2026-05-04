@@ -26,6 +26,8 @@ export default function NovaOrb({ size = 72, pulse = false, ambient = true, onCl
             background: 'radial-gradient(circle, rgba(var(--nova-glow), 0.35) 0%, rgba(var(--nova-glow), 0.12) 40%, transparent 70%)',
             filter: 'blur(14px)',
             animation: 'novaBreath 3.2s ease-in-out infinite',
+            willChange: 'transform, opacity',
+            transform: 'translateZ(0)',
           }}
         />
       )}
@@ -44,6 +46,8 @@ export default function NovaOrb({ size = 72, pulse = false, ambient = true, onCl
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          willChange: 'transform',
+          transform: 'translateZ(0)',
         }}
       >
         <span
@@ -64,6 +68,8 @@ export default function NovaOrb({ size = 72, pulse = false, ambient = true, onCl
             borderRadius: '50%',
             background: 'radial-gradient(circle, #fff 0%, rgba(255,255,255,0.6) 60%, transparent 100%)',
             animation: 'novaBreath 3.2s ease-in-out infinite',
+            willChange: 'transform, opacity',
+            transform: 'translateZ(0)',
           }}
         />
       </motion.span>

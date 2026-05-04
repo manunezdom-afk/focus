@@ -17,3 +17,4 @@ ios/.build/
 ios/App/.build/
 *.xcuserstate
 xcuserdata/
+.env*.local

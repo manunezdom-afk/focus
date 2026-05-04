@@ -21,16 +21,18 @@ function getSubline({ firstLaunch, hasEvents, hasFirstTime }) {
 }
 
 const EASE = [0.22, 1, 0.36, 1]
-const ENTER_HOLD_MS = 1900
+const ENTER_HOLD_MS = 2800
+const EXIT_DURATION_MS = 500
 
 /**
  * Threshold Scene — la pantalla-firma de entrada.
- * Secuencia coreografiada (~1900ms) y skippable con tap/tecla.
+ * Secuencia coreografiada (~2800ms) y skippable con tap/tecla.
  *
- * 0–500ms:   orbe breath-in + wordmark "FOCUS" emergiendo
- * 300–900ms: saludo (greeting) entra desde abajo
- * 650–1200ms: hairline se expande + subline aparece
- * 1900ms:    fade-out suave hacia la siguiente pantalla
+ * 0–500ms:    orbe breath-in + wordmark "FOCUS" sostenidos
+ * 400–1100ms: saludo (greeting) entra desde abajo (lento, respirado)
+ * 850–1450ms: hairline se expande
+ * 1150–1850ms: subline aparece
+ * 2800ms:     fade-out suave (500ms) hacia la siguiente pantalla
  */
 export default function WelcomeScreen({
   onEnter,
@@ -64,7 +66,7 @@ export default function WelcomeScreen({
     } catch {}
     const id = setTimeout(() => {
       onEnter?.()
-    }, 320)
+    }, EXIT_DURATION_MS)
     return () => clearTimeout(id)
   }, [phase, onEnter, keepDarkBootOnExit])
 
@@ -82,7 +84,7 @@ export default function WelcomeScreen({
   return (
     <motion.div
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.32, ease: EASE }}
+      transition={{ duration: 0.5, ease: EASE }}
       onClick={skip}
       role="button"
       tabIndex={-1}
@@ -110,7 +112,7 @@ export default function WelcomeScreen({
             initial={{ opacity: 0.55, y: 0 }}
             animate={{ opacity: 0.55, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.32, ease: EASE }}
+            transition={{ duration: 0.5, ease: EASE }}
             className="absolute left-0 right-0 text-center select-none"
             style={{
               top: 'calc(env(safe-area-inset-top, 0px) + clamp(28px, 6vh, 56px))',
@@ -144,7 +146,7 @@ export default function WelcomeScreen({
               initial={{ scale: 1, opacity: 1 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 1.06, opacity: 0 }}
-              transition={{ duration: 0.32, ease: EASE }}
+              transition={{ duration: 0.5, ease: EASE }}
               className="mb-9 sm:mb-10"
             >
               <NovaOrb size={typeof window !== 'undefined' && window.innerWidth >= 640 ? 96 : 84} ambient />
@@ -159,7 +161,7 @@ export default function WelcomeScreen({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
-              transition={{ delay: 0.30, duration: 0.55, ease: EASE }}
+              transition={{ delay: 0.4, duration: 0.7, ease: EASE }}
               className="font-headline font-medium text-white"
               style={{
                 fontSize: 'clamp(28px, 5vw, 38px)',
@@ -182,7 +184,7 @@ export default function WelcomeScreen({
               initial={{ scaleX: 0, opacity: 0 }}
               animate={{ scaleX: 1, opacity: 0.7 }}
               exit={{ opacity: 0 }}
-              transition={{ delay: 0.65, duration: 0.5, ease: EASE }}
+              transition={{ delay: 0.85, duration: 0.6, ease: EASE }}
               className="mt-5 sm:mt-6 h-px origin-center"
               style={{
                 width: 'clamp(36px, 8vw, 56px)',
@@ -200,7 +202,7 @@ export default function WelcomeScreen({
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -2 }}
-              transition={{ delay: 0.80, duration: 0.55, ease: EASE }}
+              transition={{ delay: 1.15, duration: 0.7, ease: EASE }}
               className="mt-4 sm:mt-5 font-headline text-white/60"
               style={{
                 fontSize: 'clamp(15px, 1.8vw, 18px)',

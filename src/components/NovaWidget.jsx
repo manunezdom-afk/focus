@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useUserProfile } from '../hooks/useUserProfile'
 import { useUserMemories } from '../hooks/useUserMemories'
@@ -63,7 +63,7 @@ function useSimulatedStream(fullText, isLoading) {
   return displayed
 }
 
-export default function NovaWidget({
+function NovaWidget({
   events = [],
   tasks = [],
   onAddEvent,
@@ -1162,10 +1162,10 @@ export default function NovaWidget({
                 y: { type: 'spring', damping: 32, stiffness: 340 },
                 opacity: { duration: 0.08 },
               }}
-              className="absolute left-0 right-0 bottom-0 bg-white rounded-t-[22px] flex flex-col shadow-2xl"
+              className="absolute left-0 right-0 bottom-0 bg-white rounded-t-[22px] flex flex-col shadow-2xl kb-aware"
               style={{
                 height: 'min(85dvh, 640px)',
-                paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+                paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-height, 0px))',
               }}
               role="dialog"
               aria-label="Nova"
@@ -1182,3 +1182,11 @@ export default function NovaWidget({
     </>
   )
 }
+
+// memo: el padre (App.jsx) re-renderiza cuando abre cualquier modal/sheet
+// (importExport, palette, notifPanel) o cambia inboxOpen. Sin memo, NovaWidget
+// re-renderiza por completo en cada uno — y este árbol con motion + chat
+// + speech recognition no es barato. Con onProposeActions y onOpenInbox
+// envueltos en useCallback en App.jsx, las props quedan estables y el
+// shallow-compare de memo evita el re-render.
+export default memo(NovaWidget)
