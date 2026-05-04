@@ -1,4 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { Capacitor } from '@capacitor/core'
+import { App as CapApp } from '@capacitor/app'
 import { supabase } from '../lib/supabase'
 import { dataService } from '../services/dataService'
 import { setSignalsUserId, flushSignalsQueue } from '../services/signalsService'
@@ -89,6 +91,19 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Deep-link OAuth callback para Google en app nativa (Capacitor).
+  // Escucha me.usefocus.app://login-callback?code=... y cierra la sesión.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || !supabase) return
+    let handle
+    CapApp.addListener('appUrlOpen', async ({ url }) => {
+      if (!url.startsWith('me.usefocus.app://login-callback')) return
+      const { data, error } = await supabase.auth.exchangeCodeForSession(url)
+      if (!error && data?.session?.user) setUser(data.session.user)
+    }).then(h => { handle = h })
+    return () => { handle?.remove() }
+  }, [])
+
   // Sync cola offline al recuperar red
   useEffect(() => {
     const handleOnline = () => {
@@ -171,11 +186,24 @@ export function AuthProvider({ children }) {
 
   const signInWithGoogle = useCallback(async () => {
     if (!supabase) throw new Error('Supabase no configurado')
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
-    })
-    if (error) throw error
+    if (Capacitor.isNativePlatform()) {
+      // Nativo: abre Google en Safari externo y vuelve a la app vía deep link
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: 'me.usefocus.app://login-callback',
+          skipBrowserRedirect: true,
+        },
+      })
+      if (error) throw error
+      if (data?.url) window.open(data.url, '_system')
+    } else {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin },
+      })
+      if (error) throw error
+    }
   }, [])
 
   const signOut = useCallback(async () => {
