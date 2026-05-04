@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { canInstall, onInstallAvailable, isStandalone } from '../lib/pwa'
+import { Capacitor } from '@capacitor/core'
 
 const INSTALL_DISMISSED_KEY = 'focus_install_dismissed'
 const SESSION_COUNT_KEY = 'focus_session_count'
@@ -52,9 +53,11 @@ export function useFirstRunSequence() {
 
   const ios = isIOS()
   const standalone = isStandalone()
+  const isNative = Capacitor.isNativePlatform()
 
   const reachedThreshold = sessionCount >= INSTALL_MIN_SESSIONS
   const canShowInstall =
+    !isNative &&
     !standalone &&
     !installDismissed &&
     reachedThreshold &&
