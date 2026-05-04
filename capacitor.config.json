@@ -4,7 +4,7 @@
   "webDir": "dist",
   "ios": {
     "scheme": "Focus",
-    "contentInset": "always",
+    "contentInset": "never",
     "limitsNavigationsToAppBoundDomains": false
   },
   "server": {
