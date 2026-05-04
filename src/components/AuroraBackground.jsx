@@ -42,6 +42,7 @@ export default function AuroraBackground({ variant = 'app', className = '', inte
           abajo. Las opacidades se mantienen para preservar la sensación
           ambiente — sólo cambia el matiz. */}
       <div
+        className="aurora-blob"
         style={{
           position: 'absolute',
           top: '-160px',
@@ -52,10 +53,10 @@ export default function AuroraBackground({ variant = 'app', className = '', inte
           background: `rgba(96,165,250,${0.30 * intensity * boost})`,
           filter: `blur(${dims.blur}px)`,
           animation: 'auroraDrift1 18s ease-in-out infinite',
-          willChange: 'transform',
         }}
       />
       <div
+        className="aurora-blob"
         style={{
           position: 'absolute',
           top: '15%',
@@ -66,10 +67,10 @@ export default function AuroraBackground({ variant = 'app', className = '', inte
           background: `rgba(37,99,235,${0.26 * intensity * boost})`,
           filter: `blur(${dims.blur}px)`,
           animation: 'auroraDrift2 22s ease-in-out infinite',
-          willChange: 'transform',
         }}
       />
       <div
+        className="aurora-blob"
         style={{
           position: 'absolute',
           bottom: '5%',
@@ -80,7 +81,6 @@ export default function AuroraBackground({ variant = 'app', className = '', inte
           background: `rgba(29,78,216,${0.22 * intensity * boost})`,
           filter: `blur(${dims.blur}px)`,
           animation: 'auroraDrift3 26s ease-in-out infinite',
-          willChange: 'transform',
         }}
       />
       {/* Fade al fondo para que la aurora no sea todo — solo firma ambiente. */}

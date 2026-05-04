@@ -164,6 +164,26 @@ h1, h2, h3 {
   .kb-aware {
     transition: padding-bottom 0.25s cubic-bezier(0.32, 0.72, 0, 1);
   }
+
+  /* Fuerza una capa de composición GPU. Útil para containers con animaciones
+     continuas (BottomNavBar fija con backdrop-blur, blobs de aurora) donde el
+     repaint del CPU genera frame drops en iOS WebView. */
+  .gpu-layer {
+    transform: translateZ(0);
+    will-change: transform;
+  }
+
+  /* Aurora blobs — `filter: blur(120-140px)` es carísimo en iOS WebView.
+     En mobile bajamos a 60px (mismo look general, mucho más barato). */
+  .aurora-blob {
+    will-change: transform;
+    transform: translateZ(0);
+  }
+  @media (max-width: 768px) {
+    .aurora-blob {
+      filter: blur(60px) !important;
+    }
+  }
 }
 
 /* ── Animaciones de nova / aurora ────────────────────────────────────────── */
