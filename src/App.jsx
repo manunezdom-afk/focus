@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion'
 import { useEvents }        from './hooks/useEvents'
 import { useTasks }         from './hooks/useTasks'
@@ -475,13 +475,18 @@ export default function App() {
   }
 
   // Callback que Nova invoca con sus propuestas → encolamos
-  function handleProposeActions(actions, { reply } = {}) {
+  // useCallback para que NovaWidget (memo) no re-renderice cada vez que App
+  // re-renderiza por estado no relacionado (paletteOpen, notifPanelOpen, etc.).
+  const handleProposeActions = useCallback((actions, { reply } = {}) => {
     const batchId = `batch-${Date.now()}`
     for (const action of actions) {
       const sug = actionToSuggestion(action, { reason: reply, batchId, events, tasks })
       if (sug) addSuggestion(sug)
     }
-  }
+  }, [events, tasks, addSuggestion])
+
+  // Estable para que el shallow-compare de NovaWidget memo lo respete.
+  const openInbox = useCallback(() => setInboxOpen(true), [])
 
   const {
     notifLog, unreadCount,
@@ -908,7 +913,7 @@ export default function App() {
             onToggleTask={toggleTask}
             onDeleteTask={deleteTask}
             onProposeActions={handleProposeActions}
-            onOpenInbox={() => setInboxOpen(true)}
+            onOpenInbox={openInbox}
             proposeMode={true}
             isDesktop={isDesktop}
           />
