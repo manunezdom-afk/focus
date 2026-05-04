@@ -52,7 +52,7 @@ body {
   min-height: 100dvh;
   background-color: #fafafd;
   color: #100525;
-  overscroll-behavior-y: none;
+  overscroll-behavior-y: auto;
 }
 
 h1, h2, h3 {
@@ -91,6 +91,9 @@ h1, h2, h3 {
   /* Ocultar scrollbar (sin perder funcionalidad) */
   .hide-scrollbar::-webkit-scrollbar { display: none; }
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* Contiene el bounce dentro del scroll sin propagarlo al body */
+  .scroll-contain { overscroll-behavior: contain; }
 
   /* Card hover con spring (igual que Kairos/Spark) */
   .card-hover {
