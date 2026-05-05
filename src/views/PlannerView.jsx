@@ -511,10 +511,12 @@ export default function PlannerView({ onAddEvent, onEditEvent, onDeleteEvent, on
     setBlocks((prev) => prev.filter((b) => b.id !== id))
   }
 
-  // Marca el bloque como completado (HECHO ✓): no lo borra. El bloque sigue
-  // visible, atenuado, para que "Bloques completados" refleje la realidad.
   function completeBlock(id) {
     setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, type: 'done' } : b)))
+  }
+
+  function uncompleteBlock(id) {
+    setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, type: 'confirmed' } : b)))
   }
 
   function handleModalSave(formData) {
@@ -1184,12 +1186,14 @@ export default function PlannerView({ onAddEvent, onEditEvent, onDeleteEvent, on
                               ACEPTAR
                             </button>
                           ) : _asReminderOnly ? null : type === 'done' ? (
-                            <span
-                              className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-600"
+                            <button
+                              onClick={(e) => { e.stopPropagation(); uncompleteBlock(id) }}
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-600 hover:bg-primary/10 hover:text-primary transition-colors"
                               style={{ flexShrink: 0, letterSpacing: '0.04em' }}
+                              title="Deshacer"
                             >
                               ✓ HECHO
-                            </span>
+                            </button>
                           ) : (
                             <button
                               onClick={(e) => { e.stopPropagation(); completeBlock(id) }}
