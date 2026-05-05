@@ -28,25 +28,22 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: 'rate_limit', message: 'Demasiadas solicitudes. Espera un momento.' })
   }
 
-  // Cinturón de seguridad #2: autenticación obligatoria. Sin esto, cualquiera
-  // con la URL puede vaciar el presupuesto de Anthropic. El cliente inyecta
-  // Bearer token automáticamente vía src/lib/apiClient.js si hay sesión.
+  // Auth: opcional temporalmente para pruebas en iOS sin cuenta.
+  // TODO (1 semana): restaurar el bloqueo: if (!userId) return 401.
   const userId = await getUserIdFromAuth(req)
-  if (!userId) {
-    return res.status(401).json({ error: 'auth_required', message: 'Inicia sesión para usar Nova.' })
-  }
 
-  // Cinturón de seguridad #3: cuota diaria por usuario. Si la migración 010 no
-  // se aplicó, enforceAiQuota devuelve soft:true y dejamos pasar (logueado).
-  const admin = getSupabaseAdmin()
-  const quota = await enforceAiQuota(admin, userId, 'focus-assistant')
-  if (!quota.ok) {
-    return res.status(429).json({
-      error: 'quota_exceeded',
-      message: 'Llegaste al límite diario de mensajes con Nova. Vuelve mañana.',
-      reset_at: quota.resetAt,
-      limit: quota.limit,
-    })
+  // Cuota diaria solo para usuarios autenticados.
+  if (userId) {
+    const admin = getSupabaseAdmin()
+    const quota = await enforceAiQuota(admin, userId, 'focus-assistant')
+    if (!quota.ok) {
+      return res.status(429).json({
+        error: 'quota_exceeded',
+        message: 'Llegaste al límite diario de mensajes con Nova. Vuelve mañana.',
+        reset_at: quota.resetAt,
+        limit: quota.limit,
+      })
+    }
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim()

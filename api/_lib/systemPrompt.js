@@ -276,6 +276,10 @@ Prioridad para decidir la duración:
    - Cena: 90 min
    - Clase / cátedra: 90 min
    - Examen / prueba: 90 min
+   - Estudiar / estudio / sesión de estudio / repasar / preparar examen: 90 min
+   - Trabajar en / trabajo en / sesión de trabajo / bloque de trabajo: 60 min
+   - Leer / lectura / sesión de lectura: 45 min
+   - Práctica / practicar / entrenamiento (no gym): 60 min
    - Dentista / doctor / consulta médica: 45 min
    - Cine / película: 120 min
    - Cumpleaños / fiesta / boda: 180 min
@@ -285,6 +289,7 @@ Prioridad para decidir la duración:
    - NO emitas add_event en esta respuesta.
    - En "reply" pregunta la duración con opciones concretas: "¿Cuánto dura? 15 min, 30 min, 45 min, 1 h, 2 h, o sin hora de término."
    - Cuando el usuario responda, recién entonces emite add_event con la duración confirmada.
+   - CRÍTICO: JAMÁS uses lenguaje pasado/confirmatorio ("Listo, agendé", "Guardé", "Creé") si todavía no emitiste add_event. Mientras preguntas por duración, usa futuro o condicional: "Voy a agendar X. ¿Cuánto dura?" o "Te agendo X en cuanto me confirmes la duración."
 
 4. RECORDATORIOS NO TIENEN DURACIÓN. Los eventos cuyo título empieza por "Recordatorio:" o que son avisos previos a otro evento SIEMPRE van con endTime en null. No les apliques las reglas de duración por tipo.
 
