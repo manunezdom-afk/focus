@@ -1779,19 +1779,6 @@ export default function PlannerView({ onAddEvent, onEditEvent, onDeleteEvent, on
         </div>
       </main>
 
-      {/* FAB — solo visible cuando hay bloques y en mobile.
-          Bottom calculado para que jamás pise el bottom nav:
-          safe-area + 20 (nav offset) + ~80 (alto nav) + 16 (gap) ≈ 116 + safe. */}
-      {blocks.length > 0 && !isDesktop && !showModal && (
-        <button
-          onClick={() => setShowModal(true)}
-          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 116px)' }}
-          className="fixed right-6 w-14 h-14 bg-primary text-white rounded-2xl shadow-2xl flex items-center justify-center hover:scale-105 active:scale-90 transition-transform z-40"
-          title="Añadir bloque"
-        >
-          <span className="material-symbols-outlined text-3xl">add</span>
-        </button>
-      )}
 
       {showModal && (
         <Suspense fallback={null}>
