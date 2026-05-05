@@ -86,13 +86,14 @@ export default {
       },
 
       fontFamily: {
-        // Plus Jakarta Sans — misma tipografía que Kairos y Spark.
-        // Fallbacks system para que la app funcione mientras carga la fuente.
-        headline: ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
-        body:     ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
-        label:    ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
-        nova:     ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
-        mono:     ['"JetBrains Mono"', 'ui-monospace', '"SF Mono"', 'Menlo', 'Consolas', 'monospace'],
+        // Stack del sistema (SF Pro en iOS/Mac, Segoe UI en Windows). Antes
+        // forzábamos Plus Jakarta Sans desde Google Fonts, lo que bloqueaba
+        // el primer paint en iOS WebView durante el cold start.
+        headline: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
+        body:     ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
+        label:    ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
+        nova:     ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
+        mono:     ['ui-monospace', '"SF Mono"', '"JetBrains Mono"', 'Menlo', 'Consolas', 'monospace'],
       },
 
       spacing: {

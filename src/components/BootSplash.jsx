@@ -20,8 +20,12 @@ import AuroraBackground from './AuroraBackground'
 //   3. Como vive en React, puede usar AnimatePresence para hacer el exit
 //      con framer-motion, sin saltos.
 
-const MIN_VISIBLE_MS = 1000
-const FADE_OUT_MS = 420
+// iOS nativo ya muestra su propio splash ~400ms (capacitor.config.json) +
+// el splash HTML inline pinta al primer frame. El BootSplash de React es
+// el último relevo de esa cadena: solo necesita cubrir el mount + el primer
+// frame útil. 350ms registra visualmente sin sentirse lento.
+const MIN_VISIBLE_MS = 350
+const FADE_OUT_MS = 320
 
 export function useBootSplash() {
   const [show, setShow] = useState(true)
