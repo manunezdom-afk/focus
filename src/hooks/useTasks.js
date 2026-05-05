@@ -32,6 +32,16 @@ function hydrateTasksWithLinks(rawTasks, userId) {
 // Supabase rechazó la escritura.
 const PENDING_UPSERT_TTL_MS = 15_000
 
+// Ventana para dedupe defensivo de tareas. Si llega un add_task con misma
+// `(label normalizado, category)` dentro de esta ventana, descartamos el
+// segundo. Cubre: LLM emitiendo dos add_task accidentalmente, doble click
+// en aprobar sugerencia. Mismo patrón que useEvents.
+const DEDUPE_WINDOW_MS = 4_000
+
+function normalizeLabelForDedupe(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+}
+
 function createTaskId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return `tsk-${crypto.randomUUID()}`
@@ -48,6 +58,8 @@ export function useTasks() {
   // escudo, un refetch de realtime/visibilitychange puede traer un snapshot
   // anterior y borrar la tarea local unos segundos después de crearla.
   const pendingUpsertsRef = useRef(new Map())
+  // Tracker de creaciones recientes para dedupe — ver comentario en useEvents.
+  const recentCreationsRef = useRef(new Map())
 
   function markPendingUpsert(task) {
     if (!task?.id) return
@@ -188,6 +200,18 @@ export function useTasks() {
 
   function addTask({ label, priority = 'Media', category = 'hoy', linkedEventId = null, parentTaskId = null }) {
     const cleanLabel = cleanGeneratedTitle(label) || label
+
+    // Dedupe defensivo: si la misma `(label|category)` llegó hace menos de
+    // DEDUPE_WINDOW_MS, devolvemos la tarea anterior. Cubre LLM duplicado y
+    // doble-tap en aprobar sugerencia.
+    const dedupeKey = `${normalizeLabelForDedupe(cleanLabel)}|${category}`
+    const now = Date.now()
+    const recent = recentCreationsRef.current.get(dedupeKey)
+    if (recent && now - recent.at < DEDUPE_WINDOW_MS) {
+      focusLog(`[Focus] 🛡️ addTask dedupe: "${cleanLabel}" (${dedupeKey}) — ignorada`)
+      return recent.task
+    }
+
     const t = { id: createTaskId(), label: cleanLabel, done: false, priority, category }
     if (linkedEventId) t.linkedEventId = linkedEventId
     // parentTaskId es la jerarquía tarea↔tarea. linkedEventId tiene prioridad
@@ -201,6 +225,12 @@ export function useTasks() {
       + (parentTaskId ? ` (subtarea de ${parentTaskId})` : ''),
     )
     setTasks(prev => [...prev, t])
+    recentCreationsRef.current.set(dedupeKey, { at: now, task: t })
+    if (recentCreationsRef.current.size > 64) {
+      for (const [k, v] of recentCreationsRef.current) {
+        if (now - v.at > DEDUPE_WINDOW_MS * 2) recentCreationsRef.current.delete(k)
+      }
+    }
     // Proteger contra refetch que llegue antes de que Supabase confirme.
     markPendingUpsert(t)
     if (user) dataService.upsertTask(t, user.id).catch(console.warn)

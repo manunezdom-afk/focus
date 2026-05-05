@@ -23,7 +23,12 @@ export default defineConfig({
 
   projects: [
     {
-      name: 'chromium-mobile',
+      // Mobile usa WebKit (motor real de iOS Safari y Capacitor WKWebView).
+      // No es un Chromium con viewport mobile — es el engine que corre en
+      // iPhone. Detecta bugs específicos de Safari (p.ej. requestIdleCallback
+      // ausente, gestos pointer, viewport sticky). Si querés iterar más rápido
+      // sin esto, comentá el project y dejá solo chromium-desktop.
+      name: 'webkit-mobile',
       use: { ...devices['iPhone 14 Pro'] },
     },
     {

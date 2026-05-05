@@ -750,16 +750,18 @@ function NovaWidget({
         // Chips visuales: "Propuesta: X"
         const proposalChips = otherActions.map((action) => {
           const labelMap = {
-            add_event:      `Propuesta: crear "${action.event?.title || 'evento'}"`,
-            edit_event:     `Propuesta: actualizar evento`,
-            delete_event:   `Propuesta: eliminar evento`,
-            mark_task_done: `Propuesta: completar tarea`,
-            toggle_task:    `Propuesta: completar tarea`,
-            add_task:       `Propuesta: añadir tarea "${action.task?.label || 'pendiente'}"`,
-            delete_task:    `Propuesta: eliminar tarea`,
+            add_event:           `Propuesta: crear "${action.event?.title || 'evento'}"`,
+            add_recurring_event: `Propuesta: crear recurrente "${action.event?.title || 'evento'}"`,
+            edit_event:          `Propuesta: actualizar evento`,
+            delete_event:        `Propuesta: eliminar evento`,
+            mark_task_done:      `Propuesta: completar tarea`,
+            toggle_task:         `Propuesta: completar tarea`,
+            add_task:            `Propuesta: añadir tarea "${action.task?.label || 'pendiente'}"`,
+            delete_task:         `Propuesta: eliminar tarea`,
           }
           const iconMap = {
             add_event: 'add_circle',
+            add_recurring_event: 'event_repeat',
             edit_event: 'edit_calendar',
             delete_event: 'delete',
             mark_task_done: 'task_alt',

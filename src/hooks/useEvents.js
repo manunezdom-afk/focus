@@ -55,12 +55,30 @@ function normalizeTimeField({ time, endTime, isReminder }) {
 // la nada".
 const PENDING_UPSERT_TTL_MS = 60_000
 
+// Ventana para deduplicación defensiva. Si Nova emite dos add_event idénticos
+// (bug del LLM, doble pulsación al aceptar una sugerencia, o un retry que se
+// aplica dos veces), el segundo dentro de esta ventana se descarta. Más alto
+// que el TTL típico de propose-accept; suficientemente bajo para que crear
+// dos veces el mismo "Almuerzo a las 14:00" en otro día siga funcionando.
+const DEDUPE_WINDOW_MS = 4_000
+
+function normalizeTitleForDedupe(t) {
+  return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+}
+
 export function useEvents() {
   const { user } = useAuth()
   // IDs de eventos cuyo DELETE está en vuelo — evita que un refetch previo a la
   // confirmación de Supabase restaure el evento en el estado local (race condition
   // especialmente común en iOS donde visibilitychange dispara refetch en cada tap).
   const pendingDeletesRef = useRef(new Set())
+
+  // Tracker de creaciones recientes para deduplicación defensiva. Mapea
+  // `${title}|${time}|${date}` → timestamp. Sirve para casos donde Nova emite
+  // dos add_event idénticos (bug del LLM) o el usuario aplica una sugerencia
+  // dos veces antes de que la lista se actualice. La regla #9 del system
+  // prompt previene la mayoría, pero este es el último filtro antes de Supabase.
+  const recentCreationsRef = useRef(new Map())
 
   // Eventos recién agregados/editados cuyo upsert a Supabase puede estar en
   // vuelo. Guardamos el evento completo + timestamp: si cloudEvents todavía
@@ -239,18 +257,41 @@ export function useEvents() {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     })()
 
+    const cleanedTitle = cleanGeneratedTitle(title) || title
+
+    // Dedupe defensivo: si el mismo (titulo|hora|fecha) llegó hace menos de
+    // DEDUPE_WINDOW_MS, retornamos el evento ya creado en vez de duplicar.
+    // Cubre: LLM emitiendo add_event dos veces, doble click en aceptar
+    // sugerencia, retry de network que se aplicó dos veces.
+    const dedupeKey = `${normalizeTitleForDedupe(cleanedTitle)}|${finalTime}|${resolvedDate}`
+    const now = Date.now()
+    const recent = recentCreationsRef.current.get(dedupeKey)
+    if (recent && now - recent.at < DEDUPE_WINDOW_MS) {
+      focusLog(`[Focus] 🛡️ addEvent dedupe: "${cleanedTitle}" (${dedupeKey}) — ignorado`)
+      // Devolvemos el evento previo para que callers (applySuggestion) que
+      // dependen del id devuelto sigan funcionando sin romper undo.
+      return recent.event
+    }
+
     const newEvent = {
       // Sufijo aleatorio para garantizar unicidad cuando se disparan varios
       // addEvent en el mismo tick (ej: al crear 12 repeticiones de una
       // reunión semanal). Sin él, Date.now() repetía ID y Supabase upsert
       // colapsaba todas las filas en una.
       id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      title: cleanGeneratedTitle(title) || title,
+      title: cleanedTitle,
       time: finalTime,
       description, section, featured: false, icon, dotColor,
       date: resolvedDate,
       reminderOffsets,
       timezone: tz,
+    }
+    recentCreationsRef.current.set(dedupeKey, { at: now, event: newEvent })
+    // Limpieza periódica para no acumular keys viejos sin cota.
+    if (recentCreationsRef.current.size > 64) {
+      for (const [k, v] of recentCreationsRef.current) {
+        if (now - v.at > DEDUPE_WINDOW_MS * 2) recentCreationsRef.current.delete(k)
+      }
     }
     focusLog(`[Focus] ➕ addEvent: "${newEvent.title}"`)
     setEvents(prev => [...prev, newEvent])

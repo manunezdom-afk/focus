@@ -217,11 +217,19 @@ export default function App() {
 
   // Precarga CalendarView y TasksView tras el primer frame para que la primera
   // navegación a esas vistas no dispare el Suspense fallback.
+  // CRÍTICO: usar `window.requestIdleCallback` con typeof guard. En iOS Safari
+  // y WebKit la variable global directa lanza ReferenceError ("Can't find
+  // variable") porque no es propiedad de window enumerable. Eso volaba toda
+  // la app en iPhone real (la WebView de Capacitor también es WebKit).
   useEffect(() => {
-    const id = requestIdleCallback
-      ? requestIdleCallback(() => { loadCalendarView(); loadTasksView() })
+    const ric = typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+      ? window.requestIdleCallback : null
+    const cic = typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function'
+      ? window.cancelIdleCallback : null
+    const id = ric
+      ? ric(() => { loadCalendarView(); loadTasksView() })
       : setTimeout(() => { loadCalendarView(); loadTasksView() }, 800)
-    return () => (requestIdleCallback ? cancelIdleCallback(id) : clearTimeout(id))
+    return () => (ric && cic ? cic(id) : clearTimeout(id))
   }, [])
 
   // Si el usuario recargó con un OTP pendiente (sessionStorage), reabrimos
