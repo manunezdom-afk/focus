@@ -8,9 +8,7 @@
     "limitsNavigationsToAppBoundDomains": false
   },
   "server": {
-    "iosScheme": "https",
-    "url": "http://localhost:5173",
-    "cleartext": true
+    "iosScheme": "https"
   },
   "plugins": {
     "SplashScreen": {
