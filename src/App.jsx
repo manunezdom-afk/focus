@@ -315,6 +315,15 @@ export default function App() {
     return () => mq.removeEventListener('change', handler)
   }, [])
 
+  const [keyboardOpen, setKeyboardOpen] = useState(false)
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setKeyboardOpen(document.body.classList.contains('keyboard-open'))
+    })
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+
   // Estado de conectividad. Mostramos un pill de "Sin conexión" cuando el
   // navegador declara offline, para que el usuario sepa que sus cambios viven
   // locales y se sincronizarán al volver. Sin esto, el silencio puede
@@ -899,8 +908,8 @@ export default function App() {
       {!isDesktop && (
         <motion.div
           initial={{ y: 100, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.6, type: 'spring', damping: 20 }}
+          animate={keyboardOpen ? { y: 100, opacity: 0 } : { y: 0, opacity: 1 }}
+          transition={{ duration: 0.22, ease: [0.32, 0.72, 0, 1] }}
           className="fixed bottom-0 left-0 right-0 z-40"
         >
           <BottomNavBar activeView={navView} onNavigate={navigate} />
