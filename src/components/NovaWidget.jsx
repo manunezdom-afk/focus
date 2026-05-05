@@ -571,6 +571,11 @@ function NovaWidget({
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
+    // Defensa contra disparo doble: el botón de cámara está disabled durante
+    // isAnalyzingPhoto, pero el <input type=file hidden> NO. Si el usuario
+    // re-elige antes de que el state se actualice, evitamos pisarle a la
+    // request en curso.
+    if (isAnalyzingPhoto) return
 
     const preview = URL.createObjectURL(file)
     setPhotoPreview(preview)
@@ -641,7 +646,12 @@ function NovaWidget({
   }
 
   function confirmPhotoEvents() {
-    chips.filter(c => c.photoEvent).forEach(c => {
+    // Filtramos por !c.done para evitar doble agendado en double-tap rápido:
+    // entre el primer click y el setChips→done programado, un segundo click
+    // ve los chips aún sin done=true y dispara onAddEvent otra vez.
+    const pending = chips.filter(c => c.photoEvent && !c.done)
+    if (pending.length === 0) return
+    pending.forEach(c => {
       onAddEvent?.({
         id: `${Date.now()}-${Math.random()}`,
         title: c.photoEvent.title,

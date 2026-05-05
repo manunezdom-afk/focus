@@ -13,7 +13,11 @@
     "ios:open": "npx cap open ios",
     "ios:run": "npm run build && npx cap sync ios && npx cap open ios",
     "ios:fresh": "rm -rf dist ios/App/App/public && npm run build && npx cap sync ios && npx cap open ios",
-    "ios:clean": "rm -rf dist ios/App/App/public node_modules/.vite"
+    "ios:clean": "rm -rf dist ios/App/App/public node_modules/.vite",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:nova": "playwright test tests/e2e/nova.spec.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",
@@ -34,6 +38,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.3.1",
+    "@playwright/test": "^1.59.1",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
