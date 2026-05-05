@@ -11,7 +11,9 @@
     "build:ios-icons": "node scripts/build-ios-icons.mjs",
     "ios:sync": "npm run build && npx cap sync ios",
     "ios:open": "npx cap open ios",
-    "ios:run": "npm run build && npx cap sync ios && npx cap open ios"
+    "ios:run": "npm run build && npx cap sync ios && npx cap open ios",
+    "ios:fresh": "rm -rf dist ios/App/App/public && npm run build && npx cap sync ios && npx cap open ios",
+    "ios:clean": "rm -rf dist ios/App/App/public node_modules/.vite"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",

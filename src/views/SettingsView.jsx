@@ -794,6 +794,27 @@ export default function SettingsView({ onOpenImport, onOpenMemory, onOpenNovaKno
       <p className="text-center text-[11px] text-slate-300 pt-2">
         Focus · Calendario con IA
       </p>
+      <BuildStamp />
     </div>
+  )
+}
+
+// Marca de build: commit corto + hora local de compilación. Visible siempre
+// para que en Xcode/iPhone podamos verificar que estamos viendo la build
+// nueva y no una cacheada. Las constantes vienen de `define` en vite.config.js.
+function BuildStamp() {
+  const commit = typeof __BUILD_COMMIT__ !== 'undefined' ? __BUILD_COMMIT__ : 'dev'
+  const time = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : ''
+  let stampTime = ''
+  try {
+    if (time) {
+      const d = new Date(time)
+      stampTime = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    }
+  } catch {}
+  return (
+    <p className="text-center text-[10px] text-slate-300/70 pt-1 font-mono tracking-wide select-text">
+      build {commit}{stampTime ? ` · ${stampTime}` : ''}
+    </p>
   )
 }

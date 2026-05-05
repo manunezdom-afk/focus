@@ -1,8 +1,29 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { execSync } from 'node:child_process'
+
+// Build stamp: SHA del commit + timestamp ISO. Se inyecta como constantes a
+// través de `define` y se muestra en SettingsView para que QA pueda confirmar
+// visualmente en Xcode/iPhone que está corriendo la build nueva (no una vieja
+// cacheada por el WebView). En CI/Vercel usamos VERCEL_GIT_COMMIT_SHA.
+function resolveBuildStamp() {
+  const sha = process.env.VERCEL_GIT_COMMIT_SHA
+    || (() => {
+      try {
+        return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+          .toString().trim()
+      } catch { return 'unknown' }
+    })()
+  return { commit: String(sha).slice(0, 7), time: new Date().toISOString() }
+}
+const { commit: BUILD_COMMIT, time: BUILD_TIME } = resolveBuildStamp()
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __BUILD_COMMIT__: JSON.stringify(BUILD_COMMIT),
+    __BUILD_TIME__: JSON.stringify(BUILD_TIME),
+  },
   build: {
     // Separar dependencies estables del código de la app. Ganancia clave en
     // cold start de PWA instalada / Safari: el vendor chunk se cachea para
