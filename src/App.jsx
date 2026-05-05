@@ -118,31 +118,23 @@ function resetViewportPosition() {
 }
 
 const pageVariants = {
-  initial: ({ direction = 1, depth = 'peer' } = {}) => {
+  initial: ({ depth = 'peer' } = {}) => {
     if (prefersReducedMotion()) return { opacity: 0 }
-    return {
-      opacity: 0,
-      x: depth === 'deeper' ? 18 : depth === 'back' ? -14 : direction * 16,
-      y: depth === 'deeper' ? 8 : 0,
-      scale: depth === 'deeper' ? 0.985 : 1,
-    }
+    if (depth === 'deeper') return { opacity: 0, scale: 0.98, y: 6 }
+    if (depth === 'back')   return { opacity: 0, scale: 1.01 }
+    return { opacity: 0 }
   },
   animate: {
     opacity: 1,
-    x: 0,
-    y: 0,
     scale: 1,
-    transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] },
+    y: 0,
+    transition: { duration: 0.15, ease: [0.25, 0.46, 0.45, 0.94] },
   },
-  exit: ({ direction = 1, depth = 'peer' } = {}) => {
-    if (prefersReducedMotion()) return { opacity: 0, transition: { duration: 0.08 } }
-    return {
-      opacity: 0,
-      x: depth === 'deeper' ? -10 : depth === 'back' ? 12 : direction * -12,
-      y: depth === 'deeper' ? -4 : 0,
-      scale: depth === 'back' ? 0.995 : 0.99,
-      transition: { duration: 0.1, ease: 'easeOut' },
-    }
+  exit: ({ depth = 'peer' } = {}) => {
+    if (prefersReducedMotion()) return { opacity: 0, transition: { duration: 0.06 } }
+    if (depth === 'deeper') return { opacity: 0, scale: 0.99, transition: { duration: 0.08, ease: 'easeIn' } }
+    if (depth === 'back')   return { opacity: 0, scale: 0.98, transition: { duration: 0.08, ease: 'easeIn' } }
+    return { opacity: 0, transition: { duration: 0.08, ease: 'easeIn' } }
   },
 }
 
@@ -164,14 +156,7 @@ function RouteFallback({ activeView, isDesktop }) {
       aria-label={`Cargando ${label}`}
       className={`min-h-[calc(100vh-96px)] ${isDesktop ? 'px-8 pt-10' : 'px-4 pt-6'}`}
     >
-      <div className="fixed inset-x-0 top-0 z-[80] h-[2px] overflow-hidden bg-slate-200/50">
-        <motion.div
-          className="h-full w-1/3 bg-gradient-to-r from-transparent via-blue-500 to-transparent"
-          initial={{ x: '-120%' }}
-          animate={{ x: '360%' }}
-          transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
-        />
-      </div>
+      <div className="fixed inset-x-0 top-0 z-[80] h-[2px] bg-blue-400/40" />
       <div className="mx-auto w-full max-w-5xl">
         <SkeletonBlock className="mb-4 h-4 w-32 rounded-full" />
         <SkeletonBlock className="mb-3 h-12 w-52 rounded-3xl" />
@@ -229,6 +214,15 @@ export default function App() {
   // o el planner directo.
   const { show: showBootSplash } = useBootSplash()
   const showOnboardingNow = showOnboarding && !showWelcome
+
+  // Precarga CalendarView y TasksView tras el primer frame para que la primera
+  // navegación a esas vistas no dispare el Suspense fallback.
+  useEffect(() => {
+    const id = requestIdleCallback
+      ? requestIdleCallback(() => { loadCalendarView(); loadTasksView() })
+      : setTimeout(() => { loadCalendarView(); loadTasksView() }, 800)
+    return () => (requestIdleCallback ? cancelIdleCallback(id) : clearTimeout(id))
+  }, [])
 
   // Si el usuario recargó con un OTP pendiente (sessionStorage), reabrimos
   // el modal en cuanto la bienvenida termina — evita que el flujo se pierda.
@@ -798,7 +792,7 @@ export default function App() {
             Suspense envuelve TODO para cubrir las vistas lazy. El fallback ya
             no es null: una estructura liviana evita flashes y comunica progreso. */}
         {(
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="sync">
             <motion.div
               key={activeView}
               custom={routeMotion}
@@ -807,6 +801,7 @@ export default function App() {
               animate="animate"
               exit="exit"
               className="w-full"
+              style={{ willChange: 'opacity, transform' }}
             >
               <Suspense fallback={<RouteFallback activeView={activeView} isDesktop={isDesktop} />}>
               {activeView === 'planner' && <PlannerView {...plannerProps} isDesktop={isDesktop} />}

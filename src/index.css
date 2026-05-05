@@ -31,7 +31,7 @@
 }
 
 html {
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
 }
 
 /* iOS Safari auto-zooma al enfocar inputs con font-size < 16px en PWA.
