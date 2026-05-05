@@ -1250,51 +1250,46 @@ export default function PlannerView({ onAddEvent, onEditEvent, onDeleteEvent, on
                 )
               })}
 
-              {/* ── Banner "Tienes el día abierto" ─────────────────────────
-                  Aparece cuando el día está vacío y el usuario no lo cerró.
-                  CTA grande arma el día con Nova; X persiste el dismiss
-                  para que no reaparezca en la próxima sesión. Si el usuario
-                  ya lo cerró, mostramos el chips card más abajo (fallback). */}
+              {/* ── Empty state mobile: compacto, no invasivo ───────────────
+                  Reemplaza el banner grande anterior. En mobile no necesitamos
+                  una card de marketing — el usuario ya está dentro de la app.
+                  Solo un hint suave con una acción directa. */}
               {blocks.length === 0 && pendingTasksCount === 0 && !isDesktop && !emptyDayBannerDismissed && (
-                <div className="w-full max-w-2xl mx-auto">
-                  <div
-                    className="relative rounded-3xl border border-primary/15 bg-gradient-to-br from-primary/5 via-secondary/5 to-surface px-6 py-7 sm:px-8 sm:py-9 shadow-[0_2px_24px_-8px_rgba(59,130,246,0.15)]"
-                  >
-                    <button
-                      type="button"
-                      onClick={dismissEmptyDayBanner}
-                      aria-label="Cerrar"
-                      className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full text-outline hover:text-on-surface hover:bg-surface-container-low transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">close</span>
-                    </button>
-                    <div className="flex items-start gap-4">
-                      <div className="flex-shrink-0 w-11 h-11 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-[0_4px_16px_-4px_rgba(59,130,246,0.4)]">
-                        <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-headline font-semibold tracking-tight text-on-surface text-2xl sm:text-3xl leading-tight pr-6">
-                          Tienes el día abierto. Podemos armarlo en 10 segundos.
-                        </h3>
-                        <p className="mt-2 text-outline text-sm sm:text-[15px] leading-relaxed">
-                          Agrega un evento o pídele a Nova que arme tu agenda.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFocusBarSeed(({ n }) => ({
-                              text: 'Planifica mi día',
-                              n: n + 1,
-                              autosubmit: true,
-                              context: null,
-                            }))
-                          }}
-                          className="mt-5 inline-flex items-center gap-2 bg-on-surface text-surface rounded-full px-5 py-2.5 text-sm font-bold hover:bg-on-surface/90 active:scale-[0.98] transition-all shadow-[0_4px_14px_-4px_rgba(0,0,0,0.3)]"
-                        >
-                          <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
-                          Planificar mi día con Nova
-                        </button>
-                      </div>
+                <div className="w-full px-1">
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/60 bg-white/60 px-4 py-3 shadow-sm backdrop-blur-sm">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span
+                        className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center"
+                      >
+                        <span className="material-symbols-outlined text-primary text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
+                      </span>
+                      <p className="text-[13px] font-medium text-slate-600 leading-snug">
+                        Día libre — ¿qué agendamos?
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFocusBarSeed(({ n }) => ({
+                            text: 'Planifica mi día',
+                            n: n + 1,
+                            autosubmit: true,
+                            context: null,
+                          }))
+                        }}
+                        className="text-[12px] font-bold text-primary px-3 py-1.5 rounded-full bg-primary/8 hover:bg-primary/15 active:scale-95 transition-all"
+                      >
+                        Planificar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={dismissEmptyDayBanner}
+                        aria-label="Cerrar"
+                        className="w-7 h-7 flex items-center justify-center rounded-full text-slate-300 hover:text-slate-500 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">close</span>
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1471,8 +1466,8 @@ export default function PlannerView({ onAddEvent, onEditEvent, onDeleteEvent, on
           {(!isDesktop || hasRightContent) && (
           <div className={`w-full space-y-5 ${isDesktop ? 'lg:sticky lg:top-28' : ''}`}>
 
-            {/* ── Right: tutorial Nova — solo primer uso, descartable con X ── */}
-            {showNovaGuide && (
+            {/* ── Right: tutorial Nova — solo desktop, primer uso, descartable ── */}
+            {isDesktop && showNovaGuide && (
               <div className="relative overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.07)]">
                 <button
                   type="button"
