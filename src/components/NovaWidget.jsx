@@ -141,6 +141,7 @@ function NovaWidget({
   const restartTimerRef = useRef(null)
   const finalTextRef    = useRef('')
   const sendMessageRef  = useRef(null)
+  const openHistoryLengthRef = useRef(0)
   // VAD (Voice Activity Detector) corre en paralelo al SpeechRecognition.
   // Detecta fin-de-habla por audio real (no por ausencia de transcript) y
   // resetea el silenceTimer también con sonidos paralingüísticos como
@@ -212,9 +213,12 @@ function NovaWidget({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isOpen])
 
-  // Foco automático al abrir
+  // Foco automático al abrir + capturar longitud de historia pre-existente
   useEffect(() => {
-    if (isOpen) setTimeout(() => inputRef.current?.focus(), 80)
+    if (isOpen) {
+      openHistoryLengthRef.current = historyRef.current.length
+      setTimeout(() => inputRef.current?.focus(), 80)
+    }
   }, [isOpen])
 
   // Auto-scroll al fondo del chat
@@ -880,23 +884,28 @@ function NovaWidget({
           </div>
         )}
 
-        {chatHistory.map((msg, i) => (
-          <motion.div
-            key={i}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.18 }}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-[13px] leading-relaxed whitespace-pre-wrap break-words ${
-              msg.role === 'user'
-                ? 'bg-blue-500 text-white rounded-br-[6px]'
-                : 'bg-slate-100 text-slate-700 rounded-bl-[6px]'
-            }`}>
-              {msg.content}
-            </div>
-          </motion.div>
-        ))}
+        {chatHistory.map((msg, i) => {
+          // Pre-existing messages (loaded before this open) and user messages skip
+          // the opacity-0 initial so there's no blank-flash on open or after sending.
+          const skipFade = i < openHistoryLengthRef.current || msg.role === 'user'
+          return (
+            <motion.div
+              key={i}
+              initial={skipFade ? false : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.18 }}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-[13px] leading-relaxed whitespace-pre-wrap break-words ${
+                msg.role === 'user'
+                  ? 'bg-blue-500 text-white rounded-br-[6px]'
+                  : 'bg-slate-100 text-slate-700 rounded-bl-[6px]'
+              }`}>
+                {msg.content}
+              </div>
+            </motion.div>
+          )
+        })}
 
         {/* Burbuja de respuesta en curso */}
         {isLoading && (
