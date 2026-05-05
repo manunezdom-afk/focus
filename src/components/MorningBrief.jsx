@@ -239,11 +239,12 @@ export default function MorningBrief({
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.62, duration: 0.55, ease: EASE }}
-                className="mt-5 text-center text-white/72"
+                className="mt-5 text-center text-white"
                 style={{
                   fontSize: 'clamp(15px, 1.6vw, 17px)',
                   letterSpacing: '-0.005em',
                   fontVariantNumeric: 'tabular-nums',
+                  color: 'rgba(255,255,255,0.90)',
                 }}
               >
                 {brief.summary}
