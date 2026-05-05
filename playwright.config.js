@@ -6,6 +6,8 @@ import { defineConfig, devices } from '@playwright/test'
 // recibir respuesta, no doble submit, errores claros.
 export default defineConfig({
   testDir: './tests/e2e',
+  // tests/audit/ contiene specs de auditoría visual (screenshots) que NO
+  // corren en la suite default. Se invocan con `npm run test:audit`.
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: true,
@@ -28,8 +30,15 @@ export default defineConfig({
       // iPhone. Detecta bugs específicos de Safari (p.ej. requestIdleCallback
       // ausente, gestos pointer, viewport sticky). Si querés iterar más rápido
       // sin esto, comentá el project y dejá solo chromium-desktop.
+      // Viewport 393x852 es el iPhone 14 Pro real en Capacitor full-screen
+      // (sin barra Safari). El default de devices['iPhone 14 Pro'] usaba
+      // 393x659 simulando barra de URL — falsamente reportaba contenido
+      // bajo la nav bar que en device real está holgado.
       name: 'webkit-mobile',
-      use: { ...devices['iPhone 14 Pro'] },
+      use: {
+        ...devices['iPhone 14 Pro'],
+        viewport: { width: 393, height: 852 },
+      },
     },
     {
       name: 'chromium-desktop',

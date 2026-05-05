@@ -405,7 +405,11 @@ export default function CalendarView({ events, tasks = [], onAddEvent, onDeleteE
   }
 
   return (
-    <div className="bg-surface text-on-surface min-h-screen pb-44">
+    // pb-44 (176px) era insuficiente: en iPhone 14 Pro WebKit, los botones del
+    // empty state quedaban parcialmente bajo la nav bar (overlap medido ~40px).
+    // Subimos a pb-60 (240px) para garantizar breathing room arriba de la nav,
+    // independiente del safe-area-bottom que el `<main>` global ya gestiona.
+    <div className="bg-surface text-on-surface min-h-screen pb-60">
 
       <main className={isDesktop ? "max-w-6xl xl:max-w-7xl mx-auto px-6 pt-4 space-y-6" : "max-w-md mx-auto px-4 pt-4 space-y-8"}>
 

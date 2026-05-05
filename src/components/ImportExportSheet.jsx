@@ -1123,7 +1123,14 @@ export default function ImportExportSheet({ isOpen, onClose, events, onImportEve
       {/* Sheet slides up from bottom */}
       <div
         className="fixed bottom-0 left-0 right-0 z-[56] max-h-[90dvh] flex flex-col bg-surface dark:bg-slate-900 rounded-t-[28px] shadow-2xl"
-        style={{ animation: 'slideUp 0.3s cubic-bezier(0.34,1.2,0.64,1) both' }}
+        style={{
+          animation: 'slideUp 0.3s cubic-bezier(0.34,1.2,0.64,1) both',
+          // Padding-bottom para que en iPhone con home indicator (~34px) los
+          // botones del último tab no queden debajo de la barra horizontal.
+          // El resto de sheets (QuickAdd, RecurringMeeting, AuthModal) ya
+          // tenían este patrón — esta era la única excepción.
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}
       >
         {/* Handle */}
         <div className="w-10 h-1 bg-outline-variant rounded-full mx-auto mt-4 mb-2 flex-shrink-0" />
