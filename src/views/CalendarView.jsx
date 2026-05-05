@@ -882,25 +882,6 @@ export default function CalendarView({ events, tasks = [], onAddEvent, onDeleteE
               </section>
             )}
 
-            {/* FAB — oculto en desktop y en empty state mobile.
-                En mobile vive APILADO ENCIMA de la pastilla de Nova (que está
-                en safe-bottom + 116px y ~44px de alto). Así nunca se tapan
-                entre sí: pill abajo, FAB justo arriba, mismo borde derecho. */}
-            {!isDesktop && !isDayEmpty && !showModal && (
-            <div
-              className="fixed right-4 z-[40]"
-              style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 172px)' }}
-            >
-              <button
-                onClick={() => openAdd('')}
-                aria-label="Añadir evento"
-                className="w-14 h-14 rounded-2xl bg-primary text-white shadow-2xl flex items-center justify-center active:scale-90 transition-transform duration-300"
-                title="Añadir evento"
-              >
-                <span className="material-symbols-outlined text-3xl">add</span>
-              </button>
-            </div>
-            )}
 
                 </motion.div>
               </AnimatePresence>
