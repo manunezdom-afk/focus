@@ -175,6 +175,7 @@ export default function FocusBar({
   const [composerContext, setComposerContext] = useState(null)
   const [isFocused, setIsFocused]     = useState(false)
   const [isAnalyzingPhoto, setIsAnalyzingPhoto] = useState(false)
+  const [voiceState, setVoiceState]   = useState('idle')
   // Lo último que Nova aplicó (IDs reales ya en el store). Se rellena al
   // terminar handleSend y se usa para el pill "Deshacer" inline. Se limpia
   // al cerrar la burbuja o al mandar otro turno.
@@ -198,8 +199,11 @@ export default function FocusBar({
   const srRef      = useRef(null)
   const silenceRef = useRef(null)
   const restartTimerRef = useRef(null)
+  const maxVoiceTimerRef = useRef(null)
+  const voiceIdleTimerRef = useRef(null)
   const photoInputRef = useRef(null)
   const historyRef = useRef([])
+  const sendInFlightRef = useRef(false)
 
   // Si el usuario borra un evento o tarea (desde la UI o desde otro lado),
   // las afirmaciones previas de Nova en el historial — "ya creé X", "listo, X
@@ -230,6 +234,9 @@ export default function FocusBar({
   const sessionActiveRef = useRef(false)
   const sessionStartRef  = useRef(0)
   const finalTextRef     = useRef('')
+  const liveTextRef      = useRef('')
+  const voiceFinalizedRef = useRef(false)
+  const voiceCancelRequestedRef = useRef(false)
   const isRunningRef     = useRef(false)
   const vadHandleRef     = useRef(null)
   const [commitProgress, setCommitProgress] = useState(0)
@@ -240,6 +247,7 @@ export default function FocusBar({
   // el VAD por hangover prosódico, mucho antes.
   const VAD_FALLBACK_SILENCE_MS = 2200
   const MAX_SESSION_MS = 60_000
+  const VOICE_IDLE_RESET_MS = 900
 
   // Refleja el modo activo (con/sin VAD) sin remontar el efecto de SR. El
   // useEffect captura el closure una sola vez; lee siempre desde aquí.
@@ -300,7 +308,10 @@ export default function FocusBar({
     r.continuous = false
     r.interimResults = true
 
-    r.onstart = () => { setIsListening(true) }
+    r.onstart = () => {
+      setIsListening(true)
+      setVoiceState('listening')
+    }
 
     r.onresult = (e) => {
       let finalAdd = ''
@@ -314,16 +325,22 @@ export default function FocusBar({
         finalTextRef.current = (finalTextRef.current + ' ' + finalAdd).replace(/\s+/g, ' ').trim()
       }
       const preview = (finalTextRef.current + ' ' + interim).replace(/\s+/g, ' ').trim()
-      if (preview) setText(preview)
+      if (preview) {
+        liveTextRef.current = preview
+        setText(preview)
+        setVoiceState(interim ? 'transcribing' : 'listening')
+      }
 
       clearTimeout(silenceRef.current)
       silenceRef.current = setTimeout(() => {
         sessionActiveRef.current = false
+        setVoiceState('processingAudio')
         try { r.stop() } catch {}
       }, silenceMsRef.current)
     }
 
     r.onerror = (ev) => {
+      if (voiceCancelRequestedRef.current && ev?.error === 'aborted') return
       const recoverable = ev?.error === 'no-speech' || ev?.error === 'aborted'
       if (recoverable && sessionActiveRef.current &&
           Date.now() - sessionStartRef.current < MAX_SESSION_MS) {
@@ -333,11 +350,13 @@ export default function FocusBar({
       isRunningRef.current = false
       clearTimeout(silenceRef.current)
       clearTimeout(restartTimerRef.current)
+      clearTimeout(maxVoiceTimerRef.current)
       try { vadHandleRef.current?.stop() } catch {}
       vadHandleRef.current = null
       silenceMsRef.current = TIMER_ONLY_SILENCE_MS
       setCommitProgress(0)
       setIsListening(false)
+      setVoiceState('error')
       // Errores bloqueantes: antes fallaban en silencio y el usuario veía
       // "el mic no hace nada". Ahora los reflejamos en la burbuja de reply.
       const blocking = ev?.error
@@ -387,10 +406,19 @@ export default function FocusBar({
               } catch {
                 sessionActiveRef.current = false
                 clearTimeout(silenceRef.current)
+                clearTimeout(maxVoiceTimerRef.current)
                 setIsListening(false)
-                const txt = finalTextRef.current.trim()
+                const txt = (liveTextRef.current || finalTextRef.current).trim()
                 finalTextRef.current = ''
-                if (txt) handleSendRef.current?.(txt)
+                liveTextRef.current = ''
+                if (voiceFinalizedRef.current) return
+                voiceFinalizedRef.current = true
+                if (txt) {
+                  setVoiceState('sendingToNova')
+                  handleSendRef.current?.(txt)
+                } else {
+                  setVoiceState('idle')
+                }
               }
             }, 140)
           }
@@ -405,20 +433,35 @@ export default function FocusBar({
       // invocándose con estado desactualizado.
       clearTimeout(silenceRef.current)
       clearTimeout(restartTimerRef.current)
+      clearTimeout(maxVoiceTimerRef.current)
       try { vadHandleRef.current?.stop() } catch {}
       vadHandleRef.current = null
       silenceMsRef.current = TIMER_ONLY_SILENCE_MS
       setCommitProgress(0)
       setIsListening(false)
-      const txt = finalTextRef.current.trim()
+      const txt = (liveTextRef.current || finalTextRef.current).trim()
       finalTextRef.current = ''
-      if (txt) handleSendRef.current?.(txt)
+      liveTextRef.current = ''
+      if (voiceFinalizedRef.current) return
+      voiceFinalizedRef.current = true
+      if (voiceCancelRequestedRef.current) {
+        setVoiceState('cancelled')
+        return
+      }
+      if (txt) {
+        setVoiceState('sendingToNova')
+        handleSendRef.current?.(txt)
+      } else {
+        setVoiceState('idle')
+      }
     }
 
     srRef.current = r
     return () => {
       clearTimeout(silenceRef.current)
       clearTimeout(restartTimerRef.current)
+      clearTimeout(maxVoiceTimerRef.current)
+      clearTimeout(voiceIdleTimerRef.current)
       try { vadHandleRef.current?.stop() } catch {}
       vadHandleRef.current = null
       try { r.abort() } catch {}
@@ -442,8 +485,9 @@ export default function FocusBar({
 
   async function handleSend(input) {
     const msg = (input ?? text).trim()
-    if (!msg || isThinking) return
+    if (!msg || isThinking || sendInFlightRef.current) return
 
+    sendInFlightRef.current = true
     setText('')
     setComposerContext(null)
     setIsListening(false)
@@ -453,6 +497,7 @@ export default function FocusBar({
     sessionActiveRef.current = false
     clearTimeout(silenceRef.current)
     clearTimeout(restartTimerRef.current)
+    clearTimeout(maxVoiceTimerRef.current)
     try { vadHandleRef.current?.stop() } catch {}
     vadHandleRef.current = null
     setCommitProgress(0)
@@ -583,8 +628,17 @@ export default function FocusBar({
         ? err.message
         : novaSay('error_connection', readPreferenceSync('novaPersonality'))
       setReply({ content: errMsg, actions: [] })
+      setVoiceState((prev) => prev === 'sendingToNova' ? 'error' : prev)
     } finally {
+      sendInFlightRef.current = false
       setIsThinking(false)
+      setVoiceState((prev) => prev === 'sendingToNova' ? 'success' : prev)
+      clearTimeout(voiceIdleTimerRef.current)
+      voiceIdleTimerRef.current = setTimeout(() => {
+        if (!sessionActiveRef.current) {
+          setVoiceState((prev) => prev === 'success' ? 'idle' : prev)
+        }
+      }, VOICE_IDLE_RESET_MS)
     }
   }
 
@@ -671,23 +725,37 @@ export default function FocusBar({
       sessionActiveRef.current = false
       clearTimeout(silenceRef.current)
       clearTimeout(restartTimerRef.current)
+      clearTimeout(maxVoiceTimerRef.current)
       try { vadHandleRef.current?.stop() } catch {}
       vadHandleRef.current = null
       setCommitProgress(0)
       silenceMsRef.current = TIMER_ONLY_SILENCE_MS
+      setVoiceState('processingAudio')
       try { r.stop() } catch {}
       return
     }
 
     // Arranque de sesión nueva.
+    clearTimeout(voiceIdleTimerRef.current)
+    clearTimeout(maxVoiceTimerRef.current)
     finalTextRef.current = ''
+    liveTextRef.current = ''
+    voiceFinalizedRef.current = false
+    voiceCancelRequestedRef.current = false
     setText('')
     setReply(null)
     sessionActiveRef.current = true
     sessionStartRef.current = Date.now()
+    setVoiceState('requestingPermission')
     try {
       r.start()
       isRunningRef.current = true
+      maxVoiceTimerRef.current = setTimeout(() => {
+        if (!sessionActiveRef.current) return
+        sessionActiveRef.current = false
+        setVoiceState('processingAudio')
+        try { r.stop() } catch {}
+      }, MAX_SESSION_MS)
       // VAD en paralelo. Si falla, seguimos con timer-only (1.8s).
       bootVAD()
     } catch {
@@ -699,11 +767,19 @@ export default function FocusBar({
         try {
           sessionActiveRef.current = true
           sessionStartRef.current = Date.now()
+          setVoiceState('requestingPermission')
           r.start()
           isRunningRef.current = true
+          maxVoiceTimerRef.current = setTimeout(() => {
+            if (!sessionActiveRef.current) return
+            sessionActiveRef.current = false
+            setVoiceState('processingAudio')
+            try { r.stop() } catch {}
+          }, MAX_SESSION_MS)
           bootVAD()
         } catch {
           sessionActiveRef.current = false
+          setVoiceState('error')
         }
       }, 120)
     }
@@ -722,16 +798,19 @@ export default function FocusBar({
           clearTimeout(silenceRef.current)
           silenceRef.current = setTimeout(() => {
             sessionActiveRef.current = false
+            setVoiceState('processingAudio')
             try { srRef.current?.stop() } catch {}
           }, silenceMsRef.current)
         },
         onCountdown: (remaining, total) => {
           const frac = total > 0 ? Math.max(0, Math.min(1, remaining / total)) : 0
+          if (frac > 0) setVoiceState('userPaused')
           setCommitProgress(frac)
         },
         onSpeechEnd: () => {
           if (!sessionActiveRef.current) return
           sessionActiveRef.current = false
+          setVoiceState('processingAudio')
           try { srRef.current?.stop() } catch {}
         },
       })
@@ -745,6 +824,7 @@ export default function FocusBar({
         clearTimeout(silenceRef.current)
         silenceRef.current = setTimeout(() => {
           sessionActiveRef.current = false
+          setVoiceState('processingAudio')
           try { srRef.current?.stop() } catch {}
         }, silenceMsRef.current)
       }
@@ -754,6 +834,28 @@ export default function FocusBar({
     }
   }
 
+  function cancelVoice() {
+    voiceCancelRequestedRef.current = true
+    voiceFinalizedRef.current = true
+    sessionActiveRef.current = false
+    finalTextRef.current = ''
+    liveTextRef.current = ''
+    clearTimeout(silenceRef.current)
+    clearTimeout(restartTimerRef.current)
+    clearTimeout(maxVoiceTimerRef.current)
+    try { vadHandleRef.current?.stop() } catch {}
+    vadHandleRef.current = null
+    setCommitProgress(0)
+    silenceMsRef.current = TIMER_ONLY_SILENCE_MS
+    setIsListening(false)
+    setVoiceState('cancelled')
+    try { srRef.current?.abort() } catch {}
+    clearTimeout(voiceIdleTimerRef.current)
+    voiceIdleTimerRef.current = setTimeout(() => {
+      if (!sessionActiveRef.current) setVoiceState('idle')
+    }, VOICE_IDLE_RESET_MS)
+  }
+
   function handleTextChange(value) {
     setText(value)
     if (!value.trim()) setComposerContext(null)
@@ -761,6 +863,17 @@ export default function FocusBar({
 
   const isActive = isFocused || !!text || isListening
   const hasText  = text.trim().length > 0
+  const voiceStatusText = {
+    requestingPermission: 'Preparando micrófono…',
+    listening: 'Escuchando…',
+    userPaused: 'Pausa detectada…',
+    processingAudio: 'Procesando audio…',
+    transcribing: 'Transcribiendo…',
+    sendingToNova: 'Enviando a Nova…',
+    error: 'No pude escuchar. Reintenta.',
+    cancelled: 'Dictado cancelado.',
+  }[voiceState] || ''
+  const showVoiceStatus = voiceState !== 'idle' && voiceState !== 'success' && voiceStatusText
 
   // ── Inline mode (dentro del planner, tema claro) ──────────────────────────
   if (inline) {
@@ -880,6 +993,26 @@ export default function FocusBar({
           )}
         </AnimatePresence>
 
+        {showVoiceStatus && (
+          <div className="flex items-center justify-between gap-3 px-1" aria-live="polite">
+            <div className="min-w-0 flex items-center gap-1.5 text-[12px] font-medium text-outline">
+              <span className="material-symbols-outlined text-[15px] text-primary">
+                {voiceState === 'error' ? 'error' : voiceState === 'cancelled' ? 'cancel' : 'graphic_eq'}
+              </span>
+              <span className="truncate">{voiceStatusText}</span>
+            </div>
+            {isListening && (
+              <button
+                type="button"
+                onClick={cancelVoice}
+                className="flex-shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold text-outline hover:bg-surface-container active:scale-95 transition-all"
+              >
+                Cancelar
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Input bar
             Layout: [cam] [input..............] [MIC] [send]
             - Cámara a la izquierda (acción secundaria de media).
@@ -936,7 +1069,7 @@ export default function FocusBar({
             }}
             onBlur={() => setIsFocused(false)}
             onKeyDown={(e) => e.key === 'Enter' && hasText && handleSend()}
-            placeholder={isAnalyzingPhoto ? 'Analizando foto…' : isListening ? 'Escuchando…' : PLACEHOLDER_EXAMPLES[placeholderIdx]}
+            placeholder={isAnalyzingPhoto ? 'Analizando foto…' : voiceStatusText || PLACEHOLDER_EXAMPLES[placeholderIdx]}
             disabled={isThinking || isAnalyzingPhoto}
             enterKeyHint="send"
             autoComplete="off"
@@ -1056,6 +1189,25 @@ export default function FocusBar({
       </AnimatePresence>
 
       <div className="w-full max-w-sm">
+        {showVoiceStatus && (
+          <div className="mb-2 flex items-center justify-between gap-3 rounded-full bg-slate-900/85 px-3 py-1.5 text-white shadow-lg" aria-live="polite">
+            <div className="min-w-0 flex items-center gap-1.5 text-[12px] font-medium text-white/75">
+              <span className="material-symbols-outlined text-[15px] text-indigo-300">
+                {voiceState === 'error' ? 'error' : voiceState === 'cancelled' ? 'cancel' : 'graphic_eq'}
+              </span>
+              <span className="truncate">{voiceStatusText}</span>
+            </div>
+            {isListening && (
+              <button
+                type="button"
+                onClick={cancelVoice}
+                className="flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white/75 hover:bg-white/10 active:scale-95 transition-all"
+              >
+                Cancelar
+              </button>
+            )}
+          </div>
+        )}
         <motion.div
           animate={
             isListening
@@ -1107,7 +1259,7 @@ export default function FocusBar({
             }}
             onBlur={() => setIsFocused(false)}
             onKeyDown={(e) => e.key === 'Enter' && hasText && handleSend()}
-            placeholder={isAnalyzingPhoto ? 'Analizando foto…' : isListening ? 'Escuchando…' : PLACEHOLDER_EXAMPLES[placeholderIdx]}
+            placeholder={isAnalyzingPhoto ? 'Analizando foto…' : voiceStatusText || PLACEHOLDER_EXAMPLES[placeholderIdx]}
             disabled={isThinking || isAnalyzingPhoto}
             enterKeyHint="send"
             autoComplete="off"

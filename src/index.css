@@ -11,6 +11,7 @@
   /* Altura del teclado nativo iOS — actualizada por src/lib/iosKeyboard.js
      desde keyboardWillShow/Hide. 0px en web y cuando el teclado está oculto. */
   --keyboard-height: 0px;
+  --focus-visual-viewport-height: 100dvh;
 
   /* Easing */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -199,6 +200,25 @@ h1, h2, h3 {
      manual. La curva de easing matchea la animación nativa del teclado iOS. */
   .kb-aware {
     transition: padding-bottom 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  /* Bottom sheets mobile: evitan 100vh rígido y se atan al viewport visual.
+     Cuando el teclado está abierto, ocupar el 100% del WebView visible evita
+     la compresión extra de `85dvh` y elimina huecos/bordes al pie. */
+  .nova-mobile-sheet {
+    height: min(calc(var(--focus-visual-viewport-height, 100dvh) * 0.85), 640px);
+    max-height: calc(var(--focus-visual-viewport-height, 100dvh) - env(safe-area-inset-top, 0px));
+  }
+  body.keyboard-open .nova-mobile-sheet {
+    height: var(--focus-visual-viewport-height, 100dvh);
+    max-height: var(--focus-visual-viewport-height, 100dvh);
+  }
+
+  html.is-ios .min-h-screen {
+    min-height: 100dvh;
+  }
+  html.is-ios body.keyboard-open .min-h-screen {
+    min-height: var(--focus-visual-viewport-height, 100dvh);
   }
 
   /* iOS Capacitor / iOS PWA: durante la animación del teclado el WKWebView

@@ -30,6 +30,7 @@ const SR = typeof window !== 'undefined' &&
 const TIMER_ONLY_SILENCE_MS = 1800
 const VAD_FALLBACK_SILENCE_MS = 2200
 const MAX_SESSION_MS = 60_000
+const VOICE_IDLE_RESET_MS = 900
 
 /**
  * @param {Object} opts
@@ -50,14 +51,21 @@ export function useVoiceDictation({
 } = {}) {
   const [isListening, setIsListening] = useState(false)
   const [commitProgress, setCommitProgress] = useState(0)
+  const [state, setState] = useState('idle')
 
   const srRef             = useRef(null)
   const isRunningRef      = useRef(false)
   const sessionActiveRef  = useRef(false)
   const sessionStartRef   = useRef(0)
+  const sessionIdRef      = useRef(0)
   const silenceTimerRef   = useRef(null)
   const restartTimerRef   = useRef(null)
+  const maxTimerRef       = useRef(null)
+  const idleTimerRef      = useRef(null)
   const finalTextRef      = useRef('')
+  const liveTextRef       = useRef('')
+  const finalizedRef      = useRef(false)
+  const cancelRequestedRef = useRef(false)
   const vadHandleRef      = useRef(null)
   const silenceMsRef      = useRef(TIMER_ONLY_SILENCE_MS)
 
@@ -76,6 +84,11 @@ export function useVoiceDictation({
     r.continuous = false
     r.interimResults = true
 
+    r.onstart = () => {
+      setIsListening(true)
+      setState('listening')
+    }
+
     r.onresult = (e) => {
       let finalAdd = ''
       let interim  = ''
@@ -89,16 +102,22 @@ export function useVoiceDictation({
           (finalTextRef.current + ' ' + finalAdd).replace(/\s+/g, ' ').trim()
       }
       const preview = (finalTextRef.current + ' ' + interim).replace(/\s+/g, ' ').trim()
-      if (preview) callbacksRef.current.onTranscript?.(preview)
+      if (preview) {
+        liveTextRef.current = preview
+        setState(interim ? 'transcribing' : 'listening')
+        callbacksRef.current.onTranscript?.(preview)
+      }
 
       clearTimeout(silenceTimerRef.current)
       silenceTimerRef.current = setTimeout(() => {
         sessionActiveRef.current = false
+        setState('processingAudio')
         try { r.stop() } catch {}
       }, silenceMsRef.current)
     }
 
     r.onerror = (ev) => {
+      if (cancelRequestedRef.current && ev?.error === 'aborted') return
       const recoverable = ev?.error === 'no-speech' || ev?.error === 'aborted'
       if (recoverable && sessionActiveRef.current &&
           Date.now() - sessionStartRef.current < MAX_SESSION_MS) {
@@ -108,11 +127,13 @@ export function useVoiceDictation({
       isRunningRef.current = false
       clearTimeout(silenceTimerRef.current)
       clearTimeout(restartTimerRef.current)
+      clearTimeout(maxTimerRef.current)
       try { vadHandleRef.current?.stop() } catch {}
       vadHandleRef.current = null
       silenceMsRef.current = TIMER_ONLY_SILENCE_MS
       setCommitProgress(0)
       setIsListening(false)
+      setState('error')
       const code = ev?.error
       // 'network' es común en iOS Safari sin red estable: el engine de Apple
       // sube audio a sus servers y si la conexión falla devuelve este código.
@@ -169,20 +190,35 @@ export function useVoiceDictation({
       // Fin real de sesión: limpiar y entregar el texto final.
       clearTimeout(silenceTimerRef.current)
       clearTimeout(restartTimerRef.current)
+      clearTimeout(maxTimerRef.current)
       try { vadHandleRef.current?.stop() } catch {}
       vadHandleRef.current = null
       silenceMsRef.current = TIMER_ONLY_SILENCE_MS
       setCommitProgress(0)
       setIsListening(false)
-      const text = finalTextRef.current.trim()
+      const text = (liveTextRef.current || finalTextRef.current).trim()
       finalTextRef.current = ''
-      if (text) callbacksRef.current.onFinalize?.(text)
+      liveTextRef.current = ''
+      if (finalizedRef.current) return
+      finalizedRef.current = true
+      if (cancelRequestedRef.current) {
+        setState('cancelled')
+        return
+      }
+      if (text) {
+        setState('success')
+        callbacksRef.current.onFinalize?.(text)
+      } else {
+        setState('idle')
+      }
     }
 
     srRef.current = r
     return () => {
       clearTimeout(silenceTimerRef.current)
       clearTimeout(restartTimerRef.current)
+      clearTimeout(maxTimerRef.current)
+      clearTimeout(idleTimerRef.current)
       try { vadHandleRef.current?.stop() } catch {}
       vadHandleRef.current = null
       try { r.abort() } catch {}
@@ -204,11 +240,13 @@ export function useVoiceDictation({
         },
         onCountdown: (remaining, total) => {
           const frac = total > 0 ? Math.max(0, Math.min(1, remaining / total)) : 0
+          if (frac > 0) setState('userPaused')
           setCommitProgress(frac)
         },
         onSpeechEnd: () => {
           if (!sessionActiveRef.current) return
           sessionActiveRef.current = false
+          setState('processingAudio')
           try { srRef.current?.stop() } catch {}
         },
       })
@@ -222,6 +260,7 @@ export function useVoiceDictation({
         clearTimeout(silenceTimerRef.current)
         silenceTimerRef.current = setTimeout(() => {
           sessionActiveRef.current = false
+          setState('processingAudio')
           try { srRef.current?.stop() } catch {}
         }, silenceMsRef.current)
       }
@@ -243,19 +282,32 @@ export function useVoiceDictation({
       setTimeout(start, 80)
       return
     }
+    clearTimeout(idleTimerRef.current)
+    clearTimeout(maxTimerRef.current)
+    sessionIdRef.current += 1
+    finalizedRef.current = false
+    cancelRequestedRef.current = false
     finalTextRef.current = ''
+    liveTextRef.current = ''
     sessionActiveRef.current = true
     sessionStartRef.current = Date.now()
+    setState('requestingPermission')
     try {
       r.start()
       isRunningRef.current = true
-      setIsListening(true)
+      maxTimerRef.current = setTimeout(() => {
+        if (!sessionActiveRef.current || sessionIdRef.current === 0) return
+        sessionActiveRef.current = false
+        setState('processingAudio')
+        try { r.stop() } catch {}
+      }, MAX_SESSION_MS)
       bootVAD()
     } catch {
       sessionActiveRef.current = false
       try { r.abort() } catch {}
       isRunningRef.current = false
       setIsListening(false)
+      setState('error')
     }
   }
 
@@ -263,19 +315,45 @@ export function useVoiceDictation({
     sessionActiveRef.current = false
     clearTimeout(silenceTimerRef.current)
     clearTimeout(restartTimerRef.current)
+    clearTimeout(maxTimerRef.current)
     try { vadHandleRef.current?.stop() } catch {}
     vadHandleRef.current = null
     setCommitProgress(0)
     silenceMsRef.current = TIMER_ONLY_SILENCE_MS
+    setState('processingAudio')
     try { srRef.current?.stop() } catch {}
+  }
+
+  function cancel() {
+    cancelRequestedRef.current = true
+    finalizedRef.current = true
+    sessionActiveRef.current = false
+    finalTextRef.current = ''
+    liveTextRef.current = ''
+    clearTimeout(silenceTimerRef.current)
+    clearTimeout(restartTimerRef.current)
+    clearTimeout(maxTimerRef.current)
+    try { vadHandleRef.current?.stop() } catch {}
+    vadHandleRef.current = null
+    setCommitProgress(0)
+    silenceMsRef.current = TIMER_ONLY_SILENCE_MS
+    setIsListening(false)
+    setState('cancelled')
+    try { srRef.current?.abort() } catch {}
+    clearTimeout(idleTimerRef.current)
+    idleTimerRef.current = setTimeout(() => {
+      if (!sessionActiveRef.current) setState('idle')
+    }, VOICE_IDLE_RESET_MS)
   }
 
   return {
     supported: !!SR,
     isListening,
+    state,
     commitProgress,
     start,
     stop,
+    cancel,
     toggle: () => { isListening ? stop() : start() },
   }
 }

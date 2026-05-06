@@ -202,4 +202,64 @@ test.describe('Nova — feedback loop', () => {
     await page.waitForTimeout(500)
     expect(called).toBe(false)
   })
+
+  test('dictado envía el último transcript aunque WebKit no lo marque final', async ({ page }) => {
+    const spoken = 'agenda gimnasio mañana a las siete'
+    let sentMessage = null
+
+    await page.addInitScript(() => {
+      window.__focusSpeechInstances = []
+      class MockSpeechRecognition {
+        constructor() {
+          this.lang = ''
+          this.continuous = false
+          this.interimResults = false
+          window.__focusSpeechInstances.push(this)
+        }
+        start() {
+          this.onstart?.()
+        }
+        stop() {
+          this.onend?.()
+        }
+        abort() {
+          this.onend?.()
+        }
+      }
+      window.SpeechRecognition = MockSpeechRecognition
+      window.webkitSpeechRecognition = MockSpeechRecognition
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: {
+          getUserMedia: () => Promise.reject(new Error('VAD no disponible en test')),
+        },
+      })
+    })
+
+    await page.route('**/api/focus-assistant', async (route) => {
+      const body = route.request().postDataJSON()
+      sentMessage = body?.message || null
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ reply: 'Listo.', actions: [] }),
+      })
+    })
+
+    await gotoCalendar(page)
+    await openNova(page)
+
+    await page.getByRole('button', { name: /dictar con voz/i }).click()
+    await page.waitForFunction(() => window.__focusSpeechInstances?.length > 0)
+    await page.evaluate((text) => {
+      const r = window.__focusSpeechInstances[0]
+      const interim = [{ transcript: text }]
+      interim.isFinal = false
+      r.onresult?.({ resultIndex: 0, results: [interim] })
+    }, spoken)
+
+    await expect(page.locator('input[enterkeyhint="send"]')).toHaveValue(spoken)
+    await expect(page.getByText('Listo.')).toBeVisible({ timeout: 6_000 })
+    expect(sentMessage).toBe(spoken)
+  })
 })

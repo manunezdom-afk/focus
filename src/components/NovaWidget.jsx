@@ -89,6 +89,7 @@ function NovaWidget({
   const [isAnalyzingPhoto, setIsAnalyzingPhoto] = useState(false)
   const [photoPreview, setPhotoPreview]         = useState(null)
   const [modalCount, setModalCount]             = useState(0)
+  const [voiceState, setVoiceState]             = useState('idle')
 
   // Escondemos la pastilla de Nova mientras haya algún sheet/modal abierto
   // (QuickAdd, RecurringMeeting, etc.): superponerla sobre el contenido del
@@ -139,8 +140,14 @@ function NovaWidget({
   const sessionStartRef  = useRef(0)
   const silenceTimerRef = useRef(null)
   const restartTimerRef = useRef(null)
+  const maxVoiceTimerRef = useRef(null)
+  const voiceIdleTimerRef = useRef(null)
   const finalTextRef    = useRef('')
+  const liveTextRef     = useRef('')
+  const voiceFinalizedRef = useRef(false)
+  const voiceCancelRequestedRef = useRef(false)
   const sendMessageRef  = useRef(null)
+  const sendInFlightRef = useRef(false)
   const openHistoryLengthRef = useRef(0)
   // VAD (Voice Activity Detector) corre en paralelo al SpeechRecognition.
   // Detecta fin-de-habla por audio real (no por ausencia de transcript) y
@@ -160,6 +167,7 @@ function NovaWidget({
   // o el usuario se olvidó el mic abierto, cerramos a los 60s. Suficiente
   // para dictar un evento o tarea larga sin sentirse atado.
   const MAX_SESSION_MS = 60_000
+  const VOICE_IDLE_RESET_MS = 900
 
   // El intervalo del silence timer depende de si el VAD está activo. Como el
   // useEffect del SR captura su closure, leemos el valor vivo desde un ref
@@ -225,6 +233,8 @@ function NovaWidget({
       if (isDesktop) {
         setTimeout(() => inputRef.current?.focus(), 80)
       }
+    } else if (sessionActiveRef.current || isRunningRef.current || isListening) {
+      cancelVoice()
     }
   }, [isOpen, isDesktop])
 
@@ -261,6 +271,11 @@ function NovaWidget({
     r.continuous = false
     r.interimResults = true
 
+    r.onstart = () => {
+      setIsListening(true)
+      setVoiceState('listening')
+    }
+
     r.onresult = (e) => {
       let finalAdd = ''
       let interim  = ''
@@ -273,7 +288,11 @@ function NovaWidget({
         finalTextRef.current = (finalTextRef.current + ' ' + finalAdd).replace(/\s+/g, ' ').trim()
       }
       const preview = (finalTextRef.current + ' ' + interim).replace(/\s+/g, ' ').trim()
-      if (preview) setInput(preview)
+      if (preview) {
+        liveTextRef.current = preview
+        setInput(preview)
+        setVoiceState(interim ? 'transcribing' : 'listening')
+      }
 
       // Reset silence timer en cada onresult (incluidos interim → el engine
       // los emite mientras el usuario habla, así que el timer sólo avanza
@@ -285,11 +304,13 @@ function NovaWidget({
       silenceTimerRef.current = setTimeout(() => {
         // Silencio prolongado → cerramos sesión de verdad.
         sessionActiveRef.current = false
+        setVoiceState('processingAudio')
         try { r.stop() } catch {}
       }, silenceMsRef.current)
     }
 
     r.onerror = (ev) => {
+      if (voiceCancelRequestedRef.current && ev?.error === 'aborted') return
       // 'no-speech' y 'aborted' son comunes cuando el engine se auto-cierra
       // sin haber oído nada. Si la sesión sigue activa y bajo el tope, dejamos
       // que onend decida si relanzar.
@@ -302,11 +323,13 @@ function NovaWidget({
       isRunningRef.current = false
       clearTimeout(silenceTimerRef.current)
       clearTimeout(restartTimerRef.current)
+      clearTimeout(maxVoiceTimerRef.current)
       try { vadHandleRef.current?.stop() } catch {}
       vadHandleRef.current = null
       silenceMsRef.current = TIMER_ONLY_SILENCE_MS
       setCommitProgress(0)
       setIsListening(false)
+      setVoiceState('error')
       // Antes los errores bloqueantes caían en silencio. Si el usuario está
       // en un navegador que soporta SR pero denegó el permiso (o el OS lo
       // bloquea), ahora se lo decimos en vez de que "el mic no haga nada".
@@ -353,11 +376,21 @@ function NovaWidget({
               } catch {
                 sessionActiveRef.current = false
                 clearTimeout(silenceTimerRef.current)
+                clearTimeout(maxVoiceTimerRef.current)
                 setIsListening(false)
                 // Flush lo que haya si el engine no pudo seguir.
-                const text = finalTextRef.current.trim()
+                const text = (liveTextRef.current || finalTextRef.current).trim()
                 finalTextRef.current = ''
-                if (text) { setInput(text); sendMessageRef.current?.(text) }
+                liveTextRef.current = ''
+                if (voiceFinalizedRef.current) return
+                voiceFinalizedRef.current = true
+                if (text) {
+                  setVoiceState('sendingToNova')
+                  setInput(text)
+                  sendMessageRef.current?.(text)
+                } else {
+                  setVoiceState('idle')
+                }
               }
             }, 140)
           }
@@ -368,16 +401,27 @@ function NovaWidget({
       // Fin de sesión real → limpiar y enviar lo acumulado.
       clearTimeout(silenceTimerRef.current)
       clearTimeout(restartTimerRef.current)
+      clearTimeout(maxVoiceTimerRef.current)
       try { vadHandleRef.current?.stop() } catch {}
       vadHandleRef.current = null
       silenceMsRef.current = TIMER_ONLY_SILENCE_MS
       setCommitProgress(0)
       setIsListening(false)
-      const text = finalTextRef.current.trim()
+      const text = (liveTextRef.current || finalTextRef.current).trim()
       finalTextRef.current = ''
+      liveTextRef.current = ''
+      if (voiceFinalizedRef.current) return
+      voiceFinalizedRef.current = true
+      if (voiceCancelRequestedRef.current) {
+        setVoiceState('cancelled')
+        return
+      }
       if (text) {
+        setVoiceState('sendingToNova')
         setInput(text)
         sendMessageRef.current?.(text)
+      } else {
+        setVoiceState('idle')
       }
     }
 
@@ -385,6 +429,8 @@ function NovaWidget({
     return () => {
       clearTimeout(silenceTimerRef.current)
       clearTimeout(restartTimerRef.current)
+      clearTimeout(maxVoiceTimerRef.current)
+      clearTimeout(voiceIdleTimerRef.current)
       try { vadHandleRef.current?.stop() } catch {}
       vadHandleRef.current = null
       try { r.abort() } catch {}
@@ -416,13 +462,24 @@ function NovaWidget({
       return
     }
     try {
+      clearTimeout(voiceIdleTimerRef.current)
+      clearTimeout(maxVoiceTimerRef.current)
       finalTextRef.current = ''
+      liveTextRef.current = ''
+      voiceFinalizedRef.current = false
+      voiceCancelRequestedRef.current = false
       setInput('')
       sessionActiveRef.current = true
       sessionStartRef.current = Date.now()
+      setVoiceState('requestingPermission')
       r.start()
       isRunningRef.current = true
-      setIsListening(true)
+      maxVoiceTimerRef.current = setTimeout(() => {
+        if (!sessionActiveRef.current) return
+        sessionActiveRef.current = false
+        setVoiceState('processingAudio')
+        try { r.stop() } catch {}
+      }, MAX_SESSION_MS)
       // Arrancamos el VAD en paralelo. Si falla (mic ocupado, getUserMedia
       // bloqueado, browser sin AudioContext) seguimos con el timer-only path
       // — el dictado igual funciona, sólo perdemos la mejora de latencia.
@@ -432,6 +489,7 @@ function NovaWidget({
       try { r.abort() } catch {}
       isRunningRef.current = false
       setIsListening(false)
+      setVoiceState('error')
     }
   }
 
@@ -453,6 +511,7 @@ function NovaWidget({
           clearTimeout(silenceTimerRef.current)
           silenceTimerRef.current = setTimeout(() => {
             sessionActiveRef.current = false
+            setVoiceState('processingAudio')
             try { srRef.current?.stop() } catch {}
           }, silenceMsRef.current)
         },
@@ -461,6 +520,7 @@ function NovaWidget({
           // hangover (oculta el anillo). > 0 = arco proporcional al tiempo
           // que queda antes de cerrar.
           const frac = total > 0 ? Math.max(0, Math.min(1, remaining / total)) : 0
+          if (frac > 0) setVoiceState('userPaused')
           setCommitProgress(frac)
         },
         onSpeechEnd: () => {
@@ -469,6 +529,7 @@ function NovaWidget({
           // sensación tipo ChatGPT de "0 lag" al terminar de hablar.
           if (!sessionActiveRef.current) return
           sessionActiveRef.current = false
+          setVoiceState('processingAudio')
           try { srRef.current?.stop() } catch {}
         },
       })
@@ -488,6 +549,7 @@ function NovaWidget({
         clearTimeout(silenceTimerRef.current)
         silenceTimerRef.current = setTimeout(() => {
           sessionActiveRef.current = false
+          setVoiceState('processingAudio')
           try { srRef.current?.stop() } catch {}
         }, silenceMsRef.current)
       }
@@ -504,12 +566,36 @@ function NovaWidget({
     sessionActiveRef.current = false
     clearTimeout(silenceTimerRef.current)
     clearTimeout(restartTimerRef.current)
+    clearTimeout(maxVoiceTimerRef.current)
     try { vadHandleRef.current?.stop() } catch {}
     vadHandleRef.current = null
     setCommitProgress(0)
     silenceMsRef.current = TIMER_ONLY_SILENCE_MS
+    setVoiceState('processingAudio')
     try { srRef.current?.stop() } catch {}
     // isListening se limpia en onend para reflejar el estado real del engine
+  }
+
+  function cancelVoice() {
+    voiceCancelRequestedRef.current = true
+    voiceFinalizedRef.current = true
+    sessionActiveRef.current = false
+    finalTextRef.current = ''
+    liveTextRef.current = ''
+    clearTimeout(silenceTimerRef.current)
+    clearTimeout(restartTimerRef.current)
+    clearTimeout(maxVoiceTimerRef.current)
+    try { vadHandleRef.current?.stop() } catch {}
+    vadHandleRef.current = null
+    setCommitProgress(0)
+    silenceMsRef.current = TIMER_ONLY_SILENCE_MS
+    setIsListening(false)
+    setVoiceState('cancelled')
+    try { srRef.current?.abort() } catch {}
+    clearTimeout(voiceIdleTimerRef.current)
+    voiceIdleTimerRef.current = setTimeout(() => {
+      if (!sessionActiveRef.current) setVoiceState('idle')
+    }, VOICE_IDLE_RESET_MS)
   }
 
   // Long press en la pastilla: tap = toggle, hold 500ms = voz
@@ -685,12 +771,13 @@ function NovaWidget({
     // isListening=true, así que la guardia descartaba el texto dictado.
     // El input está deshabilitado mientras se escucha, así que no hay otra
     // vía donde esta verificación sea necesaria.
-    if (!msg || isLoading) return
+    if (!msg || isLoading || sendInFlightRef.current) return
     if (msg.length > 4000) {
       setReply('El mensaje es demasiado largo. Acórtalo por favor.')
       return
     }
 
+    sendInFlightRef.current = true
     setInput('')
     setReply('')
     setChips([])
@@ -822,8 +909,17 @@ function NovaWidget({
       historyRef.current = [...historyRef.current, { role: 'assistant', content: errMsg }]
       setChatHistory([...historyRef.current])
       setReply('')
+      setVoiceState((prev) => prev === 'sendingToNova' ? 'error' : prev)
     } finally {
+      sendInFlightRef.current = false
       setIsLoading(false)
+      setVoiceState((prev) => prev === 'sendingToNova' ? 'success' : prev)
+      clearTimeout(voiceIdleTimerRef.current)
+      voiceIdleTimerRef.current = setTimeout(() => {
+        if (!sessionActiveRef.current) {
+          setVoiceState((prev) => prev === 'success' ? 'idle' : prev)
+        }
+      }, VOICE_IDLE_RESET_MS)
     }
   }
 
@@ -837,6 +933,17 @@ function NovaWidget({
   const pillPositionStyle = isDesktop
     ? undefined
     : { bottom: 'calc(env(safe-area-inset-bottom, 0px) + 116px)' }
+  const voiceStatusText = {
+    requestingPermission: 'Preparando micrófono…',
+    listening: 'Escuchando…',
+    userPaused: 'Pausa detectada…',
+    processingAudio: 'Procesando audio…',
+    transcribing: 'Transcribiendo…',
+    sendingToNova: 'Enviando a Nova…',
+    error: 'No pude escuchar. Reintenta.',
+    cancelled: 'Dictado cancelado.',
+  }[voiceState] || ''
+  const showVoiceStatus = voiceState !== 'idle' && voiceState !== 'success' && voiceStatusText
 
   // Panel reutilizable: el contenido es el mismo en desktop y mobile, cambia
   // solo el contenedor exterior (card flotante vs bottom sheet).
@@ -1010,6 +1117,26 @@ function NovaWidget({
         <div ref={chatEndRef} />
       </div>
 
+      {showVoiceStatus && (
+        <div className="border-t border-slate-100 px-3 pt-2 flex items-center justify-between gap-3" aria-live="polite">
+          <div className="min-w-0 flex items-center gap-1.5 text-[11.5px] font-medium text-slate-500">
+            <span className="material-symbols-outlined text-[14px] text-blue-500">
+              {voiceState === 'error' ? 'error' : voiceState === 'cancelled' ? 'cancel' : 'graphic_eq'}
+            </span>
+            <span className="truncate">{voiceStatusText}</span>
+          </div>
+          {isListening && (
+            <button
+              type="button"
+              onClick={cancelVoice}
+              className="flex-shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 active:scale-95 transition-all"
+            >
+              Cancelar
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Input
           Layout mobile:  [cam]  [ input................ ]  [ MIC ]  [send]
           - Cámara aislada a la izquierda (acción secundaria, media).
@@ -1054,7 +1181,7 @@ function NovaWidget({
           onKeyDown={e => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
           }}
-          placeholder={isAnalyzingPhoto ? 'Analizando foto…' : isListening ? 'Escuchando…' : 'Escribe o habla…'}
+          placeholder={isAnalyzingPhoto ? 'Analizando foto…' : voiceStatusText || 'Escribe o habla…'}
           disabled={isLoading || isListening || isAnalyzingPhoto}
           enterKeyHint="send"
           autoComplete="off"
@@ -1193,9 +1320,8 @@ function NovaWidget({
                 y: { type: 'spring', damping: 32, stiffness: 340 },
                 opacity: { duration: 0.08 },
               }}
-              className="absolute left-0 right-0 bottom-0 bg-white rounded-t-[22px] flex flex-col shadow-2xl kb-aware"
+              className="nova-mobile-sheet absolute left-0 right-0 bottom-0 bg-white rounded-t-[22px] flex flex-col shadow-2xl kb-aware"
               style={{
-                height: 'min(85dvh, 640px)',
                 paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-height, 0px))',
               }}
               role="dialog"
