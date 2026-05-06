@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import * as haptics from '../lib/haptics'
 
 // TaskCheckmark
 //
@@ -13,8 +14,9 @@ import { motion, AnimatePresence } from 'framer-motion'
 //   · Un spring scale sólo en la transición a "done" (pop 1 → 1.35 → 1).
 //   · Un halo verde que se expande y desvanece detrás del check la primera
 //     vez que queda marcado, como confirmación visual de "hecho".
-//   · navigator.vibrate(8) discretos en el toggle (Android/compatible; iOS
-//     Safari no expone la API y ahí queda silencioso).
+//   · Haptics nativos (Capacitor en iOS) + navigator.vibrate fallback en
+//     Android web. Antes en iOS Capacitor el toggle se sentía "muerto"
+//     porque navigator.vibrate no está expuesto en WKWebView.
 //
 // Uso:
 //   <TaskCheckmark done={task.done} onToggle={() => toggleTask(task.id)} size={20} />
@@ -26,6 +28,12 @@ export default function TaskCheckmark({ done, onToggle, size = 20, className = '
 
   function handleClick(e) {
     e.stopPropagation()
+    // En iOS Capacitor: feedback tipo "Success" cuando se completa, Light
+    // cuando se descompleta. Diferenciar el feedback hace que el cuerpo
+    // del usuario sienta el matiz: "lo hice" vs "deshago".
+    if (!done) haptics.confirm()
+    else haptics.tap()
+    // Fallback web/Android — navigator.vibrate ignorado en iOS WKWebView.
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
       try { navigator.vibrate(8) } catch {}
     }

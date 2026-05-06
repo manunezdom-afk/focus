@@ -59,6 +59,33 @@ body {
   background-color: #fafafd;
   color: #100525;
   overscroll-behavior-y: auto;
+  /* iOS WKWebView: sin estos defaults los taps en cualquier elemento
+     interactivo flashean en gris (350ms-500ms) y a veces el active:scale
+     ni se llega a renderizar antes de que el handler ya disparó. Resultado:
+     "el tap rompe el proceso". Quitamos el highlight nativo y dejamos a
+     CSS/JS controlar 100% el feedback. */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+/* iOS Capacitor: touch-action manipulation en todos los elementos
+   interactivos elimina el delay de 300ms que iOS conserva para detectar
+   double-tap-to-zoom. Sin esto, cada tap a un botón se siente "lento" y
+   si el usuario tappa rápido los handlers se pisan. Aplicado solo a
+   elementos clicables para no romper scroll/swipe en otros lados. */
+button, a, [role="button"], input[type="button"], input[type="submit"],
+.material-symbols-outlined, label[for] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Botones del sistema en iOS Capacitor: el active:scale-* de Tailwind
+   es JS/transform animation que requiere que el navegador reconozca el
+   estado :active. WKWebView lo ignora si no hay un cursor: pointer
+   explícito. Garantizamos que active feedback se vea. */
+html.is-capacitor button:active,
+html.is-capacitor [role="button"]:active {
+  transition-duration: 60ms;
 }
 
 h1, h2, h3 {

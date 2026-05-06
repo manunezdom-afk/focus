@@ -1,4 +1,5 @@
 import { motion, LayoutGroup } from 'framer-motion'
+import * as haptics from '../lib/haptics'
 
 export default function BottomNavBar({ activeView, onNavigate }) {
   const navItems = [
@@ -7,6 +8,11 @@ export default function BottomNavBar({ activeView, onNavigate }) {
     { id: 'tasks',    icon: 'task_alt',        label: 'Tareas'     },
     { id: 'settings', icon: 'settings',        label: 'Ajustes'    },
   ]
+
+  function handleTap(id) {
+    if (id !== activeView) haptics.tap()
+    onNavigate(id)
+  }
 
   return (
     <nav
@@ -20,10 +26,10 @@ export default function BottomNavBar({ activeView, onNavigate }) {
           return (
             <button
               key={id}
-              onClick={() => onNavigate(id)}
+              onClick={() => handleTap(id)}
               aria-label={label}
               aria-current={isActive ? 'page' : undefined}
-              className={`relative flex-1 flex flex-col items-center justify-center gap-1 min-h-[44px] px-1 text-[10.5px] font-semibold leading-tight whitespace-nowrap transition-colors duration-300 ${
+              className={`relative flex-1 flex flex-col items-center justify-center gap-1 min-h-[44px] px-1 text-[10.5px] font-semibold leading-tight whitespace-nowrap transition-colors duration-100 active:opacity-60 ${
                 isActive ? 'text-blue-600' : 'text-slate-400 hover:text-blue-500'
               }`}
             >

@@ -27,7 +27,7 @@ export default function TopAppBar({
           <button
             onClick={onBack}
             aria-label="Volver"
-            className="min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-90 duration-300"
+            className="min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-90 duration-100"
           >
             <span className="material-symbols-outlined text-on-surface">arrow_back</span>
           </button>
@@ -54,7 +54,7 @@ export default function TopAppBar({
           onClick={() => setAuthModal(true)}
           aria-label={user ? 'Tu cuenta' : 'Iniciar sesión'}
           title={user ? user.email : 'Iniciar sesión'}
-          className="min-h-[44px] min-w-[44px] flex items-center justify-center gap-1.5 px-2.5 lg:px-3 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-95 duration-200"
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center gap-1.5 px-2.5 lg:px-3 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-95 duration-100"
         >
           <span
             className={`material-symbols-outlined text-[22px] ${user ? 'text-primary' : 'text-slate-400'}`}
@@ -72,7 +72,7 @@ export default function TopAppBar({
             onClick={onSearchClick}
             aria-label="Buscar (⌘K)"
             title="Buscar (⌘K)"
-            className="hidden lg:flex min-h-[44px] min-w-[44px] items-center justify-center gap-1.5 px-2.5 lg:px-3 rounded-full text-slate-400 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-95 duration-200"
+            className="hidden lg:flex min-h-[44px] min-w-[44px] items-center justify-center gap-1.5 px-2.5 lg:px-3 rounded-full text-slate-400 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-95 duration-100"
           >
             <span className="material-symbols-outlined text-[22px]">search</span>
             <span className="hidden lg:inline text-[13px] font-semibold text-slate-600 dark:text-slate-300">Buscar</span>
@@ -84,7 +84,7 @@ export default function TopAppBar({
             onClick={onShareClick}
             aria-label="Importar / Exportar calendario"
             title="Importar / Exportar"
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center gap-1.5 px-2.5 lg:px-3 rounded-full text-slate-400 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-95 duration-200"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center gap-1.5 px-2.5 lg:px-3 rounded-full text-slate-400 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-95 duration-100"
           >
             <span className="material-symbols-outlined text-[22px]">ios_share</span>
             <span className="hidden lg:inline text-[13px] font-semibold text-slate-600 dark:text-slate-300">Importar</span>
@@ -96,7 +96,7 @@ export default function TopAppBar({
             onClick={onInboxClick}
             aria-label="Bandeja de Nova"
             title="Bandeja de Nova"
-            className="relative min-h-[44px] min-w-[44px] flex items-center justify-center gap-1.5 px-2.5 lg:px-3 rounded-full text-slate-400 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-95 duration-200"
+            className="relative min-h-[44px] min-w-[44px] flex items-center justify-center gap-1.5 px-2.5 lg:px-3 rounded-full text-slate-400 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-95 duration-100"
           >
             <span
               className={`material-symbols-outlined text-[22px] ${inboxCount > 0 ? 'text-primary' : ''}`}
@@ -117,7 +117,7 @@ export default function TopAppBar({
           onClick={onBellClick}
           aria-label="Notificaciones"
           title="Notificaciones"
-          className="relative min-h-[44px] min-w-[44px] flex items-center justify-center gap-1.5 px-2.5 lg:px-3 rounded-full text-slate-400 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-95 duration-200"
+          className="relative min-h-[44px] min-w-[44px] flex items-center justify-center gap-1.5 px-2.5 lg:px-3 rounded-full text-slate-400 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-95 duration-100"
         >
           <span
             className={`material-symbols-outlined text-[22px] ${unreadCount > 0 ? 'text-primary' : ''}`}
