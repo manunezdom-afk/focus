@@ -18,7 +18,7 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:nova": "playwright test tests/e2e/nova.spec.js",
-    "test:audit": "playwright test tests/audit --project=webkit-mobile"
+    "test:audit": "playwright test --config=playwright.audit.config.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",

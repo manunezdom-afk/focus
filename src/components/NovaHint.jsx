@@ -28,6 +28,10 @@ export default function NovaHint({
   onDismiss,
   actionLabel,
   onAction,
+  // Cuando InstallAppCard está visible (planner mobile, sesión 3+), ambos
+  // viven en el mismo bottom y se solapan. Con `liftAboveInstallCard` el
+  // hint se desplaza ~9rem arriba para dejar la card visible y leerse claro.
+  liftAboveInstallCard = false,
 }) {
   const [visible, setVisible] = useState(false)
 
@@ -68,12 +72,16 @@ export default function NovaHint({
           transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
           role="status"
           aria-live="polite"
-          className="fixed inset-x-0 z-[55] flex justify-center pointer-events-none px-4"
+          className="fixed inset-x-0 z-[56] flex justify-center pointer-events-none px-4"
           style={{
             // Anclado arriba de la barra inferior. ~6.5rem la deja visible sin
             // pisar el nav (que ronda los 5rem incluyendo safe-area). En
             // desktop la barra es la misma altura, así que la posición vale.
-            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 6.5rem)',
+            // Si InstallAppCard está visible (~104px alto incluyendo offset
+            // y márgenes), elevamos a ~15.5rem para no superponer.
+            bottom: liftAboveInstallCard
+              ? 'calc(env(safe-area-inset-bottom, 0px) + 15.5rem)'
+              : 'calc(env(safe-area-inset-bottom, 0px) + 6.5rem)',
           }}
         >
           <div

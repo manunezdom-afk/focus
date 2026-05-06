@@ -172,8 +172,16 @@ export async function promptInstall() {
 }
 
 // Detecta si ya está corriendo como PWA instalada (iOS + desktop + Android + WCO)
+// o como app nativa wrappeada con Capacitor (iOS/Android). En Capacitor el
+// WKWebView no setea display-mode standalone ni navigator.standalone, por lo
+// que sin el guard de Capacitor la InstallAppCard se renderiza DENTRO de la
+// app pidiendo "instalar" lo que ya está instalado. Bug observado en iOS.
 export function isStandalone() {
   if (typeof window === 'undefined') return false
+  // Capacitor: detección por el shim que inyecta el runtime nativo. Evita
+  // import directo para no acoplar el path web a @capacitor/core.
+  const cap = window.Capacitor
+  if (cap?.isNativePlatform?.()) return true
   return (
     window.matchMedia?.('(display-mode: standalone)').matches ||
     window.matchMedia?.('(display-mode: window-controls-overlay)').matches ||

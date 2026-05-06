@@ -1046,6 +1046,7 @@ export default function App() {
         <NovaHint
           id="welcome-intro-v1"
           delayMs={1400}
+          liftAboveInstallCard={showInstallCard}
         >
           Soy Nova. Agrego eventos, tareas y bloques al instante — y cada cambio trae un "Deshacer" visible. Háblame tocando el orbe.
         </NovaHint>
@@ -1054,6 +1055,7 @@ export default function App() {
         <NovaHint
           id="empty-day-v1"
           delayMs={1400}
+          liftAboveInstallCard={showInstallCard}
         >
           Tu día está en blanco. Dime qué quieres agendar y lo agrego.
         </NovaHint>
@@ -1064,6 +1066,7 @@ export default function App() {
           delayMs={4200}
           actionLabel="Ver bandeja"
           onAction={() => setInboxOpen(true)}
+          liftAboveInstallCard={showInstallCard}
         >
           Si detecto un conflicto que no puedo resolver solo, te dejo una propuesta en la bandeja para que decidas.
         </NovaHint>
@@ -1077,6 +1080,7 @@ export default function App() {
           actionLabel="Activar"
           onAction={requestPermission}
           onDismiss={dismissPermissionCard}
+          liftAboveInstallCard={showInstallCard}
         >
           Puedo avisarte con recordatorios inteligentes según cada evento. ¿Activamos notificaciones?
         </NovaHint>
@@ -1094,6 +1098,7 @@ export default function App() {
           actionLabel={pushHealing ? 'Reconectando…' : 'Reconectar'}
           onAction={pushHealing ? undefined : reconnectPush}
           onDismiss={() => { /* no persistimos dismiss — si sigue roto, volverá */ }}
+          liftAboveInstallCard={showInstallCard}
         >
           Tus recordatorios push están desconectados. Un toque y los vuelvo a activar.
         </NovaHint>
