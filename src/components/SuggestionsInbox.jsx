@@ -1,5 +1,6 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion'
+import { pushModal, popModal } from '../utils/modalStack'
 
 const SWIPE_THRESHOLD = 96
 const HAPTIC_APPROVE  = 12
@@ -253,6 +254,14 @@ export default function SuggestionsInbox({
       resolved: suggestions.filter((s) => s.status !== 'pending').slice(0, 10),
     }
   }, [suggestions])
+
+  // Bandeja como modal global: oculta Nova pill, hints e InstallAppCard
+  // mientras el panel del lado derecho está abierto en mobile.
+  useEffect(() => {
+    if (!isOpen) return
+    pushModal()
+    return () => popModal()
+  }, [isOpen])
 
   return (
     <AnimatePresence>

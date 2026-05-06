@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { subscribeModalStack } from '../utils/modalStack'
 
 const HINT_KEY_PREFIX = 'focus_hint_'
 
@@ -34,6 +35,12 @@ export default function NovaHint({
   liftAboveInstallCard = false,
 }) {
   const [visible, setVisible] = useState(false)
+  // En mobile, los hints viven en z-56 — entre el bottom nav y la Nova pill.
+  // Si se abre cualquier modal (auth, notifs, paleta, sheets) el hint queda
+  // flotando detrás del backdrop sin contexto. Suscribirse al modalStack y
+  // ocultarlo cuando hay algo encima limpia ese ruido visual.
+  const [modalCount, setModalCount] = useState(0)
+  useEffect(() => subscribeModalStack(setModalCount), [])
 
   useEffect(() => {
     if (!trigger) return
@@ -62,9 +69,11 @@ export default function NovaHint({
     dismiss()
   }
 
+  const shouldRender = visible && modalCount === 0
+
   return (
     <AnimatePresence>
-      {visible && (
+      {shouldRender && (
         <motion.div
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}

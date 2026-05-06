@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { resolveEventDate } from '../utils/resolveEventDate'
+import { pushModal, popModal } from '../utils/modalStack'
 
 function normalize(s) {
   return String(s || '')
@@ -58,6 +59,16 @@ function formatTaskHint(task) {
 
 export default function CommandPalette({ isOpen, onClose, events = [], tasks = [], memories = [], onNavigate, onOpenEvent, onQuickAdd }) {
   const [query, setQuery] = useState('')
+
+  // Bloquea los flotantes (Nova pill, NovaHint, InstallAppCard) mientras la
+  // paleta está abierta. En mobile la paleta cubre la mitad superior pero la
+  // pastilla de Nova vivía detrás del backdrop semi-transparente, generando
+  // ruido visual.
+  useEffect(() => {
+    if (!isOpen) return
+    pushModal()
+    return () => popModal()
+  }, [isOpen])
   const [active, setActive] = useState(0)
   const inputRef = useRef(null)
   const listRef = useRef(null)

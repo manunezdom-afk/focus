@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { canInstall, onInstallAvailable, promptInstall, isStandalone } from '../lib/pwa'
+import { pushModal, popModal, subscribeModalStack } from '../utils/modalStack'
 
 const DISMISSED_KEY = 'focus_install_dismissed'
 
@@ -28,12 +29,30 @@ export default function InstallAppCard({ onDismissed }) {
     try { return localStorage.getItem(DISMISSED_KEY) === 'true' } catch { return false }
   })
   const [iosHintOpen, setIosHintOpen] = useState(false)
+  // Si se abre un modal/sheet (auth, notifs, paleta, AddEvent, etc.), la card
+  // floating se solapa visualmente con el sheet. Nos suscribimos al modal
+  // stack y ocultamos la card mientras haya algo encima — la pastilla de
+  // Nova ya hace lo mismo, mantenemos consistencia entre flotantes inferiores.
+  const [modalCount, setModalCount] = useState(0)
+  useEffect(() => subscribeModalStack(setModalCount), [])
 
   useEffect(() => onInstallAvailable(setAvailable), [])
+
+  // Cuando se abre el modal de instrucciones iOS, lo registramos en el stack
+  // para esconder Nova pill y otros flotantes detrás del backdrop.
+  useEffect(() => {
+    if (!iosHintOpen) return
+    pushModal()
+    return () => popModal()
+  }, [iosHintOpen])
 
   // No mostrar si ya está instalado o si el usuario dijo no
   if (isStandalone()) return null
   if (dismissed) return null
+  // Si hay un modal externo activo (auth, notifs, paleta, sheets, etc.) el
+  // card flotante se solapa con el sheet. Sólo seguimos mostrando si el
+  // único modal en el stack es el nuestro propio (iosHintOpen).
+  if (modalCount > 0 && !iosHintOpen) return null
 
   const ios = isIOS()
   const chromeMac = isChromeMac()

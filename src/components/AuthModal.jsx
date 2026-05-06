@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { humanizeAuthError, isValidEmail, isRateLimitError, extractRetryAfterSec } from '../utils/authErrors'
 import QRCodeView from './QRCodeView'
 import QRScannerSheet from './QRScannerSheet'
+import { pushModal, popModal } from '../utils/modalStack'
 import {
   buildQRValue,
   extractUserCodeFromScanned,
@@ -120,6 +121,15 @@ export default function AuthModal({ isOpen, onClose }) {
   const [resendCooldown, setResendCooldown] = useState(() =>
     typeof window !== 'undefined' ? readCooldownSec() : 0
   )
+
+  // Registramos el modal en el stack global para que la pastilla de Nova,
+  // NovaHint e InstallAppCard se escondan mientras el AuthModal esté abierto
+  // en mobile. Sin esto la pastilla de Nova quedaba flotando sobre el sheet.
+  useEffect(() => {
+    if (!isOpen) return
+    pushModal()
+    return () => popModal()
+  }, [isOpen])
 
   // ── Lado logueado: pairing generado + countdown de expiración. No
   // persistimos en sessionStorage porque el user_code vive 5 min y lo
@@ -612,8 +622,8 @@ export default function AuthModal({ isOpen, onClose }) {
             role="dialog"
             aria-modal="true"
             aria-label="Iniciar sesión"
-            className="fixed inset-x-0 bottom-0 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 bg-white rounded-t-3xl sm:rounded-3xl z-[81] w-full sm:w-[420px] sm:max-w-[92vw] max-h-[92vh] overflow-y-auto shadow-2xl"
-            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
+            className="fixed inset-x-0 bottom-0 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 bg-white rounded-t-3xl sm:rounded-3xl z-[81] w-full sm:w-[420px] sm:max-w-[92vw] max-h-[92vh] overflow-y-auto shadow-2xl kb-aware"
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem + var(--keyboard-height, 0px))' }}
             initial={{ y: '100%', opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: '100%', opacity: 0 }}

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { pushModal, popModal } from '../utils/modalStack'
 
 const ICONS = [
   { value: 'event', label: 'General' },
@@ -24,6 +25,13 @@ export default function AddEventModal({ onSave, onCancel }) {
   const [icon, setIcon] = useState('event')
   const [dotColor, setDotColor] = useState('bg-secondary-container')
   const [error, setError] = useState('')
+
+  // Marca como modal en el stack para que la pastilla de Nova y demás
+  // flotantes queden ocultos mientras este sheet está abierto.
+  useEffect(() => {
+    pushModal()
+    return () => popModal()
+  }, [])
 
   function handleSubmit(e) {
     e.preventDefault()

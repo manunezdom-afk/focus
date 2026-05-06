@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { todayISO as getTodayISO } from '../utils/time'
 import { splitReminders } from '../utils/reminders'
 import AuroraBackground from './AuroraBackground'
 import NovaOrb from './NovaOrb'
+import { pushModal, popModal } from '../utils/modalStack'
 
 const EASE = [0.22, 1, 0.36, 1]
 
@@ -63,6 +64,16 @@ export default function MorningBrief({
 }) {
   const brief = useMemo(() => generateBrief({ events, tasks }), [events, tasks])
   const dateStr = useMemo(() => formatDateEyebrow(), [])
+
+  // El brief modal cubre la pantalla completa en mobile (z-200). Marcarlo
+  // como modal en el stack oculta los flotantes de fondo (Nova pill, hints,
+  // InstallAppCard) que de otra manera quedaban detrás del backdrop oscuro
+  // pero se intuían en la transición de entrada/salida.
+  useEffect(() => {
+    if (inline) return
+    pushModal()
+    return () => popModal()
+  }, [inline])
 
   // Nova no emite voz de salida. El brief se navega solo por botones
   // (arrancamos / rechazar / modificar); el micrófono sigue disponible en

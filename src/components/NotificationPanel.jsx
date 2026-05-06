@@ -81,7 +81,20 @@ function kindMeta(kind) {
   }
 }
 
+import { useEffect } from 'react'
+import { pushModal, popModal } from '../utils/modalStack'
+
 export default function NotificationPanel({ isOpen, onClose, notifLog, onMarkAllRead, onDismiss }) {
+  // pushModal/popModal: el panel se abre full-height en mobile y queremos que
+  // los flotantes que viven en z-index ~55-60 (Nova pill, InstallAppCard,
+  // NovaHint) se escondan mientras esté abierto. Sin esto, la pastilla de
+  // Nova quedaba visible sobre el backdrop en mobile y robaba taps.
+  useEffect(() => {
+    if (!isOpen) return
+    pushModal()
+    return () => popModal()
+  }, [isOpen])
+
   if (!isOpen) return null
 
   const groups    = groupEntries(notifLog)
@@ -89,15 +102,17 @@ export default function NotificationPanel({ isOpen, onClose, notifLog, onMarkAll
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — z-[88] para sentarse claramente encima de la Nova pill
+          (z-60), InstallAppCard (z-55) y NovaHint (z-56). Antes z-55 dejaba
+          la pastilla visible sobre el panel en iPhone. */}
       <div
-        className="fixed inset-0 z-[55] bg-black/30 backdrop-blur-sm"
+        className="fixed inset-0 z-[88] bg-black/30 backdrop-blur-sm"
         onClick={onClose}
       />
 
       {/* Panel */}
       <div
-        className="fixed top-0 right-0 bottom-0 z-[56] w-full max-w-sm bg-surface dark:bg-slate-900 shadow-2xl flex flex-col"
+        className="fixed top-0 right-0 bottom-0 z-[89] w-full max-w-sm bg-surface dark:bg-slate-900 shadow-2xl flex flex-col"
         style={{ animation: 'slideInRight 0.28s cubic-bezier(0.34,1.2,0.64,1) both' }}
       >
         {/* Header */}

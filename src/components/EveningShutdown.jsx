@@ -7,6 +7,7 @@ import AuroraBackground from './AuroraBackground'
 import NovaOrb from './NovaOrb'
 import { splitReminders } from '../utils/reminders'
 import { resolveEventDate } from '../utils/resolveEventDate'
+import { pushModal, popModal } from '../utils/modalStack'
 
 const PHASES = ['review', 'move', 'tomorrow']
 const PHASE_LABELS = { review: 'Revisión', move: 'Pendientes', tomorrow: 'Mañana' }
@@ -287,6 +288,14 @@ export default function EveningShutdown({
   const [showFullReview, setShowFullReview] = useState(false)
   const { user } = useAuth()
   const { profile } = useUserProfile()
+
+  // Marca el cierre del día como modal: oculta Nova pill, NovaHint y la
+  // InstallAppCard mientras el ritual está activo. Sin esto, en mobile la
+  // pastilla de Nova flotaba encima del NovaOrb del shutdown.
+  useEffect(() => {
+    pushModal()
+    return () => popModal()
+  }, [])
 
   const todayISO     = getTodayISO()
   const tomorrowISO  = getTomorrowISO()
