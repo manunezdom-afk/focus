@@ -13,7 +13,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 2 : undefined,
+  // Local: limitamos a 2 workers. Con más, el Vite dev server compartido
+  // satura y los tests de chromium-desktop empiezan a fallar por timeout
+  // esperando que la pastilla de Nova se renderice. CI: idem.
+  workers: 2,
   reporter: process.env.CI ? 'github' : 'list',
 
   use: {
