@@ -213,13 +213,20 @@ function NovaWidget({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isOpen])
 
-  // Foco automático al abrir + capturar longitud de historia pre-existente
+  // Capturar longitud de historia pre-existente al abrir.
+  // Foco automático SÓLO en desktop. En mobile (bottom sheet) enfocar al
+  // abrir dispara el teclado iOS y produce un salto visual feo: la sheet
+  // entra estable con header + sugerencias y al instante el teclado la
+  // colapsa. Ahora la sheet aterriza calma y el teclado sólo aparece
+  // cuando el usuario toca el input explícitamente.
   useEffect(() => {
     if (isOpen) {
       openHistoryLengthRef.current = historyRef.current.length
-      setTimeout(() => inputRef.current?.focus(), 80)
+      if (isDesktop) {
+        setTimeout(() => inputRef.current?.focus(), 80)
+      }
     }
-  }, [isOpen])
+  }, [isOpen, isDesktop])
 
   // Auto-scroll al fondo del chat
   useEffect(() => {
@@ -520,7 +527,10 @@ function NovaWidget({
       clearTimeout(pressTimer.current)
       pressTimer.current = null
       setIsOpen(prev => {
-        if (!prev) setTimeout(() => inputRef.current?.focus(), 60)
+        // Auto-focus sólo en desktop. En mobile el tap abre la sheet pero
+        // no enfoca el input — el teclado aparece sólo si el usuario toca
+        // el campo (criterio explícito del usuario para evitar el salto).
+        if (!prev && isDesktop) setTimeout(() => inputRef.current?.focus(), 60)
         return !prev
       })
     }

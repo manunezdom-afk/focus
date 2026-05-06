@@ -191,10 +191,29 @@ h1, h2, h3 {
   }
 
   /* Containers que deben respirar cuando aparece el teclado nativo iOS.
-     `--keyboard-height` se setea en <body> desde src/lib/iosKeyboard.js.
-     La curva de easing matchea la animación nativa del teclado iOS. */
+     En Capacitor con Keyboard.resize: "native" el WKWebView se acorta
+     automáticamente, así que no sumamos `--keyboard-height` (queda en 0).
+     En web/PWA Safari `--keyboard-height` también queda en 0 — no tenemos
+     un buen hook para detectar el teclado en standalone WebKit. La
+     transición sigue presente por si en el futuro reactivamos el cómputo
+     manual. La curva de easing matchea la animación nativa del teclado iOS. */
   .kb-aware {
     transition: padding-bottom 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  /* iOS Capacitor / iOS PWA: durante la animación del teclado el WKWebView
+     reacomoda su frame y por unos frames algunos píxeles de las esquinas
+     inferiores no quedan pintados por <body>. Si <html> tiene un background
+     oscuro (el que usamos en cold start para evitar el flash blanco) eso
+     se ve como "bordes negros" alrededor del teclado. Cuando la app ya
+     terminó el boot dark (sin clases focus-dark-boot/focus-continuity)
+     forzamos el bg de <html> al mismo surface que <body>, para que cualquier
+     gap durante transiciones del teclado se vea consistente y nunca negro. */
+  html.is-capacitor:not(.focus-dark-boot):not(.focus-continuity) {
+    background-color: #fafafd !important;
+  }
+  html.is-capacitor.dark:not(.focus-dark-boot):not(.focus-continuity) {
+    background-color: #191919 !important;
   }
 
   /* Fuerza una capa de composición GPU. Útil para containers con animaciones
