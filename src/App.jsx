@@ -117,9 +117,17 @@ function resetViewportPosition() {
   })
 }
 
+// Detección de Capacitor — main.jsx ya añade `is-capacitor` al <html> al
+// arrancar. Este getter consulta esa marca para que las variants no usen
+// transforms (scale/y) que fuerzan al WKWebView a recomputar layers en
+// cada cambio de vista. En Capacitor: solo opacity → transición fluida.
+function isCapacitorRuntime() {
+  return typeof document !== 'undefined' && document.documentElement.classList.contains('is-capacitor')
+}
+
 const pageVariants = {
   initial: ({ depth = 'peer' } = {}) => {
-    if (prefersReducedMotion()) return { opacity: 0 }
+    if (prefersReducedMotion() || isCapacitorRuntime()) return { opacity: 0 }
     if (depth === 'deeper') return { opacity: 0, scale: 0.98, y: 6 }
     if (depth === 'back')   return { opacity: 0, scale: 1.01 }
     return { opacity: 0 }
@@ -131,7 +139,9 @@ const pageVariants = {
     transition: { duration: 0.15, ease: [0.25, 0.46, 0.45, 0.94] },
   },
   exit: ({ depth = 'peer' } = {}) => {
-    if (prefersReducedMotion()) return { opacity: 0, transition: { duration: 0.06 } }
+    if (prefersReducedMotion() || isCapacitorRuntime()) {
+      return { opacity: 0, transition: { duration: 0.06 } }
+    }
     if (depth === 'deeper') return { opacity: 0, scale: 0.99, transition: { duration: 0.08, ease: 'easeIn' } }
     if (depth === 'back')   return { opacity: 0, scale: 0.98, transition: { duration: 0.08, ease: 'easeIn' } }
     return { opacity: 0, transition: { duration: 0.08, ease: 'easeIn' } }

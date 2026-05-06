@@ -189,6 +189,41 @@ h1, h2, h3 {
       filter: blur(60px) !important;
     }
   }
+  /* En Capacitor iOS los keyframes infinitos de los blobs (auroraDrift1/2/3)
+     mantienen al GPU repintando blur grandes 24/7. Combinado con backdrop-blur
+     en TopAppBar/BottomNavBar, el WKWebView se atora y otras animaciones
+     ("se pegan segundos") esperan al GPU. Aurora estática preserva la
+     identidad visual sin el costo continuo. */
+  html.is-capacitor .aurora-blob {
+    animation: none !important;
+  }
+
+  /* En Capacitor iOS, backdrop-blur sobre elementos fixed/sticky (TopAppBar,
+     BottomNavBar, scrims de sheets) fuerza al WKWebView a repintar el blur
+     en CADA frame del scroll/animación. Es la causa #1 del "lag de
+     interacciones". Cambiamos a un background sólido más opaco — pierde
+     el efecto vidrio pero gana fluidez completa. Apple's own apps usan
+     fondos sólidos en navs muchísimo. */
+  html.is-capacitor .backdrop-blur-sm,
+  html.is-capacitor .backdrop-blur,
+  html.is-capacitor .backdrop-blur-md,
+  html.is-capacitor .backdrop-blur-lg,
+  html.is-capacitor .backdrop-blur-xl,
+  html.is-capacitor .backdrop-blur-2xl,
+  html.is-capacitor .backdrop-blur-3xl {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  /* La nav bar y top bar usan bg-slate-50/70 — sin blur la translucidez
+     se ve sucia. Forzamos a casi opaco en Capacitor. */
+  html.is-capacitor nav[aria-label="Navegación principal"],
+  html.is-capacitor nav.sticky.top-0 {
+    background-color: rgba(248, 250, 252, 0.98) !important;
+  }
+  html.is-capacitor.dark nav[aria-label="Navegación principal"],
+  html.is-capacitor.dark nav.sticky.top-0 {
+    background-color: rgba(15, 23, 42, 0.98) !important;
+  }
 }
 
 /* ── Animaciones de nova / aurora ────────────────────────────────────────── */
