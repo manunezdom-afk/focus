@@ -54,7 +54,7 @@ export function EmptyDayState({ onPickPrompt }: Props) {
             accessibilityLabel={p.label}
           >
             <View style={[styles.chipIcon, { backgroundColor: c.primaryContainer }]}>
-              <IconSymbol name={p.icon} size={14} color={c.primary} />
+              <IconSymbol name={p.icon} size={16} color={c.primary} />
             </View>
             <Text style={[styles.chipText, { color: c.text }]} numberOfLines={1}>
               {p.label}
@@ -71,54 +71,68 @@ const styles = StyleSheet.create({
   wrap: {
     paddingHorizontal: Spacing.lg,
     gap: Spacing.xl,
-    paddingTop: Spacing.md,
+    paddingTop: Spacing.lg,
   },
   intro: {
     alignItems: 'center',
-    gap: Spacing.sm,
+    gap: 10,
   },
   iconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
+    marginBottom: 6,
+    // Halo suave indigo para que el ícono se sienta "vivo" sin caer en
+    // efectos llamativos.
+    shadowColor: '#5b5ef5',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 2,
   },
   title: {
-    ...Typography.title3,
-    fontSize: 18,
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 26,
     textAlign: 'center',
+    letterSpacing: -0.2,
   },
   desc: {
-    ...Typography.caption,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 20,
     textAlign: 'center',
-    maxWidth: 320,
+    maxWidth: 300,
   },
   chipsCol: {
-    gap: Spacing.sm,
+    gap: 10,
   },
+  // Cada chip es una "sugerencia de prompt", no un dato — se hace
+  // explícito al pasarlo al input cuando el usuario toca. Estilo Gemini:
+  // bordes suaves, ícono tinted a la izquierda, chevron discreta a la
+  // derecha.
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.md,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 16,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
+    borderRadius: 18,
+    paddingHorizontal: Spacing.md + 2,
+    paddingVertical: 14,
   },
   chipIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   chipText: {
-    ...Typography.body,
-    fontSize: 14,
+    fontSize: 15,
+    fontWeight: '500',
+    lineHeight: 20,
     flex: 1,
   },
 });

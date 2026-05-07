@@ -1,5 +1,6 @@
 import * as Application from 'expo-application';
 import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -97,6 +98,20 @@ export default function SettingsScreen() {
               sub={`${version} (${build})`}
             />
           </SettingsSection>
+
+          {/* Desarrollo — solo en __DEV__. En release builds no se renderiza
+              el SettingsSection completo, así que el usuario nunca lo ve. */}
+          {__DEV__ ? (
+            <SettingsSection title="Desarrollo">
+              <SettingsRow
+                isFirst
+                iconName="sparkles"
+                label="Migration Mirror"
+                sub="Comparar con la app legacy en LAN"
+                onPress={() => router.push('/(dev)/mirror')}
+              />
+            </SettingsSection>
+          ) : null}
 
           {/* Zona peligrosa */}
           <View style={styles.dangerWrap}>

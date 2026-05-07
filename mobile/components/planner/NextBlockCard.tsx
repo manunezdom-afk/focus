@@ -87,7 +87,18 @@ export function NextBlockCard({ events }: Props) {
   }
 
   return (
-    <View style={[styles.wrap, { backgroundColor: c.surface, borderColor: c.border }]}>
+    <View
+      style={[
+        styles.wrap,
+        {
+          // Tinte sutil indigo cuando hay actividad activa; surface plano
+          // si no quedan bloques pendientes. Da jerarquía visual sin ser
+          // ruidoso.
+          backgroundColor: active || next ? c.surfaceTint : c.surface,
+          borderColor: c.border,
+        },
+      ]}
+    >
       <View style={styles.headerRow}>
         <Text style={[styles.label, { color: c.text }]}>{label}</Text>
         {badge ? (
@@ -120,13 +131,20 @@ export function NextBlockCard({ events }: Props) {
 }
 
 const styles = StyleSheet.create({
+  // Card hero — más rounded y con shadow indigo sutil para sentirse
+  // como elemento "vivo" del día, distinto de los bloques regulares.
   wrap: {
     marginHorizontal: Spacing.lg,
     marginTop: Spacing.lg,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.xl,
+    borderRadius: 20,
     padding: Spacing.lg,
     gap: 6,
+    shadowColor: '#5b5ef5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 1,
   },
   headerRow: {
     flexDirection: 'row',

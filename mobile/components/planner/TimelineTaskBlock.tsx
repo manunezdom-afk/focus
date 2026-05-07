@@ -130,12 +130,19 @@ const styles = StyleSheet.create({
     borderRadius: DOT_SIZE / 2,
     zIndex: 1,
   },
+  // Card suave consistente con TimelineEventBlock: borderRadius amplio,
+  // acento lateral fino + shadow muy sutil.
   card: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderLeftWidth: 4,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
+    borderLeftWidth: 3,
+    borderRadius: 16,
+    paddingHorizontal: Spacing.md + 2,
     paddingVertical: Spacing.md,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
   titleRow: {
     flexDirection: 'row',

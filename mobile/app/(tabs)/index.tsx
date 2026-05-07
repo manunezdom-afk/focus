@@ -40,6 +40,13 @@ export default function MiDiaScreen() {
   const tasks = useTasks();
 
   const dateLabel = useMemo(() => todayLabelLong(), []);
+  const greeting = useMemo(() => {
+    const h = new Date().getHours();
+    if (h < 6) return 'Buenas noches';
+    if (h < 12) return 'Buenos días';
+    if (h < 19) return 'Buenas tardes';
+    return 'Buenas noches';
+  }, []);
 
   // Done state local — efímero. Se pierde al cambiar de tab. Cuando exista
   // schema en Supabase para "block.type=done" se persiste.
@@ -138,16 +145,17 @@ export default function MiDiaScreen() {
             />
           }
         >
-          {/* ── Header legacy ────────────────────────────────────────────
-              Línea 1: fecha completa primary uppercase tracking.
-              Línea 2: "Mi día" extrabold grande.
-              Sin botón "Añadir": el legacy no lo tiene; FocusBar es el
-              punto de entrada principal. */}
+          {/* ── Header AI-native ──────────────────────────────────────
+              Título grande primero, saludo + fecha como subtítulo
+              cálido. Mantiene la estructura legacy (título + línea de
+              contexto) pero con jerarquía y tono más Gemini-style:
+              menos rígido, más respirado. */}
           <View style={styles.header}>
-            <Text style={[styles.dateLine, { color: c.primary }]}>
-              {dateLabel.toUpperCase()}
-            </Text>
             <Text style={[styles.titleLine, { color: c.text }]}>Mi día</Text>
+            <Text style={[styles.subLine, { color: c.primary }]} numberOfLines={1}>
+              <Text style={styles.subLineStrong}>{greeting}</Text>
+              <Text style={{ color: c.textMuted }}>{`  ·  ${dateLabel}`}</Text>
+            </Text>
           </View>
 
           {/* FocusBar inline — paradigma legacy: lenguaje natural a Nova */}
@@ -217,21 +225,24 @@ const styles = StyleSheet.create({
 
   header: {
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing.xl,
-  },
-  dateLine: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-    lineHeight: 14,
-    marginBottom: 10,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing['2xl'],
+    gap: 6,
   },
   titleLine: {
-    fontSize: 36,
-    fontWeight: '800',
-    lineHeight: 40,
-    letterSpacing: -0.6,
+    fontSize: 40,
+    fontWeight: '700',
+    lineHeight: 44,
+    letterSpacing: -0.8,
+  },
+  subLine: {
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  subLineStrong: {
+    fontWeight: '700',
   },
 
   bannerWrap: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },

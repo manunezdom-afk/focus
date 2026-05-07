@@ -169,13 +169,21 @@ const styles = StyleSheet.create({
     borderRadius: DOT_SIZE / 2,
     zIndex: 1,
   },
+  // Card suave estilo IA moderna: borderRadius más amplio, acento
+  // lateral más fino (3 en vez de 4), shadow muy sutil para anclar
+  // visualmente sin ruido.
   card: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderLeftWidth: 4,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
+    borderLeftWidth: 3,
+    borderRadius: 16,
+    paddingHorizontal: Spacing.md + 2,
     paddingVertical: Spacing.md,
     gap: Spacing.xs,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
   titleRow: {
     flexDirection: 'row',
