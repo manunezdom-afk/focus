@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -34,7 +34,6 @@ function dayNumber(dateISO: string): string {
 export function DayPicker({ selectedDate, onSelect, eventCounts, days = 14 }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const scrollRef = useRef<ScrollView>(null);
 
   const dayList = useMemo(() => {
     const start = todayISO();
@@ -43,7 +42,6 @@ export function DayPicker({ selectedDate, onSelect, eventCounts, days = 14 }: Pr
 
   return (
     <ScrollView
-      ref={scrollRef}
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.row}
@@ -68,6 +66,8 @@ export function DayPicker({ selectedDate, onSelect, eventCounts, days = 14 }: Pr
                 backgroundColor: bg,
                 borderColor: isSelected ? c.primary : c.border,
                 opacity: pressed ? 0.85 : 1,
+                shadowColor: isSelected ? c.primary : '#000000',
+                shadowOpacity: isSelected ? 0.22 : 0.04,
               },
             ]}
             accessibilityRole="button"
@@ -79,15 +79,17 @@ export function DayPicker({ selectedDate, onSelect, eventCounts, days = 14 }: Pr
             </Text>
             <Text style={[styles.day, { color: fg }]}>{dayNumber(dateISO)}</Text>
             <View style={styles.markerRow}>
-              {today && !isSelected ? (
-                <View style={[styles.todayPill, { backgroundColor: c.primary }]} />
-              ) : null}
               {count > 0 ? (
                 <View style={[styles.dot, { backgroundColor: dotColor }]} />
               ) : (
                 <View style={styles.dotPlaceholder} />
               )}
             </View>
+            {today ? (
+              <Text style={[styles.todayLabel, { color: fgMuted }]}>Hoy</Text>
+            ) : (
+              <Text style={styles.todayPlaceholder}>Hoy</Text>
+            )}
           </Pressable>
         );
       })}
@@ -99,16 +101,21 @@ const styles = StyleSheet.create({
   row: {
     paddingHorizontal: Spacing.xl,
     gap: Spacing.sm,
-    paddingVertical: Spacing.xs,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.sm,
   },
   chip: {
-    width: 60,
-    paddingVertical: Spacing.sm + 2,
-    borderRadius: Radius.lg,
+    width: 64,
+    minHeight: 84,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.xl,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 14,
+    elevation: 2,
   },
   weekday: {
     ...Typography.micro,
@@ -123,24 +130,32 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
   },
   markerRow: {
-    height: 8,
+    height: 9,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
   },
-  todayPill: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-  },
   dot: {
-    width: 5,
-    height: 5,
+    width: 6,
+    height: 6,
     borderRadius: 3,
   },
   dotPlaceholder: {
-    width: 5,
-    height: 5,
+    width: 6,
+    height: 6,
+  },
+  todayLabel: {
+    ...Typography.micro,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  todayPlaceholder: {
+    ...Typography.micro,
+    fontSize: 10,
+    lineHeight: 12,
+    opacity: 0,
   },
 });

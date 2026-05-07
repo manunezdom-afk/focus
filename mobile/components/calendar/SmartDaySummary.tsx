@@ -10,116 +10,127 @@ import type { EventItem } from '@/src/data/types';
 type Props = {
   dateISO: string;
   events: EventItem[];          // ya filtrados al día seleccionado
-  pendingTasksCount: number;    // tareas con done=false (globales — no hay fecha en Task)
-  onAskNova: () => void;
+  pendingTasksCount: number;    // tareas reales relevantes para el día, calculadas por la pantalla
+  onPlanWithNova: () => void;
 };
 
-// Devuelve "HH:MM" o null si el evento no tiene hora ("todo el día").
 function startOf(event: EventItem): string | null {
   if (!event.time) return null;
   const m = event.time.replace(/\s/g, '').match(/^(\d{1,2}:\d{2})/);
   return m ? m[1] : null;
 }
 
-// Genera el texto de resumen 100% client-side a partir de datos reales.
-// Sin llamadas a Nova (eso vendría en V2). Reglas:
-// · 0 eventos + 0 tareas → "Día libre"
-// · 0 eventos + N tareas → "Sin eventos. N tareas pendientes."
-// · N eventos             → cuenta + primer evento + bloque "todo el día" si hay
+function startMinutes(event: EventItem): number | null {
+  const start = startOf(event);
+  if (!start) return null;
+  const [h, m] = start.split(':').map((part) => parseInt(part, 10));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+function sortedEvents(events: EventItem[]): EventItem[] {
+  return [...events].sort((a, b) => {
+    const am = startMinutes(a);
+    const bm = startMinutes(b);
+    if (am === null && bm === null) return a.title.localeCompare(b.title);
+    if (am === null) return 1;
+    if (bm === null) return -1;
+    if (am === bm) return a.title.localeCompare(b.title);
+    return am - bm;
+  });
+}
+
+function nextEvent(dateISO: string, events: EventItem[]): EventItem | null {
+  const ordered = sortedEvents(events);
+  if (!isToday(dateISO)) return ordered[0] ?? null;
+
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const upcoming = ordered.find((event) => {
+    const minutes = startMinutes(event);
+    return minutes !== null && minutes >= currentMinutes;
+  });
+  return upcoming ?? ordered[0] ?? null;
+}
+
 function buildSummary({
+  dateISO,
   events,
   pendingTasksCount,
-  isCurrentDay,
 }: {
+  dateISO: string;
   events: EventItem[];
   pendingTasksCount: number;
-  isCurrentDay: boolean;
 }): { headline: string; detail: string } {
   const total = events.length;
-  const allDay = events.filter((e) => !e.time);
-  const timed = events.filter((e) => !!e.time);
 
   if (total === 0 && pendingTasksCount === 0) {
     return {
-      headline: isCurrentDay ? 'Día libre.' : 'Sin eventos.',
-      detail: isCurrentDay
-        ? 'Aprovecha para enfocarte en lo que más importa.'
-        : 'Todavía no tienes nada agendado para este día.',
+      headline: 'Tienes el día libre.',
+      detail: 'Puedes planificarlo con Nova.',
     };
   }
 
   if (total === 0) {
     return {
-      headline: `${pendingTasksCount} ${pendingTasksCount === 1 ? 'tarea pendiente' : 'tareas pendientes'}.`,
-      detail: 'Sin eventos en la agenda. Ideal para avanzar.',
+      headline: 'No tienes eventos.',
+      detail: `Hay ${pendingTasksCount} ${pendingTasksCount === 1 ? 'tarea pendiente' : 'tareas pendientes'} para revisar.`,
     };
   }
 
-  // Hay al menos 1 evento.
   const eventsWord = total === 1 ? 'evento' : 'eventos';
   const tasksFragment =
     pendingTasksCount > 0
-      ? ` · ${pendingTasksCount} ${pendingTasksCount === 1 ? 'tarea' : 'tareas'}`
+      ? ` También hay ${pendingTasksCount} ${pendingTasksCount === 1 ? 'tarea pendiente' : 'tareas pendientes'}.`
       : '';
-  const headline = `${total} ${eventsWord}${tasksFragment}.`;
+  const headline = `Tienes ${total} ${eventsWord}.`;
+  const next = nextEvent(dateISO, events);
+  if (!next) return { headline, detail: tasksFragment.trim() };
 
-  let detail = '';
-  if (timed.length > 0) {
-    const first = timed[0];
-    const t = startOf(first);
-    if (t) {
-      detail = `Empiezas con "${first.title}" a las ${t}.`;
-    } else {
-      detail = `El primero: "${first.title}".`;
-    }
-  } else if (allDay.length > 0) {
-    detail = allDay.length === 1
-      ? `Tienes "${allDay[0].title}" para todo el día.`
-      : `${allDay.length} bloques sin hora definida.`;
-  }
-
-  if (allDay.length > 0 && timed.length > 0) {
-    detail += ` Hay ${allDay.length} ${allDay.length === 1 ? 'bloque' : 'bloques'} sin hora.`;
-  }
+  const start = startOf(next);
+  const detail = start
+    ? `El próximo es "${next.title}" a las ${start}.${tasksFragment}`
+    : `El primero es "${next.title}" para todo el día.${tasksFragment}`;
 
   return { headline, detail };
 }
 
-export function SmartDaySummary({ dateISO, events, pendingTasksCount, onAskNova }: Props) {
+export function SmartDaySummary({ dateISO, events, pendingTasksCount, onPlanWithNova }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
-  const isCurrentDay = isToday(dateISO);
   const summary = useMemo(
-    () => buildSummary({ events, pendingTasksCount, isCurrentDay }),
-    [events, pendingTasksCount, isCurrentDay],
+    () => buildSummary({ dateISO, events, pendingTasksCount }),
+    [dateISO, events, pendingTasksCount],
   );
+  const cardColor = scheme === 'light' ? c.primary : c.primaryContainer;
+  const mutedText = scheme === 'light' ? 'rgba(255,255,255,0.78)' : 'rgba(255,255,255,0.72)';
 
   return (
     <View
       style={[
         styles.card,
-        { backgroundColor: c.surfaceTint, borderColor: c.border },
+        { backgroundColor: cardColor, borderColor: cardColor },
       ]}
     >
       <View style={styles.row}>
         <View
           style={[
             styles.iconBubble,
-            { backgroundColor: c.surface, borderColor: c.border },
+            { backgroundColor: 'rgba(255,255,255,0.16)', borderColor: 'rgba(255,255,255,0.24)' },
           ]}
         >
-          <IconSymbol name="sparkles" size={18} color={c.primary} />
+          <IconSymbol name="sparkles" size={18} color={c.onPrimary} />
         </View>
         <View style={styles.body}>
-          <Text style={[styles.eyebrow, { color: c.primary }]}>
-            {isCurrentDay ? 'Resumen de hoy' : 'Resumen del día'}
+          <Text style={[styles.eyebrow, { color: mutedText }]}>
+            Lectura Nova
           </Text>
-          <Text style={[styles.headline, { color: c.text }]} numberOfLines={2}>
+          <Text style={[styles.headline, { color: c.onPrimary }]} numberOfLines={2}>
             {summary.headline}
           </Text>
           {summary.detail ? (
-            <Text style={[styles.detail, { color: c.textMuted }]} numberOfLines={3}>
+            <Text style={[styles.detail, { color: mutedText }]} numberOfLines={3}>
               {summary.detail}
             </Text>
           ) : null}
@@ -127,16 +138,16 @@ export function SmartDaySummary({ dateISO, events, pendingTasksCount, onAskNova 
       </View>
 
       <Pressable
-        onPress={onAskNova}
+        onPress={onPlanWithNova}
         style={({ pressed }) => [
           styles.cta,
-          { borderTopColor: c.border, opacity: pressed ? 0.7 : 1 },
+          { borderTopColor: 'rgba(255,255,255,0.22)', opacity: pressed ? 0.75 : 1 },
         ]}
         accessibilityRole="button"
-        accessibilityLabel="Pídele más a Nova"
+        accessibilityLabel="Planificar con Nova"
       >
-        <Text style={[styles.ctaText, { color: c.primary }]}>Pídele más a Nova</Text>
-        <IconSymbol name="chevron.right" size={16} color={c.primary} />
+        <Text style={[styles.ctaText, { color: c.onPrimary }]}>Planificar con Nova</Text>
+        <IconSymbol name="chevron.right" size={16} color={c.onPrimary} />
       </Pressable>
     </View>
   );
@@ -152,7 +163,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: Spacing.md,
-    padding: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.md,
   },
   iconBubble: {
     width: 36,
@@ -171,13 +184,13 @@ const styles = StyleSheet.create({
   },
   headline: {
     ...Typography.title3,
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 19,
+    lineHeight: 24,
   },
   detail: {
-    ...Typography.caption,
-    fontSize: 13,
-    lineHeight: 18,
+    ...Typography.body,
+    fontSize: 14,
+    lineHeight: 20,
   },
   cta: {
     flexDirection: 'row',
