@@ -1203,7 +1203,11 @@ function NovaWidget({
               className="absolute left-0 right-0 bottom-0 bg-white rounded-t-[22px] flex flex-col shadow-2xl kb-aware"
               style={{
                 height: 'min(85dvh, 640px)',
-                paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-height, 0px))',
+                // safe-area-inset-bottom: cubre home indicator cuando NO hay
+                // teclado. iOS reduce este valor a 0 cuando el teclado está
+                // visible (porque el indicator queda tapado), así no
+                // duplicamos espacio con el WebView que ya se reacomoda.
+                paddingBottom: 'env(safe-area-inset-bottom, 0px)',
               }}
               role="dialog"
               aria-label="Nova"

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion'
+import { useSwipeNavigation } from './lib/useSwipeNavigation'
 import { useEvents }        from './hooks/useEvents'
 import { useTasks }         from './hooks/useTasks'
 import { useNotifications } from './hooks/useNotifications'
@@ -64,6 +65,10 @@ const SuggestionsInbox  = lazy(loadSuggestionsInbox)
 
 const LAST_OPENED_KEY = 'nova_last_opened'
 const VALID_VIEWS = ['planner', 'calendar', 'day', 'tasks', 'settings']
+
+// Orden de las pestañas principales para el swipe horizontal mobile.
+// `day` y sub-views no entran — la nav inferior tampoco las muestra.
+const SWIPE_VIEW_ORDER = ['planner', 'calendar', 'tasks', 'settings']
 const SUB_VIEWS = new Set(['task-detail', 'memory', 'nova-knows'])
 const VIEW_LABELS = {
   planner: 'Mi Día',
@@ -598,6 +603,32 @@ export default function App() {
   function goBack() {
     returnToPreviousView('planner')
   }
+
+  // Swipe horizontal entre tabs principales. Solo activo en mobile y en las
+  // 4 vistas root (no sub-views, no day, no detail). El hook se encarga de:
+  //   * ignorar inputs/botones/links
+  //   * desactivar mientras el teclado está abierto
+  //   * desactivar mientras hay un modal/sheet visible
+  //   * pedir mínimo 60px horizontal y < 0.66× vertical
+  // Nota: `enabled` se evalúa en runtime — al abrir Nova/un modal el hook
+  // ya no dispara onSwipeLeft/Right, pero no lo desmontamos para no
+  // recrear listeners innecesariamente.
+  const swipeEnabled = !isDesktop && SWIPE_VIEW_ORDER.includes(activeView)
+  useSwipeNavigation({
+    enabled: swipeEnabled,
+    onSwipeLeft: useCallback(() => {
+      const idx = SWIPE_VIEW_ORDER.indexOf(activeViewRef.current)
+      if (idx >= 0 && idx < SWIPE_VIEW_ORDER.length - 1) {
+        navigate(SWIPE_VIEW_ORDER[idx + 1], { intent: 'forward' })
+      }
+    }, []),
+    onSwipeRight: useCallback(() => {
+      const idx = SWIPE_VIEW_ORDER.indexOf(activeViewRef.current)
+      if (idx > 0) {
+        navigate(SWIPE_VIEW_ORDER[idx - 1], { intent: 'back' })
+      }
+    }, []),
+  })
 
   function handleSaveTask(updates) {
     if (selectedEvent?.id) editEvent(selectedEvent.id, updates)
