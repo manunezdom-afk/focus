@@ -102,7 +102,10 @@ export default async function handler(req, res) {
       msg.includes('already') || msg.includes('exists') || msg.includes('registered') ||
       Number(createErr.status) === 422
     if (!alreadyExists) {
-      console.error('[send-otp] createUser', createErr)
+      // Solo el código del error de Supabase — el objeto completo puede
+      // incluir el email del usuario serializado en `message`/`details`,
+      // que terminaría en logs de Vercel indefinidamente.
+      console.error('[send-otp] createUser', createErr?.code || createErr?.name || 'error')
       return res.status(500).json({ error: 'user_create_failed' })
     }
   }
@@ -115,7 +118,7 @@ export default async function handler(req, res) {
   })
   const otp = linkData?.properties?.email_otp
   if (linkErr || !otp) {
-    console.error('[send-otp] generateLink', linkErr)
+    console.error('[send-otp] generateLink', linkErr?.code || linkErr?.name || 'error')
     return res.status(500).json({ error: 'otp_generation_failed' })
   }
 
@@ -131,12 +134,21 @@ export default async function handler(req, res) {
       body: JSON.stringify({ from, to: [email], subject, text, html }),
     })
   } catch (err) {
-    console.error('[send-otp] resend network', err)
+    // No loggear `err` completo: en errores de fetch suele incluir la URL
+    // (con headers de Authorization) y stacks que ensucian sin diagnosticar.
+    console.error('[send-otp] resend network', err?.name || 'error')
     return res.status(502).json({ error: 'email_send_failed' })
   }
   if (!resp.ok) {
-    const body = await resp.text().catch(() => '')
-    console.error('[send-otp] resend http', resp.status, body.slice(0, 300))
+    // El body de Resend en errores puede incluir el email del receiver.
+    // Loggeamos solo el nombre del error de Resend (p.ej. "validation_error")
+    // y el status — suficiente para diagnosticar sin filtrar PII.
+    let errName = ''
+    try {
+      const body = await resp.text()
+      errName = (() => { try { return JSON.parse(body)?.name } catch { return null } })() || ''
+    } catch {}
+    console.error('[send-otp] resend http', resp.status, errName)
     return res.status(502).json({ error: 'email_send_failed' })
   }
 

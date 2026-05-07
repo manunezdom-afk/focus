@@ -17,7 +17,13 @@
 //      user_signals, user_behavior, push_subscriptions,
 //      native_push_tokens, notif_log, calendar_feeds, kairos_links,
 //      sent_notifications, notification_deliveries, ai_usage,
-//      device_pairings (todas REFERENCES auth.users con CASCADE).
+//      ai_usage_events, user_plans, device_pairings (todas REFERENCES
+//      auth.users con CASCADE).
+//
+// IMPORTANTE: si en el futuro se agrega una tabla con datos del usuario,
+// asegurarse de que tenga `REFERENCES auth.users(id) ON DELETE CASCADE`
+// — si no, los datos quedan huérfanos y rompemos el contrato de borrado
+// total que mostramos al usuario.
 //
 // Si cualquier paso falla, devolvemos 500 con un código identificable y el
 // cliente puede reintentar — los pasos previos son idempotentes.
@@ -41,8 +47,8 @@ export const maxDuration = 30
 //   'user_signals', 'user_behavior',
 //   'push_subscriptions', 'native_push_tokens',
 //   'sent_notifications', 'calendar_feeds',
-//   'notification_deliveries', 'ai_usage',
-//   'kairos_links', 'device_pairings',
+//   'notification_deliveries', 'ai_usage', 'ai_usage_events',
+//   'user_plans', 'kairos_links', 'device_pairings',
 // ]
 
 export default async function handler(req, res) {

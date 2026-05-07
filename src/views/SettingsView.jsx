@@ -17,6 +17,7 @@ import { NOVA_PERSONALITIES } from '../utils/novaPersonality'
 import { isIOS, isAndroid } from '../lib/permissions'
 import { supabase } from '../lib/supabase'
 import { apiFetch } from '../lib/apiClient'
+import { clearAllUserDataLocal } from '../lib/privacyCleanup'
 
 // Copy contextual por plataforma para "dónde habilitar el permiso".
 // El usuario ve "Ajustes de Android" en Android, "Ajustes del iPhone" en iOS,
@@ -827,7 +828,11 @@ function DeleteAccountRow({ onSignOut }) {
         throw new Error(body?.message || 'No pudimos borrar la cuenta. Inténtalo más tarde.')
       }
       // Logout local. El servidor ya invalidó el token y borró las filas.
+      // Adicionalmente, post-delete borramos TODO incluyendo flags UX
+      // (welcome screen, hints, etc.) — el usuario quiso desaparecer del
+      // dispositivo, nada que lo identifique debería quedar.
       await onSignOut()
+      try { clearAllUserDataLocal() } catch {}
     } catch (e) {
       setError(e?.message || 'Error inesperado.')
     } finally {
