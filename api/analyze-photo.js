@@ -28,21 +28,27 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: 'rate_limit', message: 'Demasiadas solicitudes. Espera un momento.' })
   }
 
-  // Auth: opcional temporalmente para pruebas en iOS sin cuenta.
-  // TODO (1 semana): restaurar el bloqueo: if (!userId) return 401.
+  // Auth obligatoria: sin sesión válida devolvemos 401 antes de gastar tokens
+  // del modelo de visión. Antes este endpoint corría "abierto" para test en
+  // iOS sin cuenta, pero ese hueco permitía a cualquiera con la URL agotar la
+  // cuota de Anthropic mandando fotos arbitrarias.
   const userId = await getUserIdFromAuth(req)
+  if (!userId) {
+    return res.status(401).json({
+      error: 'auth_required',
+      message: 'Inicia sesión para analizar fotos.',
+    })
+  }
 
-  if (userId) {
-    const admin = getSupabaseAdmin()
-    const quota = await enforceAiQuota(admin, userId, 'analyze-photo')
-    if (!quota.ok) {
-      return res.status(429).json({
-        error: 'quota_exceeded',
-        message: 'Llegaste al límite diario de fotos analizadas. Vuelve mañana.',
-        reset_at: quota.resetAt,
-        limit: quota.limit,
-      })
-    }
+  const admin = getSupabaseAdmin()
+  const quota = await enforceAiQuota(admin, userId, 'analyze-photo')
+  if (!quota.ok) {
+    return res.status(429).json({
+      error: 'quota_exceeded',
+      message: 'Llegaste al límite diario de fotos analizadas. Vuelve mañana.',
+      reset_at: quota.resetAt,
+      limit: quota.limit,
+    })
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim()

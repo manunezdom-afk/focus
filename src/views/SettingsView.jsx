@@ -16,6 +16,7 @@ import { useAppPreferences } from '../hooks/useAppPreferences'
 import { NOVA_PERSONALITIES } from '../utils/novaPersonality'
 import { isIOS, isAndroid } from '../lib/permissions'
 import { supabase } from '../lib/supabase'
+import { apiFetch } from '../lib/apiClient'
 
 // Copy contextual por plataforma para "dónde habilitar el permiso".
 // El usuario ve "Ajustes de Android" en Android, "Ajustes del iPhone" en iOS,
@@ -777,7 +778,7 @@ export default function SettingsView({ onOpenImport, onOpenMemory, onOpenNovaKno
         </Row>
       </SectionCard>
 
-      {/* ── Cerrar sesión (solo si hay sesión activa) ───────────────────── */}
+      {/* ── Cerrar sesión / Eliminar cuenta (solo si hay sesión activa) ── */}
       {user && (
         <SectionCard title="Cuenta">
           <Row
@@ -787,6 +788,7 @@ export default function SettingsView({ onOpenImport, onOpenMemory, onOpenNovaKno
             onClick={signOut}
             danger
           />
+          <DeleteAccountRow onSignOut={signOut} />
         </SectionCard>
       )}
 
@@ -796,6 +798,102 @@ export default function SettingsView({ onOpenImport, onOpenMemory, onOpenNovaKno
       </p>
       <BuildStamp />
     </div>
+  )
+}
+
+// DeleteAccountRow — fila peligrosa que abre un modal de confirmación.
+// El servidor exige confirm:'DELETE' explícito como segunda barrera anti
+// click-accidental. Si el delete sale OK, hacemos signOut local — el
+// access_token del usuario ya no es válido en el servidor.
+function DeleteAccountRow({ onSignOut }) {
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function handleConfirm() {
+    if (typed !== 'DELETE' || submitting) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await apiFetch('/api/auth/delete-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'DELETE' }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        if (res.status === 401) throw new Error('Sesión expirada. Vuelve a iniciar sesión y reintenta.')
+        throw new Error(body?.message || 'No pudimos borrar la cuenta. Inténtalo más tarde.')
+      }
+      // Logout local. El servidor ya invalidó el token y borró las filas.
+      await onSignOut()
+    } catch (e) {
+      setError(e?.message || 'Error inesperado.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <>
+      <Row
+        icon="delete_forever"
+        label="Eliminar cuenta"
+        sub="Borra tu perfil, eventos, tareas, memorias y notificaciones — irreversible."
+        onClick={() => { setOpen(true); setTyped(''); setError(null) }}
+        danger
+      />
+      {open && (
+        <div
+          className="fixed inset-0 z-[110] grid place-items-center bg-slate-950/40 px-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-account-title"
+        >
+          <div className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <h2 id="delete-account-title" className="text-[16px] font-bold text-slate-900">Eliminar tu cuenta</h2>
+            <p className="mt-2 text-[13px] text-slate-600 leading-snug">
+              Borraremos definitivamente tu perfil, eventos, tareas, memorias de Nova y suscripciones a notificaciones. <b>Esta acción es irreversible.</b>
+            </p>
+            <p className="mt-3 text-[12px] text-slate-500">
+              Para confirmar, escribe <b>DELETE</b> abajo.
+            </p>
+            <input
+              type="text"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoFocus
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[14px] focus:border-red-400 focus:ring-2 focus:ring-red-100 outline-none"
+              placeholder="DELETE"
+              autoCapitalize="characters"
+              spellCheck={false}
+            />
+            {error && (
+              <p className="mt-2 text-[12px] text-red-600">{error}</p>
+            )}
+            <div className="mt-4 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                disabled={submitting}
+                className="px-3 py-2 rounded-xl text-[13px] font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirm}
+                disabled={typed !== 'DELETE' || submitting}
+                className="px-3 py-2 rounded-xl text-[13px] font-semibold text-white bg-red-500 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {submitting ? 'Borrando…' : 'Eliminar definitivamente'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 

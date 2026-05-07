@@ -280,19 +280,24 @@ export function AuthProvider({ children }) {
   const signOut = useCallback(async () => {
     if (supabase) await supabase.auth.signOut()
     setUser(null)
-    // Limpiamos cualquier OTP pendiente: si quedó un code en sessionStorage
-    // de una sesión anterior, al reabrir el login veríamos el paso 'code'
-    // apuntando a un email que ya no corresponde. Limpiamos también el
-    // cooldown por email para no heredarlo en el próximo login.
+    setSignalsUserId(null)
+    // sessionStorage: además del OTP pendiente y device pairing, limpiamos el
+    // historial de Nova — sin esto, si otro usuario abriera la app en este
+    // dispositivo (PWA en desktop compartida, kiosko, iPhone prestado), vería
+    // las últimas conversaciones del usuario anterior al abrir el chat.
     try {
       sessionStorage.removeItem('focus_auth_pending')
       sessionStorage.removeItem('focus_auth_resend_until')
       sessionStorage.removeItem('focus_device_pairing')
+      sessionStorage.removeItem('nova_history')
+      sessionStorage.removeItem('focus_pending_nova_seed')
     } catch {}
-    // Borramos las claves globales (sin userId) de caché local. Los datos del
-    // usuario que siguieron en estado React al salir ya no se persisten al
-    // cierre y no pueden aparecer como "tareas pendientes" en el próximo login.
-    dataService.clearGlobalCache()
+    // localStorage: borramos TANTO las claves globales (focus_events sin
+    // userId) COMO las claves por-usuario (focus_events_<uuid>, etc.). La
+    // versión anterior dejaba esas últimas en disco para siempre — si el
+    // dispositivo se pierde o lo abre otra persona con DevTools, los datos
+    // privados del usuario quedaban accesibles fuera de la app.
+    dataService.clearAllLocalCache()
   }, [])
 
   return (

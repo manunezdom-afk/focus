@@ -22,8 +22,9 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
 );
 
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own profile"
-  ON public.user_profiles FOR ALL USING (auth.uid() = id);
+CREATE POLICY "user_profiles_owner_all"
+  ON public.user_profiles FOR ALL
+  USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 
 -- ── events ────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.events (
@@ -42,8 +43,9 @@ CREATE TABLE IF NOT EXISTS public.events (
 );
 
 ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own events"
-  ON public.events FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "events_owner_all"
+  ON public.events FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- ── tasks ─────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.tasks (
@@ -59,8 +61,9 @@ CREATE TABLE IF NOT EXISTS public.tasks (
 );
 
 ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own tasks"
-  ON public.tasks FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "tasks_owner_all"
+  ON public.tasks FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- ── blocks (reserved for future time-blocking feature) ───────────────────────
 CREATE TABLE IF NOT EXISTS public.blocks (
@@ -75,8 +78,9 @@ CREATE TABLE IF NOT EXISTS public.blocks (
 );
 
 ALTER TABLE public.blocks ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own blocks"
-  ON public.blocks FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "blocks_owner_all"
+  ON public.blocks FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- ── suggestions (Nova: modo propuesta) ──────────────────────────────────────
 -- Acciones propuestas por Nova que el usuario aprueba o rechaza antes de aplicar.
@@ -96,8 +100,9 @@ CREATE TABLE IF NOT EXISTS public.suggestions (
 );
 
 ALTER TABLE public.suggestions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own suggestions"
-  ON public.suggestions FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "suggestions_owner_all"
+  ON public.suggestions FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 CREATE INDEX IF NOT EXISTS suggestions_user_status_idx
   ON public.suggestions (user_id, status, created_at DESC);
@@ -122,8 +127,9 @@ CREATE TABLE IF NOT EXISTS public.user_memories (
 );
 
 ALTER TABLE public.user_memories ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own memories"
-  ON public.user_memories FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "user_memories_owner_all"
+  ON public.user_memories FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 CREATE INDEX IF NOT EXISTS user_memories_user_idx
   ON public.user_memories (user_id, pinned DESC, last_seen_at DESC);
@@ -142,8 +148,9 @@ CREATE TABLE IF NOT EXISTS public.notif_log (
 );
 
 ALTER TABLE public.notif_log ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own notifications"
-  ON public.notif_log FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "notif_log_owner_all"
+  ON public.notif_log FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- ── updated_at trigger (applies to events, tasks, user_profiles) ─────────────
 CREATE OR REPLACE FUNCTION public.set_updated_at()
@@ -172,8 +179,9 @@ CREATE TABLE IF NOT EXISTS public.user_signals (
 );
 
 ALTER TABLE public.user_signals ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own signals"
-  ON public.user_signals FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "user_signals_owner_all"
+  ON public.user_signals FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 CREATE INDEX IF NOT EXISTS user_signals_user_kind_idx
   ON public.user_signals (user_id, kind, created_at DESC);
@@ -189,8 +197,9 @@ CREATE TABLE IF NOT EXISTS public.user_behavior (
 );
 
 ALTER TABLE public.user_behavior ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own behavior"
-  ON public.user_behavior FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "user_behavior_owner_all"
+  ON public.user_behavior FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.user_behavior
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
@@ -210,8 +219,9 @@ CREATE TABLE IF NOT EXISTS public.push_subscriptions (
 );
 
 ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own push subscriptions"
-  ON public.push_subscriptions FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "push_subscriptions_owner_all"
+  ON public.push_subscriptions FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE INDEX IF NOT EXISTS push_subs_user_idx ON public.push_subscriptions (user_id);
 
 -- ── native_push_tokens: APNs tokens para builds iOS App Store ────────────────
@@ -228,8 +238,9 @@ CREATE TABLE IF NOT EXISTS public.native_push_tokens (
 );
 
 ALTER TABLE public.native_push_tokens ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own native push tokens"
-  ON public.native_push_tokens FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "native_push_tokens_owner_all"
+  ON public.native_push_tokens FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE INDEX IF NOT EXISTS native_push_tokens_user_idx
   ON public.native_push_tokens (user_id);
 CREATE INDEX IF NOT EXISTS native_push_tokens_user_env_idx
@@ -252,7 +263,7 @@ CREATE TABLE IF NOT EXISTS public.sent_notifications (
 
 ALTER TABLE public.sent_notifications ENABLE ROW LEVEL SECURITY;
 -- El service role bypasea RLS; los users pueden ver las propias
-CREATE POLICY "Users read own sent notifications"
+CREATE POLICY "sent_notifications_owner_select"
   ON public.sent_notifications FOR SELECT USING (auth.uid() = user_id);
 CREATE INDEX IF NOT EXISTS sent_notif_user_evt_idx
   ON public.sent_notifications (user_id, event_id);
@@ -274,7 +285,8 @@ CREATE TABLE IF NOT EXISTS public.calendar_feeds (
 );
 
 ALTER TABLE public.calendar_feeds ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users manage own feeds"
-  ON public.calendar_feeds FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "calendar_feeds_owner_all"
+  ON public.calendar_feeds FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE INDEX IF NOT EXISTS calendar_feeds_user_idx
   ON public.calendar_feeds (user_id, created_at DESC);

@@ -28,22 +28,28 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: 'rate_limit', message: 'Demasiadas solicitudes. Espera un momento.' })
   }
 
-  // Auth: opcional temporalmente para pruebas en iOS sin cuenta.
-  // TODO (1 semana): restaurar el bloqueo: if (!userId) return 401.
+  // Auth obligatoria: sin Bearer válido devolvemos 401. Antes este endpoint
+  // aceptaba requests sin sesión "para pruebas en iOS sin cuenta", pero eso
+  // exponía la cuota de Anthropic a cualquiera que descubriera la URL — un
+  // atacante podía vaciar el presupuesto de la API en minutos.
   const userId = await getUserIdFromAuth(req)
+  if (!userId) {
+    return res.status(401).json({
+      error: 'auth_required',
+      message: 'Inicia sesión para hablar con Nova.',
+    })
+  }
 
-  // Cuota diaria solo para usuarios autenticados.
-  if (userId) {
-    const admin = getSupabaseAdmin()
-    const quota = await enforceAiQuota(admin, userId, 'focus-assistant')
-    if (!quota.ok) {
-      return res.status(429).json({
-        error: 'quota_exceeded',
-        message: 'Llegaste al límite diario de mensajes con Nova. Vuelve mañana.',
-        reset_at: quota.resetAt,
-        limit: quota.limit,
-      })
-    }
+  // Cuota diaria por usuario autenticado.
+  const admin = getSupabaseAdmin()
+  const quota = await enforceAiQuota(admin, userId, 'focus-assistant')
+  if (!quota.ok) {
+    return res.status(429).json({
+      error: 'quota_exceeded',
+      message: 'Llegaste al límite diario de mensajes con Nova. Vuelve mañana.',
+      reset_at: quota.resetAt,
+      limit: quota.limit,
+    })
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim()

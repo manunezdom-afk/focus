@@ -341,6 +341,40 @@ export const dataService = {
     } catch {}
   },
 
+  // Borra TODA la caché privada del dispositivo: globales + por-usuario.
+  // Llamado al cerrar sesión para que ningún dato del usuario quede en disk
+  // accesible vía DevTools si alguien recoge el dispositivo después.
+  // Recorremos localStorage entero buscando prefijos conocidos: la versión
+  // anterior solo limpiaba claves globales y dejaba `focus_events_<uuid>`,
+  // `focus_tasks_<uuid>`, etc. en disco indefinidamente.
+  clearAllLocalCache() {
+    try {
+      const KNOWN_PREFIXES = [
+        'focus_events',         // global + focus_events_<userId>
+        'focus_tasks',          // global + focus_tasks_<userId>
+        'focus_suggestions',
+        'focus_user_profile',
+        'focus_user_memories',
+        'focus_user_behavior',
+        'focus_migrated',
+        'focus_task_links',     // global + focus_task_links_<userId>
+        'focus_task_parents',   // global + focus_task_parents_<userId>
+        'focus_sync_queue',     // cola offline (puede tener writes del user anterior)
+        'focus_signals_queue',  // signals encolados sin upload
+        'nova_history',         // por compatibilidad si alguna vez se persistió en localStorage
+      ]
+      const toDelete = []
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const k = localStorage.key(i)
+        if (!k) continue
+        if (KNOWN_PREFIXES.some(p => k === p || k.startsWith(`${p}_`))) {
+          toDelete.push(k)
+        }
+      }
+      for (const k of toDelete) localStorage.removeItem(k)
+    } catch {}
+  },
+
   // ── Flush offline queue ─────────────────────────────────────────────────────
 
   async flushQueue() {
