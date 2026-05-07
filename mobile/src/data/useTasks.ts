@@ -7,7 +7,9 @@ import {
   deleteTask as apiDeleteTask,
   fetchTasks,
   setTaskDone as apiSetTaskDone,
+  updateTask as apiUpdateTask,
   type CreateTaskInput,
+  type TaskPatch,
 } from './tasks';
 import type { Task } from './types';
 
@@ -133,6 +135,24 @@ export function useTasks() {
     [userId, state.tasks],
   );
 
+  const patchTask = useCallback(
+    async (id: string, patch: TaskPatch): Promise<void> => {
+      if (!userId) return;
+      const before = state.tasks;
+      // Optimistic update: aplicar el patch en cliente al instante.
+      setState((s) => ({
+        ...s,
+        tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+      }));
+      try {
+        await apiUpdateTask(userId, id, patch);
+      } catch (err: any) {
+        setState((s) => ({ ...s, tasks: before, error: err?.message ?? 'update_failed' }));
+      }
+    },
+    [userId, state.tasks],
+  );
+
   return {
     tasks: state.tasks,
     loading: state.loading,
@@ -142,5 +162,6 @@ export function useTasks() {
     addTask,
     toggleTask,
     removeTask,
+    patchTask,
   };
 }

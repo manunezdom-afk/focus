@@ -87,3 +87,22 @@ export async function deleteTask(userId: string, id: string): Promise<void> {
   const { error } = await supabase.from('tasks').delete().eq('id', id).eq('user_id', userId);
   if (error) throw error;
 }
+
+// Update parcial — cambiar priority o category sin tocar el resto. Mismo
+// patrón que la web (updateTask en dataService.js).
+export type TaskPatch = {
+  priority?: TaskPriority;
+  category?: string;
+  label?: string;
+};
+
+export async function updateTask(userId: string, id: string, patch: TaskPatch): Promise<void> {
+  if (!supabase) throw new Error('supabase_not_configured');
+  if (Object.keys(patch).length === 0) return;
+  const { error } = await supabase
+    .from('tasks')
+    .update(patch)
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error) throw error;
+}

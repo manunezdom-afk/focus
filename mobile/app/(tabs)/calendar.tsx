@@ -1,20 +1,44 @@
 import * as Haptics from 'expo-haptics';
 import { useMemo, useState } from 'react';
-import { FlatList, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CreateEventSheet } from '@/components/CreateEventSheet';
-import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { EventRow } from '@/components/EventRow';
 import { LoadingState } from '@/components/LoadingState';
-import { SectionHeader } from '@/components/SectionHeader';
+import { SectionLabel } from '@/components/ui/SectionLabel';
+import { NovaPromptCard } from '@/components/ui/NovaPromptCard';
+import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
+import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { dateLabelShort, isToday, todayISO } from '@/src/data/today';
 import type { EventItem } from '@/src/data/types';
 import { useEvents } from '@/src/data/useEvents';
+
+// Mes en español para el eyebrow del header (ej: "Mayo 2026"). Mismo
+// patrón que el legacy CalendarView.
+const MONTHS_ES = [
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
+];
+
+function currentMonthYear(): string {
+  const d = new Date();
+  return `${MONTHS_ES[d.getMonth()][0].toUpperCase()}${MONTHS_ES[d.getMonth()].slice(1)} ${d.getFullYear()}`;
+}
 
 type Section =
   | { type: 'header'; title: string; count: number }
@@ -75,42 +99,38 @@ export default function CalendarScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: c.text }]}>Calendario</Text>
-        <Text style={[styles.subtitle, { color: c.textMuted }]}>
-          Eventos de hoy en adelante.
-        </Text>
-      </View>
+      <ScreenHeader
+        eyebrow={currentMonthYear()}
+        title="Calendario"
+        subtitle="Eventos de hoy en adelante."
+      />
 
       {events.error ? (
-        <ErrorBanner message="No pudimos cargar tu calendario." onRetry={events.refresh} />
+        <View style={styles.bannerWrap}>
+          <ErrorBanner
+            message="No pudimos cargar tu calendario."
+            onRetry={events.refresh}
+          />
+        </View>
       ) : null}
 
       {showLoading ? (
         <LoadingState />
       ) : showEmpty ? (
-        <EmptyState
-          icon="calendar"
-          title="Sin eventos próximos"
-          description="Crea uno con el botón + o pídeselo a Nova."
-          action={
-            <Pressable
+        <View style={styles.emptyWrap}>
+          <NovaPromptCard
+            title="Sin eventos próximos."
+            description="Crea uno con el botón + o pídeselo a Nova."
+          />
+          <View style={styles.emptyCtaRow}>
+            <PrimaryButton
+              label="Nuevo evento"
+              size="md"
               onPress={openCreate}
-              style={({ pressed }) => [
-                styles.emptyCta,
-                {
-                  backgroundColor: c.primary,
-                  opacity: pressed ? 0.85 : 1,
-                },
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Crear evento"
-            >
-              <IconSymbol name="plus" size={16} color={c.onPrimary} />
-              <Text style={[styles.emptyCtaText, { color: c.onPrimary }]}>Nuevo evento</Text>
-            </Pressable>
-          }
-        />
+              leftIcon={<IconSymbol name="plus" size={16} color={c.onPrimary} />}
+            />
+          </View>
+        </View>
       ) : (
         <FlatList
           data={sections}
@@ -119,7 +139,7 @@ export default function CalendarScreen() {
           }
           renderItem={({ item }) =>
             item.type === 'header' ? (
-              <SectionHeader title={item.title} count={item.count} />
+              <SectionLabel label={item.title} count={item.count} />
             ) : (
               <EventRow event={item.event} />
             )
@@ -168,40 +188,29 @@ export default function CalendarScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  header: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.md,
-    gap: Spacing.xs,
+  bannerWrap: { paddingHorizontal: Spacing.lg },
+  emptyWrap: {
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.md,
   },
-  title: { ...Typography.display },
-  subtitle: { ...Typography.body },
+  emptyCtaRow: {
+    alignSelf: 'flex-start',
+  },
   listContent: { paddingBottom: 100 }, // espacio para el FAB
 
   fab: {
     position: 'absolute',
-    bottom: Spacing.xl,
+    bottom: Spacing['2xl'] + 64, // sobre la tab bar
     right: Spacing.xl,
     width: 56,
     height: 56,
-    borderRadius: 28,
+    borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    // Sombra suave para resaltar
+    // Sombra para destacar sobre el contenido
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
-    elevation: 6, // Android
+    elevation: 6,
   },
-
-  emptyCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderRadius: Radius.full,
-    minHeight: 44,
-  },
-  emptyCtaText: { ...Typography.bodyStrong },
 });

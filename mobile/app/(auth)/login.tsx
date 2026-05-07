@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { sendOtp } from '@/src/lib/api';
 import { supabase } from '@/src/lib/supabase';
 import { Colors } from '@/constants/theme';
@@ -178,26 +178,14 @@ export default function LoginScreen() {
             <Text style={[styles.error, { color: c.danger }]}>{humanizeError(error)}</Text>
           ) : null}
 
-          <Pressable
-            accessibilityRole="button"
-            onPress={step === 'email' ? handleSendOtp : handleVerifyOtp}
+          <PrimaryButton
+            label={step === 'email' ? 'Enviar código' : 'Entrar'}
+            size="lg"
+            loading={loading}
             disabled={loading}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              {
-                backgroundColor: c.primary,
-                opacity: loading ? 0.6 : pressed ? 0.85 : 1,
-              },
-            ]}
-          >
-            {loading ? (
-              <ActivityIndicator color={c.onPrimary} />
-            ) : (
-              <Text style={[styles.primaryButtonText, { color: c.onPrimary }]}>
-                {step === 'email' ? 'Enviar código' : 'Entrar'}
-              </Text>
-            )}
-          </Pressable>
+            onPress={step === 'email' ? handleSendOtp : handleVerifyOtp}
+            style={styles.primaryButtonOverride}
+          />
 
           {step === 'code' ? (
             <Pressable
@@ -262,16 +250,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  primaryButton: {
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 52,
-  },
-  primaryButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+  primaryButtonOverride: {
+    width: '100%',
   },
   secondaryButton: {
     paddingVertical: 12,

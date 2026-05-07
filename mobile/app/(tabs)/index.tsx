@@ -1,25 +1,23 @@
 import { router } from 'expo-router';
 import { useMemo } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { EventRow } from '@/components/EventRow';
 import { LoadingState } from '@/components/LoadingState';
-import { SectionHeader } from '@/components/SectionHeader';
 import { TaskRow } from '@/components/TaskRow';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
+import { Card } from '@/components/ui/Card';
+import { NovaPromptCard } from '@/components/ui/NovaPromptCard';
+import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import { QuickActionButton } from '@/components/ui/QuickActionButton';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { SectionLabel } from '@/components/ui/SectionLabel';
+import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { todayLabelLong } from '@/src/data/today';
 import { useEvents } from '@/src/data/useEvents';
 import { useTasks } from '@/src/data/useTasks';
-
-// Capitaliza la primera letra ("lunes 4 de marzo" → "Lunes 4 de marzo")
-function capitalize(s: string): string {
-  return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s;
-}
 
 // Saludo según hora local. Mismo patrón que la web.
 function greeting(now = new Date()): string {
@@ -37,12 +35,14 @@ export default function MiDiaScreen() {
   const events = useEvents('today');
   const tasks = useTasks();
 
-  const dateLabel = useMemo(() => capitalize(todayLabelLong()), []);
-  const hello = useMemo(() => greeting(), []);
+  const dateLabel = useMemo(() => todayLabelLong(), []);
+  const eyebrow = useMemo(() => greeting(), []);
 
-  // Tareas pendientes (no done) primero — la query ya las trae ordenadas.
-  // Para Mi Día filtramos a pending y mostramos las primeras 8.
+  // Tareas pendientes hoy (similar al modelo legacy: category === 'hoy' es lo
+  // que aparece en Mi Día; si no hay esa categoría, mostramos pending top 8).
   const pendingTasks = useMemo(() => {
+    const today = tasks.tasks.filter((t) => !t.done && (t.category === 'hoy' || !t.category));
+    if (today.length > 0) return today.slice(0, 8);
     return tasks.tasks.filter((t) => !t.done).slice(0, 8);
   }, [tasks.tasks]);
 
@@ -64,6 +64,16 @@ export default function MiDiaScreen() {
     void tasks.refresh();
   }
 
+  function notImplemented(feature: string) {
+    Alert.alert(
+      feature,
+      'Esta función estará disponible en la próxima versión. Por ahora puedes pedírselo a Nova.',
+      [{ text: 'Entendido', style: 'default' }],
+    );
+  }
+
+  const hasAnyItem = events.events.length > 0 || pendingTasks.length > 0;
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
       <ScrollView
@@ -76,112 +86,112 @@ export default function MiDiaScreen() {
           />
         }
       >
-        {/* Header con saludo + fecha */}
-        <View style={styles.header}>
-          <Text style={[styles.greeting, { color: c.textMuted }]}>{hello}</Text>
-          <Text style={[styles.title, { color: c.text }]}>Mi día</Text>
-          <Text style={[styles.subtitle, { color: c.textMuted }]}>{dateLabel}</Text>
-        </View>
-
-        {/* Tarjeta CTA Nova — entrada al asistente */}
-        <Pressable
-          onPress={() => router.push('/nova')}
-          style={({ pressed }) => [
-            styles.novaCard,
-            {
-              backgroundColor: c.surfaceTint,
-              borderColor: c.border,
-              opacity: pressed ? 0.85 : 1,
-            },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Abrir Nova"
-        >
-          <View
-            style={[
-              styles.novaIcon,
-              { backgroundColor: c.surface, borderColor: c.border },
-            ]}
-          >
-            <IconSymbol name="sparkles" size={20} color={c.primary} />
-          </View>
-          <View style={styles.novaText}>
-            <Text style={[styles.novaTitle, { color: c.text }]}>Pregúntale a Nova</Text>
-            <Text style={[styles.novaDesc, { color: c.textMuted }]}>
-              Organiza tu día, crea tareas o eventos hablando.
-            </Text>
-          </View>
-          <IconSymbol name="chevron.right" size={18} color={c.textSubtle} />
-        </Pressable>
+        {/* Header — eyebrow primary + título grande extrabold + fecha completa */}
+        <ScreenHeader
+          eyebrow={eyebrow}
+          title="Mi día"
+          subtitle={dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)}
+          rightAction={
+            <PrimaryButton
+              label="Añadir"
+              size="sm"
+              onPress={() => router.push('/calendar')}
+            />
+          }
+        />
 
         {error ? (
-          <ErrorBanner message="No pudimos cargar tus datos." onRetry={handleRefresh} />
+          <View style={styles.bannerWrap}>
+            <ErrorBanner message="No pudimos cargar tus datos." onRetry={handleRefresh} />
+          </View>
         ) : null}
 
         {loading ? (
           <LoadingState />
+        ) : !hasAnyItem ? (
+          // Empty state legacy: Nova prompt card + grid 2-col de quick actions.
+          <View style={styles.emptyWrap}>
+            <NovaPromptCard
+              title="Tu agenda de hoy está vacía."
+              description="Dile a Nova qué tienes hoy, o añade algo tú mismo."
+            />
+            <View style={styles.actionsGrid}>
+              <View style={styles.actionsRow}>
+                <QuickActionButton
+                  label="Añadir"
+                  iconName="plus.circle.fill"
+                  onPress={() => router.push('/calendar')}
+                />
+                <QuickActionButton
+                  label="Hablar con Nova"
+                  iconName="sparkles"
+                  onPress={() => router.push('/nova')}
+                />
+              </View>
+              <View style={styles.actionsRow}>
+                <QuickActionButton
+                  label="Dictar"
+                  iconName="sparkles"
+                  onPress={() => notImplemented('Dictado')}
+                  disabled
+                />
+                <QuickActionButton
+                  label="Foto de agenda"
+                  iconName="plus"
+                  onPress={() => notImplemented('Foto de agenda')}
+                  disabled
+                />
+              </View>
+            </View>
+          </View>
         ) : (
           <>
             {/* Eventos de hoy */}
-            <SectionHeader title="Eventos de hoy" count={events.events.length} />
+            <SectionLabel label="Eventos de hoy" count={events.events.length} />
             {events.events.length === 0 ? (
-              <EmptyState
-                icon="calendar"
-                title="Sin eventos hoy"
-                description="Disfruta el día con calma — o crea uno desde el calendario."
-              />
+              <View style={styles.miniEmpty}>
+                <NovaPromptCard
+                  title="Sin eventos hoy."
+                  description="Crea uno desde Calendario o pídeselo a Nova."
+                />
+              </View>
             ) : (
-              <View
-                style={[
-                  styles.list,
-                  { backgroundColor: c.surface, borderColor: c.border },
-                ]}
-              >
-                {events.events.map((evt) => (
-                  <EventRow key={evt.id} event={evt} />
-                ))}
+              <View style={styles.cardWrap}>
+                <Card variant="default">
+                  {events.events.map((evt) => (
+                    <EventRow key={evt.id} event={evt} />
+                  ))}
+                </Card>
               </View>
             )}
 
             {/* Tareas pendientes */}
-            <SectionHeader title="Tareas pendientes" count={pendingTasks.length} />
+            <SectionLabel label="Tareas pendientes" count={pendingTasks.length} />
             {pendingTasks.length === 0 ? (
-              <EmptyState
-                icon="checklist"
-                title={totalDoneToday > 0 ? '¡Listo por hoy!' : 'Todo en orden'}
-                description={
-                  totalDoneToday > 0
-                    ? `Completaste ${totalDoneToday} tarea${totalDoneToday === 1 ? '' : 's'} hoy.`
-                    : 'Crea nuevas desde la pestaña Tareas.'
-                }
-              />
+              <View style={styles.miniEmpty}>
+                <NovaPromptCard
+                  title={totalDoneToday > 0 ? '¡Listo por hoy!' : 'Todo en orden'}
+                  description={
+                    totalDoneToday > 0
+                      ? `Completaste ${totalDoneToday} tarea${totalDoneToday === 1 ? '' : 's'} hoy.`
+                      : 'Crea nuevas desde la pestaña Tareas.'
+                  }
+                />
+              </View>
             ) : (
-              <View
-                style={[
-                  styles.list,
-                  { backgroundColor: c.surface, borderColor: c.border },
-                ]}
-              >
-                {pendingTasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    onToggle={tasks.toggleTask}
-                    onDelete={tasks.removeTask}
-                  />
-                ))}
+              <View style={styles.cardWrap}>
+                <Card variant="default">
+                  {pendingTasks.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      onToggle={tasks.toggleTask}
+                      onDelete={tasks.removeTask}
+                    />
+                  ))}
+                </Card>
               </View>
             )}
-
-            {/* Resumen de progreso al final, sutil */}
-            {totalDoneToday > 0 && pendingTasks.length > 0 ? (
-              <View style={[styles.progressNote, { backgroundColor: c.surfaceTint }]}>
-                <IconSymbol name="checklist" size={14} color={c.primary} />
-                <Text style={[styles.progressText, { color: c.text }]}>
-                  Hoy completaste {totalDoneToday} tarea{totalDoneToday === 1 ? '' : 's'}.
-                </Text>
-              </View>
-            ) : null}
           </>
         )}
       </ScrollView>
@@ -192,57 +202,20 @@ export default function MiDiaScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   scrollContent: { paddingBottom: Spacing['3xl'] },
-  header: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xs,
-    gap: 2,
-  },
-  greeting: {
-    ...Typography.caption,
-    fontWeight: '600',
-  },
-  title: { ...Typography.display, marginTop: 2 },
-  subtitle: { ...Typography.body, marginTop: 2 },
 
-  novaCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.lg,
-    padding: Spacing.md,
-    borderRadius: Radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  novaIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  novaText: { flex: 1, gap: 2 },
-  novaTitle: { ...Typography.bodyStrong },
-  novaDesc: { ...Typography.caption },
+  bannerWrap: { paddingHorizontal: Spacing.lg },
+  cardWrap: { paddingHorizontal: Spacing.lg },
+  miniEmpty: { paddingHorizontal: Spacing.lg },
 
-  list: {
-    marginHorizontal: Spacing.lg,
-    borderRadius: Radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-
-  progressNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.lg,
+  emptyWrap: {
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderRadius: Radius.md,
+    gap: Spacing.md,
   },
-  progressText: { ...Typography.caption, fontWeight: '600' },
+  actionsGrid: {
+    gap: Spacing.sm,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
 });

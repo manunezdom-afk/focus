@@ -1,12 +1,15 @@
 import * as Application from 'expo-application';
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Screen } from '@/components/Screen';
-import { useAuth } from '@/src/auth/AuthProvider';
-import { Colors } from '@/constants/theme';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { SettingsRow, SettingsSection } from '@/components/ui/SettingsList';
+import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useAuth } from '@/src/auth/AuthProvider';
 
 export default function SettingsScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -41,67 +44,83 @@ export default function SettingsScreen() {
     );
   }
 
+  function comingSoon(feature: string) {
+    Alert.alert(
+      feature,
+      'Esta función estará disponible en la próxima versión.',
+      [{ text: 'Entendido', style: 'default' }],
+    );
+  }
+
   const version = Application.nativeApplicationVersion ?? '0.1.0';
   const build = Application.nativeBuildVersion ?? '—';
 
   return (
-    <Screen title="Ajustes" subtitle="Tu cuenta y la app." scroll>
-      <View style={styles.body}>
-        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <Text style={[styles.label, { color: c.textMuted }]}>Cuenta</Text>
-          <Text style={[styles.value, { color: c.text }]}>{user?.email ?? '—'}</Text>
-        </View>
+    <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.scroll}>
+        <ScreenHeader title="Ajustes" subtitle="Tu cuenta y la app." />
 
-        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <Text style={[styles.label, { color: c.textMuted }]}>Versión</Text>
-          <Text style={[styles.value, { color: c.text }]}>
-            {version} ({build})
-          </Text>
-        </View>
+        <View style={styles.body}>
+          {/* Cuenta */}
+          <SettingsSection title="Cuenta">
+            <SettingsRow
+              isFirst
+              iconName="gearshape.fill"
+              label={user?.email ?? 'Sin sesión'}
+              sub="Sesión activa en este dispositivo"
+            />
+          </SettingsSection>
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={confirmSignOut}
-          disabled={loggingOut}
-          style={({ pressed }) => [
-            styles.dangerButton,
-            {
-              borderColor: c.danger,
-              opacity: loggingOut ? 0.6 : pressed ? 0.85 : 1,
-            },
-          ]}
-        >
-          <Text style={[styles.dangerText, { color: c.danger }]}>
-            {loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
-          </Text>
-        </Pressable>
-      </View>
-    </Screen>
+          {/* Nova personality (placeholder por ahora — backend ya lo soporta) */}
+          <SettingsSection title="Nova">
+            <SettingsRow
+              isFirst
+              iconName="sparkles"
+              label="Personalidad de Nova"
+              sub="Tono enfocado · Predeterminado"
+              onPress={() => comingSoon('Personalidad de Nova')}
+            />
+            <SettingsRow
+              iconName="sparkles"
+              label="Notificaciones inteligentes"
+              sub="Próximamente"
+              onPress={() => comingSoon('Notificaciones')}
+            />
+          </SettingsSection>
+
+          {/* App */}
+          <SettingsSection title="Aplicación">
+            <SettingsRow
+              isFirst
+              iconName="gearshape.fill"
+              label="Versión"
+              sub={`${version} (${build})`}
+            />
+          </SettingsSection>
+
+          {/* Zona peligrosa */}
+          <View style={styles.dangerWrap}>
+            <PrimaryButton
+              label={loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
+              variant="danger"
+              size="lg"
+              onPress={confirmSignOut}
+              loading={loggingOut}
+              disabled={loggingOut}
+            />
+          </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  body: { paddingHorizontal: 20, gap: 12 },
-  card: {
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 4,
+  safe: { flex: 1 },
+  scroll: { paddingBottom: Spacing['3xl'] + 60 },
+  body: {
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.lg,
   },
-  label: {
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  value: { fontSize: 16, fontWeight: '500' },
-  dangerButton: {
-    marginTop: 8,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  dangerText: { fontSize: 15, fontWeight: '600' },
+  dangerWrap: { marginTop: Spacing.md },
 });
