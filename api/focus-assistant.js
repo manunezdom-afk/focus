@@ -8,6 +8,9 @@ import { normalizeNovaPersonality } from './_lib/personality.js'
 import { rejectCrossSiteUnsafe, setCorsHeaders } from './_lib/security.js'
 import { getSupabaseAdmin, getUserIdFromAuth } from './_supabaseAdmin.js'
 import { ACTION_TYPES, checkLimit, getUserPlan, recordUsage } from './_lib/usageLimits.js'
+import { trackAIUsageEvent } from './_lib/aiUsageTracking.js'
+
+const MODEL_ID = 'claude-haiku-4-5-20251001'
 
 // Necesario en Pro plan: por defecto Vercel mata la función a los 10s, lo
 // cual era menor que el timeout de 25s del SDK de Anthropic — el handler
@@ -110,14 +113,47 @@ export default async function handler(req, res) {
     { role: 'user', content: message },
   ]
 
-  async function runClaude(extra = '') {
+  async function runClaude(extra = '', attempt = 1) {
     const extraMsgs = extra ? [{ role: 'user', content: extra }] : []
-    return anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1500,
-      system: systemPrompt,
-      messages: [...messages, ...extraMsgs],
-    })
+    const start = Date.now()
+    let response
+    try {
+      response = await anthropic.messages.create({
+        model: MODEL_ID,
+        max_tokens: 1500,
+        system: systemPrompt,
+        messages: [...messages, ...extraMsgs],
+      })
+    } catch (err) {
+      // Registrar el intento fallido también — sin tokens (Anthropic no los
+      // devolvió). Útil para distinguir "modelo cayó" de "no se llamó nunca".
+      trackAIUsageEvent({
+        admin,
+        userId,
+        action_type: ACTION_TYPES.NOVA_MESSAGE,
+        endpoint: 'focus-assistant',
+        model: MODEL_ID,
+        usage: { input_tokens: 0, output_tokens: 0, source: 'unavailable' },
+        success: false,
+        error_type: err?.name || 'upstream_error',
+        duration_ms: Date.now() - start,
+        metadata: { plan, retry_attempt: attempt },
+      }).catch(() => {})
+      throw err
+    }
+    // Tracking granular del costo real de esta llamada al modelo.
+    trackAIUsageEvent({
+      admin,
+      userId,
+      action_type: ACTION_TYPES.NOVA_MESSAGE,
+      endpoint: 'focus-assistant',
+      model: response?.model || MODEL_ID,
+      anthropicResponse: response,
+      success: true,
+      duration_ms: Date.now() - start,
+      metadata: { plan, retry_attempt: attempt },
+    }).catch(() => {})
+    return response
   }
 
   // Procesa la respuesta del modelo, aplica enforcement de smart_action y
@@ -160,13 +196,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const d1 = await runClaude()
+    const d1 = await runClaude('', 1)
     const r1 = (d1.content?.[0]?.text ?? '').trim()
     try {
       return finalize(safeParseAssistantJSON(r1))
     } catch {
       const d2 = await runClaude(
-        'Tu respuesta anterior tuvo JSON inválido o incompleto. Reintenta ahora. Responde SOLO con un objeto JSON válido siguiendo exactamente el formato indicado. Cierra todas las llaves y corchetes.'
+        'Tu respuesta anterior tuvo JSON inválido o incompleto. Reintenta ahora. Responde SOLO con un objeto JSON válido siguiendo exactamente el formato indicado. Cierra todas las llaves y corchetes.',
+        2,
       )
       const r2 = (d2.content?.[0]?.text ?? '').trim()
       try {

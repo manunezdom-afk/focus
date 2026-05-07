@@ -2,6 +2,9 @@ import { rateLimited, clientIp } from './_lib/rateLimit.js'
 import { rejectCrossSiteUnsafe, setCorsHeaders } from './_lib/security.js'
 import { getSupabaseAdmin, getUserIdFromAuth } from './_supabaseAdmin.js'
 import { ACTION_TYPES, checkLimit, getUserPlan, recordUsage } from './_lib/usageLimits.js'
+import { trackAIUsageEvent } from './_lib/aiUsageTracking.js'
+
+const MODEL_ID = 'claude-haiku-4-5-20251001'
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
 const MAX_IMAGES = 4
@@ -140,6 +143,7 @@ Ejemplo de output: [
 Si no hay eventos claros: []`,
   }
 
+  const start = Date.now()
   try {
     const anthropicRes = await fetch(ANTHROPIC_API, {
       method: 'POST',
@@ -149,7 +153,7 @@ Si no hay eventos claros: []`,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL_ID,
         max_tokens: 2048,
         messages: [{ role: 'user', content: [...imageBlocks, textBlock] }],
       }),
@@ -168,6 +172,20 @@ Si no hay eventos claros: []`,
         detail = (() => { try { return JSON.parse(txt)?.error?.message } catch { return null } })() || txt.slice(0, 200)
       } catch {}
       console.error('[analyze-photo] upstream', anthropicRes.status)
+      // Tracking de la llamada fallida (sin tokens — Anthropic no los reporta
+      // en errores). Útil para distinguir spike de errores upstream.
+      trackAIUsageEvent({
+        admin,
+        userId,
+        action_type: ACTION_TYPES.PHOTO_ANALYSIS,
+        endpoint: 'analyze-photo',
+        model: MODEL_ID,
+        usage: { input_tokens: 0, output_tokens: 0, source: 'unavailable' },
+        success: false,
+        error_type: `upstream_${anthropicRes.status}`,
+        duration_ms: Date.now() - start,
+        metadata: { plan },
+      }).catch(() => {})
       return res.status(502).json({ error: 'api_error', status: anthropicRes.status, detail })
     }
 
@@ -185,6 +203,19 @@ Si no hay eventos claros: []`,
     events = (Array.isArray(events) ? events : [])
       .filter((e) => e && typeof e.title === 'string' && e.title.trim())
 
+    // Tracking granular: tokens reales + costo. Fire-and-forget.
+    trackAIUsageEvent({
+      admin,
+      userId,
+      action_type: ACTION_TYPES.PHOTO_ANALYSIS,
+      endpoint: 'analyze-photo',
+      model: data?.model || MODEL_ID,
+      anthropicResponse: data,
+      success: true,
+      duration_ms: Date.now() - start,
+      metadata: { plan, had_actions: events.length > 0 },
+    }).catch(() => {})
+
     // Contamos el uso DESPUÉS de un análisis exitoso. Si Anthropic falló
     // o devolvió eventos vacíos, no penalizamos al usuario.
     recordUsage(admin, userId, ACTION_TYPES.PHOTO_ANALYSIS).catch(() => {})
@@ -194,6 +225,19 @@ Si no hay eventos claros: []`,
     // Sin volcar err.message completo: a veces incluye URLs/headers
     // serializados que ensucian logs sin aportar diagnóstico.
     console.error('[analyze-photo]', err?.name || 'Error')
+    // Tracking del error de red/timeout (sin tokens).
+    trackAIUsageEvent({
+      admin,
+      userId,
+      action_type: ACTION_TYPES.PHOTO_ANALYSIS,
+      endpoint: 'analyze-photo',
+      model: MODEL_ID,
+      usage: { input_tokens: 0, output_tokens: 0, source: 'unavailable' },
+      success: false,
+      error_type: err?.name || 'fetch_error',
+      duration_ms: Date.now() - start,
+      metadata: { plan },
+    }).catch(() => {})
     return res.status(500).json({ error: 'internal_error' })
   }
 }
