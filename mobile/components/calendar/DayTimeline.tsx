@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { isToday } from '@/src/data/today';
@@ -9,6 +11,9 @@ import type { EventItem } from '@/src/data/types';
 type Props = {
   dateISO: string;
   events: EventItem[]; // ya filtrados al día seleccionado
+  // Llamado al tocar el ícono papelera; el padre maneja la confirmación
+  // (Alert.alert con destructive). Si no se pasa, no se muestra el botón.
+  onDeleteEvent?: (id: string, title: string) => void;
 };
 
 // Estado temporal de un evento dentro del día. `now` solo aplica cuando
@@ -65,7 +70,7 @@ function sortByTime(events: EventItem[]): EventItem[] {
   });
 }
 
-export function DayTimeline({ dateISO, events }: Props) {
+export function DayTimeline({ dateISO, events, onDeleteEvent }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const isCurrentDay = isToday(dateISO);
@@ -78,9 +83,20 @@ export function DayTimeline({ dateISO, events }: Props) {
 
   return (
     <View style={styles.list}>
-      {sorted.map((event) => {
+      {sorted.map((event, idx) => {
         const window = classify(event, isCurrentDay, nowMinutes);
-        return <TimelineRow key={event.id} event={event} window={window} c={c} />;
+        return (
+          <TimelineRow
+            key={event.id}
+            event={event}
+            window={window}
+            c={c}
+            enterIndex={idx}
+            onDeletePress={
+              onDeleteEvent ? () => onDeleteEvent(event.id, event.title) : undefined
+            }
+          />
+        );
       })}
     </View>
   );
@@ -90,16 +106,21 @@ function TimelineRow({
   event,
   window,
   c,
+  enterIndex,
+  onDeletePress,
 }: {
   event: EventItem;
   window: Window;
   c: typeof Colors.light;
+  enterIndex: number;
+  onDeletePress?: () => void;
 }) {
   const { start } = parseTimeRange(event.time);
   const isPast = window === 'past';
   const isNow = window === 'now';
   const isUntimed = window === 'untimed';
   const timeLabel = isUntimed ? 'Todo' : start ?? '';
+  const enterDelay = Math.min(160 + enterIndex * 50, 400);
 
   const cardBg = isNow ? c.primaryContainer : c.surface;
   const cardBorder = isNow ? c.primary : c.border;
@@ -113,7 +134,10 @@ function TimelineRow({
         : c.text;
 
   return (
-    <View style={[styles.row, isPast ? styles.rowPast : null]}>
+    <Animated.View
+      entering={FadeInDown.delay(enterDelay).duration(320)}
+      style={[styles.row, isPast ? styles.rowPast : null]}
+    >
       <View style={styles.timeCol}>
         <Text
           style={[
@@ -153,10 +177,31 @@ function TimelineRow({
           >
             {event.title}
           </Text>
+
+          {/* Pills: "Ahora" si en curso, "Finalizado" si pasado.
+              Parity con el legacy CalendarView que mostraba ambos. */}
           {isNow ? (
             <View style={[styles.nowBadge, { backgroundColor: c.surface }]}>
               <Text style={[styles.nowBadgeText, { color: c.primary }]}>Ahora</Text>
             </View>
+          ) : isPast ? (
+            <View style={[styles.pastBadge, { backgroundColor: c.surfaceMuted }]}>
+              <Text style={[styles.pastBadgeText, { color: c.textMuted }]}>Finalizado</Text>
+            </View>
+          ) : null}
+
+          {/* Botón papelera — paridad con Mi Día. El padre maneja la
+              confirmación con Alert.alert destructive. */}
+          {onDeletePress ? (
+            <Pressable
+              onPress={onDeletePress}
+              hitSlop={8}
+              style={({ pressed }) => [styles.deleteBtn, { opacity: pressed ? 0.5 : 1 }]}
+              accessibilityLabel="Eliminar evento"
+              accessibilityRole="button"
+            >
+              <IconSymbol name="trash.fill" size={14} color={c.textSubtle} />
+            </Pressable>
           ) : null}
         </View>
         {event.description ? (
@@ -174,7 +219,7 @@ function TimelineRow({
           </Text>
         ) : null}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -231,6 +276,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
     letterSpacing: 0.4,
+  },
+  pastBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: Radius.full,
+  },
+  pastBadgeText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  deleteBtn: {
+    paddingTop: 2,
+    paddingHorizontal: 2,
   },
   description: {
     ...Typography.caption,
