@@ -1,13 +1,5 @@
-import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  Easing,
-  FadeInDown,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -31,30 +23,17 @@ export function EmptyDayState({ onPickPrompt }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
-  // Halo pulse sutil en el ícono Nova: scale 1 ↔ 1.06 cada 2.4s. Se
-  // siente como una "respiración" que sugiere presencia inteligente.
-  const haloScale = useSharedValue(1);
-  useEffect(() => {
-    haloScale.value = withRepeat(
-      withTiming(1.06, { duration: 1200, easing: Easing.inOut(Easing.quad) }),
-      -1,
-      true,
-    );
-  }, [haloScale]);
-  const haloAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: haloScale.value }],
-  }));
+  // Sin pulse infinito acá — corría en UI thread incluso cuando esta
+  // tab no estaba visible. Ícono estático, mismo look sin coste perf.
 
   return (
     <View style={styles.wrap}>
       {/* Intro centrada — espejo del legacy mobile: ícono + título humilde
           + descripción invitando a Nova. */}
       <View style={styles.intro}>
-        <Animated.View
-          style={[styles.iconCircle, { backgroundColor: c.primaryContainer }, haloAnimatedStyle]}
-        >
+        <View style={[styles.iconCircle, { backgroundColor: c.primaryContainer }]}>
           <IconSymbol name="sparkles" size={22} color={c.primary} />
-        </Animated.View>
+        </View>
         <Animated.Text
           entering={FadeInDown.delay(60).duration(320)}
           style={[styles.title, { color: c.text }]}

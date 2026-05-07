@@ -15,31 +15,41 @@ type Props = {
   size?: number;
   // Halo ambiente (anillo tinted exterior). false en headers compactos.
   ambient?: boolean;
+  // Respiración infinita 1↔1.05 cada 1.6s. Default false para no
+  // gastar UI thread con animaciones invisibles. Activar SOLO en orbs
+  // grandes hero (size >= 80) que el usuario está mirando directamente.
+  breathing?: boolean;
 };
 
 // Firma visual de Nova en mobile. Adaptación del NovaOrb legacy
 // (radial-gradient + breathing) sin requerir gradient lib: orb sólido
 // indigo + highlight superior izquierdo simulando reflejo + halo
-// animado opcional. Respiración suave 1↔1.06 cada 1.6s, mismo
-// patrón que el legacy (3.2s legacy, acortado en mobile para que se
-// note en una sesión corta).
-export function NovaOrb({ size = 64, ambient = true }: Props) {
+// ambient opcional.
+//
+// Performance: la respiración (`withRepeat` infinito) corre en UI thread
+// pero igual consume worklet cycles. Default off para que en headers
+// compactos (Tasks summary, Nova header) sea estática. Solo los hero
+// orbs grandes (Nova empty 88px, Tasks empty 84px) la activan.
+export function NovaOrb({ size = 64, ambient = true, breathing = false }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
   const pulse = useSharedValue(1);
   useEffect(() => {
+    if (!breathing) {
+      pulse.value = 1;
+      return;
+    }
     pulse.value = withRepeat(
       withTiming(1.05, { duration: 1600, easing: Easing.inOut(Easing.quad) }),
       -1,
       true,
     );
-  }, [pulse]);
+  }, [breathing, pulse]);
 
   const orbAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulse.value }],
   }));
-  // Halo respira en contrafase para sentirse más vivo.
   const haloAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: 2 - pulse.value + 0.05 }],
   }));

@@ -279,7 +279,7 @@ export default function NovaScreen() {
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.emptyHero}>
-              <NovaOrb size={88} ambient />
+              <NovaOrb size={88} ambient breathing />
               <Text style={[styles.emptyTitle, { color: c.text }]}>¿Qué necesitas?</Text>
               <Text style={[styles.emptyDesc, { color: c.textMuted }]}>
                 Te ayudo a agendar, mover o limpiar tu día. Siempre confirmas antes de aplicar.
