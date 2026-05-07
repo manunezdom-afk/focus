@@ -107,3 +107,32 @@ export function isValidEmail(value) {
   if (v.length > 254) return false
   return EMAIL_RE.test(v)
 }
+
+// Score de fortaleza de password 0-4.
+// 0: vacía o <6 chars
+// 1: 6-7 chars o solo un tipo de carácter
+// 2: 8+ chars con dos tipos
+// 3: 8+ chars con tres tipos
+// 4: 12+ chars con tres+ tipos
+// Tipos: minúscula, mayúscula, dígito, símbolo.
+export function passwordStrength(value) {
+  const v = String(value ?? '')
+  if (!v || v.length < 6) return 0
+  let types = 0
+  if (/[a-z]/.test(v)) types++
+  if (/[A-Z]/.test(v)) types++
+  if (/\d/.test(v)) types++
+  if (/[^A-Za-z0-9]/.test(v)) types++
+  if (v.length < 8) return Math.min(1, types > 1 ? 1 : 1)
+  if (v.length >= 12 && types >= 3) return 4
+  if (types >= 3) return 3
+  if (types >= 2) return 2
+  return 1
+}
+
+// Mínimo aceptable para signup: 8 chars. La UI muestra fortaleza pero no
+// fuerza variedad — con 8 chars cualquiera ya pasa el bar mínimo (Supabase
+// por defecto exige 6, así que somos un poco más estrictos en el cliente).
+export function isAcceptablePassword(value) {
+  return String(value ?? '').length >= 8
+}

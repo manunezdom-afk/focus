@@ -1,7 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
-import { humanizeAuthError, isValidEmail, isRateLimitError, extractRetryAfterSec } from '../utils/authErrors'
+import {
+  humanizeAuthError,
+  isValidEmail,
+  isRateLimitError,
+  extractRetryAfterSec,
+  passwordStrength,
+  isAcceptablePassword,
+} from '../utils/authErrors'
 import QRCodeView from './QRCodeView'
 import QRScannerSheet from './QRScannerSheet'
 import { pushModal, popModal } from '../utils/modalStack'
@@ -92,6 +99,8 @@ export default function AuthModal({ isOpen, onClose }) {
     signInWithEmail, verifyOtp, user, signOut,
     signInWithGoogle,
     signInWithPassword, signUpWithPassword,
+    resetPasswordForEmail, updatePassword,
+    recoveryMode, setRecoveryMode,
     startDevicePairing, claimDevicePairing, exchangeDeviceToken,
   } = useAuth()
 
@@ -101,10 +110,14 @@ export default function AuthModal({ isOpen, onClose }) {
   const [email, setEmail]       = useState(initialPending?.email || '')
   const [code, setCode]         = useState('')
   // Pasos:
-  //   chooser         — elección entre email-OTP, email+contraseña y QR
+  //   chooser         — elección entre Iniciar sesión / Crear cuenta / OTP / QR
   //   email           — pedir email para OTP
   //   code            — verificar OTP
-  //   password        — login/registro con email + contraseña
+  //   signin          — login con email + contraseña + "Olvidé mi contraseña"
+  //   signup          — registro con nombre, email, contraseña + confirmación, t&c
+  //   forgot          — pedir email para enviar link de reset
+  //   forgot_sent     — confirmación de "te mandamos el correo"
+  //   signup_sent     — confirmación post-signup cuando email confirmation está activo
   //   device_scan     — (sin sesión) escanear/tipear código para entrar
   //   device_show     — (logueado) mostrar QR para que otro dispositivo entre
   //   device_success  — breve confirmación antes de cerrar
@@ -151,12 +164,15 @@ export default function AuthModal({ isOpen, onClose }) {
   // Banner post rate-limit sugiriendo usar otro dispositivo.
   const [rateLimitHit, setRateLimitHit] = useState(false)
 
-  // ── Lado password (signin/signup) ───────────────────────────────────────
-  // Mismo paso 'password' sirve para entrar o crear cuenta. El toggle al pie
-  // alterna el modo sin desmontar el form.
+  // ── Lado password (signin/signup separados) ────────────────────────────
+  // Ahora signin y signup viven en pasos distintos para que el usuario
+  // entienda qué está haciendo. Compartimos el state `password` porque solo
+  // uno de los dos forms está montado a la vez.
   const [password, setPassword] = useState('')
-  const [passwordMode, setPasswordMode] = useState('signin') // 'signin' | 'signup'
+  const [passwordConfirm, setPasswordConfirm] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [name, setName] = useState('')
+  const [acceptTerms, setAcceptTerms] = useState(false)
   // Cuando el proyecto Supabase tiene email-confirmation activado, signUp
   // devuelve session=null y el usuario debe abrir el link del correo. En ese
   // caso mostramos un mensaje en lugar del form, sin cerrar el modal.
@@ -202,6 +218,14 @@ export default function AuthModal({ isOpen, onClose }) {
       setClaimCode('')
       setSharePairing(null)
       setClaimStage('idle')
+      // Limpieza extra de estados de signup/forgot para que un reopen
+      // no muestre datos sensibles del intento anterior.
+      setPassword('')
+      setPasswordConfirm('')
+      setName('')
+      setAcceptTerms(false)
+      setShowPassword(false)
+      setSignupSuccess(false)
     }
     onClose?.()
   }, [onClose])
@@ -379,6 +403,19 @@ export default function AuthModal({ isOpen, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, claimCode])
 
+  // PASSWORD_RECOVERY: si Supabase nos avisó (vía AuthContext), forzamos
+  // el paso de "nueva contraseña". Esto pisa cualquier otro flujo en curso
+  // porque la sesión recovery solo sirve para cambiar la contraseña.
+  useEffect(() => {
+    if (!isOpen) return
+    if (recoveryMode && step !== 'recovery' && step !== 'recovery_success') {
+      setStep('recovery')
+      setError(null)
+      setPassword('')
+      setPasswordConfirm('')
+    }
+  }, [isOpen, recoveryMode, step])
+
   // Bloqueo de scroll + Escape + interceptar botón atrás del navegador.
   // El back cierra el modal en vez de salir de la app.
   useEffect(() => {
@@ -520,7 +557,7 @@ export default function AuthModal({ isOpen, onClose }) {
     setResendCooldown(0)
   }
 
-  async function handlePasswordSubmit(e) {
+  async function handleSigninSubmit(e) {
     e?.preventDefault?.()
     if (submitLock.current || loading) return
     if (!emailValid) {
@@ -528,30 +565,121 @@ export default function AuthModal({ isOpen, onClose }) {
       return
     }
     if (password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres.')
+      setError('Ingresa tu contraseña.')
       return
     }
     submitLock.current = true
     setLoading(true)
     setError(null)
     try {
-      if (passwordMode === 'signup') {
-        const { session } = await signUpWithPassword(email, password)
-        if (!session) {
-          // Email confirmation activado en Supabase: no hay sesión todavía.
-          // Mostramos el mensaje "revisa tu correo" sin cerrar el modal.
-          setSignupSuccess(true)
-          setPassword('')
-          return
-        }
-      } else {
-        await signInWithPassword(email, password)
-      }
+      await signInWithPassword(email, password)
       // SIGNED_IN dispara onAuthStateChange en AuthContext, que maneja la
       // limpieza de caché global y el flush de cola. Solo cerramos el modal.
       setPassword('')
       handleClose()
     } catch (err) {
+      setError(humanizeAuthError(err))
+    } finally {
+      setLoading(false)
+      submitLock.current = false
+    }
+  }
+
+  async function handleSignupSubmit(e) {
+    e?.preventDefault?.()
+    if (submitLock.current || loading) return
+    if (!emailValid) {
+      setError('Ingresa un email válido.')
+      return
+    }
+    if (!isAcceptablePassword(password)) {
+      setError('La contraseña debe tener al menos 8 caracteres.')
+      return
+    }
+    if (password !== passwordConfirm) {
+      setError('Las contraseñas no coinciden.')
+      return
+    }
+    if (!acceptTerms) {
+      setError('Debes aceptar los términos para continuar.')
+      return
+    }
+    submitLock.current = true
+    setLoading(true)
+    setError(null)
+    try {
+      const { session } = await signUpWithPassword(email, password, { name: name.trim() })
+      if (!session) {
+        // Email confirmation activado en Supabase: no hay sesión todavía.
+        // Mostramos el mensaje "revisa tu correo" sin cerrar el modal.
+        setSignupSuccess(true)
+        setStep('signup_sent')
+        setPassword('')
+        setPasswordConfirm('')
+        return
+      }
+      // Auto-login (Supabase devolvió session): cerramos el modal.
+      setPassword('')
+      setPasswordConfirm('')
+      setName('')
+      setAcceptTerms(false)
+      handleClose()
+    } catch (err) {
+      setError(humanizeAuthError(err))
+    } finally {
+      setLoading(false)
+      submitLock.current = false
+    }
+  }
+
+  async function handleRecoverySubmit(e) {
+    e?.preventDefault?.()
+    if (submitLock.current || loading) return
+    if (!isAcceptablePassword(password)) {
+      setError('La contraseña debe tener al menos 8 caracteres.')
+      return
+    }
+    if (password !== passwordConfirm) {
+      setError('Las contraseñas no coinciden.')
+      return
+    }
+    submitLock.current = true
+    setLoading(true)
+    setError(null)
+    try {
+      await updatePassword(password)
+      setRecoveryMode(false)
+      setStep('recovery_success')
+      setPassword('')
+      setPasswordConfirm('')
+      setTimeout(() => handleClose(), 1500)
+    } catch (err) {
+      setError(humanizeAuthError(err))
+    } finally {
+      setLoading(false)
+      submitLock.current = false
+    }
+  }
+
+  async function handleForgotSubmit(e) {
+    e?.preventDefault?.()
+    if (submitLock.current || loading) return
+    if (!emailValid) {
+      setError('Ingresa un email válido.')
+      return
+    }
+    submitLock.current = true
+    setLoading(true)
+    setError(null)
+    try {
+      await resetPasswordForEmail(email)
+      setStep('forgot_sent')
+    } catch (err) {
+      if (isRateLimitError(err)) {
+        const secs = extractRetryAfterSec(err) ?? RATE_LIMIT_COOLDOWN_SEC
+        writeCooldownSec(secs)
+        setResendCooldown(secs)
+      }
       setError(humanizeAuthError(err))
     } finally {
       setLoading(false)
@@ -633,7 +761,125 @@ export default function AuthModal({ isOpen, onClose }) {
               {/* Grip handle visual en mobile */}
               <div className="sm:hidden mx-auto mb-3 h-1 w-10 rounded-full bg-slate-200" aria-hidden="true" />
 
-              {user ? (
+              {/* recoveryMode tiene precedencia sobre el bloque "user" porque
+                  Supabase deja al usuario logueado durante PASSWORD_RECOVERY,
+                  pero la UI debe mostrar el form de "nueva contraseña" antes
+                  que el menú de "sesión activa". */}
+              {recoveryMode && (step === 'recovery' || step === 'recovery_success') ? (
+                step === 'recovery' ? (
+                  <>
+                    <div className="flex items-start justify-between gap-3 mb-5">
+                      <div className="min-w-0 flex-1">
+                        <h2 className="text-[20px] sm:text-[22px] font-bold text-slate-900 leading-tight">
+                          Nueva contraseña
+                        </h2>
+                        <p className="text-[12.5px] text-slate-500 mt-1 leading-snug">
+                          Crea una nueva contraseña para tu cuenta.
+                        </p>
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleRecoverySubmit} noValidate>
+                      <div className="relative mb-1.5">
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          value={password}
+                          onChange={(e) => { setPassword(e.target.value); if (error) setError(null) }}
+                          placeholder="Nueva contraseña"
+                          required
+                          minLength={8}
+                          autoComplete="new-password"
+                          autoFocus
+                          aria-label="Nueva contraseña"
+                          aria-invalid={!!error}
+                          className="w-full px-4 py-3.5 pr-12 rounded-2xl border border-slate-200 text-[15px] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((v) => !v)}
+                          aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-slate-400 text-[20px]">
+                            {showPassword ? 'visibility_off' : 'visibility'}
+                          </span>
+                        </button>
+                      </div>
+
+                      {password.length > 0 && (() => {
+                        const score = passwordStrength(password)
+                        const labels = ['Muy débil', 'Débil', 'Aceptable', 'Buena', 'Fuerte']
+                        const colors = ['bg-red-400', 'bg-orange-400', 'bg-yellow-400', 'bg-emerald-500', 'bg-emerald-600']
+                        return (
+                          <div className="mb-3 px-1" aria-live="polite">
+                            <div className="flex gap-1 mb-1">
+                              {[0, 1, 2, 3].map((i) => (
+                                <div
+                                  key={i}
+                                  className={`h-1 flex-1 rounded-full transition-colors ${
+                                    i < score ? colors[score] : 'bg-slate-200'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            <p className="text-[11px] text-slate-500">
+                              Fortaleza: <span className="font-semibold text-slate-700">{labels[score]}</span>
+                            </p>
+                          </div>
+                        )
+                      })()}
+
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={passwordConfirm}
+                        onChange={(e) => { setPasswordConfirm(e.target.value); if (error) setError(null) }}
+                        placeholder="Confirma la nueva contraseña"
+                        required
+                        minLength={8}
+                        autoComplete="new-password"
+                        aria-label="Confirmar nueva contraseña"
+                        aria-invalid={!!error || (passwordConfirm.length > 0 && password !== passwordConfirm)}
+                        className={`w-full px-4 py-3.5 rounded-2xl border text-[15px] mb-3 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 ${
+                          passwordConfirm.length > 0 && password !== passwordConfirm
+                            ? 'border-red-300'
+                            : 'border-slate-200'
+                        }`}
+                      />
+
+                      {error && (
+                        <p role="alert" className="text-red-500 text-[12.5px] mb-3 leading-snug">
+                          {error}
+                        </p>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={
+                          loading ||
+                          !isAcceptablePassword(password) ||
+                          password !== passwordConfirm
+                        }
+                        className="w-full py-3.5 bg-primary text-white rounded-2xl text-[14px] font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                      >
+                        {loading ? (<><Spinner /> Guardando…</>) : 'Guardar nueva contraseña'}
+                      </button>
+                    </form>
+                  </>
+                ) : (
+                  <div className="text-center py-6">
+                    <span
+                      className="material-symbols-outlined text-6xl text-emerald-500 mb-3 block"
+                      style={{ fontVariationSettings: "'FILL' 1" }}
+                    >
+                      check_circle
+                    </span>
+                    <p className="font-semibold text-slate-800 text-[16px]">Contraseña actualizada</p>
+                    <p className="text-[12.5px] text-slate-500 mt-1 leading-snug">
+                      Ya puedes seguir usando Focus con tu nueva contraseña.
+                    </p>
+                  </div>
+                )
+              ) : user ? (
                 step === 'device_show' ? (
                   /* ── Logged-in: mostrar QR para que otro dispositivo entre ── */
                   <>
@@ -762,15 +1008,15 @@ export default function AuthModal({ isOpen, onClose }) {
                   </div>
                 )
               ) : step === 'chooser' ? (
-                /* ── Chooser: elegir método ──────────────────────────── */
+                /* ── Chooser: elegir método (signin / signup / OTP / QR) ── */
                 <>
                   <div className="flex items-start justify-between gap-3 mb-5">
                     <div className="min-w-0 flex-1">
                       <h2 className="text-[20px] sm:text-[22px] font-bold text-slate-900 leading-tight">
-                        Inicia sesión
+                        Bienvenido a Focus
                       </h2>
                       <p className="text-[12.5px] text-slate-500 mt-1 leading-snug">
-                        Elige cómo quieres entrar.
+                        Inicia sesión o crea tu cuenta para sincronizar tus datos.
                       </p>
                     </div>
                     <button
@@ -797,10 +1043,56 @@ export default function AuthModal({ isOpen, onClose }) {
                   </div>
 
                   <div className="space-y-2.5">
+                    {/* CTA primaria: Iniciar sesión con email + contraseña */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep('signin')
+                        setError(null)
+                        setSignupSuccess(false)
+                      }}
+                      className="w-full px-4 py-3.5 rounded-2xl bg-primary text-white hover:opacity-95 active:scale-[0.99] transition-all flex items-center gap-3 text-left shadow-sm"
+                    >
+                      <span className="material-symbols-outlined text-white text-[22px] flex-shrink-0">login</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[14px] font-bold">Iniciar sesión</p>
+                        <p className="text-[11.5px] text-white/80 leading-snug">Con tu email y contraseña.</p>
+                      </div>
+                      <span className="material-symbols-outlined text-white/70 text-[20px]">chevron_right</span>
+                    </button>
+
+                    {/* CTA secundaria: Crear cuenta nueva */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep('signup')
+                        setError(null)
+                        setSignupSuccess(false)
+                        setPassword('')
+                        setPasswordConfirm('')
+                        setName('')
+                        setAcceptTerms(false)
+                      }}
+                      className="w-full px-4 py-3.5 rounded-2xl border-2 border-primary/30 hover:border-primary/50 hover:bg-primary/5 active:scale-[0.99] transition-all flex items-center gap-3 text-left"
+                    >
+                      <span className="material-symbols-outlined text-primary text-[22px] flex-shrink-0">person_add</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[14px] font-bold text-slate-800">Crear cuenta</p>
+                        <p className="text-[11.5px] text-slate-500 leading-snug">Empieza con Focus en menos de un minuto.</p>
+                      </div>
+                      <span className="material-symbols-outlined text-slate-300 text-[20px]">chevron_right</span>
+                    </button>
+
+                    <div className="flex items-center gap-2 my-2">
+                      <div className="flex-1 h-px bg-slate-100" />
+                      <span className="text-[11px] text-slate-400">o entra con</span>
+                      <div className="flex-1 h-px bg-slate-100" />
+                    </div>
+
                     <button
                       type="button"
                       onClick={async () => { setError(null); try { await signInWithGoogle() } catch (e) { setError(e.message) } }}
-                      className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.99] transition-all flex items-center gap-3"
+                      className="w-full px-4 py-3 rounded-2xl border border-slate-200 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.99] transition-all flex items-center gap-3"
                     >
                       <svg width="20" height="20" viewBox="0 0 18 18" fill="none" className="flex-shrink-0">
                         <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615Z" fill="#4285F4"/>
@@ -809,27 +1101,7 @@ export default function AuthModal({ isOpen, onClose }) {
                         <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58Z" fill="#EA4335"/>
                       </svg>
                       <div className="flex-1 min-w-0 text-left">
-                        <p className="text-[14px] font-semibold text-slate-800">Continuar con Google</p>
-                        <p className="text-[11.5px] text-slate-500 leading-snug">Rápido, seguro y sin contraseña extra.</p>
-                      </div>
-                      <span className="material-symbols-outlined text-slate-300 text-[20px]">chevron_right</span>
-                    </button>
-
-                    <div className="flex items-center gap-2 my-1">
-                      <div className="flex-1 h-px bg-slate-100" />
-                      <span className="text-[11px] text-slate-400">o continúa con</span>
-                      <div className="flex-1 h-px bg-slate-100" />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => { setStep('password'); setError(null); setPasswordMode('signin'); setSignupSuccess(false) }}
-                      className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.99] transition-all flex items-center gap-3 text-left"
-                    >
-                      <span className="material-symbols-outlined text-primary text-[22px] flex-shrink-0">lock</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[14px] font-semibold text-slate-800">Email y contraseña</p>
-                        <p className="text-[11.5px] text-slate-500 leading-snug">Inicia sesión o crea una cuenta.</p>
+                        <p className="text-[13.5px] font-semibold text-slate-800">Continuar con Google</p>
                       </div>
                       <span className="material-symbols-outlined text-slate-300 text-[20px]">chevron_right</span>
                     </button>
@@ -837,12 +1109,12 @@ export default function AuthModal({ isOpen, onClose }) {
                     <button
                       type="button"
                       onClick={() => { setStep('email'); setError(null) }}
-                      className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.99] transition-all flex items-center gap-3 text-left"
+                      className="w-full px-4 py-3 rounded-2xl border border-slate-200 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.99] transition-all flex items-center gap-3 text-left"
                     >
-                      <span className="material-symbols-outlined text-primary text-[22px] flex-shrink-0">mail</span>
+                      <span className="material-symbols-outlined text-primary text-[20px] flex-shrink-0">mail</span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[14px] font-semibold text-slate-800">Código por email</p>
-                        <p className="text-[11.5px] text-slate-500 leading-snug">Sin contraseña. Te enviamos un código por correo.</p>
+                        <p className="text-[13.5px] font-semibold text-slate-800">Código por email</p>
+                        <p className="text-[11px] text-slate-500 leading-snug">Sin contraseña.</p>
                       </div>
                       <span className="material-symbols-outlined text-slate-300 text-[20px]">chevron_right</span>
                     </button>
@@ -850,12 +1122,12 @@ export default function AuthModal({ isOpen, onClose }) {
                     <button
                       type="button"
                       onClick={() => { setClaimCode(''); setError(null); setStep('device_scan') }}
-                      className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.99] transition-all flex items-center gap-3 text-left"
+                      className="w-full px-4 py-3 rounded-2xl border border-slate-200 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.99] transition-all flex items-center gap-3 text-left"
                     >
-                      <span className="material-symbols-outlined text-primary text-[22px] flex-shrink-0">qr_code_scanner</span>
+                      <span className="material-symbols-outlined text-primary text-[20px] flex-shrink-0">qr_code_scanner</span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[14px] font-semibold text-slate-800">Entrar con QR de otro dispositivo</p>
-                        <p className="text-[11.5px] text-slate-500 leading-snug">Escanea el código de donde ya tienes sesión.</p>
+                        <p className="text-[13.5px] font-semibold text-slate-800">QR de otro dispositivo</p>
+                        <p className="text-[11px] text-slate-500 leading-snug">Si ya tienes sesión en otro lado.</p>
                       </div>
                       <span className="material-symbols-outlined text-slate-300 text-[20px]">chevron_right</span>
                     </button>
@@ -871,18 +1143,16 @@ export default function AuthModal({ isOpen, onClose }) {
                     Al continuar aceptas que usemos tu email solo para autenticación.
                   </p>
                 </>
-              ) : step === 'password' ? (
-                /* ── Email + contraseña (signin/signup) ────────────── */
+              ) : step === 'signin' ? (
+                /* ── Iniciar sesión (email + contraseña) ─────────────── */
                 <>
                   <div className="flex items-start justify-between gap-3 mb-5">
                     <div className="min-w-0 flex-1">
                       <h2 className="text-[20px] sm:text-[22px] font-bold text-slate-900 leading-tight">
-                        {passwordMode === 'signup' ? 'Crear cuenta' : 'Iniciar sesión'}
+                        Iniciar sesión
                       </h2>
                       <p className="text-[12.5px] text-slate-500 mt-1 leading-snug">
-                        {passwordMode === 'signup'
-                          ? 'Usa tu email y elige una contraseña.'
-                          : 'Con tu email y contraseña.'}
+                        Bienvenido de vuelta. Entra con tu email y contraseña.
                       </p>
                     </div>
                     <button
@@ -892,7 +1162,6 @@ export default function AuthModal({ isOpen, onClose }) {
                         setError(null)
                         setPassword('')
                         setShowPassword(false)
-                        setSignupSuccess(false)
                       }}
                       aria-label="Volver"
                       className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors active:scale-95"
@@ -901,127 +1170,440 @@ export default function AuthModal({ isOpen, onClose }) {
                     </button>
                   </div>
 
-                  {signupSuccess ? (
-                    <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-center">
-                      <span
-                        className="material-symbols-outlined text-emerald-600 text-[32px]"
-                        style={{ fontVariationSettings: "'FILL' 1" }}
-                      >
-                        mark_email_read
-                      </span>
-                      <p className="text-[13px] font-bold text-emerald-900 mt-2">Revisa tu correo</p>
-                      <p className="text-[12px] text-emerald-800 mt-1 leading-snug">
-                        Te enviamos un enlace de confirmación a <span className="font-semibold break-all">{email}</span>. Revisa también la carpeta de spam.
-                      </p>
+                  <form onSubmit={handleSigninSubmit} noValidate>
+                    <label htmlFor="auth-signin-email" className="sr-only">Email</label>
+                    <input
+                      id="auth-signin-email"
+                      type="email"
+                      inputMode="email"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      value={email}
+                      onChange={(e) => handleEmailChange(e.target.value)}
+                      placeholder="tu@email.com"
+                      required
+                      autoComplete="email"
+                      aria-invalid={!!error}
+                      className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 text-[15px] mb-3 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40"
+                    />
+
+                    <label htmlFor="auth-signin-pw" className="sr-only">Contraseña</label>
+                    <div className="relative mb-2">
+                      <input
+                        id="auth-signin-pw"
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(e) => { setPassword(e.target.value); if (error) setError(null) }}
+                        placeholder="Contraseña"
+                        required
+                        autoComplete="current-password"
+                        aria-invalid={!!error}
+                        className="w-full px-4 py-3.5 pr-12 rounded-2xl border border-slate-200 text-[15px] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40"
+                      />
                       <button
                         type="button"
-                        onClick={() => { setSignupSuccess(false); setPasswordMode('signin'); setError(null) }}
-                        className="mt-3 text-primary text-[12.5px] font-semibold hover:underline"
+                        onClick={() => setShowPassword((v) => !v)}
+                        aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors"
                       >
-                        Ya confirmé, iniciar sesión
+                        <span className="material-symbols-outlined text-slate-400 text-[20px]">
+                          {showPassword ? 'visibility_off' : 'visibility'}
+                        </span>
                       </button>
-                      <div className="mt-3 pt-3 border-t border-emerald-200">
-                        <p className="text-[11px] text-emerald-700 mb-2">
-                          ¿No llegó el correo? Entra con código de un solo uso.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSignupSuccess(false)
-                            setPassword('')
-                            setError(null)
-                            setStep('email')
-                          }}
-                          className="w-full py-2 bg-emerald-700 text-white rounded-xl text-[12.5px] font-semibold active:scale-[0.98] transition-transform flex items-center justify-center gap-1.5"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">mail</span>
-                          Acceder con código OTP
-                        </button>
-                      </div>
                     </div>
-                  ) : (
-                    <>
-                      <form onSubmit={handlePasswordSubmit} noValidate>
-                        <label htmlFor="auth-pw-email" className="sr-only">Email</label>
-                        <input
-                          id="auth-pw-email"
-                          type="email"
-                          inputMode="email"
-                          autoCapitalize="off"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          value={email}
-                          onChange={(e) => handleEmailChange(e.target.value)}
-                          placeholder="tu@email.com"
-                          required
-                          autoComplete="email"
-                          aria-invalid={!!error}
-                          className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 text-[15px] mb-3 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40"
-                        />
 
-                        <label htmlFor="auth-pw-input" className="sr-only">Contraseña</label>
-                        <div className="relative mb-3">
-                          <input
-                            id="auth-pw-input"
-                            type={showPassword ? 'text' : 'password'}
-                            value={password}
-                            onChange={(e) => { setPassword(e.target.value); if (error) setError(null) }}
-                            placeholder="Contraseña"
-                            required
-                            minLength={6}
-                            autoComplete={passwordMode === 'signup' ? 'new-password' : 'current-password'}
-                            aria-invalid={!!error}
-                            className="w-full px-4 py-3.5 pr-12 rounded-2xl border border-slate-200 text-[15px] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPassword((v) => !v)}
-                            aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors"
-                          >
-                            <span className="material-symbols-outlined text-slate-400 text-[20px]">
-                              {showPassword ? 'visibility_off' : 'visibility'}
-                            </span>
-                          </button>
-                        </div>
+                    <div className="flex justify-end mb-3">
+                      <button
+                        type="button"
+                        onClick={() => { setStep('forgot'); setError(null) }}
+                        className="text-primary text-[12px] font-semibold hover:underline"
+                      >
+                        ¿Olvidaste tu contraseña?
+                      </button>
+                    </div>
 
-                        {error && (
-                          <p role="alert" className="text-red-500 text-[12.5px] mb-3 leading-snug">
-                            {error}
-                          </p>
-                        )}
-
-                        <button
-                          type="submit"
-                          disabled={loading || !emailValid || password.length < 6}
-                          className="w-full py-3.5 bg-primary text-white rounded-2xl text-[14px] font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                        >
-                          {loading
-                            ? (<><Spinner /> {passwordMode === 'signup' ? 'Creando cuenta…' : 'Iniciando sesión…'}</>)
-                            : (passwordMode === 'signup' ? 'Crear cuenta' : 'Iniciar sesión')}
-                        </button>
-                      </form>
-
-                      <div className="mt-4 text-center">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPasswordMode((m) => (m === 'signup' ? 'signin' : 'signup'))
-                            setError(null)
-                          }}
-                          className="text-primary text-[12.5px] font-semibold hover:underline"
-                        >
-                          {passwordMode === 'signup'
-                            ? '¿Ya tienes cuenta? Inicia sesión'
-                            : '¿No tienes cuenta? Crea una'}
-                        </button>
-                      </div>
-
-                      <p className="mt-4 text-[11px] text-center text-slate-400 leading-snug">
-                        Mínimo 6 caracteres. Al continuar aceptas que usemos tu email solo para autenticación.
+                    {error && (
+                      <p role="alert" className="text-red-500 text-[12.5px] mb-3 leading-snug">
+                        {error}
                       </p>
-                    </>
-                  )}
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={loading || !emailValid || password.length < 6}
+                      className="w-full py-3.5 bg-primary text-white rounded-2xl text-[14px] font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                    >
+                      {loading ? (<><Spinner /> Iniciando sesión…</>) : 'Iniciar sesión'}
+                    </button>
+                  </form>
+
+                  <div className="mt-4 text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep('signup')
+                        setError(null)
+                        setPassword('')
+                        setPasswordConfirm('')
+                        setName('')
+                        setAcceptTerms(false)
+                      }}
+                      className="text-primary text-[12.5px] font-semibold hover:underline"
+                    >
+                      ¿No tienes cuenta? Crea una
+                    </button>
+                  </div>
+                </>
+              ) : step === 'signup' ? (
+                /* ── Crear cuenta (nombre + email + contraseña + confirmar + t&c) ── */
+                <>
+                  <div className="flex items-start justify-between gap-3 mb-5">
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-[20px] sm:text-[22px] font-bold text-slate-900 leading-tight">
+                        Crear cuenta
+                      </h2>
+                      <p className="text-[12.5px] text-slate-500 mt-1 leading-snug">
+                        Empieza a organizar tu día con Focus.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep('chooser')
+                        setError(null)
+                        setPassword('')
+                        setPasswordConfirm('')
+                        setShowPassword(false)
+                      }}
+                      aria-label="Volver"
+                      className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors active:scale-95"
+                    >
+                      <span className="material-symbols-outlined text-slate-400 text-[22px]">arrow_back</span>
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSignupSubmit} noValidate>
+                    <label htmlFor="auth-signup-name" className="sr-only">Tu nombre</label>
+                    <input
+                      id="auth-signup-name"
+                      type="text"
+                      autoCapitalize="words"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      value={name}
+                      onChange={(e) => { setName(e.target.value); if (error) setError(null) }}
+                      placeholder="Tu nombre (opcional)"
+                      autoComplete="given-name"
+                      maxLength={60}
+                      className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 text-[15px] mb-3 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40"
+                    />
+
+                    <label htmlFor="auth-signup-email" className="sr-only">Email</label>
+                    <input
+                      id="auth-signup-email"
+                      type="email"
+                      inputMode="email"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      value={email}
+                      onChange={(e) => handleEmailChange(e.target.value)}
+                      placeholder="tu@email.com"
+                      required
+                      autoComplete="email"
+                      aria-invalid={!!error}
+                      className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 text-[15px] mb-3 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40"
+                    />
+
+                    <label htmlFor="auth-signup-pw" className="sr-only">Contraseña</label>
+                    <div className="relative mb-1.5">
+                      <input
+                        id="auth-signup-pw"
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(e) => { setPassword(e.target.value); if (error) setError(null) }}
+                        placeholder="Crea una contraseña"
+                        required
+                        minLength={8}
+                        autoComplete="new-password"
+                        aria-invalid={!!error}
+                        className="w-full px-4 py-3.5 pr-12 rounded-2xl border border-slate-200 text-[15px] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-slate-400 text-[20px]">
+                          {showPassword ? 'visibility_off' : 'visibility'}
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* Indicador de fortaleza de contraseña */}
+                    {password.length > 0 && (() => {
+                      const score = passwordStrength(password)
+                      const labels = ['Muy débil', 'Débil', 'Aceptable', 'Buena', 'Fuerte']
+                      const colors = ['bg-red-400', 'bg-orange-400', 'bg-yellow-400', 'bg-emerald-500', 'bg-emerald-600']
+                      return (
+                        <div className="mb-3 px-1" aria-live="polite">
+                          <div className="flex gap-1 mb-1">
+                            {[0, 1, 2, 3].map((i) => (
+                              <div
+                                key={i}
+                                className={`h-1 flex-1 rounded-full transition-colors ${
+                                  i < score ? colors[score] : 'bg-slate-200'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                          <p className="text-[11px] text-slate-500">
+                            Fortaleza: <span className="font-semibold text-slate-700">{labels[score]}</span>
+                            {score < 2 && <span className="text-slate-400"> · al menos 8 caracteres</span>}
+                          </p>
+                        </div>
+                      )
+                    })()}
+
+                    <label htmlFor="auth-signup-pw2" className="sr-only">Confirmar contraseña</label>
+                    <input
+                      id="auth-signup-pw2"
+                      type={showPassword ? 'text' : 'password'}
+                      value={passwordConfirm}
+                      onChange={(e) => { setPasswordConfirm(e.target.value); if (error) setError(null) }}
+                      placeholder="Confirma la contraseña"
+                      required
+                      minLength={8}
+                      autoComplete="new-password"
+                      aria-invalid={!!error || (passwordConfirm.length > 0 && password !== passwordConfirm)}
+                      className={`w-full px-4 py-3.5 rounded-2xl border text-[15px] mb-3 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 ${
+                        passwordConfirm.length > 0 && password !== passwordConfirm
+                          ? 'border-red-300'
+                          : 'border-slate-200'
+                      }`}
+                    />
+
+                    {/* Términos */}
+                    <label className="flex items-start gap-2 mb-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={acceptTerms}
+                        onChange={(e) => { setAcceptTerms(e.target.checked); if (error) setError(null) }}
+                        className="mt-0.5 w-4 h-4 rounded border-slate-300 text-primary focus:ring-2 focus:ring-primary/30"
+                      />
+                      <span className="text-[11.5px] text-slate-600 leading-snug">
+                        Acepto que Focus use mi email para autenticación y que mis datos se sincronicen en la nube.
+                      </span>
+                    </label>
+
+                    {error && (
+                      <p role="alert" className="text-red-500 text-[12.5px] mb-3 leading-snug">
+                        {error}
+                      </p>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={
+                        loading ||
+                        !emailValid ||
+                        !isAcceptablePassword(password) ||
+                        password !== passwordConfirm ||
+                        !acceptTerms
+                      }
+                      className="w-full py-3.5 bg-primary text-white rounded-2xl text-[14px] font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                    >
+                      {loading ? (<><Spinner /> Creando cuenta…</>) : 'Crear cuenta'}
+                    </button>
+                  </form>
+
+                  <div className="mt-4 text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep('signin')
+                        setError(null)
+                        setPassword('')
+                        setPasswordConfirm('')
+                      }}
+                      className="text-primary text-[12.5px] font-semibold hover:underline"
+                    >
+                      ¿Ya tienes cuenta? Inicia sesión
+                    </button>
+                  </div>
+
+                  <p className="mt-4 text-[11px] text-center text-slate-400 leading-snug">
+                    Tu contraseña debe tener al menos 8 caracteres.
+                  </p>
+                </>
+              ) : step === 'signup_sent' ? (
+                /* ── Post-signup: revisa tu correo ──────────────────────── */
+                <>
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-[20px] sm:text-[22px] font-bold text-slate-900 leading-tight">
+                        Casi listo
+                      </h2>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleClose}
+                      aria-label="Cerrar"
+                      className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors active:scale-95"
+                    >
+                      <span className="material-symbols-outlined text-slate-400 text-[22px]">close</span>
+                    </button>
+                  </div>
+
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-center">
+                    <span
+                      className="material-symbols-outlined text-emerald-600 text-[36px]"
+                      style={{ fontVariationSettings: "'FILL' 1" }}
+                    >
+                      mark_email_read
+                    </span>
+                    <p className="text-[14px] font-bold text-emerald-900 mt-2">Revisa tu correo</p>
+                    <p className="text-[12.5px] text-emerald-800 mt-1 leading-snug">
+                      Te enviamos un enlace de confirmación a <span className="font-semibold break-all">{email}</span>. Ábrelo para activar tu cuenta y luego inicia sesión.
+                    </p>
+                    <p className="text-[11px] text-emerald-700 mt-2">Revisa también la carpeta de spam.</p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSignupSuccess(false)
+                      setPassword('')
+                      setPasswordConfirm('')
+                      setStep('signin')
+                      setError(null)
+                    }}
+                    className="mt-4 w-full py-3 bg-primary text-white rounded-2xl text-[13.5px] font-semibold active:scale-[0.98] transition-transform"
+                  >
+                    Ya confirmé, iniciar sesión
+                  </button>
+
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <p className="text-[11px] text-slate-500 mb-2 text-center">
+                      ¿No llegó el correo? Entra con código de un solo uso.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSignupSuccess(false)
+                        setPassword('')
+                        setPasswordConfirm('')
+                        setError(null)
+                        setStep('email')
+                      }}
+                      className="w-full py-2.5 bg-slate-900 text-white rounded-xl text-[12.5px] font-semibold active:scale-[0.98] transition-transform flex items-center justify-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">mail</span>
+                      Acceder con código OTP
+                    </button>
+                  </div>
+                </>
+              ) : step === 'forgot' ? (
+                /* ── Olvidé mi contraseña — pedir email para reset ──────── */
+                <>
+                  <div className="flex items-start justify-between gap-3 mb-5">
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-[20px] sm:text-[22px] font-bold text-slate-900 leading-tight">
+                        Recupera tu cuenta
+                      </h2>
+                      <p className="text-[12.5px] text-slate-500 mt-1 leading-snug">
+                        Te enviamos un enlace para crear una nueva contraseña.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setStep('signin'); setError(null) }}
+                      aria-label="Volver"
+                      className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors active:scale-95"
+                    >
+                      <span className="material-symbols-outlined text-slate-400 text-[22px]">arrow_back</span>
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleForgotSubmit} noValidate>
+                    <label htmlFor="auth-forgot-email" className="sr-only">Email</label>
+                    <input
+                      id="auth-forgot-email"
+                      type="email"
+                      inputMode="email"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      value={email}
+                      onChange={(e) => handleEmailChange(e.target.value)}
+                      placeholder="tu@email.com"
+                      required
+                      autoComplete="email"
+                      aria-invalid={!!error}
+                      className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 text-[15px] mb-3 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40"
+                    />
+
+                    {error && (
+                      <p role="alert" className="text-red-500 text-[12.5px] mb-3 leading-snug">
+                        {error}
+                      </p>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={loading || !emailValid}
+                      className="w-full py-3.5 bg-primary text-white rounded-2xl text-[14px] font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                    >
+                      {loading ? (<><Spinner /> Enviando…</>) : 'Enviar enlace de recuperación'}
+                    </button>
+                  </form>
+
+                  <p className="mt-3 text-[11px] text-center text-slate-400 leading-snug">
+                    Si el email está registrado, te llegará un correo.
+                  </p>
+                </>
+              ) : step === 'forgot_sent' ? (
+                /* ── Confirmación: te enviamos el correo de reset ──────── */
+                <>
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-[20px] sm:text-[22px] font-bold text-slate-900 leading-tight">
+                        Revisa tu correo
+                      </h2>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleClose}
+                      aria-label="Cerrar"
+                      className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors active:scale-95"
+                    >
+                      <span className="material-symbols-outlined text-slate-400 text-[22px]">close</span>
+                    </button>
+                  </div>
+
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-center">
+                    <span
+                      className="material-symbols-outlined text-emerald-600 text-[36px]"
+                      style={{ fontVariationSettings: "'FILL' 1" }}
+                    >
+                      mark_email_read
+                    </span>
+                    <p className="text-[14px] font-bold text-emerald-900 mt-2">Enlace enviado</p>
+                    <p className="text-[12.5px] text-emerald-800 mt-1 leading-snug">
+                      Si <span className="font-semibold break-all">{email}</span> está registrado, llegará un correo con instrucciones para crear una nueva contraseña.
+                    </p>
+                    <p className="text-[11px] text-emerald-700 mt-2">Revisa también la carpeta de spam.</p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => { setStep('signin'); setError(null) }}
+                    className="mt-4 w-full py-3 bg-primary text-white rounded-2xl text-[13.5px] font-semibold active:scale-[0.98] transition-transform"
+                  >
+                    Volver a iniciar sesión
+                  </button>
                 </>
               ) : step === 'device_scan' ? (
                 /* ── Nuevo dispositivo: escanear o tipear código ────── */

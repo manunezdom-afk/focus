@@ -29,6 +29,11 @@ export function AuthProvider({ children }) {
   const [user, setUser]           = useState(null)
   const [loading, setLoading]     = useState(true)
   const [authModal, setAuthModal] = useState(false)
+  // Cuando Supabase emite PASSWORD_RECOVERY (al abrir el link del correo),
+  // marcamos el flag para que la UI muestre el form de "nueva contraseña"
+  // antes que cualquier otra cosa. Se desmarca al hacer updatePassword
+  // exitoso o al cerrar el modal explícitamente.
+  const [recoveryMode, setRecoveryMode] = useState(false)
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return }
@@ -82,8 +87,19 @@ export function AuthProvider({ children }) {
         const newUser = session?.user ?? null
         setUser(newUser)
         setSignalsUserId(newUser?.id ?? null)
+        if (event === 'PASSWORD_RECOVERY') {
+          // Llegó al app desde un link de "olvidé mi contraseña". Forzamos
+          // el modal abierto en el paso de "nueva contraseña" antes de hacer
+          // sync de nada — el usuario debe setear su nueva password primero.
+          setRecoveryMode(true)
+          setAuthModal(true)
+          return
+        }
         if (event === 'SIGNED_IN' && newUser) {
           await syncOnSession(newUser, { freshLogin: true })
+        }
+        if (event === 'SIGNED_OUT') {
+          setRecoveryMode(false)
         }
       }
     )
@@ -155,15 +171,49 @@ export function AuthProvider({ children }) {
   // y el usuario debe abrir el link del correo antes de poder loguearse.
   // Devolvemos {user, session} para que la UI pueda mostrar el mensaje
   // "Revisa tu correo" en ese caso.
-  const signUpWithPassword = useCallback(async (email, password) => {
+  // El nombre se guarda en user_metadata.name (nullable). Si Supabase tiene
+  // una tabla profiles con trigger on_auth_user_created, se puede leer ahí.
+  const signUpWithPassword = useCallback(async (email, password, options = {}) => {
     if (!supabase) throw new Error('Supabase no configurado')
     const clean = String(email || '').trim().toLowerCase()
+    const name = String(options?.name ?? '').trim()
+    const emailRedirectTo = Capacitor.isNativePlatform()
+      ? 'me.usefocus.app://login-callback'
+      : (typeof window !== 'undefined' ? `${window.location.origin}/?confirmed=1` : undefined)
     const { data, error } = await supabase.auth.signUp({
       email: clean,
       password: String(password ?? ''),
+      options: {
+        emailRedirectTo,
+        data: name ? { name } : undefined,
+      },
     })
     if (error) throw error
     return { user: data?.user ?? null, session: data?.session ?? null }
+  }, [])
+
+  // Reset password: envía un email con link al endpoint /reset-password de la
+  // app. El link abre la app con el token en URL hash que Supabase intercepta
+  // automáticamente (detectSessionInUrl: true) y deja al usuario logueado en
+  // estado "PASSWORD_RECOVERY", momento en el que la UI le pide setear nueva
+  // contraseña. Para nativo (Capacitor) usamos el deep link de la app.
+  const resetPasswordForEmail = useCallback(async (email) => {
+    if (!supabase) throw new Error('Supabase no configurado')
+    const clean = String(email || '').trim().toLowerCase()
+    const redirectTo = Capacitor.isNativePlatform()
+      ? 'me.usefocus.app://login-callback?recovery=1'
+      : (typeof window !== 'undefined' ? `${window.location.origin}/?recovery=1` : undefined)
+    const { error } = await supabase.auth.resetPasswordForEmail(clean, { redirectTo })
+    if (error) throw error
+  }, [])
+
+  // Update password durante el flujo PASSWORD_RECOVERY o cualquier sesión
+  // activa. Supabase requiere que el usuario esté autenticado (recovery token
+  // counts) para llamar updateUser.
+  const updatePassword = useCallback(async (newPassword) => {
+    if (!supabase) throw new Error('Supabase no configurado')
+    const { error } = await supabase.auth.updateUser({ password: String(newPassword ?? '') })
+    if (error) throw error
   }, [])
 
   const verifyOtp = useCallback(async (email, token) => {
@@ -345,9 +395,11 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{
       user, loading, authModal, setAuthModal,
+      recoveryMode, setRecoveryMode,
       signInWithEmail, verifyOtp, signOut,
       signInWithGoogle,
       signInWithPassword, signUpWithPassword,
+      resetPasswordForEmail, updatePassword,
       startDevicePairing, claimDevicePairing, exchangeDeviceToken,
     }}>
       {children}
