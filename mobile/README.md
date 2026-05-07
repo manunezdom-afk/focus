@@ -2,7 +2,7 @@
 
 App nativa de **Focus** en React Native + Expo Router. Vive dentro de este monorepo, junto a la app web (raíz del repo) y la app Capacitor (carpeta `ios/`). Comparte backend con ambas (Supabase, Vercel APIs).
 
-> Estado: **base inicial (Fase 1)**. Auth por correo + 4 tabs vacíos. La lógica de Mi día / Calendario / Tareas / Nova se incorporará en fases posteriores. Detalles y plan en [`MOBILE_EXPO_MIGRATION.md`](../MOBILE_EXPO_MIGRATION.md).
+> Estado: **Fase 2** — datos reales conectados. Auth por correo, Mi Día / Tareas / Calendario leen de Supabase, tareas se crean / completan / borran desde mobile. La lógica de Nova, push notifications y crear eventos vendrá en fases posteriores. Detalles y plan en [`MOBILE_EXPO_MIGRATION.md`](../MOBILE_EXPO_MIGRATION.md).
 
 ## Requisitos
 
@@ -82,6 +82,14 @@ mobile/
 ├── hooks/                    # useColorScheme, useThemeColor
 ├── src/
 │   ├── auth/AuthProvider.tsx # contexto de sesión Supabase
+│   ├── data/                 # capa de datos hacia Supabase (Fase 2)
+│   │   ├── types.ts          # Task, EventItem
+│   │   ├── ids.ts            # generadores de IDs
+│   │   ├── today.ts          # helpers de fecha local
+│   │   ├── tasks.ts          # CRUD tareas
+│   │   ├── events.ts         # queries eventos
+│   │   ├── useTasks.ts       # hook con loading/error/refresh + optimistic
+│   │   └── useEvents.ts      # hook con modo today/all
 │   └── lib/
 │       ├── supabase.ts       # cliente con AsyncStorage adapter
 │       └── api.ts            # apiFetch con Bearer auto + sendOtp
