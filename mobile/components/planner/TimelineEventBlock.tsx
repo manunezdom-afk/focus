@@ -8,11 +8,14 @@ import type { EventItem } from '@/src/data/types';
 type Props = {
   event: EventItem;
   isPast: boolean;
-  // Llamado al tocar el ícono papelera. El padre maneja la confirmación.
+  // Estado "done" local (legacy lo persiste en localStorage; mobile lo guarda
+  // en memoria del padre). Se pierde al cambiar de tab — coherente con un
+  // "checkpoint visual" que aún no tiene schema persistido.
+  done: boolean;
+  onToggleDone?: () => void;
   onDeletePress?: () => void;
 };
 
-// Extrae solo la hora de inicio de "HH:MM" o "HH:MM - HH:MM".
 function startTimeStr(time: string): string {
   if (!time) return '';
   return time.split('-')[0].trim();
@@ -21,7 +24,13 @@ function startTimeStr(time: string): string {
 const DOT_SIZE = 8;
 const COL_GAP = 20;
 
-export function TimelineEventBlock({ event, isPast, onDeletePress }: Props) {
+export function TimelineEventBlock({
+  event,
+  isPast,
+  done,
+  onToggleDone,
+  onDeletePress,
+}: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const timeLabel = startTimeStr(event.time) || '—';
@@ -30,6 +39,13 @@ export function TimelineEventBlock({ event, isPast, onDeletePress }: Props) {
   const hasDescription =
     !!event.description &&
     !/^\d{4}-\d{2}-\d{2}$/.test(event.description.trim());
+
+  // El evento se ve "apagado" si está hecho o ya pasó.
+  const dim = done || isPast;
+
+  // Color del dot — verde si hecho, primary si futuro/activo.
+  const dotColor = done ? c.success : c.primary;
+  const accentColor = done ? c.success : c.primary;
 
   return (
     <View style={styles.row}>
@@ -40,37 +56,76 @@ export function TimelineEventBlock({ event, isPast, onDeletePress }: Props) {
 
       {/* Columna tarjeta — flex 1, contiene dot absoluto + card */}
       <View style={styles.cardCol}>
-        {/* Dot conector centrado en el gap */}
-        <View style={[styles.dot, { backgroundColor: c.primary }]} />
+        <View style={[styles.dot, { backgroundColor: dotColor }]} />
 
-        {/* Card con acento lateral primary */}
         <View
           style={[
             styles.card,
             {
               backgroundColor: c.surface,
               borderColor: c.border,
-              borderLeftColor: c.primary,
-              opacity: isPast ? 0.55 : 1,
+              borderLeftColor: accentColor,
+              opacity: dim ? 0.55 : 1,
             },
           ]}
         >
-          {/* Fila superior: título + botón papelera */}
           <View style={styles.titleRow}>
-            <Text style={[styles.title, { color: c.text }]} numberOfLines={2}>
+            <Text
+              style={[
+                styles.title,
+                {
+                  color: c.text,
+                  textDecorationLine: done ? 'line-through' : 'none',
+                },
+              ]}
+              numberOfLines={2}
+            >
               {event.title}
             </Text>
-            {onDeletePress ? (
-              <Pressable
-                onPress={onDeletePress}
-                hitSlop={8}
-                style={({ pressed }) => [styles.deleteBtn, { opacity: pressed ? 0.5 : 1 }]}
-                accessibilityLabel="Eliminar evento"
-                accessibilityRole="button"
-              >
-                <IconSymbol name="trash.fill" size={14} color={c.textSubtle} />
-              </Pressable>
-            ) : null}
+
+            <View style={styles.actionsCol}>
+              {onToggleDone ? (
+                <Pressable
+                  onPress={onToggleDone}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.doneBtn,
+                    {
+                      backgroundColor: done
+                        ? c.surfaceMuted
+                        : c.primaryContainer,
+                      opacity: pressed ? 0.6 : 1,
+                    },
+                  ]}
+                  accessibilityLabel={done ? 'Desmarcar evento' : 'Marcar evento hecho'}
+                  accessibilityRole="button"
+                >
+                  <Text
+                    style={[
+                      styles.doneBtnText,
+                      { color: done ? c.success : c.primary },
+                    ]}
+                  >
+                    {done ? '✓ HECHO' : 'HECHO ✓'}
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              {onDeletePress ? (
+                <Pressable
+                  onPress={onDeletePress}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.deleteBtn,
+                    { opacity: pressed ? 0.5 : 1 },
+                  ]}
+                  accessibilityLabel="Eliminar evento"
+                  accessibilityRole="button"
+                >
+                  <IconSymbol name="trash.fill" size={14} color={c.textSubtle} />
+                </Pressable>
+              ) : null}
+            </View>
           </View>
 
           {hasDescription ? (
@@ -105,7 +160,6 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingBottom: Spacing['3xl'],
   },
-  // Dot posicionado centrado en el gap (left: -(gap/2 + dot/2))
   dot: {
     position: 'absolute',
     left: -(COL_GAP / 2 + DOT_SIZE / 2),
@@ -132,8 +186,22 @@ const styles = StyleSheet.create({
     ...Typography.bodyStrong,
     flex: 1,
   },
+  actionsCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  doneBtn: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+  },
+  doneBtnText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
   deleteBtn: {
-    // hitSlop amplía el área táctil; el ícono visual es 14px
     paddingTop: 2,
   },
   description: {
