@@ -210,25 +210,28 @@ export default function MiDiaScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   flex: { flex: 1 },
-  scrollContent: { paddingBottom: Spacing['3xl'] },
+  // 48px asegura que el último bloque del timeline no quede oculto detrás
+  // del CustomTabBar (que tiene su propia safe area). Sin este margen, el
+  // botón "HECHO ✓" del último item podía quedar parcialmente cubierto.
+  scrollContent: { paddingBottom: 48 },
 
   header: {
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.lg,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.xl,
   },
   dateLine: {
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1.5,
     lineHeight: 14,
-    marginBottom: 6,
+    marginBottom: 10,
   },
   titleLine: {
     fontSize: 36,
     fontWeight: '800',
-    lineHeight: 42,
-    letterSpacing: -0.5,
+    lineHeight: 40,
+    letterSpacing: -0.6,
   },
 
   bannerWrap: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },

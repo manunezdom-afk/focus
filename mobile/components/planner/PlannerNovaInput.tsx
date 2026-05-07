@@ -165,10 +165,16 @@ export function PlannerNovaInput({
   return (
     <View style={styles.wrap}>
       <View style={[styles.inputBar, { backgroundColor: c.surface, borderColor: c.border }]}>
+        {/* Indicador izquierdo: círculo con ícono Nova. No es interactivo —
+            solo señaliza visualmente que la barra es de Nova, paralelo al
+            mic button del legacy (la voz es scope futuro). */}
+        <View style={[styles.leftIndicator, { backgroundColor: c.surfaceTint }]}>
+          <IconSymbol name="sparkles" size={14} color={c.primary} />
+        </View>
         <TextInput
           value={draft}
           onChangeText={setDraft}
-          placeholder="Habla con Nova: 'agenda gym 7am' · '¿qué tengo hoy?'"
+          placeholder='Ej: "Agenda dentista el viernes a las 10"'
           placeholderTextColor={c.textSubtle}
           style={[styles.input, { color: c.text }]}
           multiline
@@ -182,7 +188,7 @@ export function PlannerNovaInput({
           disabled={!canSend}
           style={({ pressed }) => [
             styles.sendBtn,
-            { backgroundColor: c.primary, opacity: !canSend ? 0.4 : pressed ? 0.85 : 1 },
+            { backgroundColor: c.primary, opacity: !canSend ? 0.35 : pressed ? 0.85 : 1 },
           ]}
           accessibilityLabel="Enviar a Nova"
           accessibilityRole="button"
@@ -190,7 +196,7 @@ export function PlannerNovaInput({
           {sending ? (
             <ActivityIndicator color={c.onPrimary} size="small" />
           ) : (
-            <IconSymbol name="arrow.up" size={18} color={c.onPrimary} />
+            <IconSymbol name="arrow.up" size={16} color={c.onPrimary} />
           )}
         </Pressable>
       </View>
@@ -244,24 +250,35 @@ const styles = StyleSheet.create({
   },
   inputBar: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: Spacing.sm,
+    alignItems: 'center',
+    gap: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.xl,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    minHeight: 48,
+  },
+  leftIndicator: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   input: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 32,
     maxHeight: 120,
-    paddingVertical: 6,
-    ...Typography.body,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '400',
   },
   sendBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },

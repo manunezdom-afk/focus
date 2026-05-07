@@ -70,32 +70,33 @@ function Shell() {
   );
 }
 
-// Botón visible solo en __DEV__: esquina superior izquierda respetando safe
-// area. Tap simple abre Migration Mirror. En release builds no se renderiza.
+// Botón visible solo en __DEV__: punto pequeño en la esquina superior
+// derecha. Las pantallas tienen header alineado a la izquierda, así que
+// la zona superior derecha está libre. Tap abre Migration Mirror. En
+// release builds no se renderiza.
 function DevMirrorTrigger() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   return (
     <Pressable
       onPress={() => router.push('/(dev)/mirror')}
-      onLongPress={() => router.push('/(dev)/mirror')}
-      delayLongPress={400}
+      hitSlop={10}
       style={({ pressed }) => ({
         position: 'absolute',
-        top: insets.top + 8,
-        left: 12,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderRadius: 10,
-        backgroundColor: pressed ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.55)',
+        top: insets.top + 6,
+        right: 12,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: pressed ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.28)',
+        alignItems: 'center',
+        justifyContent: 'center',
         zIndex: 9999,
       })}
       accessibilityLabel="Abrir Migration Mirror (dev)"
       accessibilityRole="button"
     >
-      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 }}>
-        Mirror
-      </Text>
+      <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>M</Text>
     </Pressable>
   );
 }

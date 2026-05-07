@@ -6,13 +6,16 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 
 type Props = {
   // Llamado al tocar un chip; el padre debe sembrar el FocusBar con `text`.
+  // Hasta que el usuario toque enviar, NO se crean datos — son solo prompts.
   onPickPrompt: (text: string) => void;
 };
 
-const PROMPTS = [
-  'Planifica mi día',
-  'Agenda gym mañana a las 7',
-  'Reserva 2h enfocadas esta tarde',
+// Iconos de los chips. Solo usamos íconos del MAPPING actual de
+// icon-symbol.tsx para no introducir mappings nuevos.
+const PROMPTS: Array<{ label: string; icon: 'sparkles' | 'calendar' | 'checklist' }> = [
+  { label: 'Planifica mi día', icon: 'sparkles' },
+  { label: 'Agenda gym mañana a las 7', icon: 'calendar' },
+  { label: 'Reserva 2h enfocadas esta tarde', icon: 'checklist' },
 ];
 
 export function EmptyDayState({ onPickPrompt }: Props) {
@@ -21,23 +24,24 @@ export function EmptyDayState({ onPickPrompt }: Props) {
 
   return (
     <View style={styles.wrap}>
-      <View style={[styles.banner, { backgroundColor: c.surface, borderColor: c.border }]}>
+      {/* Intro centrada — espejo del legacy mobile: ícono + título humilde
+          + descripción invitando a Nova. */}
+      <View style={styles.intro}>
         <View style={[styles.iconCircle, { backgroundColor: c.primaryContainer }]}>
-          <IconSymbol name="sparkles" size={18} color={c.primary} />
+          <IconSymbol name="sparkles" size={22} color={c.primary} />
         </View>
-        <View style={styles.bannerCol}>
-          <Text style={[styles.title, { color: c.text }]}>Día libre — ¿qué agendamos?</Text>
-          <Text style={[styles.desc, { color: c.textMuted }]}>
-            Escríbele a Nova arriba o usa una de estas ideas.
-          </Text>
-        </View>
+        <Text style={[styles.title, { color: c.text }]}>Hoy está libre.</Text>
+        <Text style={[styles.desc, { color: c.textMuted }]}>
+          ¿Por dónde empezamos? Toca un ejemplo o escríbele a Nova.
+        </Text>
       </View>
 
+      {/* Chips: icon-circle + label flex + chevron derecha */}
       <View style={styles.chipsCol}>
         {PROMPTS.map((p) => (
           <Pressable
-            key={p}
-            onPress={() => onPickPrompt(p)}
+            key={p.label}
+            onPress={() => onPickPrompt(p.label)}
             style={({ pressed }) => [
               styles.chip,
               {
@@ -47,9 +51,14 @@ export function EmptyDayState({ onPickPrompt }: Props) {
               },
             ]}
             accessibilityRole="button"
-            accessibilityLabel={p}
+            accessibilityLabel={p.label}
           >
-            <Text style={[styles.chipText, { color: c.text }]}>{p}</Text>
+            <View style={[styles.chipIcon, { backgroundColor: c.primaryContainer }]}>
+              <IconSymbol name={p.icon} size={14} color={c.primary} />
+            </View>
+            <Text style={[styles.chipText, { color: c.text }]} numberOfLines={1}>
+              {p.label}
+            </Text>
             <IconSymbol name="chevron.right" size={14} color={c.textSubtle} />
           </Pressable>
         ))}
@@ -61,32 +70,32 @@ export function EmptyDayState({ onPickPrompt }: Props) {
 const styles = StyleSheet.create({
   wrap: {
     paddingHorizontal: Spacing.lg,
-    gap: Spacing.md,
+    gap: Spacing.xl,
+    paddingTop: Spacing.md,
   },
-  banner: {
-    flexDirection: 'row',
+  intro: {
     alignItems: 'center',
-    gap: Spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.xl,
-    padding: Spacing.md,
+    gap: Spacing.sm,
   },
   iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  bannerCol: {
-    flex: 1,
+    marginBottom: 4,
   },
   title: {
-    ...Typography.bodyStrong,
+    ...Typography.title3,
+    fontSize: 18,
+    textAlign: 'center',
   },
   desc: {
     ...Typography.caption,
-    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    maxWidth: 320,
   },
   chipsCol: {
     gap: Spacing.sm,
@@ -96,12 +105,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.md,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.lg,
-    paddingHorizontal: Spacing.lg,
+    borderRadius: 16,
+    paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
+  },
+  chipIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   chipText: {
     ...Typography.body,
+    fontSize: 14,
     flex: 1,
   },
 });
