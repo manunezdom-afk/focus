@@ -1,31 +1,29 @@
 import { router } from 'expo-router';
 import { useMemo } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ErrorBanner } from '@/components/ErrorBanner';
-import { EventRow } from '@/components/EventRow';
 import { LoadingState } from '@/components/LoadingState';
 import { TaskRow } from '@/components/TaskRow';
 import { Card } from '@/components/ui/Card';
 import { NovaPromptCard } from '@/components/ui/NovaPromptCard';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { QuickActionButton } from '@/components/ui/QuickActionButton';
-import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { SectionLabel } from '@/components/ui/SectionLabel';
+import { TimelineEventBlock } from '@/components/planner/TimelineEventBlock';
 import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { todayLabelLong } from '@/src/data/today';
 import { useEvents } from '@/src/data/useEvents';
 import { useTasks } from '@/src/data/useTasks';
 
-// Saludo según hora local. Mismo patrón que la web.
-function greeting(now = new Date()): string {
-  const h = now.getHours();
-  if (h < 6) return 'Buenas noches';
-  if (h < 12) return 'Buenos días';
-  if (h < 19) return 'Buenas tardes';
-  return 'Buenas noches';
+// Convierte "HH:MM" o "HH:MM - HH:MM" a valor decimal (14.5 = 14:30).
+// Retorna Infinity si no hay hora (eventos sin hora van al final del timeline).
+function timeToH(time: string): number {
+  const m = time?.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return Infinity;
+  return parseInt(m[1], 10) + parseInt(m[2], 10) / 60;
 }
 
 export default function MiDiaScreen() {
@@ -36,10 +34,21 @@ export default function MiDiaScreen() {
   const tasks = useTasks();
 
   const dateLabel = useMemo(() => todayLabelLong(), []);
-  const eyebrow = useMemo(() => greeting(), []);
 
-  // Tareas pendientes hoy (similar al modelo legacy: category === 'hoy' es lo
-  // que aparece en Mi Día; si no hay esa categoría, mostramos pending top 8).
+  // Eventos ordenados por hora ascendente; sin hora al final.
+  const sortedEvents = useMemo(
+    () => [...events.events].sort((a, b) => timeToH(a.time) - timeToH(b.time)),
+    [events.events],
+  );
+
+  // Hora actual en decimal para marcar eventos pasados.
+  const nowH = (() => {
+    const d = new Date();
+    return d.getHours() + d.getMinutes() / 60;
+  })();
+
+  // Tareas pendientes hoy: category === 'hoy' tiene prioridad; si no hay,
+  // se muestran todas las pendientes (máx 8). Mismo criterio que el legacy.
   const pendingTasks = useMemo(() => {
     const today = tasks.tasks.filter((t) => !t.done && (t.category === 'hoy' || !t.category));
     if (today.length > 0) return today.slice(0, 8);
@@ -47,10 +56,8 @@ export default function MiDiaScreen() {
   }, [tasks.tasks]);
 
   const totalDoneToday = useMemo(() => {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const startMs = startOfDay.getTime();
-    return tasks.tasks.filter((t) => t.done && t.doneAt && t.doneAt >= startMs).length;
+    const startMs = new Date().setHours(0, 0, 0, 0);
+    return tasks.tasks.filter((t) => t.done && t.doneAt != null && t.doneAt >= startMs).length;
   }, [tasks.tasks]);
 
   const loading =
@@ -64,14 +71,6 @@ export default function MiDiaScreen() {
     void tasks.refresh();
   }
 
-  function notImplemented(feature: string) {
-    Alert.alert(
-      feature,
-      'Esta función estará disponible en la próxima versión. Por ahora puedes pedírselo a Nova.',
-      [{ text: 'Entendido', style: 'default' }],
-    );
-  }
-
   const hasAnyItem = events.events.length > 0 || pendingTasks.length > 0;
 
   return (
@@ -79,26 +78,26 @@ export default function MiDiaScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={c.text}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={c.text} />
         }
       >
-        {/* Header — eyebrow primary + título grande extrabold + fecha completa */}
-        <ScreenHeader
-          eyebrow={eyebrow}
-          title="Mi día"
-          subtitle={dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)}
-          rightAction={
-            <PrimaryButton
-              label="Añadir"
-              size="sm"
-              onPress={() => router.push('/calendar')}
-            />
-          }
-        />
+        {/* ── Header legacy-style ──────────────────────────────────────────
+            Línea 1: fecha completa en primary, uppercase, tracking.
+            Línea 2: "Mi día" extrabold grande.
+            Botón "Añadir" a la derecha (provisional hasta implementar FocusBar). */}
+        <View style={styles.header}>
+          <View style={styles.headerRow}>
+            <View>
+              <Text style={[styles.dateLine, { color: c.primary }]}>
+                {dateLabel.toUpperCase()}
+              </Text>
+              <Text style={[styles.titleLine, { color: c.text }]}>Mi día</Text>
+            </View>
+            <View style={styles.headerBtn}>
+              <PrimaryButton label="Añadir" size="sm" onPress={() => router.push('/calendar')} />
+            </View>
+          </View>
+        </View>
 
         {error ? (
           <View style={styles.bannerWrap}>
@@ -109,46 +108,32 @@ export default function MiDiaScreen() {
         {loading ? (
           <LoadingState />
         ) : !hasAnyItem ? (
-          // Empty state legacy: Nova prompt card + grid 2-col de quick actions.
+          // Empty state: Nova card + 2 acciones principales.
+          // Los botones deshabilitados (Dictar, Foto) se quitaron hasta implementarse.
           <View style={styles.emptyWrap}>
             <NovaPromptCard
               title="Tu agenda de hoy está vacía."
               description="Dile a Nova qué tienes hoy, o añade algo tú mismo."
             />
-            <View style={styles.actionsGrid}>
-              <View style={styles.actionsRow}>
-                <QuickActionButton
-                  label="Añadir"
-                  iconName="plus.circle.fill"
-                  onPress={() => router.push('/calendar')}
-                />
-                <QuickActionButton
-                  label="Hablar con Nova"
-                  iconName="sparkles"
-                  onPress={() => router.push('/nova')}
-                />
-              </View>
-              <View style={styles.actionsRow}>
-                <QuickActionButton
-                  label="Dictar"
-                  iconName="sparkles"
-                  onPress={() => notImplemented('Dictado')}
-                  disabled
-                />
-                <QuickActionButton
-                  label="Foto de agenda"
-                  iconName="plus"
-                  onPress={() => notImplemented('Foto de agenda')}
-                  disabled
-                />
-              </View>
+            <View style={styles.actionsRow}>
+              <QuickActionButton
+                label="Añadir"
+                iconName="plus.circle.fill"
+                onPress={() => router.push('/calendar')}
+              />
+              <QuickActionButton
+                label="Hablar con Nova"
+                iconName="sparkles"
+                onPress={() => router.push('/nova')}
+              />
             </View>
           </View>
         ) : (
           <>
-            {/* Eventos de hoy */}
-            <SectionLabel label="Eventos de hoy" count={events.events.length} />
-            {events.events.length === 0 ? (
+            {/* ── Timeline de eventos ──────────────────────────────────────
+                Columna hora 52px + dot conector + card con borde lateral.
+                Eventos sin hora van al final (timeToH → Infinity). */}
+            {sortedEvents.length === 0 ? (
               <View style={styles.miniEmpty}>
                 <NovaPromptCard
                   title="Sin eventos hoy."
@@ -156,16 +141,20 @@ export default function MiDiaScreen() {
                 />
               </View>
             ) : (
-              <View style={styles.cardWrap}>
-                <Card variant="default">
-                  {events.events.map((evt) => (
-                    <EventRow key={evt.id} event={evt} />
-                  ))}
-                </Card>
+              <View style={styles.timelineWrap}>
+                {sortedEvents.map((evt) => (
+                  <TimelineEventBlock
+                    key={evt.id}
+                    event={evt}
+                    isPast={timeToH(evt.time) < nowH}
+                  />
+                ))}
               </View>
             )}
 
-            {/* Tareas pendientes */}
+            {/* ── Tareas pendientes ────────────────────────────────────────
+                Se mantienen en sección separada hasta Paso 4 (integrar en
+                timeline como bloques de tarea). */}
             <SectionLabel label="Tareas pendientes" count={pendingTasks.length} />
             {pendingTasks.length === 0 ? (
               <View style={styles.miniEmpty}>
@@ -203,16 +192,42 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   scrollContent: { paddingBottom: Spacing['3xl'] },
 
+  // Header legacy-style
+  header: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.lg,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  headerBtn: {
+    paddingBottom: 6,
+  },
+  dateLine: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    lineHeight: 14,
+    marginBottom: 6,
+  },
+  titleLine: {
+    fontSize: 36,
+    fontWeight: '800',
+    lineHeight: 42,
+    letterSpacing: -0.5,
+  },
+
   bannerWrap: { paddingHorizontal: Spacing.lg },
   cardWrap: { paddingHorizontal: Spacing.lg },
-  miniEmpty: { paddingHorizontal: Spacing.lg },
+  miniEmpty: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
+  timelineWrap: { paddingTop: Spacing.sm },
 
   emptyWrap: {
     paddingHorizontal: Spacing.lg,
     gap: Spacing.md,
-  },
-  actionsGrid: {
-    gap: Spacing.sm,
   },
   actionsRow: {
     flexDirection: 'row',
