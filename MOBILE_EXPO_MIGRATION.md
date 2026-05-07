@@ -236,3 +236,76 @@ Decisiones simples para Fase 2 (no replicamos la complejidad de `src/services/da
 7. **Caché en disco con AsyncStorage** para pintado instantáneo offline
 8. **Assets de marca** (icon.png y splash-icon.png siguen siendo placeholder Expo)
 9. **Delete account** en Ajustes
+
+## 9. Cómo correr la app nueva en Xcode
+
+PR #9 dejó mergeado el proyecto Xcode generado por `npx expo prebuild -p ios`. Vive en [`mobile/ios/`](./mobile/ios/) y es **una app distinta** del Xcode legacy de Capacitor en [`ios/`](./ios/) (que sigue intacto y NO se debe tocar).
+
+| Carpeta        | Origen                  | Bundle ID              | Cuándo abrirla                 |
+| -------------- | ----------------------- | ---------------------- | ------------------------------ |
+| `ios/`         | Capacitor (legacy)      | `me.usefocus.app`      | App actual en App Store        |
+| `mobile/ios/`  | Expo prebuild (nuevo)   | `me.usefocus.app.expo` | App nueva — Xcode + simulador  |
+
+### 9.1 Sincronizar main
+
+```bash
+git checkout main
+git pull origin main
+ls mobile/ios   # debe mostrar Focus, Focus.xcodeproj, Podfile
+```
+
+### 9.2 Asegurar CocoaPods (única vez)
+
+CocoaPods 1.13+ es requerido por React Native 0.81. La Ruby de macOS (`/usr/bin/ruby`, 2.6.10) es **demasiado vieja** para esa versión. Hay que usar una Ruby moderna. La forma más simple es Homebrew:
+
+```bash
+# Si no tienes Homebrew:
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Instalar CocoaPods (trae su propia Ruby):
+brew install cocoapods
+
+# Verificar:
+pod --version   # debe imprimir 1.16.x o superior
+```
+
+> Alternativa sin Homebrew: instalar Ruby 3+ con `rbenv` o `asdf`, luego `gem install cocoapods`. Evitar `sudo gem install cocoapods` — usa la Ruby vieja del sistema y rompe.
+
+### 9.3 Instalar pods y abrir Xcode
+
+```bash
+cd mobile/ios
+pod install            # genera Pods/ y Focus.xcworkspace
+open Focus.xcworkspace # ← SIEMPRE el .xcworkspace, NUNCA el .xcodeproj
+```
+
+`pod install` tarda 2–5 min la primera vez (descarga Hermes, Folly, Boost, etc.).
+
+### 9.4 Correr en Xcode
+
+1. En Xcode, esquema **Focus** seleccionado (top bar izquierda).
+2. Destino: **iPhone 15 Pro Simulator** (o tu iPhone físico si está conectado y confiado).
+3. ▶ Run (Cmd+R).
+4. Primera build: 5–10 min compilando Hermes y los nativos. Las siguientes: ~30s.
+
+Si al correr en iPhone físico Xcode pide signing:
+- **Targets → Focus → Signing & Capabilities**
+- **Team**: tu Apple ID personal
+- Bundle ID se queda en `me.usefocus.app.expo` (distinto del Capacitor)
+
+### 9.5 Atajo: sin abrir Xcode
+
+```bash
+cd mobile
+npm run ios   # equivale a `expo run:ios` — hace prebuild + pod install + build + launch
+```
+
+### 9.6 Verificación mínima en simulador
+
+1. App abre con splash de Focus → cae en pantalla de login (si no hay sesión).
+2. Login OTP: ingresar correo → llega código por Resend → verificar.
+3. Mi Día carga con la fecha de hoy + eventos + tareas pendientes desde Supabase.
+4. Tareas: crear, completar (haptic), borrar (long-press → Alert).
+5. Calendario: lista cronológica desde hoy en adelante.
+6. Ajustes: email visible + logout funciona.
+7. Pull-to-refresh nativo en las 3 listas.
