@@ -36,10 +36,10 @@ function formatTime(time: string): string {
 // DayTimeGrid: hora a la izquierda, dot grande, línea vertical conectando
 // con el siguiente evento, título a la derecha + chip de estado.
 //
-// Estados de pill (decididos en runtime comparando vs hora local):
-//   past   → "HECHO ✓" en surfaceTint
-//   now    → "EN CURSO" en primary filled
-//   future → sin pill
+// Visual tomada del screenshot del usuario:
+//   15:00 ●  Ir a buscar a tu hermano    [HECHO ✓]
+//             ╲
+//   17:00 ●  Jugar fútbol                [HECHO ✓]
 export function TodayEventRow({ event, isLast = false }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];

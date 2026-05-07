@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActionSheetIOS,
   Alert,
@@ -22,18 +22,10 @@ import { Card } from '@/components/ui/Card';
 import { FocusBar } from '@/components/ui/FocusBar';
 import { NextBlockCard } from '@/components/ui/NextBlockCard';
 import { NovaPromptCard } from '@/components/ui/NovaPromptCard';
-import { NovaReplyCard } from '@/components/ui/NovaReplyCard';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SectionLabel } from '@/components/ui/SectionLabel';
 import { Colors, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { sendNovaMessage } from '@/src/data/nova';
-import {
-  applyNovaActions,
-  undoApplied,
-  type AppliedItem,
-  type NovaAction,
-} from '@/src/data/novaActions';
 import { dateEyebrow, timeUntil } from '@/src/data/today';
 import type { EventItem } from '@/src/data/types';
 import { useEvents } from '@/src/data/useEvents';
@@ -57,36 +49,24 @@ function getStartTime(time: string): string {
   return m ? m[1] : '';
 }
 
-// Estado del reply card de Nova. `null` = oculto.
-type NovaReplyState =
-  | { phase: 'sending' }
-  | { phase: 'success'; reply: string; applied: AppliedItem[] }
-  | { phase: 'error'; error: string };
-
 export default function MiDiaScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
-  // Eventos del día y todas las tareas. useEvents('today') filtra por
-  // date == hoy en SQL, así que es la fuente de verdad para el timeline.
   const events = useEvents('today');
   const tasks = useTasks();
 
-  // Tick para refrescar countdown del Próximo Bloque cada minuto.
+  // Tick para refrescar countdown del Próximo Bloque cada minuto sin hacer
+  // setState costoso. Re-render via tick state — más simple que useReducer.
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), 60_000);
     return () => clearInterval(id);
   }, []);
 
-  // Estado del reply card de Nova (inline en Mi Día, debajo del FocusBar).
-  const [novaReply, setNovaReply] = useState<NovaReplyState | null>(null);
-  // Bloquea Send mientras Nova procesa.
-  const novaInflightRef = useRef(false);
-
   const eyebrow = useMemo(() => dateEyebrow(), []);
 
-  // Pendientes hoy: priorizamos category === 'hoy', si no hay, top 8 sin done.
+  // Pendientes: si tiene category 'hoy', priorizamos. Si no, top 8 sin done.
   const pendingTasks = useMemo(() => {
     const today = tasks.tasks.filter(
       (t) => !t.done && (t.category === 'hoy' || !t.category),
@@ -95,6 +75,8 @@ export default function MiDiaScreen() {
     return tasks.tasks.filter((t) => !t.done).slice(0, 8);
   }, [tasks.tasks]);
 
+  // Eventos ordenados por hora (la query ya viene ordenada, pero aseguramos
+  // por si llegan items sin tiempo arriba).
   const sortedEvents = useMemo(() => {
     return [...events.events].sort((a, b) => {
       const aT = getStartTime(a.time) || 'zz';
@@ -103,10 +85,7 @@ export default function MiDiaScreen() {
     });
   }, [events.events]);
 
-  const nextEvent = useMemo(
-    () => findNextEvent(sortedEvents, new Date()),
-    [sortedEvents],
-  );
+  const nextEvent = useMemo(() => findNextEvent(sortedEvents, new Date()), [sortedEvents]);
   const nextCountdown = useMemo(
     () => (nextEvent ? timeUntil(getStartTime(nextEvent.time)) : null),
     [nextEvent],
@@ -123,90 +102,17 @@ export default function MiDiaScreen() {
     void tasks.refresh();
   }
 
-  // Núcleo del flujo Mi Día → Nova: el usuario escribe en el FocusBar,
-  // mandamos al backend, aplicamos las actions[] localmente, mostramos chips
-  // de "Agregado: X" y dejamos disponible "Deshacer".
-  //
-  // Espejo del handler que vive en src/components/FocusBar.jsx (legacy líneas
-  // 477-573) — sin location/profile/memories/behavior por ahora (TODO Fase 5).
-  const handleNovaSubmit = useCallback(
-    async (text: string) => {
-      if (novaInflightRef.current) return;
-      novaInflightRef.current = true;
-      setNovaReply({ phase: 'sending' });
-      if (Platform.OS === 'ios') {
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      }
-      try {
-        const reply = await sendNovaMessage({
-          message: text,
-          events: events.events,
-          tasks: tasks.tasks,
-          history: [],
-        });
-        const actions = (reply.raw as any)?.actions as NovaAction[] | undefined;
-        // Apply actions locally usando los hooks reales. Esto crea/borra/etc.
-        // en Supabase y refresca state.
-        const { applied, failed } = await applyNovaActions(actions ?? [], {
-          events: events.events,
-          tasks: tasks.tasks,
-          addEvent: events.addEvent,
-          removeEvent: events.removeEvent,
-          addTask: tasks.addTask,
-          toggleTask: tasks.toggleTask,
-          removeTask: tasks.removeTask,
-          patchTask: tasks.patchTask,
-        });
-        if (failed.length > 0) {
-          // Best-effort: log silencioso. Los chips aplicados se muestran;
-          // las que fallaron se omiten para no confundir al usuario.
-          console.warn('[Nova] actions failed', failed);
-        }
-        setNovaReply({
-          phase: 'success',
-          reply: reply.message || 'Listo.',
-          applied,
-        });
-        // Si Nova creó algo, refrescamos para que el timeline muestre los
-        // nuevos eventos (la lista local ya tiene los upserts optimistas,
-        // pero refresh asegura sincronización con el server).
-        if (applied.length > 0) {
-          void events.refresh();
-          void tasks.refresh();
-          if (Platform.OS === 'ios') {
-            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          }
-        }
-      } catch (err: any) {
-        const msg: string =
-          err?.message || 'No pude responder. Intenta de nuevo en un momento.';
-        setNovaReply({ phase: 'error', error: msg });
-        if (Platform.OS === 'ios') {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        }
-      } finally {
-        novaInflightRef.current = false;
-      }
-    },
-    [events, tasks],
-  );
-
-  // Deshacer: revierte los applied items (crear→borrar, toggle→toggle).
-  const handleUndo = useCallback(async () => {
-    if (!novaReply || novaReply.phase !== 'success') return;
-    const items = novaReply.applied;
-    setNovaReply(null);
-    await undoApplied(items, {
-      removeEvent: events.removeEvent,
-      removeTask: tasks.removeTask,
-      toggleTask: tasks.toggleTask,
-    });
-    void events.refresh();
-    void tasks.refresh();
+  // Cuando el usuario manda algo desde el FocusBar, navegamos a Nova con
+  // el seed pre-rellenado y autosubmit. Nova se encarga del flujo.
+  function handleFocusSubmit(text: string) {
     if (Platform.OS === 'ios') {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-  }, [novaReply, events, tasks]);
+    router.push({
+      pathname: '/nova',
+      params: { seed: text, autosubmit: '1' },
+    });
+  }
 
   // Action sheet del botón "Añadir": tarea / evento / pedirle a Nova.
   function openAddSheet() {
@@ -254,7 +160,7 @@ export default function MiDiaScreen() {
             />
           }
         >
-          {/* Header — eyebrow date + título + descripción del producto */}
+          {/* Header — eyebrow date caps + título Mi Día + descripción */}
           <View style={styles.header}>
             <View style={styles.headerRow}>
               <View style={styles.headerText}>
@@ -269,29 +175,12 @@ export default function MiDiaScreen() {
             </Text>
           </View>
 
-          {/* FocusBar — input "Habla con Nova…" */}
+          {/* FocusBar — centro de la pantalla */}
           <View style={styles.focusBarWrap}>
-            <FocusBar
-              onSubmit={handleNovaSubmit}
-              loading={novaReply?.phase === 'sending'}
-            />
+            <FocusBar onSubmit={handleFocusSubmit} />
           </View>
 
-          {/* Reply card de Nova (inline, debajo del FocusBar) */}
-          {novaReply ? (
-            <View style={styles.cardWrap}>
-              <NovaReplyCard
-                reply={novaReply.phase === 'success' ? novaReply.reply : ''}
-                applied={novaReply.phase === 'success' ? novaReply.applied : []}
-                loading={novaReply.phase === 'sending'}
-                error={novaReply.phase === 'error' ? novaReply.error : null}
-                onUndo={handleUndo}
-                onDismiss={() => setNovaReply(null)}
-              />
-            </View>
-          ) : null}
-
-          {/* Próximo Bloque — solo si hay un evento futuro hoy */}
+          {/* Próximo Bloque */}
           {nextEvent ? (
             <View style={styles.cardWrap}>
               <NextBlockCard
@@ -302,7 +191,7 @@ export default function MiDiaScreen() {
             </View>
           ) : null}
 
-          {/* Errors de carga */}
+          {/* Errors */}
           {error ? (
             <View style={styles.cardWrap}>
               <ErrorBanner
@@ -315,9 +204,9 @@ export default function MiDiaScreen() {
           {loading ? (
             <LoadingState />
           ) : !hasAnyItem ? (
-            // Empty state legacy: solo NovaPromptCard. Las acciones rápidas
-            // ahora viven en el FocusBar (cámara/mic/send) y en el botón
-            // "Añadir" del header.
+            // Empty state legacy: NovaPromptCard + grid 2x2 quick actions.
+            // Las acciones reales están en el FocusBar de arriba; aquí
+            // mantenemos el patrón legacy para los onboarding empty states.
             <View style={styles.emptyWrap}>
               <NovaPromptCard
                 title="Tu agenda de hoy está vacía."
@@ -326,7 +215,8 @@ export default function MiDiaScreen() {
             </View>
           ) : (
             <>
-              {/* Eventos timeline */}
+              {/* Eventos timeline — sin SectionLabel cuando hay NextBlockCard
+                  arriba para no duplicar. */}
               {sortedEvents.length > 0 ? (
                 <>
                   <SectionLabel label="Hoy" count={sortedEvents.length} />
@@ -374,6 +264,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scrollContent: { paddingBottom: Spacing['3xl'] + 60 },
 
+  // Header
   header: {
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.sm,
@@ -406,16 +297,19 @@ const styles = StyleSheet.create({
 
   focusBarWrap: {
     paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.lg,
   },
+
   cardWrap: {
     paddingHorizontal: Spacing.lg,
     marginBottom: Spacing.md,
   },
+
   emptyWrap: {
     paddingHorizontal: Spacing.lg,
     gap: Spacing.md,
   },
+
   timelineWrap: {
     paddingHorizontal: Spacing.lg + 4,
     paddingBottom: Spacing.md,
