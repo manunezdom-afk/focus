@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
+import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
 import { EmptyDayState } from '@/components/planner/EmptyDayState';
 import { NextBlockCard } from '@/components/planner/NextBlockCard';
 import { PlannerNovaInput, type PlannerNovaSeed } from '@/components/planner/PlannerNovaInput';
@@ -151,6 +152,7 @@ export default function MiDiaScreen() {
         />
       </View>
 
+      <SwipeNavigator currentTab="index">
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -235,6 +237,7 @@ export default function MiDiaScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+      </SwipeNavigator>
     </SafeAreaView>
   );
 }

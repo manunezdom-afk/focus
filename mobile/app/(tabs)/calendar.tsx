@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CreateEventSheet } from '@/components/CreateEventSheet';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
+import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
 import { DayPicker } from '@/components/calendar/DayPicker';
 import { DayTimeline } from '@/components/calendar/DayTimeline';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -163,7 +164,7 @@ export default function CalendarScreen() {
       {showLoading ? (
         <LoadingState />
       ) : (
-        <>
+        <SwipeNavigator currentTab="calendar">
           <ScrollView
             contentContainerStyle={styles.scrollContent}
             refreshControl={
@@ -235,7 +236,7 @@ export default function CalendarScreen() {
           >
             <IconSymbol name="plus" size={26} color={c.onPrimary} />
           </Pressable>
-        </>
+        </SwipeNavigator>
       )}
 
       <CreateEventSheet

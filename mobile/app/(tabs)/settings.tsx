@@ -14,6 +14,7 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { SettingsRow, SettingsSection } from '@/components/ui/SettingsList';
 import { Colors, Radius, Spacing } from '@/constants/theme';
@@ -101,6 +102,7 @@ export default function SettingsScreen() {
         />
       </View>
 
+      <SwipeNavigator currentTab="settings">
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Header premium — título 40px + subtítulo humano */}
         <Animated.View entering={FadeInDown.duration(360)} style={styles.header}>
@@ -304,6 +306,7 @@ export default function SettingsScreen() {
           </Animated.View>
         </View>
       </ScrollView>
+      </SwipeNavigator>
     </SafeAreaView>
   );
 }

@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
+import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
 import { NovaOrb } from '@/components/nova/NovaOrb';
 import { TaskRow } from '@/components/TaskRow';
 import { Card } from '@/components/ui/Card';
@@ -191,6 +192,7 @@ export default function TasksScreen() {
         />
       </View>
 
+      <SwipeNavigator currentTab="tasks">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
@@ -462,6 +464,7 @@ export default function TasksScreen() {
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
+      </SwipeNavigator>
     </SafeAreaView>
   );
 }

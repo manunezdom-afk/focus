@@ -20,6 +20,7 @@ import Animated, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChatBubble } from '@/components/ChatBubble';
+import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
 import { NovaOrb } from '@/components/nova/NovaOrb';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -252,6 +253,7 @@ export default function NovaScreen() {
         />
       </View>
 
+      <SwipeNavigator currentTab="nova">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
@@ -409,6 +411,7 @@ export default function NovaScreen() {
           </Pressable>
         </Animated.View>
       </KeyboardAvoidingView>
+      </SwipeNavigator>
     </SafeAreaView>
   );
 }
