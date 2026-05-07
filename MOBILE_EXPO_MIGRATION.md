@@ -256,20 +256,28 @@ ls mobile/ios   # debe mostrar Focus, Focus.xcodeproj, Podfile
 
 ### 9.2 Asegurar CocoaPods (única vez)
 
-CocoaPods 1.13+ es requerido por React Native 0.81. La Ruby de macOS (`/usr/bin/ruby`, 2.6.10) es **demasiado vieja** para esa versión. Hay que usar una Ruby moderna. La forma más simple es Homebrew:
+CocoaPods 1.13+ es requerido por React Native 0.81 / Expo SDK 54 — porque podspecs como `react-native-safe-area-context` usan `s.visionos.deployment_target`, soportado solo desde pods 1.13.
+
+La Ruby de macOS (`/usr/bin/ruby` 2.6.10) **no puede instalar CocoaPods 1.13+**. Cualquier intento de `gem install cocoapods` cae en una cadena de dependencias (`ffi`, `zeitwerk`, `securerandom`) que requieren Ruby ≥ 3.0. Verificado: hasta `cocoapods 1.11.3` se puede forzar, pero falla al parsear los podspecs modernos (`undefined method 'visionos'`).
+
+**Forma recomendada — Homebrew** (trae su propia Ruby moderna):
 
 ```bash
-# Si no tienes Homebrew:
+# 1. Instalar Homebrew (pide tu contraseña una vez para crear /opt/homebrew):
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-# Instalar CocoaPods (trae su propia Ruby):
+# 2. Después de instalar, si Apple Silicon, agregar brew al PATH del shell:
+echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+# 3. Instalar CocoaPods:
 brew install cocoapods
 
-# Verificar:
+# 4. Verificar:
 pod --version   # debe imprimir 1.16.x o superior
 ```
 
-> Alternativa sin Homebrew: instalar Ruby 3+ con `rbenv` o `asdf`, luego `gem install cocoapods`. Evitar `sudo gem install cocoapods` — usa la Ruby vieja del sistema y rompe.
+> Alternativa sin Homebrew: instalar Ruby 3+ con `rbenv` (tarda 30+ min compilando), luego `gem install cocoapods`. Evitar `sudo gem install cocoapods` — usa la Ruby vieja del sistema y rompe.
 
 ### 9.3 Instalar pods y abrir Xcode
 
