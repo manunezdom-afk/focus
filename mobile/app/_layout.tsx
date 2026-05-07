@@ -2,10 +2,10 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '@/src/auth/AuthProvider';
 import { Colors } from '@/constants/theme';
@@ -70,27 +70,33 @@ function Shell() {
   );
 }
 
-// Trigger oculto solo en __DEV__: zona invisible 28x28 en esquina superior
-// izquierda. Long-press (650ms) abre el Migration Mirror. Position: top:0,
-// left:0 — área que ninguna pantalla usa para tap. En release builds el
-// Pressable no se renderiza y la zona vuelve a ser tappable normalmente.
+// Botón visible solo en __DEV__: esquina superior izquierda respetando safe
+// area. Tap simple abre Migration Mirror. En release builds no se renderiza.
 function DevMirrorTrigger() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   return (
     <Pressable
+      onPress={() => router.push('/(dev)/mirror')}
       onLongPress={() => router.push('/(dev)/mirror')}
-      delayLongPress={650}
-      style={{
+      delayLongPress={400}
+      style={({ pressed }) => ({
         position: 'absolute',
-        top: 0,
-        left: 0,
-        width: 28,
-        height: 28,
-        // sin background → completamente invisible
-      }}
+        top: insets.top + 8,
+        left: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 10,
+        backgroundColor: pressed ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.55)',
+        zIndex: 9999,
+      })}
       accessibilityLabel="Abrir Migration Mirror (dev)"
       accessibilityRole="button"
-    />
+    >
+      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 }}>
+        Mirror
+      </Text>
+    </Pressable>
   );
 }
 
