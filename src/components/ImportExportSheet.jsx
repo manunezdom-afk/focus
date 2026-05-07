@@ -887,7 +887,8 @@ function PhotoTab({ onImport }) {
       }
 
       if (data?.error === 'quota_exceeded') {
-        setError('Llegaste al límite diario de fotos. Vuelve mañana.')
+        // El backend devuelve message específico por plan (free/early_access).
+        setError(data?.message || 'Llegaste al límite diario de fotos. Vuelve mañana.')
         return
       }
 

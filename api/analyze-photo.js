@@ -1,7 +1,7 @@
 import { rateLimited, clientIp } from './_lib/rateLimit.js'
 import { rejectCrossSiteUnsafe, setCorsHeaders } from './_lib/security.js'
 import { getSupabaseAdmin, getUserIdFromAuth } from './_supabaseAdmin.js'
-import { enforceAiQuota } from './_lib/aiUsage.js'
+import { ACTION_TYPES, checkLimit, getUserPlan, recordUsage } from './_lib/usageLimits.js'
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
 const MAX_IMAGES = 4
@@ -41,13 +41,18 @@ export default async function handler(req, res) {
   }
 
   const admin = getSupabaseAdmin()
-  const quota = await enforceAiQuota(admin, userId, 'analyze-photo')
-  if (!quota.ok) {
+  const plan = await getUserPlan(admin, userId)
+  const check = await checkLimit(admin, userId, plan, ACTION_TYPES.PHOTO_ANALYSIS)
+  if (!check.ok) {
     return res.status(429).json({
       error: 'quota_exceeded',
-      message: 'Llegaste al límite diario de fotos analizadas. Vuelve mañana.',
-      reset_at: quota.resetAt,
-      limit: quota.limit,
+      action_type: check.action_type,
+      plan: check.plan,
+      period: check.period,
+      used: check.used,
+      limit: check.limit,
+      reset_at: check.resetAt,
+      message: check.message,
     })
   }
 
@@ -180,6 +185,9 @@ Si no hay eventos claros: []`,
     events = (Array.isArray(events) ? events : [])
       .filter((e) => e && typeof e.title === 'string' && e.title.trim())
 
+    // Contamos el uso DESPUÉS de un análisis exitoso. Si Anthropic falló
+    // o devolvió eventos vacíos, no penalizamos al usuario.
+    recordUsage(admin, userId, ACTION_TYPES.PHOTO_ANALYSIS).catch(() => {})
     return res.status(200).json({ events })
 
   } catch (err) {

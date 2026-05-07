@@ -7,7 +7,7 @@ import { safeParseAssistantJSON } from './_lib/neutralize.js'
 import { normalizeNovaPersonality } from './_lib/personality.js'
 import { rejectCrossSiteUnsafe, setCorsHeaders } from './_lib/security.js'
 import { getSupabaseAdmin, getUserIdFromAuth } from './_supabaseAdmin.js'
-import { enforceAiQuota } from './_lib/aiUsage.js'
+import { ACTION_TYPES, checkLimit, getUserPlan, recordUsage } from './_lib/usageLimits.js'
 
 // Necesario en Pro plan: por defecto Vercel mata la función a los 10s, lo
 // cual era menor que el timeout de 25s del SDK de Anthropic — el handler
@@ -40,17 +40,30 @@ export default async function handler(req, res) {
     })
   }
 
-  // Cuota diaria por usuario autenticado.
+  // Cuota por plan: chequeamos nova_message ANTES de gastar tokens. La
+  // verificación es read-only; el contador se incrementa después de que
+  // Anthropic respondió OK, así un timeout o caída no quema cuota.
   const admin = getSupabaseAdmin()
-  const quota = await enforceAiQuota(admin, userId, 'focus-assistant')
-  if (!quota.ok) {
+  const plan = await getUserPlan(admin, userId)
+  const messageCheck = await checkLimit(admin, userId, plan, ACTION_TYPES.NOVA_MESSAGE)
+  if (!messageCheck.ok) {
     return res.status(429).json({
       error: 'quota_exceeded',
-      message: 'Llegaste al límite diario de mensajes con Nova. Vuelve mañana.',
-      reset_at: quota.resetAt,
-      limit: quota.limit,
+      action_type: messageCheck.action_type,
+      plan: messageCheck.plan,
+      period: messageCheck.period,
+      used: messageCheck.used,
+      limit: messageCheck.limit,
+      reset_at: messageCheck.resetAt,
+      message: messageCheck.message,
     })
   }
+
+  // Pre-chequeo de smart actions: si no hay cuota, NO bloqueamos el chat
+  // — el usuario puede seguir conversando — pero strippeamos las actions
+  // del response para no aplicarlas. El frontend muestra un aviso amable.
+  const smartCheck = await checkLimit(admin, userId, plan, ACTION_TYPES.NOVA_SMART_ACTION)
+  const smartActionsBlocked = !smartCheck.ok
 
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim()
   if (!apiKey) return res.status(503).json({ error: 'no_api_key' })
@@ -107,23 +120,66 @@ export default async function handler(req, res) {
     })
   }
 
+  // Procesa la respuesta del modelo, aplica enforcement de smart_action y
+  // contabiliza nova_message una sola vez si todo salió bien.
+  function finalize(parsed) {
+    const out = parsed && typeof parsed === 'object' ? { ...parsed } : { reply: '', actions: [] }
+    const actions = Array.isArray(out.actions) ? out.actions : []
+
+    // Si las smart_actions están bloqueadas por cuota: stripeamos las
+    // acciones (excepto 'remember' que es transparente y barata) y avisamos
+    // al usuario al final del reply para que sepa por qué Nova no actuó.
+    let appliedSmartAction = false
+    if (smartActionsBlocked && actions.length > 0) {
+      const allowed = actions.filter(a => a?.type === 'remember')
+      const stripped = actions.length - allowed.length
+      out.actions = allowed
+      if (stripped > 0) {
+        out.smart_actions_blocked = true
+        out.smart_actions_message = smartCheck.message
+        const note = `\n\n_${smartCheck.message}_`
+        out.reply = `${out.reply || ''}${out.reply ? note : smartCheck.message}`
+      }
+    } else if (actions.length > 0) {
+      // Hay acciones reales (excluyendo solo-memoria): sí cuenta como smart_action.
+      const realActions = actions.filter(a => a?.type !== 'remember')
+      appliedSmartAction = realActions.length > 0
+    }
+
+    // Fire-and-forget: no esperamos a que termine el upsert para responder.
+    // Si falla, el usuario tuvo su respuesta y el contador queda como está
+    // (peor caso: pierde +1 contra sí mismo si la próxima llamada lo cuenta).
+    Promise.resolve()
+      .then(() => recordUsage(admin, userId, ACTION_TYPES.NOVA_MESSAGE))
+      .then(() => appliedSmartAction
+        ? recordUsage(admin, userId, ACTION_TYPES.NOVA_SMART_ACTION)
+        : null)
+      .catch(() => {})
+
+    return res.status(200).json(out)
+  }
+
   try {
     const d1 = await runClaude()
     const r1 = (d1.content?.[0]?.text ?? '').trim()
     try {
-      return res.status(200).json(safeParseAssistantJSON(r1))
+      return finalize(safeParseAssistantJSON(r1))
     } catch {
       const d2 = await runClaude(
         'Tu respuesta anterior tuvo JSON inválido o incompleto. Reintenta ahora. Responde SOLO con un objeto JSON válido siguiendo exactamente el formato indicado. Cierra todas las llaves y corchetes.'
       )
       const r2 = (d2.content?.[0]?.text ?? '').trim()
       try {
-        return res.status(200).json(safeParseAssistantJSON(r2))
+        return finalize(safeParseAssistantJSON(r2))
       } catch {
         // Sin loggear el contenido crudo: incluye datos del usuario
         // (eventos, tareas, memorias) y filtra a Vercel logs. La métrica útil
         // (tasa de fallo) la podemos derivar del status code 502.
         console.error('[focus-assistant] JSON parse failed after retry')
+        // Aún si el parse falló dos veces, el modelo SI gastó tokens. Contamos
+        // la acción para evitar que un atacante use mensajes mal formateados
+        // intencionalmente para bypassear el contador.
+        recordUsage(admin, userId, ACTION_TYPES.NOVA_MESSAGE).catch(() => {})
         return res.status(502).json({
           error: 'llm_bad_output',
           reply: 'Tuve un problema procesando la respuesta. Repite el mensaje por favor.',

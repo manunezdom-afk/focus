@@ -316,3 +316,31 @@ CREATE INDEX IF NOT EXISTS ai_usage_events_user_created_idx
   ON public.ai_usage_events (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS ai_usage_events_action_idx
   ON public.ai_usage_events (action_type, created_at DESC);
+
+-- ── user_plans: plan comercial del usuario ───────────────────────────────────
+-- Sin fila → free implícito. Sólo el service_role escribe (sin policies de
+-- INSERT/UPDATE/DELETE), así un usuario logueado no puede auto-promoverse.
+-- Ver supabase/migrations/015_user_plans.sql para detalle y comandos
+-- de asignación manual.
+CREATE TABLE IF NOT EXISTS public.user_plans (
+  user_id    UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  plan       TEXT NOT NULL DEFAULT 'free'
+             CHECK (plan IN ('free', 'early_access', 'plus', 'pro', 'admin')),
+  granted_by TEXT NOT NULL DEFAULT 'system',
+  granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ,
+  notes      TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.user_plans ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "user_plans_owner_select"
+  ON public.user_plans FOR SELECT USING (auth.uid() = user_id);
+
+CREATE INDEX IF NOT EXISTS user_plans_plan_idx
+  ON public.user_plans (plan)
+  WHERE plan <> 'free';
+
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.user_plans
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();

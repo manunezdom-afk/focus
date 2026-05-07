@@ -616,7 +616,8 @@ function NovaWidget({
         return
       }
       if (data?.error === 'quota_exceeded') {
-        setReply('Llegaste al límite diario de fotos analizadas. Vuelve mañana.')
+        // El backend devuelve message específico por plan (free/early_access).
+        setReply(data?.message || 'Llegaste al límite diario de fotos analizadas. Vuelve mañana.')
         return
       }
       const events = data?.events ?? []
@@ -731,18 +732,24 @@ function NovaWidget({
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         const code = data?.error
-        const statusMsg = {
-          rate_limit:           'Muchos mensajes seguidos. Espera unos segundos.',
-          upstream_rate_limit:  'Muchos mensajes seguidos. Espera unos segundos.',
-          upstream_overloaded:  'El servicio está sobrecargado. Reintenta.',
-          invalid_api_key:      'Servicio no disponible en este momento.',
-          no_api_key:           'Servicio no disponible en este momento.',
-          message_too_long:     'Mensaje demasiado largo.',
-          llm_bad_output:       'No pude procesarlo. Repite por favor.',
-          auth_required:        'Inicia sesión para hablar con Nova.',
-          quota_exceeded:       'Llegaste al límite diario de mensajes. Vuelve mañana.',
-        }[code] || data?.message || `Error ${res.status}`
-        throw new Error(statusMsg)
+        // quota_exceeded ahora trae un message ya armado por plan
+        // (free / early_access). Lo preferimos al texto genérico.
+        const statusMsg = code === 'quota_exceeded' && data?.message
+          ? data.message
+          : ({
+              rate_limit:           'Muchos mensajes seguidos. Espera unos segundos.',
+              upstream_rate_limit:  'Muchos mensajes seguidos. Espera unos segundos.',
+              upstream_overloaded:  'El servicio está sobrecargado. Reintenta.',
+              invalid_api_key:      'Servicio no disponible en este momento.',
+              no_api_key:           'Servicio no disponible en este momento.',
+              message_too_long:     'Mensaje demasiado largo.',
+              llm_bad_output:       'No pude procesarlo. Repite por favor.',
+              auth_required:        'Inicia sesión para hablar con Nova.',
+              quota_exceeded:       'Llegaste al límite diario de mensajes. Vuelve mañana.',
+            }[code] || data?.message || `Error ${res.status}`)
+        const err = new Error(statusMsg)
+        err.code = code
+        throw err
       }
 
       const data = await res.json()

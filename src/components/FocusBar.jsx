@@ -134,18 +134,23 @@ async function callFocusAssistant({ message, events, tasks, memories, history })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     const code = data?.error
-    const friendly = {
-      auth_required:       'Inicia sesión para hablar con Nova.',
-      quota_exceeded:      'Llegaste al límite diario de mensajes con Nova. Vuelve mañana.',
-      rate_limit:          'Muchos mensajes seguidos. Espera unos segundos.',
-      upstream_rate_limit: 'Muchos mensajes seguidos. Espera unos segundos.',
-      upstream_overloaded: 'El servicio está sobrecargado. Reintenta.',
-      timeout:             'La respuesta tardó demasiado. Intenta otra vez.',
-      no_api_key:          'Servicio no configurado. Vuelve a intentarlo en un rato.',
-      invalid_api_key:     'Servicio temporalmente no disponible. Reintenta más tarde.',
-      llm_bad_output:      'Tuve un problema procesando la respuesta. Repite el mensaje.',
-      internal_error:      'Error interno. Reintenta en un momento.',
-    }[code]
+    // El backend ya devuelve un mensaje específico por plan en quota_exceeded
+    // (ej. "Llegaste al límite diario en el plan gratis…"). Si vino, lo usamos
+    // tal cual; si no, caemos al diccionario local.
+    const friendly = code === 'quota_exceeded' && data?.message
+      ? data.message
+      : {
+          auth_required:       'Inicia sesión para hablar con Nova.',
+          quota_exceeded:      'Llegaste al límite diario de mensajes con Nova. Vuelve mañana.',
+          rate_limit:          'Muchos mensajes seguidos. Espera unos segundos.',
+          upstream_rate_limit: 'Muchos mensajes seguidos. Espera unos segundos.',
+          upstream_overloaded: 'El servicio está sobrecargado. Reintenta.',
+          timeout:             'La respuesta tardó demasiado. Intenta otra vez.',
+          no_api_key:          'Servicio no configurado. Vuelve a intentarlo en un rato.',
+          invalid_api_key:     'Servicio temporalmente no disponible. Reintenta más tarde.',
+          llm_bad_output:      'Tuve un problema procesando la respuesta. Repite el mensaje.',
+          internal_error:      'Error interno. Reintenta en un momento.',
+        }[code]
     const err = new Error(friendly || code || 'error')
     err.code = code
     err.status = res.status
@@ -610,7 +615,22 @@ export default function FocusBar({
         body: JSON.stringify({ images: [{ base64, mediaType: file.type || 'image/jpeg' }] }),
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
+
+      // Errores específicos antes que "no events": evita confundir al usuario
+      // con "no se detectaron eventos" cuando en realidad se quedó sin cuota.
+      if (res.status === 401 || data?.error === 'auth_required') {
+        setReply({ content: 'Inicia sesión para analizar fotos.', actions: [] })
+        return
+      }
+      if (data?.error === 'quota_exceeded') {
+        setReply({
+          content: data?.message || 'Llegaste al límite diario de fotos analizadas. Vuelve mañana.',
+          actions: [],
+        })
+        return
+      }
+
       const extracted = Array.isArray(data?.events) ? data.events : []
 
       if (extracted.length === 0) {
