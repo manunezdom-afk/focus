@@ -1,5 +1,4 @@
 import * as Haptics from 'expo-haptics';
-import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FlatList,
@@ -46,18 +45,12 @@ export default function NovaScreen() {
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList<ChatMessage>>(null);
 
-  // Seed: cuando alguien navega a /nova?seed=...&autosubmit=1 (ej. desde el
-  // FocusBar de Mi Día), prerrellenamos el draft y opcionalmente autosend.
-  const params = useLocalSearchParams<{ seed?: string; autosubmit?: string }>();
-
   const { events } = useEvents('all');
   const tasks = useTasks();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
-  // Evita procesar el seed múltiples veces (re-render / re-focus).
-  const seedConsumedRef = useRef<string | null>(null);
 
   const handleSend = useCallback(
     async (overrideText?: string) => {
@@ -131,22 +124,6 @@ export default function NovaScreen() {
       });
     }
   }, [messages.length]);
-
-  // Procesa el seed (una sola vez) si vino por URL params. Si autosubmit=1,
-  // dispara handleSend; si no, deja el draft pre-rellenado para que el usuario
-  // edite antes de enviar.
-  useEffect(() => {
-    const seed = typeof params.seed === 'string' ? params.seed : null;
-    if (!seed) return;
-    if (seedConsumedRef.current === seed) return;
-    seedConsumedRef.current = seed;
-    const autosubmit = params.autosubmit === '1' || params.autosubmit === 'true';
-    if (autosubmit) {
-      void handleSend(seed);
-    } else {
-      setDraft(seed);
-    }
-  }, [params.seed, params.autosubmit, handleSend]);
 
   const isEmpty = messages.length === 0;
 
