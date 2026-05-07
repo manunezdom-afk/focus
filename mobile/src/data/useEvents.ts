@@ -1,8 +1,7 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
-import { supabase } from '../lib/supabase';
 import {
   createEvent,
   deleteEvent,
@@ -70,38 +69,6 @@ export function useEvents(mode: Mode = 'all') {
       void load('initial');
     }, [load]),
   );
-
-  // Realtime subscription — port de useEvents.js legacy líneas 200-217.
-  // Cuando otro device del mismo usuario crea/edita/borra un evento, queremos
-  // que la lista se refresque sin pull-to-refresh manual. Supabase Realtime
-  // dispara el evento; nosotros refetcheamos en respuesta.
-  //
-  // En RN/Expo el WebSocket puede morir cuando la app va a background — el
-  // status SUBSCRIBED tras un resuscribe nos da una señal para hacer
-  // catch-up de cambios perdidos.
-  useEffect(() => {
-    if (!userId) return;
-    const sb = supabase;
-    if (!sb) return;
-    const channel = sb
-      .channel(`events-rt-${userId}-${mode}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'events',
-          filter: `user_id=eq.${userId}`,
-        },
-        () => {
-          void load('refresh');
-        },
-      )
-      .subscribe();
-    return () => {
-      void sb.removeChannel(channel);
-    };
-  }, [userId, mode, load]);
 
   const refresh = useCallback(() => load('refresh'), [load]);
 

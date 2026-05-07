@@ -1,8 +1,7 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
-import { supabase } from '../lib/supabase';
 import {
   createTask as apiCreateTask,
   deleteTask as apiDeleteTask,
@@ -71,33 +70,6 @@ export function useTasks() {
       void load('initial');
     }, [load]),
   );
-
-  // Realtime subscription a la tabla tasks — port de useTasks.js legacy.
-  // Cuando Nova en otro device, o el mismo dispositivo desde otra pantalla,
-  // crea/borra/toggle una tarea, la lista local se refresca al instante.
-  useEffect(() => {
-    if (!userId) return;
-    const sb = supabase;
-    if (!sb) return;
-    const channel = sb
-      .channel(`tasks-rt-${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'tasks',
-          filter: `user_id=eq.${userId}`,
-        },
-        () => {
-          void load('refresh');
-        },
-      )
-      .subscribe();
-    return () => {
-      void sb.removeChannel(channel);
-    };
-  }, [userId, load]);
 
   const refresh = useCallback(() => load('refresh'), [load]);
 
