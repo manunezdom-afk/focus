@@ -1,29 +1,31 @@
 import { router } from 'expo-router';
 import { useMemo } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { EventRow } from '@/components/EventRow';
 import { LoadingState } from '@/components/LoadingState';
-import { NovaInputPill } from '@/components/NovaInputPill';
-import { SuggestionChip } from '@/components/SuggestionChip';
 import { TaskRow } from '@/components/TaskRow';
 import { Card } from '@/components/ui/Card';
+import { NovaPromptCard } from '@/components/ui/NovaPromptCard';
+import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import { QuickActionButton } from '@/components/ui/QuickActionButton';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { SectionLabel } from '@/components/ui/SectionLabel';
-import { Colors, Spacing, Typography } from '@/constants/theme';
+import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { todayLabelLong } from '@/src/data/today';
 import { useEvents } from '@/src/data/useEvents';
 import { useTasks } from '@/src/data/useTasks';
 
-// Eyebrow tipo "JUEVES, 7 DE MAYO" derivado de todayLabelLong
-// ("jueves 7 de mayo" → comma after weekday + uppercase). Mantiene la
-// misma fuente de verdad de fecha que el resto de la app.
-function todayEyebrow(): string {
-  const label = todayLabelLong(); // "jueves 7 de mayo"
-  return label.replace(/^(\S+) /, '$1, ').toUpperCase();
+// Saludo según hora local. Mismo patrón que la web.
+function greeting(now = new Date()): string {
+  const h = now.getHours();
+  if (h < 6) return 'Buenas noches';
+  if (h < 12) return 'Buenos días';
+  if (h < 19) return 'Buenas tardes';
+  return 'Buenas noches';
 }
 
 export default function MiDiaScreen() {
@@ -33,8 +35,11 @@ export default function MiDiaScreen() {
   const events = useEvents('today');
   const tasks = useTasks();
 
-  const eyebrow = useMemo(() => todayEyebrow(), []);
+  const dateLabel = useMemo(() => todayLabelLong(), []);
+  const eyebrow = useMemo(() => greeting(), []);
 
+  // Tareas pendientes hoy (similar al modelo legacy: category === 'hoy' es lo
+  // que aparece en Mi Día; si no hay esa categoría, mostramos pending top 8).
   const pendingTasks = useMemo(() => {
     const today = tasks.tasks.filter((t) => !t.done && (t.category === 'hoy' || !t.category));
     if (today.length > 0) return today.slice(0, 8);
@@ -59,11 +64,11 @@ export default function MiDiaScreen() {
     void tasks.refresh();
   }
 
-  function goToNova(prompt?: string) {
-    router.push(
-      prompt
-        ? { pathname: '/(tabs)/nova', params: { prompt } }
-        : '/(tabs)/nova',
+  function notImplemented(feature: string) {
+    Alert.alert(
+      feature,
+      'Esta función estará disponible en la próxima versión. Por ahora puedes pedírselo a Nova.',
+      [{ text: 'Entendido', style: 'default' }],
     );
   }
 
@@ -81,12 +86,19 @@ export default function MiDiaScreen() {
           />
         }
       >
-        <ScreenHeader eyebrow={eyebrow} title="Mi Día" />
-
-        {/* Pill de entrada a Nova — la pieza protagonista del header. */}
-        <View style={styles.pillWrap}>
-          <NovaInputPill onPress={() => goToNova()} />
-        </View>
+        {/* Header — eyebrow primary + título grande extrabold + fecha completa */}
+        <ScreenHeader
+          eyebrow={eyebrow}
+          title="Mi día"
+          subtitle={dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)}
+          rightAction={
+            <PrimaryButton
+              label="Añadir"
+              size="sm"
+              onPress={() => router.push('/calendar')}
+            />
+          }
+        />
 
         {error ? (
           <View style={styles.bannerWrap}>
@@ -97,11 +109,53 @@ export default function MiDiaScreen() {
         {loading ? (
           <LoadingState />
         ) : !hasAnyItem ? (
-          <EmptyToday onPick={(prompt) => goToNova(prompt)} c={c} />
+          // Empty state legacy: Nova prompt card + grid 2-col de quick actions.
+          <View style={styles.emptyWrap}>
+            <NovaPromptCard
+              title="Tu agenda de hoy está vacía."
+              description="Dile a Nova qué tienes hoy, o añade algo tú mismo."
+            />
+            <View style={styles.actionsGrid}>
+              <View style={styles.actionsRow}>
+                <QuickActionButton
+                  label="Añadir"
+                  iconName="plus.circle.fill"
+                  onPress={() => router.push('/calendar')}
+                />
+                <QuickActionButton
+                  label="Hablar con Nova"
+                  iconName="sparkles"
+                  onPress={() => router.push('/nova')}
+                />
+              </View>
+              <View style={styles.actionsRow}>
+                <QuickActionButton
+                  label="Dictar"
+                  iconName="sparkles"
+                  onPress={() => notImplemented('Dictado')}
+                  disabled
+                />
+                <QuickActionButton
+                  label="Foto de agenda"
+                  iconName="plus"
+                  onPress={() => notImplemented('Foto de agenda')}
+                  disabled
+                />
+              </View>
+            </View>
+          </View>
         ) : (
           <>
+            {/* Eventos de hoy */}
             <SectionLabel label="Eventos de hoy" count={events.events.length} />
-            {events.events.length === 0 ? null : (
+            {events.events.length === 0 ? (
+              <View style={styles.miniEmpty}>
+                <NovaPromptCard
+                  title="Sin eventos hoy."
+                  description="Crea uno desde Calendario o pídeselo a Nova."
+                />
+              </View>
+            ) : (
               <View style={styles.cardWrap}>
                 <Card variant="default">
                   {events.events.map((evt) => (
@@ -111,14 +165,18 @@ export default function MiDiaScreen() {
               </View>
             )}
 
+            {/* Tareas pendientes */}
             <SectionLabel label="Tareas pendientes" count={pendingTasks.length} />
             {pendingTasks.length === 0 ? (
               <View style={styles.miniEmpty}>
-                <Text style={[styles.miniEmptyText, { color: c.textMuted }]}>
-                  {totalDoneToday > 0
-                    ? `Completaste ${totalDoneToday} tarea${totalDoneToday === 1 ? '' : 's'} hoy.`
-                    : 'No tienes tareas pendientes.'}
-                </Text>
+                <NovaPromptCard
+                  title={totalDoneToday > 0 ? '¡Listo por hoy!' : 'Todo en orden'}
+                  description={
+                    totalDoneToday > 0
+                      ? `Completaste ${totalDoneToday} tarea${totalDoneToday === 1 ? '' : 's'} hoy.`
+                      : 'Crea nuevas desde la pestaña Tareas.'
+                  }
+                />
               </View>
             ) : (
               <View style={styles.cardWrap}>
@@ -141,79 +199,23 @@ export default function MiDiaScreen() {
   );
 }
 
-// Empty state "Hoy está libre" con 3 chips de prompts para Nova.
-// Los chips son CTA — al tocarlos abrimos Nova con ese prompt prellenado.
-// NO son eventos ni tareas reales: son ejemplos para dispararle al chat.
-function EmptyToday({
-  onPick,
-  c,
-}: {
-  onPick: (prompt: string) => void;
-  c: typeof Colors.light;
-}) {
-  return (
-    <View style={emptyStyles.box}>
-      <Text style={[emptyStyles.title, { color: c.text }]}>Hoy está libre.</Text>
-      <Text style={[emptyStyles.desc, { color: c.textMuted }]}>
-        ¿Por dónde empezamos? Toca un ejemplo o escríbele a Nova.
-      </Text>
-
-      <View style={emptyStyles.chips}>
-        <SuggestionChip
-          iconName="dumbbell.fill"
-          label="Agendar gym mañana"
-          onPress={() => onPick('Agéndame gym mañana a primera hora.')}
-        />
-        <SuggestionChip
-          iconName="clock.fill"
-          label="Reservar 2h enfocadas"
-          onPress={() => onPick('Resérvame 2 horas de trabajo enfocado hoy.')}
-        />
-        <SuggestionChip
-          iconName="calendar"
-          label="Reunión semanal fija"
-          onPress={() =>
-            onPick('Crea una reunión semanal fija. Pregúntame día y hora.')
-          }
-        />
-      </View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   scrollContent: { paddingBottom: Spacing['3xl'] },
 
-  pillWrap: {
-    paddingHorizontal: Spacing.lg,
-    marginTop: -Spacing.xs,
-    marginBottom: Spacing.lg,
-  },
-
   bannerWrap: { paddingHorizontal: Spacing.lg },
   cardWrap: { paddingHorizontal: Spacing.lg },
-  miniEmpty: { paddingHorizontal: Spacing.xl, paddingVertical: Spacing.sm },
-  miniEmptyText: { ...Typography.body, fontSize: 14 },
-});
+  miniEmpty: { paddingHorizontal: Spacing.lg },
 
-const emptyStyles = StyleSheet.create({
-  box: {
+  emptyWrap: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing['2xl'],
     gap: Spacing.md,
-    alignItems: 'stretch',
   },
-  title: {
-    ...Typography.title2,
-    textAlign: 'center',
+  actionsGrid: {
+    gap: Spacing.sm,
   },
-  desc: {
-    ...Typography.body,
-    textAlign: 'center',
-    marginBottom: Spacing.md,
-  },
-  chips: {
+  actionsRow: {
+    flexDirection: 'row',
     gap: Spacing.sm,
   },
 });
