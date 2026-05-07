@@ -1,8 +1,9 @@
 // Cliente Nova hacia /api/focus-assistant.
 //
-// Mismo contrato que la web (src/components/NovaWidget.jsx):
+// Mismo contrato que la web (src/components/NovaWidget.jsx + FocusBar.jsx):
 // - POST /api/focus-assistant con { message, events, tasks, history, ... }
-// - Recibe { message, ... } o errores tipados (quota_exceeded, rate_limit, ...)
+// - Recibe { message, actions, ... } o errores tipados (quota_exceeded,
+//   rate_limit, ...)
 //
 // La sesión Supabase se inyecta como Bearer automáticamente vía apiFetch.
 //
@@ -10,6 +11,8 @@
 // asegura que el usuario vea "Llegaste al límite diario" en vez de "Error 429".
 
 import { apiFetch } from '@/src/lib/api';
+import type { Memory } from '@/src/data/memories';
+import type { UserProfile } from '@/src/data/profile';
 import type { Task, EventItem } from '@/src/data/types';
 
 export type ChatRole = 'user' | 'assistant';
@@ -62,9 +65,20 @@ export async function sendNovaMessage(opts: {
   events: EventItem[];
   tasks: Task[];
   history: ChatMessage[];
+  // Contexto opcional — si se pasa, Nova lo usa para enriquecer el prompt.
+  profile?: UserProfile | null;
+  memories?: Memory[];
   novaPersonality?: string;
 }): Promise<NovaReply> {
-  const { message, events, tasks, history, novaPersonality = 'focus' } = opts;
+  const {
+    message,
+    events,
+    tasks,
+    history,
+    profile = null,
+    memories = [],
+    novaPersonality = 'focus',
+  } = opts;
 
   // Mantener solo los últimos 20 turnos (igual que web).
   const trimmedHistory = history.slice(-20).map((m) => ({
@@ -80,9 +94,12 @@ export async function sendNovaMessage(opts: {
       events,
       tasks,
       history: trimmedHistory,
-      // Nova en mobile no tiene aún location/profile/memories/behavior. El
-      // backend acepta todos opcionales — la respuesta será un poco menos
-      // contextualizada pero funciona. Siguiente fase: implementar.
+      // Profile, memories y personality enriquecen el system prompt — el
+      // backend ya los lee (legacy NovaWidget los pasa). Si vienen vacíos,
+      // Nova responde sin ese contexto, sin romper nada.
+      profile,
+      memories,
+      // location y behavior aún no portados — mobile no los manda.
       clientNow: Date.now(),
       clientTimezone: getTimezone(),
       novaPersonality,
