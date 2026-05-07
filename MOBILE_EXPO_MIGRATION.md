@@ -151,3 +151,88 @@ Ver el commit que introduce esta migración:
 - `expo start` arrancado para sanity check del bundler
 
 La app no se probó todavía en iPhone físico — eso lo hace Martín siguiendo las instrucciones de [`mobile/README.md`](./mobile/README.md).
+
+---
+
+## Fase 2 — Datos reales básicos (in progress)
+
+PR #8 mergeado a `main`. Esta fase agrega la primera capa de datos real desde Supabase y rehace las pantallas Mi Día / Tareas / Calendario para mostrar contenido del usuario autenticado.
+
+### Capa de datos (`mobile/src/data/`)
+
+| Archivo            | Responsabilidad                                                        |
+| ------------------ | ---------------------------------------------------------------------- |
+| `types.ts`         | Tipos TS de `Task`, `EventItem`, `TaskPriority`                        |
+| `ids.ts`           | Generadores de IDs (`tsk-…`, `evt-…`) compatibles con la web           |
+| `today.ts`         | Helpers de fecha (`todayISO`, `todayLabelLong`, `dateLabelShort`)      |
+| `tasks.ts`         | `fetchTasks` · `createTask` · `setTaskDone` · `deleteTask`             |
+| `events.ts`        | `fetchEvents` · `fetchEventsForDate` · `fetchTodayEvents`              |
+| `useTasks.ts`      | Hook con `tasks/loading/error/refresh/addTask/toggleTask/removeTask`   |
+| `useEvents.ts`     | Hook con `events/loading/error/refresh` y modo `'today' \| 'all'`      |
+
+Decisiones simples para Fase 2 (no replicamos la complejidad de `src/services/dataService.js` web):
+
+- **Sin caché en disco** todavía (la web usa `localStorage` con dedupe + pendingUpserts). En mobile arrancamos limpio y refrescamos al ganar foco con `useFocusEffect`. AsyncStorage queda para Fase 3.
+- **Sin realtime subscription** todavía. `useFocusEffect` + pull-to-refresh cubren el 90% de los casos sin sumar la maquinaria de WebSocket que la web necesita por su modelo PWA.
+- **Optimistic updates** en `toggleTask` / `removeTask` / `addTask`: la UI cambia al instante; si Supabase rechaza, revertimos. Sin esto el toggle se sentía laggy por la latencia de red.
+- **RLS en defensa profunda**: aunque las policies `auth.uid() = user_id` ya garantizan acceso, todos los `update`/`delete` filtran `.eq('user_id', userId)` explícitamente. Patrón mismo que la web.
+
+### Pantallas
+
+- **Mi día** ([`app/(tabs)/index.tsx`](./mobile/app/(tabs)/index.tsx)): título grande + fecha localizada (es-CO), lista de eventos de hoy + lista de hasta 8 tareas pendientes. Pull-to-refresh refresca ambos. Estados loading / empty / error con `EmptyState` y `ErrorBanner`.
+- **Tareas** ([`app/(tabs)/tasks.tsx`](./mobile/app/(tabs)/tasks.tsx)): input compositor sticky en la parte de arriba, lista en `FlatList` particionada en *Pendientes* / *Completadas*. Tap = toggle (haptic Light). Long-press = Alert de confirmación → delete (haptic Warning). Touch targets ≥48px. `KeyboardAvoidingView` para que el teclado iOS no tape el input.
+- **Calendario** ([`app/(tabs)/calendar.tsx`](./mobile/app/(tabs)/calendar.tsx)): lista cronológica agrupada por fecha (hoy + futuro). `SectionHeader` con label localizado ("Hoy · jue 7 may"). Solo lectura en Fase 2 — crear/editar eventos vendrá con la pantalla detalle en Fase 3.
+- **Ajustes** ([`app/(tabs)/settings.tsx`](./mobile/app/(tabs)/settings.tsx)): sin cambios — ya tenía email + versión + logout con confirmación + haptic Warning.
+
+### Componentes nuevos
+
+- `Screen` (heredado de Fase 1)
+- `TaskRow`, `EventRow` — filas táctiles con haptics
+- `SectionHeader` — separadores de sección estilo iOS
+- `EmptyState`, `LoadingState`, `ErrorBanner` — estados utilitarios
+
+### Tablas Supabase usadas
+
+| Tabla         | Operaciones                          | RLS                     |
+| ------------- | ------------------------------------ | ----------------------- |
+| `tasks`       | SELECT, INSERT, UPDATE (done), DELETE | `auth.uid() = user_id` |
+| `events`      | SELECT (filtrado por date)            | `auth.uid() = user_id` |
+
+`user_profiles`, `suggestions`, `user_memories`, `user_signals`, `user_behavior` no se tocan en Fase 2.
+
+### Mobile feel checks aplicados
+
+- Componentes RN reales (`View`, `Text`, `Pressable`, `FlatList`, `ScrollView`, `RefreshControl`, `KeyboardAvoidingView`)
+- SafeAreaView con edges `['top']` (la tab bar ya empuja el bottom)
+- Touch targets ≥44px en TaskRow (`minHeight: 56`), addButton (`minHeight: 44`), input (`minHeight: 44`)
+- Haptics: tab change (Light), task toggle (Light), task delete confirm (Warning), task create (Success), logout confirm (Warning)
+- Pull-to-refresh nativo iOS (`RefreshControl`) en Mi Día, Tareas y Calendario
+- KeyboardAvoidingView con `keyboardVerticalOffset` ajustado por la tab bar
+- Sin WebView ni CSS web
+
+### Cómo probar en iPhone
+
+1. `cd mobile && cp .env.example .env` y completar con valores del proyecto Supabase
+2. `npm run start`
+3. Escanear QR con la cámara del iPhone (con [Expo Go](https://apps.apple.com/app/expo-go/id982107779) instalado)
+4. Loguearse con tu correo (mismo OTP que la web)
+5. Verificar:
+   - **Mi día** muestra fecha de hoy + eventos del día (los que ya creaste desde la web aparecen)
+   - **Tareas** lista las tareas reales; crear una desde el input la persiste a Supabase y aparece en la web tras refrescar
+   - Tap en una tarea la marca como hecha (con haptic) y persiste
+   - Long-press en una tarea pide confirmación y la borra
+   - **Calendario** muestra eventos agrupados por fecha desde hoy en adelante
+   - Pull-to-refresh en cualquier pantalla refresca al instante
+   - **Ajustes** sigue mostrando tu email y permite cerrar sesión
+
+### Qué falta para Fase 3
+
+1. **Sincronización en vivo** — Supabase realtime channel sobre `tasks` y `events` (espejar `useTasks.js` web con coalesced refetch)
+2. **Crear / editar eventos** desde mobile (botón "+" en Calendario y Mi Día)
+3. **Pantalla detalle de tarea** (cambiar prioridad, categoría, descripción)
+4. **Nova chat** contra `/api/focus-assistant`
+5. **Push notifications** con Expo Notifications + APNs
+6. **Sign in with Apple**
+7. **Caché en disco con AsyncStorage** para pintado instantáneo offline
+8. **Assets de marca** (icon.png y splash-icon.png siguen siendo placeholder Expo)
+9. **Delete account** en Ajustes
