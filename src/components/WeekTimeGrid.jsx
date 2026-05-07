@@ -214,7 +214,7 @@ export default function WeekTimeGrid({ weekStart, events = [], onOpenTask, onAdd
       className={`bg-surface-container-lowest border border-slate-200 rounded-2xl overflow-y-auto ${
         isNarrow ? 'overflow-x-hidden' : 'overflow-x-auto'
       }`}
-      style={{ maxHeight: 'calc(100vh - 260px)' }}
+      style={{ maxHeight: 'calc(var(--focus-visual-viewport-height, 100dvh) - 260px)' }}
     >
       <div
         className="relative"

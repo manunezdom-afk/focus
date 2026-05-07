@@ -438,7 +438,7 @@ export default function EveningShutdown({
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-        className="relative z-10 w-full max-h-[90vh] flex flex-col rounded-t-[28px] bg-white/5 backdrop-blur-2xl border-t border-white/10 overflow-hidden"
+        className="relative z-10 w-full max-h-[calc(var(--focus-visual-viewport-height,100dvh)*0.9)] flex flex-col rounded-t-[28px] bg-white/5 backdrop-blur-2xl border-t border-white/10 overflow-hidden"
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 1.5rem)' }}
       >
         {/* Grip handle */}

@@ -17,7 +17,7 @@ export default function BottomNavBar({ activeView, onNavigate }) {
   return (
     <nav
       aria-label="Navegación principal"
-      className="fixed bottom-0 left-0 right-0 w-full z-50 flex justify-around items-center px-2 pt-3 bg-slate-50/70 backdrop-blur-2xl border-t border-slate-200/50 gpu-layer"
+      className="fixed bottom-0 left-0 right-0 w-full z-bottom-nav flex justify-around items-center px-2 pt-3 bg-slate-50/70 backdrop-blur-2xl border-t border-slate-200/50 gpu-layer"
       style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.5rem)' }}
     >
       <LayoutGroup id="bottom-nav">

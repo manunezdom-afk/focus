@@ -42,7 +42,7 @@ export function useBootSplash() {
 function FocusIcon({ size = 96 }) {
   return (
     <img
-      src="/icons/icon-192.png?v=3"
+      src="/icons/icon-192.png?v=4"
       alt=""
       aria-hidden="true"
       width={size}
@@ -61,7 +61,7 @@ export default function BootSplash() {
       initial={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: FADE_OUT_MS / 1000, ease: [0.22, 1, 0.36, 1] }}
-      className="fixed inset-0 z-[200] flex items-center justify-center"
+      className="fixed inset-0 z-critical flex items-center justify-center"
       style={{
         background: 'radial-gradient(ellipse at 50% 42%, #0a1226 0%, #06080f 70%)',
       }}

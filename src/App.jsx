@@ -164,9 +164,10 @@ function RouteFallback({ activeView, isDesktop }) {
       role="status"
       aria-live="polite"
       aria-label={`Cargando ${label}`}
-      className={`min-h-[calc(100vh-96px)] ${isDesktop ? 'px-8 pt-10' : 'px-4 pt-6'}`}
+      className={`${isDesktop ? 'px-8 pt-10' : 'px-4 pt-6'}`}
+      style={{ minHeight: 'calc(var(--focus-visual-viewport-height, 100dvh) - 96px)' }}
     >
-      <div className="fixed inset-x-0 top-0 z-[80] h-[2px] bg-blue-400/40" />
+      <div className="fixed inset-x-0 top-0 z-overlay h-[2px] bg-blue-400/40" />
       <div className="mx-auto w-full max-w-5xl">
         <SkeletonBlock className="mb-4 h-4 w-32 rounded-full" />
         <SkeletonBlock className="mb-3 h-12 w-52 rounded-3xl" />
@@ -198,7 +199,7 @@ function SheetFallback({ label = 'Cargando' }) {
     <div
       role="status"
       aria-live="polite"
-      className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/20 px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-overlay grid place-items-center bg-slate-950/20 px-4 backdrop-blur-sm"
     >
       <div className="w-full max-w-sm rounded-[1.75rem] border border-white/70 bg-white/90 p-5 shadow-2xl shadow-slate-900/15">
         <SkeletonBlock className="mb-3 h-4 w-28 rounded-full" />
@@ -764,7 +765,10 @@ export default function App() {
     {/* Aurora ambiente — firma de marca, continuidad con landing.
         Renderizada fuera del wrapper principal para que el bg-surface no la tape. */}
     <AuroraBackground variant="app" intensity={0.55} />
-    <div className="relative z-[1] min-h-screen overflow-hidden">
+    <div
+      data-focus-app-shell
+      className="focus-app-shell min-h-screen"
+    >
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -803,8 +807,8 @@ export default function App() {
       )}
 
       <main
-        className={`relative z-10 ${isDesktop && !isDetail ? "pb-0 pl-[72px]" : "w-full"}`}
-        style={!isDesktop || isDetail ? { paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 7rem)' } : undefined}
+        data-focus-main
+        className={`focus-app-main ${isDesktop && !isDetail ? "pb-0 pl-[72px]" : "focus-mobile-main w-full"}`}
       >
         {/* ── Single-view layout: cada botón del sidebar → su propia vista ──
             Suspense envuelve TODO para cubrir las vistas lazy. El fallback ya
@@ -914,7 +918,7 @@ export default function App() {
           initial={{ y: 100, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.6, type: 'spring', damping: 20 }}
-          className="fixed bottom-0 left-0 right-0 z-40"
+          className="focus-bottom-nav-wrap fixed bottom-0 left-0 right-0"
         >
           <BottomNavBar activeView={navView} onNavigate={navigate} />
         </motion.div>
@@ -975,7 +979,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-            className="fixed inset-x-4 mx-auto z-[80] px-4 py-3 rounded-2xl bg-slate-900/95 text-white shadow-[0_20px_48px_rgba(0,0,0,0.25)] backdrop-blur flex items-center gap-2.5 max-w-[420px]"
+            className="fixed inset-x-4 mx-auto z-overlay px-4 py-3 rounded-2xl bg-slate-900/95 text-white shadow-[0_20px_48px_rgba(0,0,0,0.25)] backdrop-blur flex items-center gap-2.5 max-w-[420px]"
             style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 6.5rem)' }}
           >
             <span

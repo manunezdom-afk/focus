@@ -932,7 +932,7 @@ function NovaWidget({
   const pillPositionClass = isDesktop ? 'fixed bottom-6 right-6' : 'fixed right-4'
   const pillPositionStyle = isDesktop
     ? undefined
-    : { bottom: 'calc(env(safe-area-inset-bottom, 0px) + 116px)' }
+    : { bottom: 'var(--focus-floating-bottom)' }
   const voiceStatusText = {
     requestingPermission: 'Preparando micrófono…',
     listening: 'Escuchando…',
@@ -1232,7 +1232,7 @@ function NovaWidget({
           <motion.div
             key="pill-wrap"
             id="nova-widget"
-            className={`${pillPositionClass} z-[60]`}
+            className={`${pillPositionClass} z-floating`}
             style={pillPositionStyle}
             initial={{ opacity: 0, scale: 0.7 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -1285,7 +1285,7 @@ function NovaWidget({
         {isOpen && (isDesktop ? (
           <motion.div
             key="panel-desktop"
-            className={`${pillPositionClass} z-[60]`}
+            className={`${pillPositionClass} z-floating`}
             style={pillPositionStyle}
             initial={{ opacity: 0, scale: 0.88, y: 12 }}
             animate={{ opacity: 1, scale: 1,    y: 0  }}
@@ -1300,7 +1300,7 @@ function NovaWidget({
             </div>
           </motion.div>
         ) : (
-          <div key="panel-mobile" className="fixed inset-0 z-[70]">
+          <div key="panel-mobile" data-nova-mobile-panel className="fixed inset-0 z-modal">
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}

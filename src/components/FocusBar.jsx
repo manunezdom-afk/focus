@@ -1118,8 +1118,8 @@ export default function FocusBar({
   // ── Floating mode ─────────────────────────────────────────────────────────
   return (
     <div
-      className="fixed left-0 right-0 z-30 flex flex-col items-center gap-3 px-5"
-      style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 116px)' }}
+      className="fixed left-0 right-0 z-floating flex flex-col items-center gap-3 px-5"
+      style={{ bottom: 'var(--focus-floating-bottom)' }}
     >
       <AnimatePresence>
         {(isThinking || reply) && (
