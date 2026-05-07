@@ -17,3 +17,8 @@ export function newTaskId(): string {
 export function newEventId(): string {
   return `evt-${Date.now()}-${randomSlug(8)}`;
 }
+
+// IDs de mensajes UI puramente locales (chat de Nova). No tocan DB.
+export function newClientId(): string {
+  return `c-${Date.now()}-${randomSlug(6)}`;
+}

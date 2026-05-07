@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { Colors } from '@/constants/theme';
+import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import type { EventItem } from '@/src/data/types';
 
@@ -8,26 +8,50 @@ type Props = {
   event: EventItem;
 };
 
-// Formatea "HH:MM - HH:MM" → "HH:MM" (mostramos solo el inicio en filas
-// densas; la duración irá en la pantalla de detalle más adelante).
-function startTime(time: string): string {
-  if (!time) return '';
-  const m = time.match(/^(\d{1,2}:\d{2})/);
-  return m ? m[1] : time;
+// Formatea "HH:MM - HH:MM" en parts (start, end).
+function parseTime(time: string): { start: string; end: string | null } {
+  if (!time) return { start: '', end: null };
+  const cleaned = time.replace(/\s/g, '');
+  const m = cleaned.match(/^(\d{1,2}:\d{2})(?:-(\d{1,2}:\d{2}))?$/);
+  if (!m) return { start: time, end: null };
+  return { start: m[1], end: m[2] || null };
+}
+
+// Etiqueta corta de "section" para mostrar como tag visual ("trabajo", "salud"…)
+function sectionLabel(s: string): string {
+  if (!s) return '';
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
 export function EventRow({ event }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const time = startTime(event.time);
+  const { start, end } = parseTime(event.time);
 
   return (
-    <View style={[styles.row, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+    <View
+      style={[
+        styles.row,
+        { backgroundColor: c.surface, borderBottomColor: c.border },
+      ]}
+    >
+      {/* Indicador color a la izquierda — featured = primary, otro = muted. */}
+      <View
+        style={[
+          styles.bar,
+          { backgroundColor: event.featured ? c.primary : c.borderStrong },
+        ]}
+      />
+
       <View style={styles.timeCol}>
-        <Text style={[styles.time, { color: time ? c.text : c.textMuted }]}>
-          {time || '—'}
+        <Text style={[styles.startTime, { color: start ? c.text : c.textMuted }]}>
+          {start || '—'}
         </Text>
+        {end ? (
+          <Text style={[styles.endTime, { color: c.textSubtle }]}>{end}</Text>
+        ) : null}
       </View>
+
       <View style={styles.body}>
         <Text style={[styles.title, { color: c.text }]} numberOfLines={2}>
           {event.title}
@@ -37,6 +61,18 @@ export function EventRow({ event }: Props) {
             {event.description}
           </Text>
         ) : null}
+        {event.section ? (
+          <View
+            style={[
+              styles.tag,
+              { backgroundColor: c.surfaceTint, borderColor: c.border },
+            ]}
+          >
+            <Text style={[styles.tagText, { color: c.primary }]}>
+              {sectionLabel(event.section)}
+            </Text>
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -45,22 +81,42 @@ export function EventRow({ event }: Props) {
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 14,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md + 2,
+    gap: Spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    minHeight: 56,
+    minHeight: 60,
+    alignItems: 'flex-start',
+  },
+  bar: {
+    width: 3,
+    alignSelf: 'stretch',
+    borderRadius: 2,
+    marginVertical: 4,
   },
   timeCol: {
-    width: 60,
+    width: 56,
     paddingTop: 2,
   },
-  time: {
-    fontSize: 15,
-    fontWeight: '600',
+  startTime: {
+    ...Typography.bodyStrong,
     fontVariant: ['tabular-nums'],
   },
-  body: { flex: 1, gap: 2 },
-  title: { fontSize: 16, lineHeight: 22 },
-  description: { fontSize: 13, lineHeight: 18 },
+  endTime: {
+    ...Typography.caption,
+    fontVariant: ['tabular-nums'],
+    marginTop: 2,
+  },
+  body: { flex: 1, gap: 4 },
+  title: { ...Typography.body, fontSize: 16, lineHeight: 22 },
+  description: { ...Typography.caption },
+  tag: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: Radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: Spacing.xs,
+  },
+  tagText: { ...Typography.micro, fontWeight: '700' },
 });

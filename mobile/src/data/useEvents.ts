@@ -2,7 +2,13 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
-import { fetchEvents, fetchTodayEvents } from './events';
+import {
+  createEvent,
+  deleteEvent,
+  fetchEvents,
+  fetchTodayEvents,
+  type CreateEventInput,
+} from './events';
 import type { EventItem } from './types';
 
 type Mode = 'today' | 'all';
@@ -22,6 +28,9 @@ const INITIAL: State = { events: [], loading: true, refreshing: false, error: nu
 //
 // Mismo patrón simple que useTasks: useFocusEffect refresca al ganar foco,
 // `refresh()` para pull-to-refresh.
+//
+// `addEvent` hace optimistic insert (lo metemos al state inmediatamente y
+// si falla revertimos). Devuelve el evento creado o null si error.
 export function useEvents(mode: Mode = 'all') {
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -63,11 +72,43 @@ export function useEvents(mode: Mode = 'all') {
 
   const refresh = useCallback(() => load('refresh'), [load]);
 
+  const addEvent = useCallback(
+    async (input: CreateEventInput): Promise<EventItem | null> => {
+      if (!userId) return null;
+      try {
+        const created = await createEvent(userId, input);
+        setState((s) => ({ ...s, events: [...s.events, created], error: null }));
+        return created;
+      } catch (err: any) {
+        setState((s) => ({ ...s, error: err?.message ?? 'create_event_failed' }));
+        return null;
+      }
+    },
+    [userId],
+  );
+
+  const removeEvent = useCallback(
+    async (id: string) => {
+      if (!userId) return;
+      const prev = state.events;
+      setState((s) => ({ ...s, events: s.events.filter((e) => e.id !== id) }));
+      try {
+        await deleteEvent(userId, id);
+      } catch (err: any) {
+        // Revertir
+        setState((s) => ({ ...s, events: prev, error: err?.message ?? 'delete_event_failed' }));
+      }
+    },
+    [userId, state.events],
+  );
+
   return {
     events: state.events,
     loading: state.loading,
     refreshing: state.refreshing,
     error: state.error,
     refresh,
+    addEvent,
+    removeEvent,
   };
 }

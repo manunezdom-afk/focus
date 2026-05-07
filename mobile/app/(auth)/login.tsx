@@ -185,15 +185,15 @@ export default function LoginScreen() {
             style={({ pressed }) => [
               styles.primaryButton,
               {
-                backgroundColor: c.text,
+                backgroundColor: c.primary,
                 opacity: loading ? 0.6 : pressed ? 0.85 : 1,
               },
             ]}
           >
             {loading ? (
-              <ActivityIndicator color={c.background} />
+              <ActivityIndicator color={c.onPrimary} />
             ) : (
-              <Text style={[styles.primaryButtonText, { color: c.background }]}>
+              <Text style={[styles.primaryButtonText, { color: c.onPrimary }]}>
                 {step === 'email' ? 'Enviar código' : 'Entrar'}
               </Text>
             )}

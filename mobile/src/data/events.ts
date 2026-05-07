@@ -64,3 +64,46 @@ export async function fetchEventsForDate(userId: string, dateISO: string): Promi
 export function fetchTodayEvents(userId: string): Promise<EventItem[]> {
   return fetchEventsForDate(userId, todayISO());
 }
+
+export type CreateEventInput = {
+  title: string;
+  date: string | null; // YYYY-MM-DD
+  time: string | null; // "HH:MM" o "HH:MM-HH:MM"
+  description?: string;
+  section?: string;
+  featured?: boolean;
+};
+
+// Crear evento — INSERT directo a la tabla. RLS exige user_id = auth.uid()
+// así que también lo pasamos explícito (defensa en profundidad).
+//
+// Devolvemos el evento ya transformado a EventItem para que el caller pueda
+// hacer optimistic update sin re-fetch.
+export async function createEvent(userId: string, input: CreateEventInput): Promise<EventItem> {
+  if (!supabase) throw new Error('supabase_not_configured');
+  const insertRow = {
+    user_id: userId,
+    title: input.title.trim(),
+    date: input.date,
+    time: input.time,
+    description: (input.description ?? '').trim() || null,
+    section: input.section ?? 'focus',
+    icon: 'event',
+    featured: !!input.featured,
+  };
+  const { data, error } = await supabase
+    .from('events')
+    .insert(insertRow)
+    .select('id, user_id, title, time, description, section, icon, dot_color, date, featured, created_at, updated_at')
+    .single();
+  if (error) throw error;
+  return fromRow(data as EventRow);
+}
+
+// Borrar evento — solo si pertenece al usuario (RLS). El cliente filtra
+// también por user_id como defensa en profundidad.
+export async function deleteEvent(userId: string, id: string): Promise<void> {
+  if (!supabase) throw new Error('supabase_not_configured');
+  const { error } = await supabase.from('events').delete().eq('user_id', userId).eq('id', id);
+  if (error) throw error;
+}

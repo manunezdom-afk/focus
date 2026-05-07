@@ -69,8 +69,8 @@ export function TaskRow({ task, onToggle, onDelete }: Props) {
         style={[
           styles.check,
           {
-            borderColor: task.done ? c.accent : c.border,
-            backgroundColor: task.done ? c.accent : 'transparent',
+            borderColor: task.done ? c.primary : c.borderStrong,
+            backgroundColor: task.done ? c.primary : 'transparent',
           },
         ]}
       >

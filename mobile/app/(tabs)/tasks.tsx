@@ -106,14 +106,14 @@ export default function TasksScreen() {
             style={({ pressed }) => [
               styles.addButton,
               {
-                backgroundColor: c.text,
+                backgroundColor: c.primary,
                 opacity: !draft.trim() || submitting ? 0.4 : pressed ? 0.85 : 1,
               },
             ]}
             accessibilityRole="button"
             accessibilityLabel="Crear tarea"
           >
-            <Text style={[styles.addButtonText, { color: c.background }]}>Añadir</Text>
+            <Text style={[styles.addButtonText, { color: c.onPrimary }]}>Añadir</Text>
           </Pressable>
         </View>
 
@@ -125,8 +125,9 @@ export default function TasksScreen() {
           <LoadingState />
         ) : showEmptyState ? (
           <EmptyState
-            title="Sin tareas"
-            description="Escribe arriba para crear tu primera tarea."
+            icon="checklist"
+            title="Sin tareas todavía"
+            description="Escribe arriba para crear tu primera, o pídele a Nova que te ayude."
           />
         ) : (
           <FlatList

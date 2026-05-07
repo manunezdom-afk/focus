@@ -1,13 +1,16 @@
-import { useMemo } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { useMemo, useState } from 'react';
+import { FlatList, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CreateEventSheet } from '@/components/CreateEventSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { EventRow } from '@/components/EventRow';
 import { LoadingState } from '@/components/LoadingState';
 import { SectionHeader } from '@/components/SectionHeader';
-import { Colors } from '@/constants/theme';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { dateLabelShort, isToday, todayISO } from '@/src/data/today';
 import type { EventItem } from '@/src/data/types';
@@ -17,10 +20,9 @@ type Section =
   | { type: 'header'; title: string; count: number }
   | { type: 'event'; event: EventItem };
 
-// Agrupa los eventos por `date`. Eventos con date null caen en bucket 'sin-fecha'
-// y van al final. Los del pasado se ocultan por defecto en Fase 2 — Calendario
-// solo muestra hoy + futuro para mantener la lista útil. Cuando haya filtros
-// (Fase 3) podemos exponer "Mostrar pasados".
+// Agrupa los eventos por `date`. Eventos con date null caen en bucket
+// 'sin-fecha' y van al final. Los del pasado se ocultan por defecto en
+// Fase 2 — Calendario solo muestra hoy + futuro para mantener la lista útil.
 function groupAndFlatten(events: EventItem[]): Section[] {
   const today = todayISO();
   const futureOrToday = events.filter((e) => !e.date || e.date >= today);
@@ -33,7 +35,7 @@ function groupAndFlatten(events: EventItem[]): Section[] {
     buckets.set(key, arr);
   }
 
-  // Orden: por clave ASC. 'sin-fecha' al final (forzamos prefijo '~' al sortear).
+  // Orden: por clave ASC. 'sin-fecha' al final (forzamos prefijo '~').
   const sorted = Array.from(buckets.entries()).sort((a, b) => {
     const keyA = a[0] === 'sin-fecha' ? '~' : a[0];
     const keyB = b[0] === 'sin-fecha' ? '~' : b[0];
@@ -57,11 +59,19 @@ function groupAndFlatten(events: EventItem[]): Section[] {
 export default function CalendarScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const { events, loading, refreshing, error, refresh } = useEvents('all');
+  const events = useEvents('all');
+  const [showSheet, setShowSheet] = useState(false);
 
-  const sections = useMemo(() => groupAndFlatten(events), [events]);
-  const showLoading = loading && events.length === 0;
-  const showEmpty = !loading && sections.length === 0;
+  const sections = useMemo(() => groupAndFlatten(events.events), [events.events]);
+  const showLoading = events.loading && events.events.length === 0;
+  const showEmpty = !events.loading && sections.length === 0;
+
+  function openCreate() {
+    if (Platform.OS === 'ios') {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setShowSheet(true);
+  }
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
@@ -72,14 +82,34 @@ export default function CalendarScreen() {
         </Text>
       </View>
 
-      {error ? <ErrorBanner message="No pudimos cargar tu calendario." onRetry={refresh} /> : null}
+      {events.error ? (
+        <ErrorBanner message="No pudimos cargar tu calendario." onRetry={events.refresh} />
+      ) : null}
 
       {showLoading ? (
         <LoadingState />
       ) : showEmpty ? (
         <EmptyState
+          icon="calendar"
           title="Sin eventos próximos"
-          description="Crea eventos desde la app web o desde Nova; aparecerán aquí."
+          description="Crea uno con el botón + o pídeselo a Nova."
+          action={
+            <Pressable
+              onPress={openCreate}
+              style={({ pressed }) => [
+                styles.emptyCta,
+                {
+                  backgroundColor: c.primary,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Crear evento"
+            >
+              <IconSymbol name="plus" size={16} color={c.onPrimary} />
+              <Text style={[styles.emptyCtaText, { color: c.onPrimary }]}>Nuevo evento</Text>
+            </Pressable>
+          }
         />
       ) : (
         <FlatList
@@ -95,24 +125,83 @@ export default function CalendarScreen() {
             )
           }
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.text} />
+            <RefreshControl
+              refreshing={events.refreshing}
+              onRefresh={events.refresh}
+              tintColor={c.text}
+            />
           }
           contentContainerStyle={styles.listContent}
         />
       )}
+
+      {/* FAB siempre visible (excepto en empty state que ya tiene su CTA). */}
+      {!showEmpty ? (
+        <Pressable
+          onPress={openCreate}
+          style={({ pressed }) => [
+            styles.fab,
+            {
+              backgroundColor: c.primary,
+              shadowColor: c.primary,
+              opacity: pressed ? 0.85 : 1,
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Crear evento"
+        >
+          <IconSymbol name="plus" size={24} color={c.onPrimary} />
+        </Pressable>
+      ) : null}
+
+      <CreateEventSheet
+        visible={showSheet}
+        onDismiss={() => setShowSheet(false)}
+        onSubmit={async (input) => {
+          const created = await events.addEvent(input);
+          return !!created;
+        }}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16, gap: 4 },
-  title: {
-    fontSize: 32,
-    fontWeight: '700',
-    lineHeight: 38,
-    letterSpacing: -0.5,
+  header: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.md,
+    gap: Spacing.xs,
   },
-  subtitle: { fontSize: 15, lineHeight: 21 },
-  listContent: { paddingBottom: 32 },
+  title: { ...Typography.display },
+  subtitle: { ...Typography.body },
+  listContent: { paddingBottom: 100 }, // espacio para el FAB
+
+  fab: {
+    position: 'absolute',
+    bottom: Spacing.xl,
+    right: Spacing.xl,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Sombra suave para resaltar
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 6, // Android
+  },
+
+  emptyCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderRadius: Radius.full,
+    minHeight: 44,
+  },
+  emptyCtaText: { ...Typography.bodyStrong },
 });

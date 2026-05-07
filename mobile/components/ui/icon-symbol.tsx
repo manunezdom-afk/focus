@@ -20,6 +20,11 @@ const MAPPING = {
   'paperplane.fill': 'send',
   'chevron.right': 'chevron-right',
   'chevron.left': 'chevron-left',
+  'sparkles': 'auto-awesome',
+  'arrow.up': 'arrow-upward',
+  'plus': 'add',
+  'plus.circle.fill': 'add-circle',
+  'xmark': 'close',
 } as IconMapping;
 
 export function IconSymbol({
