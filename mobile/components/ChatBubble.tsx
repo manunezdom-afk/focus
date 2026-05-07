@@ -1,4 +1,5 @@
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -10,7 +11,9 @@ type Props = {
 
 // Un mensaje del chat con Nova. El de Nova alinea izquierda con surface tinted,
 // el del usuario alinea derecha con primary. Mantiene compatibilidad con dark.
-// Mientras Nova "piensa", muestra un spinner pequeño en la burbuja.
+// Mientras Nova "piensa", muestra un spinner pequeño en la burbuja. Si la
+// respuesta del assistant aplicó acciones (add_event/add_task), las muestra
+// como chips primary debajo del texto.
 export function ChatBubble({ message }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
@@ -18,16 +21,19 @@ export function ChatBubble({ message }: Props) {
   const isSending = message.status === 'sending';
   const isError = message.status === 'error';
 
-  // Color de texto y fondo según rol
   const bg = isUser
     ? c.primary
     : isError
       ? c.surfaceMuted
       : c.surfaceTint;
   const fg = isUser ? c.onPrimary : isError ? c.danger : c.text;
+  const hasActions = !!message.appliedActions && message.appliedActions.length > 0;
 
   return (
-    <View style={[styles.row, isUser ? styles.rowUser : styles.rowAssistant]}>
+    <Animated.View
+      entering={FadeIn.duration(200)}
+      style={[styles.row, isUser ? styles.rowUser : styles.rowAssistant]}
+    >
       <View
         style={[
           styles.bubble,
@@ -42,8 +48,21 @@ export function ChatBubble({ message }: Props) {
             {message.content}
           </Text>
         )}
+
+        {hasActions ? (
+          <View style={styles.chipsRow}>
+            {message.appliedActions!.map((label, idx) => (
+              <View
+                key={`${label}-${idx}`}
+                style={[styles.chip, { backgroundColor: c.primaryContainer }]}
+              >
+                <Text style={[styles.chipText, { color: c.primary }]}>{label}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -70,5 +89,21 @@ const styles = StyleSheet.create({
   },
   text: {
     ...Typography.body,
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: Spacing.sm,
+  },
+  chip: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+  },
+  chipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 });

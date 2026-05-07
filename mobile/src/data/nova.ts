@@ -21,6 +21,10 @@ export type ChatMessage = {
   createdAt: number;
   status?: 'sending' | 'sent' | 'error';
   errorCode?: string;
+  // Etiquetas humanas de las acciones que Nova aplicó tras este mensaje.
+  // Solo se setea en mensajes assistant; el ChatBubble las renderiza como
+  // chips primary debajo del texto. Ej: ["Agregado: Gym", "Tarea agregada: Llamar a Juan"].
+  appliedActions?: string[];
 };
 
 export type NovaActionShape = {
