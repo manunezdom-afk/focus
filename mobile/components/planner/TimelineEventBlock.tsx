@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -14,6 +15,8 @@ type Props = {
   done: boolean;
   onToggleDone?: () => void;
   onDeletePress?: () => void;
+  // Índice para stagger en la entrada animada. El padre lo pasa.
+  enterIndex?: number;
 };
 
 function startTimeStr(time: string): string {
@@ -30,10 +33,14 @@ export function TimelineEventBlock({
   done,
   onToggleDone,
   onDeletePress,
+  enterIndex = 0,
 }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const timeLabel = startTimeStr(event.time) || '—';
+
+  // Stagger 50ms por bloque, máx 240ms para que el último no tarde demasiado.
+  const enterDelay = Math.min(160 + enterIndex * 50, 400);
 
   // Ignorar descriptions que parecen fechas ISO (artefacto legacy).
   const hasDescription =
@@ -48,7 +55,10 @@ export function TimelineEventBlock({
   const accentColor = done ? c.success : c.primary;
 
   return (
-    <View style={styles.row}>
+    <Animated.View
+      entering={FadeInDown.delay(enterDelay).duration(320)}
+      style={styles.row}
+    >
       {/* Columna hora — 52px fija, texto alineado a la derecha */}
       <View style={styles.timeCol}>
         <Text style={[styles.timeText, { color: c.textMuted }]}>{timeLabel}</Text>
@@ -135,7 +145,7 @@ export function TimelineEventBlock({
           ) : null}
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 

@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -87,7 +88,8 @@ export function NextBlockCard({ events }: Props) {
   }
 
   return (
-    <View
+    <Animated.View
+      entering={FadeInDown.delay(360).duration(400)}
       style={[
         styles.wrap,
         {
@@ -126,7 +128,7 @@ export function NextBlockCard({ events }: Props) {
           <Text style={[styles.metricSuffix, { color: c.textMuted }]}>{metricSuffix}</Text>
         ) : null}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 

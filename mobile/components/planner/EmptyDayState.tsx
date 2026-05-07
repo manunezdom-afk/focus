@@ -1,4 +1,13 @@
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  FadeInDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -22,45 +31,74 @@ export function EmptyDayState({ onPickPrompt }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
+  // Halo pulse sutil en el ícono Nova: scale 1 ↔ 1.06 cada 2.4s. Se
+  // siente como una "respiración" que sugiere presencia inteligente.
+  const haloScale = useSharedValue(1);
+  useEffect(() => {
+    haloScale.value = withRepeat(
+      withTiming(1.06, { duration: 1200, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      true,
+    );
+  }, [haloScale]);
+  const haloAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: haloScale.value }],
+  }));
+
   return (
     <View style={styles.wrap}>
       {/* Intro centrada — espejo del legacy mobile: ícono + título humilde
           + descripción invitando a Nova. */}
       <View style={styles.intro}>
-        <View style={[styles.iconCircle, { backgroundColor: c.primaryContainer }]}>
+        <Animated.View
+          style={[styles.iconCircle, { backgroundColor: c.primaryContainer }, haloAnimatedStyle]}
+        >
           <IconSymbol name="sparkles" size={22} color={c.primary} />
-        </View>
-        <Text style={[styles.title, { color: c.text }]}>Hoy está libre.</Text>
-        <Text style={[styles.desc, { color: c.textMuted }]}>
+        </Animated.View>
+        <Animated.Text
+          entering={FadeInDown.delay(60).duration(320)}
+          style={[styles.title, { color: c.text }]}
+        >
+          Hoy está libre.
+        </Animated.Text>
+        <Animated.Text
+          entering={FadeInDown.delay(120).duration(320)}
+          style={[styles.desc, { color: c.textMuted }]}
+        >
           ¿Por dónde empezamos? Toca un ejemplo o escríbele a Nova.
-        </Text>
+        </Animated.Text>
       </View>
 
-      {/* Chips: icon-circle + label flex + chevron derecha */}
+      {/* Chips con stagger: cada uno entra 60ms después del anterior */}
       <View style={styles.chipsCol}>
-        {PROMPTS.map((p) => (
-          <Pressable
+        {PROMPTS.map((p, idx) => (
+          <Animated.View
             key={p.label}
-            onPress={() => onPickPrompt(p.label)}
-            style={({ pressed }) => [
-              styles.chip,
-              {
-                backgroundColor: c.surface,
-                borderColor: c.border,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={p.label}
+            entering={FadeInDown.delay(200 + idx * 70).duration(340)}
           >
-            <View style={[styles.chipIcon, { backgroundColor: c.primaryContainer }]}>
-              <IconSymbol name={p.icon} size={16} color={c.primary} />
-            </View>
-            <Text style={[styles.chipText, { color: c.text }]} numberOfLines={1}>
-              {p.label}
-            </Text>
-            <IconSymbol name="chevron.right" size={14} color={c.textSubtle} />
-          </Pressable>
+            <Pressable
+              onPress={() => onPickPrompt(p.label)}
+              style={({ pressed }) => [
+                styles.chip,
+                {
+                  backgroundColor: c.surface,
+                  borderColor: c.border,
+                  opacity: pressed ? 0.7 : 1,
+                  transform: [{ scale: pressed ? 0.98 : 1 }],
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={p.label}
+            >
+              <View style={[styles.chipIcon, { backgroundColor: c.primaryContainer }]}>
+                <IconSymbol name={p.icon} size={16} color={c.primary} />
+              </View>
+              <Text style={[styles.chipText, { color: c.text }]} numberOfLines={1}>
+                {p.label}
+              </Text>
+              <IconSymbol name="chevron.right" size={14} color={c.textSubtle} />
+            </Pressable>
+          </Animated.View>
         ))}
       </View>
     </View>

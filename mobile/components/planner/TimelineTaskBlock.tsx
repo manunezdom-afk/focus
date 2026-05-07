@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -9,6 +10,7 @@ type Props = {
   task: Task;
   onToggle?: (id: string) => void;
   onDeletePress?: () => void;
+  enterIndex?: number;
 };
 
 const DOT_SIZE = 8;
@@ -25,14 +27,18 @@ function getColors(scheme: 'light' | 'dark') {
   return Colors[scheme];
 }
 
-export function TimelineTaskBlock({ task, onToggle, onDeletePress }: Props) {
+export function TimelineTaskBlock({ task, onToggle, onDeletePress, enterIndex = 0 }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = getColors(scheme);
 
   const accent = priorityAccent(c, task.priority);
+  const enterDelay = Math.min(160 + enterIndex * 50, 400);
 
   return (
-    <View style={styles.row}>
+    <Animated.View
+      entering={FadeInDown.delay(enterDelay).duration(320)}
+      style={styles.row}
+    >
       {/* Columna izquierda: ícono check_box (en lugar de hora) */}
       <View style={styles.timeCol}>
         <IconSymbol name="checklist" size={18} color={c.textSubtle} />
@@ -101,7 +107,7 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress }: Props) {
           </View>
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 

@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ErrorBanner } from '@/components/ErrorBanner';
@@ -129,6 +130,27 @@ export default function MiDiaScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
+      {/* ── Hero halo ─────────────────────────────────────────────────
+          Bloque tinted indigo posicionado en absoluto detrás del header,
+          con bordes redondos amplios y opacidad baja. Crea la sensación
+          de "ambient glow" estilo Gemini sin requerir un linear-gradient
+          (no se agrega dependencia native). pointerEvents none asegura
+          que no intercepta toques. */}
+      <View style={styles.heroHaloLayer} pointerEvents="none">
+        <View
+          style={[
+            styles.heroHaloCircle,
+            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.45 : 0.55 },
+          ]}
+        />
+        <View
+          style={[
+            styles.heroHaloCircleSoft,
+            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.18 : 0.22 },
+          ]}
+        />
+      </View>
+
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -145,28 +167,26 @@ export default function MiDiaScreen() {
             />
           }
         >
-          {/* ── Header AI-native ──────────────────────────────────────
-              Título grande primero, saludo + fecha como subtítulo
-              cálido. Mantiene la estructura legacy (título + línea de
-              contexto) pero con jerarquía y tono más Gemini-style:
-              menos rígido, más respirado. */}
-          <View style={styles.header}>
+          {/* ── Header AI-native con entrada animada ─────────────────── */}
+          <Animated.View entering={FadeInDown.duration(360)} style={styles.header}>
             <Text style={[styles.titleLine, { color: c.text }]}>Mi día</Text>
             <Text style={[styles.subLine, { color: c.primary }]} numberOfLines={1}>
               <Text style={styles.subLineStrong}>{greeting}</Text>
               <Text style={{ color: c.textMuted }}>{`  ·  ${dateLabel}`}</Text>
             </Text>
-          </View>
+          </Animated.View>
 
-          {/* FocusBar inline — paradigma legacy: lenguaje natural a Nova */}
-          <PlannerNovaInput
-            events={events.events}
-            tasks={tasks.tasks}
-            onAddEvent={events.addEvent}
-            onAddTask={tasks.addTask}
-            onRefresh={handleRefresh}
-            seed={novaSeed}
-          />
+          {/* FocusBar — entra después del header (delay 60ms) */}
+          <Animated.View entering={FadeInDown.delay(60).duration(360)}>
+            <PlannerNovaInput
+              events={events.events}
+              tasks={tasks.tasks}
+              onAddEvent={events.addEvent}
+              onAddTask={tasks.addTask}
+              onRefresh={handleRefresh}
+              seed={novaSeed}
+            />
+          </Animated.View>
 
           {error ? (
             <View style={styles.bannerWrap}>
@@ -180,12 +200,14 @@ export default function MiDiaScreen() {
           {loading ? (
             <LoadingState />
           ) : !hasAnyItem ? (
-            <EmptyDayState onPickPrompt={seedNova} />
+            <Animated.View entering={FadeInDown.delay(140).duration(420)}>
+              <EmptyDayState onPickPrompt={seedNova} />
+            </Animated.View>
           ) : (
             <>
               {/* Timeline: eventos por hora + tareas hoy al final */}
               <View style={styles.timelineWrap}>
-                {sortedEvents.map((evt) => (
+                {sortedEvents.map((evt, idx) => (
                   <TimelineEventBlock
                     key={evt.id}
                     event={evt}
@@ -193,14 +215,16 @@ export default function MiDiaScreen() {
                     done={doneEventIds.has(evt.id)}
                     onToggleDone={() => toggleEventDone(evt.id)}
                     onDeletePress={() => handleDeleteEvent(evt.id, evt.title)}
+                    enterIndex={idx}
                   />
                 ))}
-                {pendingTasks.map((t) => (
+                {pendingTasks.map((t, idx) => (
                   <TimelineTaskBlock
                     key={t.id}
                     task={t}
                     onToggle={tasks.toggleTask}
                     onDeletePress={() => handleDeleteTask(t.id, t.label)}
+                    enterIndex={sortedEvents.length + idx}
                   />
                 ))}
               </View>
@@ -222,6 +246,36 @@ const styles = StyleSheet.create({
   // del CustomTabBar (que tiene su propia safe area). Sin este margen, el
   // botón "HECHO ✓" del último item podía quedar parcialmente cubierto.
   scrollContent: { paddingBottom: 48 },
+
+  // Hero halo: dos "blobs" tinted indigo apilados en absoluto detrás del
+  // header. Sin gradient deps. Crea profundidad ambiente estilo IA sin
+  // saturar la pantalla.
+  heroHaloLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 380,
+    overflow: 'hidden',
+  },
+  heroHaloCircle: {
+    position: 'absolute',
+    top: -120,
+    left: -60,
+    right: -60,
+    height: 320,
+    borderBottomLeftRadius: 240,
+    borderBottomRightRadius: 240,
+  },
+  heroHaloCircleSoft: {
+    position: 'absolute',
+    top: 60,
+    left: -120,
+    right: -120,
+    height: 280,
+    borderRadius: 240,
+    transform: [{ scaleY: 0.55 }],
+  },
 
   header: {
     paddingHorizontal: Spacing.xl,

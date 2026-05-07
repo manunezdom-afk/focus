@@ -2,7 +2,7 @@ import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 
 import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -69,15 +69,19 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
           <Pressable
             key={route.key}
             onPress={handlePress}
-            style={styles.tab}
+            style={({ pressed }) => [
+              styles.tab,
+              { transform: [{ scale: pressed ? 0.94 : 1 }] },
+            ]}
             accessibilityRole="button"
             accessibilityLabel={cfg.label}
             accessibilityState={{ selected: focused }}
           >
-            <IconSymbol
+            <TabIcon
               name={focused ? cfg.iconActive : cfg.iconInactive}
-              size={26}
-              color={focused ? c.primary : c.tabIconDefault}
+              focused={focused}
+              activeColor={c.primary}
+              inactiveColor={c.tabIconDefault}
             />
             <Text
               style={[
@@ -115,6 +119,31 @@ function Dot({ focused, color }: { focused: boolean; color: string }) {
         animStyle,
       ]}
     />
+  );
+}
+
+// Ícono de tab con scale animado al activarse: 1 → 1.08 con timing 220ms.
+// Sutil pero suficiente para que el cambio se sienta vivo. Color animado
+// vía cambio de prop (RN no anima color en native driver de Reanimated 4
+// sin extra config; el color cambia instantáneo y la escala suaviza).
+function TabIcon({
+  name,
+  focused,
+  activeColor,
+  inactiveColor,
+}: {
+  name: any;
+  focused: boolean;
+  activeColor: string;
+  inactiveColor: string;
+}) {
+  const style = useAnimatedStyle(() => ({
+    transform: [{ scale: withTiming(focused ? 1.08 : 1, { duration: 220 }) }],
+  }));
+  return (
+    <Animated.View style={style}>
+      <IconSymbol name={name} size={26} color={focused ? activeColor : inactiveColor} />
+    </Animated.View>
   );
 }
 

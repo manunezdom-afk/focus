@@ -9,6 +9,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated, {
+  FadeIn,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -102,6 +108,15 @@ export function PlannerNovaInput({
     }
   }, [seed?.n, seed?.text]);
 
+  // Glow indigo animado en focus. shadowOpacity y shadowRadius crecen al
+  // enfocar; el efecto se nota como un halo suave indigo, sin scale ni
+  // borde fuerte. 200ms cubic — feel iOS/Gemini.
+  const focus = useSharedValue(0);
+  const animatedBarStyle = useAnimatedStyle(() => ({
+    shadowOpacity: 0.07 + focus.value * 0.13,
+    shadowRadius: 14 + focus.value * 10,
+  }));
+
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text || sending) return;
@@ -164,7 +179,13 @@ export function PlannerNovaInput({
 
   return (
     <View style={styles.wrap}>
-      <View style={[styles.inputBar, { backgroundColor: c.surface, borderColor: c.border }]}>
+      <Animated.View
+        style={[
+          styles.inputBar,
+          { backgroundColor: c.surface, borderColor: c.border },
+          animatedBarStyle,
+        ]}
+      >
         {/* Indicador izquierdo: círculo con ícono Nova. No es interactivo —
             solo señaliza visualmente que la barra es de Nova, paralelo al
             mic button del legacy (la voz es scope futuro). */}
@@ -182,6 +203,12 @@ export function PlannerNovaInput({
           autoCapitalize="sentences"
           maxLength={2000}
           editable={!sending}
+          onFocus={() => {
+            focus.value = withTiming(1, { duration: 220 });
+          }}
+          onBlur={() => {
+            focus.value = withTiming(0, { duration: 220 });
+          }}
         />
         <Pressable
           onPress={send}
@@ -199,10 +226,11 @@ export function PlannerNovaInput({
             <IconSymbol name="arrow.up" size={16} color={c.onPrimary} />
           )}
         </Pressable>
-      </View>
+      </Animated.View>
 
       {reply ? (
-        <View
+        <Animated.View
+          entering={FadeIn.duration(220)}
           style={[
             styles.reply,
             {
@@ -236,7 +264,7 @@ export function PlannerNovaInput({
           >
             <IconSymbol name="xmark" size={14} color={c.textSubtle} />
           </Pressable>
-        </View>
+        </Animated.View>
       ) : null}
     </View>
   );
