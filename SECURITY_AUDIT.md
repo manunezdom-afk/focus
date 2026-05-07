@@ -196,3 +196,112 @@ Todas las políticas vivían como `FOR ALL USING (auth.uid() = user_id)`. Postgr
 - **Tres puntos de seguridad quedan pendientes** (rate-limit persistente, account-pre-create al pedir OTP, rotación periódica de `CRON_SECRET`); ninguno bloquea TestFlight pero deben quedar agendados.
 
 La seguridad base de Focus está lista para beta / TestFlight, siempre que el operador aplique la migración 012 en Supabase y confirme las env vars en Vercel.
+
+---
+
+## 11. Update 2026-05-07 — migraciones faltantes aplicadas + paso previo a sistema de límites
+
+Antes de pasar al sistema de límites por usuario gratuito había que cerrar un punto técnico: 5 tablas que el código consumía (`ai_usage`, `notif_log`, `notification_deliveries`, `native_push_tokens`, `kairos_links`) **no existían en producción** porque las migraciones del repo nunca se aplicaron. Esto hacía que el cron de notificaciones fallara silenciosamente, la cuota diaria de IA degradara a `soft:true`, el panel de notificaciones in-app no cargara histórico y la integración Focus↔Kairos no funcionara.
+
+Además detectamos que faltaban columnas que el código de Nova/quiet hours esperaba en `user_profiles` y `sent_notifications` (migraciones 006, 007, 008 también pendientes).
+
+### Migraciones aplicadas en este pase
+
+| Migración | Qué hace | Estado |
+| --- | --- | --- |
+| `005_notification_deliveries.sql` | Telemetría persistente de cada push enviado | ✅ aplicada |
+| `006_sent_notification_metadata.sql` | Columnas `kind/title/body/payload` en `sent_notifications` | ✅ aplicada |
+| `007_user_personality.sql` | `user_profiles.nova_personality` con CHECK constraint | ✅ aplicada |
+| `008_quiet_hours.sql` | `user_profiles.quiet_start/quiet_end` con CHECK | ✅ aplicada |
+| `009_native_push_tokens.sql` | APNs tokens para builds App Store iOS | ✅ aplicada |
+| `010_ai_usage.sql` | Contador diario `ai_usage` (rate limit en `aiUsage.js`) | ✅ aplicada |
+| `011_kairos_links.sql` | Vínculo Focus↔Kairos vía `focus_code` público | ✅ aplicada |
+| `012_security_rls_baseline.sql` | RLS endurecido con `WITH CHECK` (re-aplicada) | ✅ aplicada |
+| `013_ai_usage_events.sql` (**nueva**) | Tracking granular per-call para futuro sistema de límites/costos | ✅ aplicada |
+| `014_notif_log.sql` (**nueva**) | Tabla `notif_log` extraída de `schema.sql` | ✅ aplicada |
+
+### Tabla `ai_usage_events` — preparada para el sistema de límites
+
+Agregamos `public.ai_usage_events` como log granular per-call (NO reemplaza `ai_usage`, que sigue siendo el contador diario que `api/_lib/aiUsage.js` consulta). Schema:
+
+```sql
+ai_usage_events (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  action_type TEXT NOT NULL,          -- 'focus-assistant' | 'analyze-photo' | …
+  model_used TEXT NOT NULL,            -- ej. 'claude-haiku-4-5-20251001'
+  input_tokens INTEGER >= 0,
+  output_tokens INTEGER >= 0,
+  total_tokens GENERATED ALWAYS (input + output) STORED,
+  estimated_cost_usd NUMERIC(12,6) >= 0,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT now()
+)
+```
+
+**RLS:** RLS habilitado. Policy `ai_usage_events_owner_select` permite solo SELECT al dueño. Sin policies de INSERT/UPDATE/DELETE → solo `service_role` desde el backend escribe → un atacante con sesión válida no puede inflar contadores ajenos ni mentir sobre tokens consumidos. Las inserts del backend NO confían en datos del cliente — los tokens y el costo se calculan en el handler con la respuesta real del modelo.
+
+**Por qué dos tablas y no una**:
+- `ai_usage` (migración 010) es un contador agregado por (user_id, day, endpoint) → count. Es lo que `api/_lib/aiUsage.js` usa para enforcement de cuota diaria. Cambiar su shape rompe ese flujo crítico.
+- `ai_usage_events` guarda UNA fila por cada llamada al modelo → permite construir gráficos, alertas, top-users por costo y futuros tiers (free/pro) sin perder granularidad.
+- Cuando llegue el sistema de límites, la cuota diaria puede derivarse de `ai_usage_events` con `SELECT count(*) WHERE user_id=X AND created_at >= now() - interval '1 day'` o seguir usando `ai_usage` para enforcement rápido. Coexisten sin pisarse.
+
+### Verificación SQL ejecutada
+
+Estado final de las **17 tablas privadas** en producción:
+
+```
+status      n   tablas
+EXISTS     17   ai_usage, ai_usage_events, calendar_feeds, device_pairings,
+                events, kairos_links, native_push_tokens, notif_log,
+                notification_deliveries, push_subscriptions, sent_notifications,
+                suggestions, tasks, user_behavior, user_memories,
+                user_profiles, user_signals
+```
+
+- ✅ RLS habilitado en las 17.
+- ✅ Cada tabla privada (excepto `device_pairings`) con UNA policy con prefijo `<tabla>_owner_*`.
+- ✅ `device_pairings`: 0 policies (intencional — solo `service_role`).
+- ✅ 0 policies legacy/duplicadas (verificado con query que filtra por `policyname NOT IN (tablename || '_owner_all', tablename || '_owner_select')`).
+- ✅ `with_check` poblado en todas las policies `FOR ALL` (con `SELECT`-only para `sent_notifications`, `notification_deliveries`, `ai_usage`, `ai_usage_events`).
+- ✅ Columnas de migraciones 004/006/007/008 confirmadas presentes (events.timezone, events.reminder_offsets, sent_notifications.{kind,title,body,payload}, user_profiles.{nova_personality,quiet_start,quiet_end}).
+
+### `OPENAI_API_KEY` legacy — borrada
+
+Confirmado con `grep -rn "OPENAI" --include='*.{js,jsx,json,yml,toml,mjs}'` que `OPENAI_API_KEY` **NO se usa** en código fuente ni en `dist/`. El último uso fue en TTS removido por el commit `e4de579 feat(voz): elimina salida de voz de Nova`. **Eliminada del dashboard de Vercel** ("Removed Environment Variable successfully").
+
+> **Acción manual recomendada:** rotar/desactivar la API key en el dashboard de OpenAI (`platform.openai.com → API keys`) ya que Vercel solo elimina la referencia, no la invalida en el origen.
+
+### APNs — variables faltantes (no bloquean este paso, pero sí TestFlight)
+
+Antes de habilitar push notifications en builds iOS App Store hay que agregar a Vercel (todas backend, sin prefijo `VITE_`):
+
+| Variable | Para qué | Dónde obtenerla |
+| --- | --- | --- |
+| `APNS_TEAM_ID` | Team ID del developer | Apple Developer → Membership |
+| `APNS_KEY_ID` | Key ID del APNs auth key | Apple Developer → Keys |
+| `APNS_PRIVATE_KEY` | Contenido del `.p8` con `\n` literales | Apple Developer → Keys (descarga única) |
+| `APNS_BUNDLE_ID` | `me.usefocus.app` | hardcoded por defecto |
+| `APNS_ENV` | `production` (TestFlight + App Store) o `development` (sandbox) | tu elección |
+
+Y opcionalmente para que el frontend conozca el environment:
+- `VITE_APNS_ENV` = `production` (build prod) | `development` (build sandbox)
+
+Sin estas vars el cron de push iOS detecta `apnsConfig.configured = false` y no envía native push (graceful degrade, no crash).
+
+### Pruebas ejecutadas
+
+- ✅ `npm run build` — Vite build OK + SW stamp.
+- ✅ `node --test tests/security.test.js tests/cron-config.test.js tests/apns.test.js tests/auth-required.test.js` — 13/13 pass.
+- ✅ Demo mode (sin Supabase env): la app arranca sin errores, console-warn esperado.
+- ✅ DB consistency: las 17 tablas privadas tienen RLS + policy correcta.
+
+### Pendientes reales antes del punto 2 (sistema de límites)
+
+Ninguno bloquea el punto 2. La tabla `ai_usage_events` ya está lista. Pendientes documentados (post-punto-2 o paralelo):
+
+1. **Rotar la `OPENAI_API_KEY` en OpenAI** (clave del item anterior — solo borramos de Vercel).
+2. **Agregar APNs env vars** antes de TestFlight con push iOS.
+3. **`send-otp` pre-create** de cuentas (PEND-1 del audit original) — sigue abierto.
+4. **Rate limit persistente en Postgres** (PEND-2) — útil cuando lleguen los límites finos.
+5. **Rotación trimestral de `CRON_SECRET`** (PEND-3).

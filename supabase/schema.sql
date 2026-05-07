@@ -290,3 +290,29 @@ CREATE POLICY "calendar_feeds_owner_all"
   USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE INDEX IF NOT EXISTS calendar_feeds_user_idx
   ON public.calendar_feeds (user_id, created_at DESC);
+
+-- ── ai_usage_events: tracking granular per-call de IA (futuro sistema de límites) ─
+-- Una fila por cada llamada a Claude (Anthropic). Permite construir gráficos,
+-- alertas y tiers (free/pro). El service_role escribe; el usuario puede leer
+-- sus propios eventos via RLS. Ver migration 013_ai_usage_events.sql.
+CREATE TABLE IF NOT EXISTS public.ai_usage_events (
+  id                  BIGSERIAL PRIMARY KEY,
+  user_id             UUID    NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  action_type         TEXT    NOT NULL,
+  model_used          TEXT    NOT NULL,
+  input_tokens        INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens  >= 0),
+  output_tokens       INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+  total_tokens        INTEGER GENERATED ALWAYS AS (input_tokens + output_tokens) STORED,
+  estimated_cost_usd  NUMERIC(12, 6) NOT NULL DEFAULT 0 CHECK (estimated_cost_usd >= 0),
+  metadata            JSONB   NOT NULL DEFAULT '{}'::jsonb,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.ai_usage_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "ai_usage_events_owner_select"
+  ON public.ai_usage_events FOR SELECT
+  USING (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS ai_usage_events_user_created_idx
+  ON public.ai_usage_events (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ai_usage_events_action_idx
+  ON public.ai_usage_events (action_type, created_at DESC);
