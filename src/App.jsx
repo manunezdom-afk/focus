@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion'
-import { useSwipeNavigation } from './lib/useSwipeNavigation'
+import { useNativeSwipe } from './lib/useNativeSwipe'
+import { EASE_IOS } from './lib/motion'
+import * as haptics from './lib/haptics'
 import { useEvents }        from './hooks/useEvents'
 import { useTasks }         from './hooks/useTasks'
 import { useNotifications } from './hooks/useNotifications'
@@ -129,26 +131,37 @@ function isCapacitorRuntime() {
   return typeof document !== 'undefined' && document.documentElement.classList.contains('is-capacitor')
 }
 
+// Slide horizontal entre tabs peer (Mi Día → Calendario, etc.). En tap
+// también se siente el direccionalismo iOS — no solo un crossfade. Para
+// sub-views (deeper / back) seguimos con opacity + escala leve (Apple usa
+// crossfade sin slide para "drill-in" en ajustes y pantallas modales).
+const PAGE_SLIDE_PX = 28  // discreto; el grueso lo aporta el opacity fade
+const PAGE_TRANSITION = { duration: 0.22, ease: EASE_IOS }
+
 const pageVariants = {
-  initial: ({ depth = 'peer' } = {}) => {
-    if (prefersReducedMotion() || isCapacitorRuntime()) return { opacity: 0 }
+  initial: ({ depth = 'peer', direction = 1 } = {}) => {
+    if (prefersReducedMotion()) return { opacity: 0 }
     if (depth === 'deeper') return { opacity: 0, scale: 0.98, y: 6 }
     if (depth === 'back')   return { opacity: 0, scale: 1.01 }
-    return { opacity: 0 }
+    // Peer (cambio horizontal entre tabs root): la vista entrante arranca
+    // ligeramente desplazada en la dirección del movimiento.
+    return { opacity: 0, x: direction * PAGE_SLIDE_PX }
   },
   animate: {
     opacity: 1,
     scale: 1,
+    x: 0,
     y: 0,
-    transition: { duration: 0.15, ease: [0.25, 0.46, 0.45, 0.94] },
+    transition: PAGE_TRANSITION,
   },
-  exit: ({ depth = 'peer' } = {}) => {
-    if (prefersReducedMotion() || isCapacitorRuntime()) {
-      return { opacity: 0, transition: { duration: 0.06 } }
+  exit: ({ depth = 'peer', direction = 1 } = {}) => {
+    if (prefersReducedMotion()) {
+      return { opacity: 0, transition: { duration: 0.10 } }
     }
-    if (depth === 'deeper') return { opacity: 0, scale: 0.99, transition: { duration: 0.08, ease: 'easeIn' } }
-    if (depth === 'back')   return { opacity: 0, scale: 0.98, transition: { duration: 0.08, ease: 'easeIn' } }
-    return { opacity: 0, transition: { duration: 0.08, ease: 'easeIn' } }
+    if (depth === 'deeper') return { opacity: 0, scale: 0.99, transition: { duration: 0.12, ease: 'easeIn' } }
+    if (depth === 'back')   return { opacity: 0, scale: 0.98, transition: { duration: 0.12, ease: 'easeIn' } }
+    // Peer: se desplaza al lado opuesto a donde entrará la nueva vista.
+    return { opacity: 0, x: -direction * PAGE_SLIDE_PX, transition: { duration: 0.16, ease: EASE_IOS } }
   },
 }
 
@@ -274,6 +287,10 @@ export default function App() {
   const [previousView, setPreviousView] = useState('planner')
   const [routeMotion, setRouteMotion] = useState({ direction: 1, depth: 'peer' })
   const activeViewRef = useRef(activeView)
+  // Ref del wrapper de la vista activa — useNativeSwipe lo translatea en
+  // tiempo real durante el drag (sin re-render). Se monta al motion.div
+  // que ya envuelve la AnimatePresence.
+  const swipeWrapperRef = useRef(null)
 
   useEffect(() => {
     activeViewRef.current = activeView
@@ -604,30 +621,43 @@ export default function App() {
     returnToPreviousView('planner')
   }
 
-  // Swipe horizontal entre tabs principales. Solo activo en mobile y en las
-  // 4 vistas root (no sub-views, no day, no detail). El hook se encarga de:
-  //   * ignorar inputs/botones/links
-  //   * desactivar mientras el teclado está abierto
-  //   * desactivar mientras hay un modal/sheet visible
-  //   * pedir mínimo 60px horizontal y < 0.66× vertical
-  // Nota: `enabled` se evalúa en runtime — al abrir Nova/un modal el hook
-  // ya no dispara onSwipeLeft/Right, pero no lo desmontamos para no
-  // recrear listeners innecesariamente.
+  // Swipe interactivo entre root tabs. El contenido sigue al dedo en
+  // tiempo real (transform translate3d aplicado al wrapper vía ref, sin
+  // setState por frame), con snap-back si el gesto no alcanza threshold,
+  // commit con spring si lo pasa, y rubber-band en los bordes.
   const swipeEnabled = !isDesktop && SWIPE_VIEW_ORDER.includes(activeView)
-  useSwipeNavigation({
+  const canGoLeft  = useCallback(() => {
+    const idx = SWIPE_VIEW_ORDER.indexOf(activeViewRef.current)
+    return idx >= 0 && idx < SWIPE_VIEW_ORDER.length - 1
+  }, [])
+  const canGoRight = useCallback(() => {
+    return SWIPE_VIEW_ORDER.indexOf(activeViewRef.current) > 0
+  }, [])
+  const onCommitLeft = useCallback(() => {
+    const idx = SWIPE_VIEW_ORDER.indexOf(activeViewRef.current)
+    if (idx >= 0 && idx < SWIPE_VIEW_ORDER.length - 1) {
+      haptics.tap()
+      navigate(SWIPE_VIEW_ORDER[idx + 1], { intent: 'forward' })
+    }
+  }, [])
+  const onCommitRight = useCallback(() => {
+    const idx = SWIPE_VIEW_ORDER.indexOf(activeViewRef.current)
+    if (idx > 0) {
+      haptics.tap()
+      navigate(SWIPE_VIEW_ORDER[idx - 1], { intent: 'back' })
+    }
+  }, [])
+  // Haptic suave al cruzar el threshold del drag — feedback "estás por
+  // cambiar". Si no completa el gesto, no se dispara nada más.
+  const onSwipeHaptic = useCallback(() => {
+    haptics.selectionTick()
+  }, [])
+  useNativeSwipe({
     enabled: swipeEnabled,
-    onSwipeLeft: useCallback(() => {
-      const idx = SWIPE_VIEW_ORDER.indexOf(activeViewRef.current)
-      if (idx >= 0 && idx < SWIPE_VIEW_ORDER.length - 1) {
-        navigate(SWIPE_VIEW_ORDER[idx + 1], { intent: 'forward' })
-      }
-    }, []),
-    onSwipeRight: useCallback(() => {
-      const idx = SWIPE_VIEW_ORDER.indexOf(activeViewRef.current)
-      if (idx > 0) {
-        navigate(SWIPE_VIEW_ORDER[idx - 1], { intent: 'back' })
-      }
-    }, []),
+    containerRef: swipeWrapperRef,
+    canGoLeft, canGoRight,
+    onCommitLeft, onCommitRight,
+    onHaptic: onSwipeHaptic,
   })
 
   function handleSaveTask(updates) {
@@ -832,6 +862,12 @@ export default function App() {
               className="w-full"
               style={{ willChange: 'opacity, transform' }}
             >
+              {/* Wrapper estable para useNativeSwipe — el ref no puede ir
+                  en motion.div directamente (framer-motion lo intercepta).
+                  El hook aplica translate3d acá durante el drag, sin
+                  pelearse con la animación de framer-motion que controla
+                  el motion.div padre. */}
+              <div ref={swipeWrapperRef} className="w-full" style={{ willChange: 'transform' }}>
               <Suspense fallback={<RouteFallback activeView={activeView} isDesktop={isDesktop} />}>
               {activeView === 'planner' && <PlannerView {...plannerProps} isDesktop={isDesktop} />}
 
@@ -914,6 +950,7 @@ export default function App() {
 
 
               </Suspense>
+              </div>
             </motion.div>
           </AnimatePresence>
         )}

@@ -275,18 +275,25 @@ h1, h2, h3 {
     transition: padding-bottom 0.25s cubic-bezier(0.32, 0.72, 0, 1);
   }
 
-  /* Cuando el teclado iOS está abierto (clase la añade iosKeyboard.js al
-     body), escondemos la BottomNavBar. iOS con Keyboard.resize=native
-     reduce el WebView, así que la barra estaría empujada justo encima del
-     teclado, restando ~80px de espacio efectivo al contenido. Sacarla
-     mientras se escribe da el feel nativo de "input pegado al teclado".
-     Tap en el input arriba la trae de vuelta cuando el blur cierra el
-     teclado. La transición del display la fingimos con opacity+pointer
-     para no romper el layout (display:none cambiaría flow). */
+  /* BottomNavBar — transición y feedback nativo iOS.
+     Reposo: sin transform. Al abrirse el teclado, deslizamos la barra
+     hacia abajo con translate3d (acelera por GPU) y opacity. translate3d
+     no afecta layout flow, así que el contenido principal no salta.
+     Curva ease-out tipo iOS. La duración matchea (aprox) la animación
+     nativa del teclado iOS para que se sienta el bottom-nav "atado" al
+     teclado, no como un elemento separado. */
+  nav[aria-label="Navegación principal"] {
+    transition:
+      transform 0.24s cubic-bezier(0.32, 0.72, 0, 1),
+      opacity   0.18s cubic-bezier(0.32, 0.72, 0, 1);
+    will-change: transform;
+  }
   body.keyboard-open nav[aria-label="Navegación principal"] {
+    /* 100% del propio nav + safe-area-bottom para sacarla del todo de la
+       pantalla incluso en iPhone con home indicator. */
+    transform: translate3d(0, calc(100% + env(safe-area-inset-bottom, 0px)), 0);
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.18s ease-out;
   }
 
   /* iOS Capacitor / iOS PWA: durante la animación del teclado el WKWebView

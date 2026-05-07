@@ -202,6 +202,163 @@ gestos reales** las debe hacer Martín en el simulador o iPhone real. Lista:
 
 ---
 
+## 6.1 Mobile Native Interaction Foundation — segunda pasada
+
+La pasada inicial dejó el swipe **detectivo** (detectar gesto al final y
+cambiar tab). Después de probarlo, se sentía tosco — "click después del
+swipe", el contenido no acompañaba al dedo, no había snap-back, no había
+feedback al cruzar threshold, BottomNav desaparecía con un fade plano.
+Esta sección documenta la segunda pasada, donde reescribimos los gestos
+para que sean **interactivos** (el contenido sigue al dedo) con física
+spring de tipo iOS.
+
+### Diagnóstico de lo que se sentía tosco
+
+| # | Síntoma | Causa raíz |
+| --- | --- | --- |
+| 1 | "Click después del swipe" | El hook anterior solo detectaba dirección al `touchend` y llamaba `navigate()`. El contenido nunca se movía con el dedo. |
+| 2 | Cambio de tab solo con opacity en Capacitor | `pageVariants` en `is-capacitor` devolvía `{ opacity: 0 }` sin `x`. Sin direccionalismo visual. |
+| 3 | BottomNav desaparece con fade plano | `body.keyboard-open` aplicaba `opacity: 0; pointer-events: none`. La barra se desvanecía pero no se sentía como un elemento físico saliendo. |
+| 4 | No había snap-back | Si el swipe no llegaba al threshold, simplemente no pasaba nada — silencio = sensación de "se atascó". |
+| 5 | No había haptic al cruzar threshold | El usuario no sabía hasta soltar si el cambio de tab había sido aceptado. |
+| 6 | Sin física consistente entre componentes | Cada animación traía sus propios `cubic-bezier` random. |
+| 7 | Falta de rubber-band en bordes | Ajustes deslizando aún más a la izquierda no daba ningún feedback. |
+
+### Cambios aplicados
+
+#### A. Sistema centralizado `src/lib/motion.js`
+
+Single source of truth de física. Define:
+- 4 curvas easing (EASE_IOS, EASE_KEYBOARD, EASE_SNAP_BACK, EASE_DECEL).
+- 6 duraciones (instant, fast, page, sheet, snapBack, keyboard).
+- 4 spring presets (page, snap, panel, ui) con stiffness/damping/mass calibrados.
+- `prefersReducedMotion()` y `safeTransition()` helpers.
+- **Solver de spring 1D** (`stepSpring`, `isSpringSettled`) para animaciones manuales con `requestAnimationFrame` sin depender de framer-motion en hot paths.
+
+#### B. Hook nuevo `src/lib/useNativeSwipe.js` (reemplaza `useSwipeNavigation`)
+
+El cambio de fondo: **el contenido sigue al dedo en tiempo real**. Aplicamos `transform: translate3d(...)` directamente al wrapper vía ref dentro del `touchmove`. Cero `setState` por frame (ese era el suicidio de performance).
+
+- **Threshold combinado**: 30% del ancho del viewport O velocidad ≥ 550 px/seg (mismo que Apple usa para flick en Safari).
+- **Snap-back**: si el gesto no completa, animamos de vuelta a 0 con `SPRING.snap` (más blando, rebote ligero).
+- **Commit**: si pasa, animamos hasta `±width` con `SPRING.page` (rígido, asienta rápido) y al terminar disparamos `onCommit{Left,Right}()`.
+- **Rubber band en bordes**: cuando no hay vista en esa dirección, el drag responde con 0.45× del movimiento (sensación iOS típica).
+- **Haptic al cruzar threshold**: `haptics.selectionTick()` se dispara una sola vez por gesto, **antes** de soltar — el usuario siente físicamente que el cambio fue aceptado.
+- **Edge swipe del sistema**: ignora los primeros 20px del borde izquierdo para no chocar con el back nativo de iOS.
+- **Decisión de eje temprana** (≥8px): si el ratio horizontal/vertical es < 1.5×, dropea el gesto y deja que sea scroll.
+- **Cancel limpio**: en `touchcancel` o unmount del hook, animamos de vuelta a 0.
+
+#### C. `pageVariants` con slide direccional
+
+Ya no es `opacity-only` en Capacitor. Cambio peer (Mi Día → Calendario): la vista entrante arranca a `+28px` en la dirección del movimiento; la saliente se va a `-28px`. Combinado con opacity y `EASE_IOS`. Para deeper/back (sub-views) seguimos con scale + opacity (Apple usa crossfade sin slide para drill-in).
+
+#### D. BottomNavBar con `translateY` (no opacity-only)
+
+```css
+nav[aria-label="Navegación principal"] {
+  transition:
+    transform 0.24s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity   0.18s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform;
+}
+body.keyboard-open nav[...] {
+  transform: translate3d(0, calc(100% + env(safe-area-inset-bottom, 0px)), 0);
+  opacity: 0;
+  pointer-events: none;
+}
+```
+
+La barra **se desliza fuera** de la pantalla (incluyendo safe area) cuando aparece el teclado, en vez de desvanecerse. La curva matchea aprox la del teclado iOS (250ms ease-out fuerte). Ya no es "fantasma transparente" mientras escribes.
+
+#### E. Hook `src/hooks/useKeyboardState.js`
+
+Para componentes React que necesiten reaccionar al estado del teclado (ej. autoscroll de mensajes en Nova). Usa `MutationObserver` sobre `body.classList` — única fuente de verdad ya gestionada por `iosKeyboard.js`. No duplica listeners.
+
+#### F. `useCallback` y refs estables
+
+El wire del swipe en `App.jsx` lee `activeViewRef.current` (no del state) para que los handlers no se recreen en cada render. `swipeWrapperRef` apunta a un `<div>` adentro del `motion.div` (no al motion.div directo, que framer-motion intercepta — aprendizaje del primer intento que tiraba warnings de React).
+
+### Archivos modificados / nuevos en la pasada 6.1
+
+| Archivo | Tipo |
+| --- | --- |
+| `src/lib/motion.js` | **Nuevo** — language de motion centralizado + spring solver. |
+| `src/lib/useNativeSwipe.js` | **Nuevo** — hook interactivo (reemplaza useSwipeNavigation). |
+| `src/hooks/useKeyboardState.js` | **Nuevo** — estado del teclado para React. |
+| `src/lib/useSwipeNavigation.js` | **Eliminado** — reemplazado. |
+| `tests/swipe-navigation.test.js` | **Eliminado** — reemplazado. |
+| `tests/native-swipe.test.js` | **Nuevo** — 12 tests (gates + spring solver + curvas). |
+| `src/App.jsx` | Cableado del nuevo hook + `pageVariants` con slide direccional + ref wrapper interno. |
+| `src/index.css` | BottomNav con `translateY` en lugar de `opacity` puro + curvas iOS. |
+
+### Decisiones explícitas
+
+**Swipe interactivo**:
+- `transform: translate3d` aplicado directamente al ref via JS, **NO** vía setState. Si lo hiciera vía React state, los re-renders por frame harían 60+ commits/seg → jank.
+- Threshold dual (distancia 30% O velocidad 550 px/seg) — uno solo es frágil. Apple usa ambos.
+- `e.preventDefault()` solo después de decidir horizontal — no rompe scroll vertical.
+- Animaciones de release con rAF + spring solver propio (no framer-motion para hot paths de gestos).
+
+**BottomNav**:
+- `translateY(100% + safe-area-inset-bottom)` — saca la barra del todo, no solo la opacity.
+- `will-change: transform` para que iOS pre-pinte el layer.
+- No usé `display: none` para no romper layout flow (el scroll del contenido principal no debe re-flowear cuando el teclado abre/cierra).
+
+**Haptics**:
+- `selectionTick()` en `useNativeSwipe.onHaptic` — feedback de "pasaste el threshold". Más sutil que `tap()`.
+- `tap()` al confirmar el cambio de tab (commit).
+- Decidido NO disparar haptic en snap-back fallido — sería ruidoso.
+
+**Reduced motion**:
+- `pageVariants` cae a opacity-fade plano si el user pidió reduced motion.
+- El swipe sigue funcionando pero sin spring de release (jump directo). Si en futuro queremos desactivarlo del todo, agregar un check en el hook.
+
+**Performance**:
+- Spring solver es ~10 ops/frame en JS puro. Bajo consumo, no hay GC pressure (mismo objeto state se asigna).
+- `cancelAnimationFrame` al desmontar/cancelar gesto.
+- Listeners pasivos donde se puede; sólo `touchmove` con `passive: false` para preventDefault.
+
+### Pruebas ejecutadas
+
+- `node --test tests/native-swipe.test.js` → **12/12 ok**
+- Suite completa: 94/94 ok.
+- `npm run build` → 2.13s, sin warnings.
+- Preview Vite dev → app limpia, **sin warnings de React** (corregido el conflicto de `ref` en `motion.div`).
+- Verificación manual desde el preview en formato móvil → renderizado limpio.
+
+### Lo que Martín debe probar manualmente en iPhone (smoke test 6.1)
+
+**Críticos del swipe interactivo**:
+- [ ] Iniciar drag horizontal lento → el contenido debe seguir al dedo en tiempo real (no esperar al release).
+- [ ] Soltar antes del 30% del ancho → debe hacer snap-back con rebote suave.
+- [ ] Soltar después del 30% → debe completar el cambio de tab con spring.
+- [ ] Flick rápido (movimiento corto pero veloz) → debe completar también (threshold por velocidad).
+- [ ] En Mi Día, deslizar a la derecha (no hay tab anterior) → rubber band, vuelve solo.
+- [ ] En Ajustes, deslizar a la izquierda (no hay tab siguiente) → rubber band, vuelve solo.
+- [ ] Sentir el haptic suave al cruzar el threshold antes de soltar.
+- [ ] Sentir el haptic `tap` al confirmar el cambio.
+
+**Críticos del teclado**:
+- [ ] Tap en input de Mi Día → BottomNav se desliza hacia abajo (translateY), no solo desaparece.
+- [ ] Cerrar teclado → BottomNav vuelve con la misma curva.
+
+**Sin regresiones**:
+- [ ] Tap normal en BottomNavBar (sin swipe) sigue cambiando de tab con haptic.
+- [ ] Modales/sheets siguen abriendo/cerrando bien.
+- [ ] Login/logout/Nova/demo intactos.
+
+### Pendientes para próxima iteración
+
+1. **Animación de transición coordinada con el commit del swipe** — hoy al soltar con commit, animamos el wrapper hasta el borde y luego framer-motion arranca su propia animación de slide. Hay un microsegundo de "doble animación". La solución sería suprimir la animación de framer-motion para tabs cambiados via swipe (el wrapper ya completó visualmente). Requiere comunicar el estado del swipe al motion.div padre.
+2. **Edge swipe back desde sub-views** — `memory`, `nova-knows`, `task-detail` no tienen swipe-back, solo botón.
+3. **Pull to dismiss** en sheets de Nova / Memory.
+4. **Long press en tareas/eventos** — para acciones rápidas (eliminar, completar, mover).
+5. **Drag to reorder** tareas — usable pero requiere lib o trabajo dedicado.
+6. **Test del hook con renderer React** — el repo no tiene `@testing-library/react`. Cubrimos solo helpers puros y la matemática del spring.
+7. **Tests para useKeyboardState** — necesitan jsdom para MutationObserver. Pendiente.
+
+---
+
 ## 8. Lo que Martín debe verificar manualmente en iPhone
 
 **Críticos (bloquean TestFlight si fallan)**:
