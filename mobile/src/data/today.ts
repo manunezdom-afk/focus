@@ -47,3 +47,35 @@ export function addDaysISO(dateISO: string, days: number): string {
   dt.setDate(dt.getDate() + days);
   return todayISO(dt);
 }
+
+// "JUEVES, 7 DE MAYO" — para el eyebrow del header de Mi Día (paridad legacy).
+// Devuelve UPPERCASE sin diacríticos forzados (Intl ya respeta el locale).
+export function dateEyebrow(date: Date = new Date()): string {
+  const long = new Intl.DateTimeFormat('es-CO', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(date);
+  // Convertir "jueves, 7 de mayo" → "JUEVES, 7 DE MAYO"
+  // Algunos locales no añaden la coma — la insertamos manual entre weekday y day.
+  const parts = long.split(' ');
+  if (parts.length >= 2 && !long.includes(',')) {
+    return `${parts[0]}, ${parts.slice(1).join(' ')}`.toUpperCase();
+  }
+  return long.toUpperCase();
+}
+
+// Devuelve { hours, minutes } restantes hasta `targetTime` (HH:MM 24h) hoy.
+// Si la hora ya pasó, devuelve null. Útil para el countdown de "Próximo Bloque".
+export function timeUntil(targetTime: string, now: Date = new Date()): { hours: number; minutes: number } | null {
+  const m = targetTime.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const targetH = parseInt(m[1], 10);
+  const targetM = parseInt(m[2], 10);
+  const target = new Date(now);
+  target.setHours(targetH, targetM, 0, 0);
+  const diffMs = target.getTime() - now.getTime();
+  if (diffMs <= 0) return null;
+  const totalMin = Math.floor(diffMs / 60000);
+  return { hours: Math.floor(totalMin / 60), minutes: totalMin % 60 };
+}

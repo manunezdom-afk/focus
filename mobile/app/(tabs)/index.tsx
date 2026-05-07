@@ -1,31 +1,52 @@
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useMemo } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  ActionSheetIOS,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ErrorBanner } from '@/components/ErrorBanner';
-import { EventRow } from '@/components/EventRow';
 import { LoadingState } from '@/components/LoadingState';
 import { TaskRow } from '@/components/TaskRow';
+import { TodayEventRow } from '@/components/TodayEventRow';
 import { Card } from '@/components/ui/Card';
+import { FocusBar } from '@/components/ui/FocusBar';
+import { NextBlockCard } from '@/components/ui/NextBlockCard';
 import { NovaPromptCard } from '@/components/ui/NovaPromptCard';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
-import { QuickActionButton } from '@/components/ui/QuickActionButton';
-import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { SectionLabel } from '@/components/ui/SectionLabel';
-import { Colors, Spacing } from '@/constants/theme';
+import { Colors, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { todayLabelLong } from '@/src/data/today';
+import { dateEyebrow, timeUntil } from '@/src/data/today';
+import type { EventItem } from '@/src/data/types';
 import { useEvents } from '@/src/data/useEvents';
 import { useTasks } from '@/src/data/useTasks';
 
-// Saludo según hora local. Mismo patrón que la web.
-function greeting(now = new Date()): string {
-  const h = now.getHours();
-  if (h < 6) return 'Buenas noches';
-  if (h < 12) return 'Buenos días';
-  if (h < 19) return 'Buenas tardes';
-  return 'Buenas noches';
+// Devuelve el siguiente evento futuro hoy, o null si no hay.
+function findNextEvent(events: EventItem[], now: Date): EventItem | null {
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  for (const ev of events) {
+    if (!ev.time) continue;
+    const m = ev.time.replace(/\s/g, '').match(/^(\d{1,2}):(\d{2})/);
+    if (!m) continue;
+    const startMin = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+    if (startMin > nowMin) return ev;
+  }
+  return null;
+}
+
+function getStartTime(time: string): string {
+  const m = time.replace(/\s/g, '').match(/^(\d{1,2}:\d{2})/);
+  return m ? m[1] : '';
 }
 
 export default function MiDiaScreen() {
@@ -35,23 +56,40 @@ export default function MiDiaScreen() {
   const events = useEvents('today');
   const tasks = useTasks();
 
-  const dateLabel = useMemo(() => todayLabelLong(), []);
-  const eyebrow = useMemo(() => greeting(), []);
+  // Tick para refrescar countdown del Próximo Bloque cada minuto sin hacer
+  // setState costoso. Re-render via tick state — más simple que useReducer.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
-  // Tareas pendientes hoy (similar al modelo legacy: category === 'hoy' es lo
-  // que aparece en Mi Día; si no hay esa categoría, mostramos pending top 8).
+  const eyebrow = useMemo(() => dateEyebrow(), []);
+
+  // Pendientes: si tiene category 'hoy', priorizamos. Si no, top 8 sin done.
   const pendingTasks = useMemo(() => {
-    const today = tasks.tasks.filter((t) => !t.done && (t.category === 'hoy' || !t.category));
+    const today = tasks.tasks.filter(
+      (t) => !t.done && (t.category === 'hoy' || !t.category),
+    );
     if (today.length > 0) return today.slice(0, 8);
     return tasks.tasks.filter((t) => !t.done).slice(0, 8);
   }, [tasks.tasks]);
 
-  const totalDoneToday = useMemo(() => {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const startMs = startOfDay.getTime();
-    return tasks.tasks.filter((t) => t.done && t.doneAt && t.doneAt >= startMs).length;
-  }, [tasks.tasks]);
+  // Eventos ordenados por hora (la query ya viene ordenada, pero aseguramos
+  // por si llegan items sin tiempo arriba).
+  const sortedEvents = useMemo(() => {
+    return [...events.events].sort((a, b) => {
+      const aT = getStartTime(a.time) || 'zz';
+      const bT = getStartTime(b.time) || 'zz';
+      return aT.localeCompare(bT);
+    });
+  }, [events.events]);
+
+  const nextEvent = useMemo(() => findNextEvent(sortedEvents, new Date()), [sortedEvents]);
+  const nextCountdown = useMemo(
+    () => (nextEvent ? timeUntil(getStartTime(nextEvent.time)) : null),
+    [nextEvent],
+  );
 
   const loading =
     (events.loading && events.events.length === 0) ||
@@ -64,158 +102,216 @@ export default function MiDiaScreen() {
     void tasks.refresh();
   }
 
-  function notImplemented(feature: string) {
-    Alert.alert(
-      feature,
-      'Esta función estará disponible en la próxima versión. Por ahora puedes pedírselo a Nova.',
-      [{ text: 'Entendido', style: 'default' }],
-    );
+  // Cuando el usuario manda algo desde el FocusBar, navegamos a Nova con
+  // el seed pre-rellenado y autosubmit. Nova se encarga del flujo.
+  function handleFocusSubmit(text: string) {
+    if (Platform.OS === 'ios') {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    router.push({
+      pathname: '/nova',
+      params: { seed: text, autosubmit: '1' },
+    });
   }
 
-  const hasAnyItem = events.events.length > 0 || pendingTasks.length > 0;
+  // Action sheet del botón "Añadir": tarea / evento / pedirle a Nova.
+  function openAddSheet() {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: 'Añadir',
+          options: ['Pedirle a Nova', 'Crear evento', 'Crear tarea', 'Cancelar'],
+          cancelButtonIndex: 3,
+          userInterfaceStyle: scheme,
+        },
+        (idx) => {
+          if (idx === 0) router.push('/nova');
+          else if (idx === 1) router.push('/calendar');
+          else if (idx === 2) router.push('/tasks');
+        },
+      );
+    } else {
+      Alert.alert('Añadir', '¿Qué quieres crear?', [
+        { text: 'Pedirle a Nova', onPress: () => router.push('/nova') },
+        { text: 'Evento', onPress: () => router.push('/calendar') },
+        { text: 'Tarea', onPress: () => router.push('/tasks') },
+        { text: 'Cancelar', style: 'cancel' },
+      ]);
+    }
+  }
+
+  const hasAnyItem = sortedEvents.length > 0 || pendingTasks.length > 0;
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={c.text}
-          />
-        }
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.flex}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       >
-        {/* Header — eyebrow primary + título grande extrabold + fecha completa */}
-        <ScreenHeader
-          eyebrow={eyebrow}
-          title="Mi día"
-          subtitle={dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)}
-          rightAction={
-            <PrimaryButton
-              label="Añadir"
-              size="sm"
-              onPress={() => router.push('/calendar')}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={c.text}
             />
           }
-        />
-
-        {error ? (
-          <View style={styles.bannerWrap}>
-            <ErrorBanner message="No pudimos cargar tus datos." onRetry={handleRefresh} />
-          </View>
-        ) : null}
-
-        {loading ? (
-          <LoadingState />
-        ) : !hasAnyItem ? (
-          // Empty state legacy: Nova prompt card + grid 2-col de quick actions.
-          <View style={styles.emptyWrap}>
-            <NovaPromptCard
-              title="Tu agenda de hoy está vacía."
-              description="Dile a Nova qué tienes hoy, o añade algo tú mismo."
-            />
-            <View style={styles.actionsGrid}>
-              <View style={styles.actionsRow}>
-                <QuickActionButton
-                  label="Añadir"
-                  iconName="plus.circle.fill"
-                  onPress={() => router.push('/calendar')}
-                />
-                <QuickActionButton
-                  label="Hablar con Nova"
-                  iconName="sparkles"
-                  onPress={() => router.push('/nova')}
-                />
+        >
+          {/* Header — eyebrow date caps + título Mi Día + descripción */}
+          <View style={styles.header}>
+            <View style={styles.headerRow}>
+              <View style={styles.headerText}>
+                <Text style={[styles.eyebrow, { color: c.primary }]}>{eyebrow}</Text>
+                <Text style={[styles.title, { color: c.text }]}>Mi Día</Text>
               </View>
-              <View style={styles.actionsRow}>
-                <QuickActionButton
-                  label="Dictar"
-                  iconName="sparkles"
-                  onPress={() => notImplemented('Dictado')}
-                  disabled
-                />
-                <QuickActionButton
-                  label="Foto de agenda"
-                  iconName="plus"
-                  onPress={() => notImplemented('Foto de agenda')}
-                  disabled
-                />
-              </View>
+              <PrimaryButton label="Añadir" size="sm" onPress={openAddSheet} />
             </View>
+            <Text style={[styles.description, { color: c.textMuted }]}>
+              Captura cualquier cosa en lenguaje natural. Nova lo convierte en
+              agenda, tareas y recordatorios.
+            </Text>
           </View>
-        ) : (
-          <>
-            {/* Eventos de hoy */}
-            <SectionLabel label="Eventos de hoy" count={events.events.length} />
-            {events.events.length === 0 ? (
-              <View style={styles.miniEmpty}>
-                <NovaPromptCard
-                  title="Sin eventos hoy."
-                  description="Crea uno desde Calendario o pídeselo a Nova."
-                />
-              </View>
-            ) : (
-              <View style={styles.cardWrap}>
-                <Card variant="default">
-                  {events.events.map((evt) => (
-                    <EventRow key={evt.id} event={evt} />
-                  ))}
-                </Card>
-              </View>
-            )}
 
-            {/* Tareas pendientes */}
-            <SectionLabel label="Tareas pendientes" count={pendingTasks.length} />
-            {pendingTasks.length === 0 ? (
-              <View style={styles.miniEmpty}>
-                <NovaPromptCard
-                  title={totalDoneToday > 0 ? '¡Listo por hoy!' : 'Todo en orden'}
-                  description={
-                    totalDoneToday > 0
-                      ? `Completaste ${totalDoneToday} tarea${totalDoneToday === 1 ? '' : 's'} hoy.`
-                      : 'Crea nuevas desde la pestaña Tareas.'
-                  }
-                />
-              </View>
-            ) : (
-              <View style={styles.cardWrap}>
-                <Card variant="default">
-                  {pendingTasks.map((task) => (
-                    <TaskRow
-                      key={task.id}
-                      task={task}
-                      onToggle={tasks.toggleTask}
-                      onDelete={tasks.removeTask}
-                    />
-                  ))}
-                </Card>
-              </View>
-            )}
-          </>
-        )}
-      </ScrollView>
+          {/* FocusBar — centro de la pantalla */}
+          <View style={styles.focusBarWrap}>
+            <FocusBar onSubmit={handleFocusSubmit} />
+          </View>
+
+          {/* Próximo Bloque */}
+          {nextEvent ? (
+            <View style={styles.cardWrap}>
+              <NextBlockCard
+                title={nextEvent.title}
+                startTime={getStartTime(nextEvent.time)}
+                countdown={nextCountdown}
+              />
+            </View>
+          ) : null}
+
+          {/* Errors */}
+          {error ? (
+            <View style={styles.cardWrap}>
+              <ErrorBanner
+                message="No pudimos cargar tus datos."
+                onRetry={handleRefresh}
+              />
+            </View>
+          ) : null}
+
+          {loading ? (
+            <LoadingState />
+          ) : !hasAnyItem ? (
+            // Empty state legacy: NovaPromptCard + grid 2x2 quick actions.
+            // Las acciones reales están en el FocusBar de arriba; aquí
+            // mantenemos el patrón legacy para los onboarding empty states.
+            <View style={styles.emptyWrap}>
+              <NovaPromptCard
+                title="Tu agenda de hoy está vacía."
+                description="Dile a Nova qué tienes hoy, o añade algo tú mismo."
+              />
+            </View>
+          ) : (
+            <>
+              {/* Eventos timeline — sin SectionLabel cuando hay NextBlockCard
+                  arriba para no duplicar. */}
+              {sortedEvents.length > 0 ? (
+                <>
+                  <SectionLabel label="Hoy" count={sortedEvents.length} />
+                  <View style={styles.timelineWrap}>
+                    {sortedEvents.map((evt, idx) => (
+                      <TodayEventRow
+                        key={evt.id}
+                        event={evt}
+                        isLast={idx === sortedEvents.length - 1}
+                      />
+                    ))}
+                  </View>
+                </>
+              ) : null}
+
+              {/* Tareas pendientes */}
+              {pendingTasks.length > 0 ? (
+                <>
+                  <SectionLabel label="Pendientes" count={pendingTasks.length} />
+                  <View style={styles.cardWrap}>
+                    <Card variant="default">
+                      {pendingTasks.map((task) => (
+                        <TaskRow
+                          key={task.id}
+                          task={task}
+                          onToggle={tasks.toggleTask}
+                          onDelete={tasks.removeTask}
+                          showPriority={false}
+                        />
+                      ))}
+                    </Card>
+                  </View>
+                </>
+              ) : null}
+            </>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  scrollContent: { paddingBottom: Spacing['3xl'] },
+  flex: { flex: 1 },
+  scrollContent: { paddingBottom: Spacing['3xl'] + 60 },
 
-  bannerWrap: { paddingHorizontal: Spacing.lg },
-  cardWrap: { paddingHorizontal: Spacing.lg },
-  miniEmpty: { paddingHorizontal: Spacing.lg },
+  // Header
+  header: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.lg,
+    gap: Spacing.sm,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: Spacing.md,
+  },
+  headerText: { flex: 1 },
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    marginBottom: 6,
+  },
+  title: {
+    fontSize: 36,
+    fontWeight: '800',
+    lineHeight: 42,
+    letterSpacing: -0.6,
+  },
+  description: {
+    ...Typography.body,
+    lineHeight: 21,
+    marginTop: 4,
+  },
+
+  focusBarWrap: {
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
+  },
+
+  cardWrap: {
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+  },
 
   emptyWrap: {
     paddingHorizontal: Spacing.lg,
     gap: Spacing.md,
   },
-  actionsGrid: {
-    gap: Spacing.sm,
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
+
+  timelineWrap: {
+    paddingHorizontal: Spacing.lg + 4,
+    paddingBottom: Spacing.md,
   },
 });
