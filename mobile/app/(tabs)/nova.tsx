@@ -1,4 +1,5 @@
 import * as Haptics from 'expo-haptics';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FlatList,
@@ -48,9 +49,24 @@ export default function NovaScreen() {
   const { events } = useEvents('all');
   const tasks = useTasks();
 
+  // Permitimos que otra pantalla (ej: Mi Día) navegue acá con un prompt
+  // sugerido vía `?prompt=…`. Prellenamos el input pero NO mandamos solos —
+  // que el usuario revise y dispare. consumedPromptRef evita que el mismo
+  // valor se reescriba al volver a entrar al tab.
+  const params = useLocalSearchParams<{ prompt?: string | string[] }>();
+  const incomingPrompt = Array.isArray(params.prompt) ? params.prompt[0] : params.prompt;
+  const consumedPromptRef = useRef<string | null>(null);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (incomingPrompt && incomingPrompt !== consumedPromptRef.current) {
+      consumedPromptRef.current = incomingPrompt;
+      setDraft(incomingPrompt);
+    }
+  }, [incomingPrompt]);
 
   const handleSend = useCallback(
     async (overrideText?: string) => {

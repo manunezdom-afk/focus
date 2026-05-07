@@ -22,9 +22,14 @@ const MAPPING = {
   'chevron.left': 'chevron-left',
   'sparkles': 'auto-awesome',
   'arrow.up': 'arrow-upward',
+  'arrow.up.right': 'north-east',
   'plus': 'add',
   'plus.circle.fill': 'add-circle',
   'xmark': 'close',
+  'mic.fill': 'mic',
+  'camera.fill': 'photo-camera',
+  'clock.fill': 'schedule',
+  'dumbbell.fill': 'fitness-center',
 } as IconMapping;
 
 export function IconSymbol({
