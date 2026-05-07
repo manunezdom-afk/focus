@@ -147,28 +147,16 @@ await Browser.open({ url: data.url, presentationStyle: 'popover' })
 Y el listener `appUrlOpen` en AuthContext hace
 `exchangeCodeForSession(url)` y cierra el `Browser` con `Browser.close()`.
 
-**Configuración actual en Supabase Dashboard** (verificada 2026-05-07 vía Computer Use):
-- **Site URL**: `https://usefocus.me` (sin `www`)
-- **Redirect URLs configuradas** (10 total, las relevantes para Focus):
-  - `https://usefocus.me/**` ✓ cubre `?confirmed=1`, `?recovery=1`
+**Configuración actual en Supabase Dashboard** (verificada 2026-05-07 vía Computer Use, con
+correcciones aplicadas):
+- **Site URL**: `https://www.usefocus.me` (canonical productivo) ✅
+- **Redirect URLs configuradas** (11 total, las relevantes para Focus):
+  - `https://usefocus.me/**` ✓ cubre `?confirmed=1`, `?recovery=1` (sin www)
+  - `https://www.usefocus.me/**` ✓ canonical productivo (con www) — agregada el 2026-05-07
   - `me.usefocus.app://login-callback` ✓ deep link iOS
   - `http://localhost:3000/**` ✓ dev local
-  - 7 entries de otros proyectos (kairos, sparkstudio) — ignoradas para Focus
-
-⚠️ **Problema detectado**: la app productiva responde en `https://www.usefocus.me`
-y el dominio `https://usefocus.me` redirige 301 al `www`. Si un OAuth callback o
-recovery link llega a `www.usefocus.me/?recovery=1`, Supabase puede rechazar
-porque `https://www.usefocus.me/**` no está en la allowlist (solo está la versión
-sin `www`). Hoy el flujo aparenta funcionar porque el cliente pasa
-`window.location.origin = 'https://www.usefocus.me'` → ese redirect_to no está
-en allowlist → Supabase puede caer al Site URL como fallback. El comportamiento
-en edge cases (deep linking desde email recovery, etc.) puede ser frágil.
-
-**Acción sugerida** (Martín en Supabase Dashboard):
-- Agregar `https://www.usefocus.me/**` a Redirect URLs.
-- Considerar cambiar Site URL a `https://www.usefocus.me` (canonical).
-- Limpiar las URLs de otros proyectos (kairos, sparkstudio) — están ahí por
-  reciclar el proyecto Supabase entre apps.
+  - 7 entries de otros proyectos (kairos, sparkstudio) — ignoradas para Focus,
+    se pueden limpiar a futuro pero no afectan.
 
 **Configuración requerida en Google Cloud Console** (OAuth client):
 - **Authorized redirect URIs**: `https://<supabase-project>.supabase.co/auth/v1/callback`
@@ -323,17 +311,12 @@ node --test tests/auth-errors.test.js tests/privacy-cleanup.test.js \
 **Configuración externa pendiente** (Martín, verificada el 2026-05-07):
 
 ### Supabase Dashboard
-- [x] Authentication → URL Configuration → Site URL: `https://usefocus.me` (sin www, OK).
-- [x] Redirect URLs incluye `https://usefocus.me/**` y `me.usefocus.app://login-callback`. ✓
-- [ ] **Agregar** `https://www.usefocus.me/**` a Redirect URLs (la app productiva responde en www).
+- [x] Authentication → URL Configuration → Site URL: `https://www.usefocus.me` ✓ (canonical, actualizado 2026-05-07).
+- [x] Redirect URLs incluye `https://usefocus.me/**`, `https://www.usefocus.me/**` y `me.usefocus.app://login-callback`. ✓
 - [x] Provider Google habilitado con Client ID + Secret. Callback URL es
   `https://hvwqeemtfoyvfmongwzo.supabase.co/auth/v1/callback`. ✓
-- [ ] **Revisar** "Allow anonymous sign-ins" → está ON pero el código de Focus
-  NO lo usa. Mantenerlo ON es un vector de abuso económico: un atacante con
-  el anon key (público) puede crear N cuentas anónimas y consumir cuota IA
-  en cada una (cada cuenta = 20 mensajes Nova/día en plan free). Recomendado
-  desactivarlo desde Authentication → Sign In / Providers → Allow anonymous
-  sign-ins → toggle OFF.
+- [x] "Allow anonymous sign-ins": **OFF** ✓ (apagado el 2026-05-07 — la app no lo usa).
+- [ ] (Opcional) Limpiar las 7 URLs de otros proyectos (kairos, sparkstudio) — no afectan, solo ruido.
 
 ### Google Cloud Console
 - [ ] Verificar (sin acceso desde aquí) que el OAuth client tiene como
@@ -380,10 +363,10 @@ Snapshot de lo que fue verificado vía Computer Use en este punto del plan:
 | Item | Estado | Notas |
 | --- | --- | --- |
 | Vercel: producción Ready con commit `c81c786` | ✅ | Deploy `focus-4h4wxahnl` Ready hace 3 min. |
-| Supabase Site URL | ✅ | `https://usefocus.me` (sin www, OK). |
-| Supabase Redirect URLs | ⚠️ | Falta `https://www.usefocus.me/**` (canonical productivo). |
+| Supabase Site URL | ✅ | `https://www.usefocus.me` (canonical) — corregido el 2026-05-07. |
+| Supabase Redirect URLs | ✅ | Agregada `https://www.usefocus.me/**`. Total 11 URLs. |
 | Supabase: deep link iOS allowed | ✅ | `me.usefocus.app://login-callback`. |
 | Supabase: Google Provider | ✅ | Enabled con Client ID + Secret. Callback OK. |
-| Supabase: Anonymous sign-ins | ⚠️ | ON pero la app NO lo usa → vector de abuso IA. Desactivar. |
+| Supabase: Anonymous sign-ins | ✅ | **OFF** — apagado el 2026-05-07. La app no lo usa. |
 | Google Cloud Console | ⏸ | No verificado desde aquí (sin acceso). Confirmar redirect URI. |
 | OpenAI Platform: OPENAI_API_KEY legacy | ⏸ | No verificado (sin acceso). Pasos manuales arriba. |
