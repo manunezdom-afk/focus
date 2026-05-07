@@ -24,14 +24,85 @@
   --grad-2: #6366f1;
   --grad-3: #a78bfa;
   --grad-4: #c084fc;
+
+  /* App surface — color único de fondo de la app. Se mantiene en sincro
+     html/body/AppShell para que ningún borde, esquina o gap durante
+     transiciones (teclado, navegación, AnimatePresence) muestre un color
+     distinto. Si necesitas cambiar el bg de la app en mobile, este es el
+     único lugar. */
+  --app-bg:      #fafafd;
+  --app-bg-dark: #191919;
+  /* Color del boot/splash dark (consistente con SplashScreen iOS y con el
+     splash inline de index.html). */
+  --boot-bg:     #06080f;
+
+  /* ── Z-index scale centralizada ────────────────────────────────────────
+     Valores agrupados por capa para que sea explícito qué tapa qué.
+     Editar acá en lugar de números mágicos repartidos por toda la app. */
+  --z-base:        1;    /* contenido principal por encima de aurora bg */
+  --z-aurora:      0;    /* aurora ambiente, detrás del contenido */
+  --z-sticky:     20;    /* TopAppBar sticky */
+  --z-banner:     30;    /* offline pill, banners no críticos */
+  --z-bottom-nav: 40;    /* BottomNavBar fija */
+  --z-floating:   50;    /* FocusBar, NovaOrb pastilla flotante */
+  --z-toast:      70;    /* UndoToast, approvalToast */
+  --z-scrim:      80;    /* overlay scrim de modales/sheets */
+  --z-modal:      81;    /* contenido del modal/sheet */
+  --z-fallback:   90;    /* SheetFallback (loading skeleton de sheets lazy) */
+  --z-splash:    200;    /* BootSplash + WelcomeScreen — siempre encima */
 }
 
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
+/* ── Base mobile shell ─────────────────────────────────────────────────────
+   html/body/#root forman la "AppShell" estructural. Reglas:
+
+   1. html/body/#root con el MISMO bg → ningún gap durante transiciones del
+      teclado iOS muestra "bordes negros".
+   2. min-height 100% del viewport visual (svh) — en iOS evita que la barra
+      dinámica recorte contenido y deje un agujero al fondo. Body sigue con
+      100dvh para layouts de altura completa que se reajusten al teclado.
+   3. overflow-x: clip en html bloquea el scroll horizontal accidental que
+      cualquier hijo puede provocar al desbordar.
+   4. Antes html arrancaba dark (#06080f) y body claro (#fafafd). El switch
+      tardío entre ambos creaba un flash y "bordes negros" si un overlay
+      cubría sólo body. Ahora ambos arrancan claros y, sólo si hay onboarding
+      o welcome (clase `focus-dark-boot`), pintamos dark de forma temporal.
+   5. is-capacitor refuerza el bg light incluso si el SW reinyectó la clase
+      dark-boot tarde. */
+
 html {
   scroll-behavior: auto;
+  background-color: var(--app-bg);
+  /* iOS Safari/WKWebView: clip horizontal, jamás permitas scroll-x. */
+  overflow-x: clip;
+}
+
+html.dark {
+  background-color: var(--app-bg-dark);
+}
+
+/* Boot/onboarding: html arranca dark sólo cuando hay welcome o onboarding
+   pendiente. La clase la añade el inline script de index.html y la quita
+   App.jsx cuando esos gates terminan. */
+html.focus-dark-boot,
+html.focus-dark-boot body,
+html.focus-continuity,
+html.focus-continuity body {
+  background-color: var(--boot-bg) !important;
+}
+
+#root {
+  background-color: var(--app-bg);
+  min-height: 100svh;
+  /* Padding inferior queda a cargo del componente que tenga BottomNavBar
+     fija. Aquí no aplicamos pb-safe para no doblar safe areas. */
+}
+
+html.dark #root {
+  background-color: var(--app-bg-dark);
 }
 
 /* iOS Safari auto-zooma al enfocar inputs con font-size < 16px en PWA.
@@ -56,7 +127,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   min-height: 100dvh;
-  background-color: #fafafd;
+  background-color: var(--app-bg);
   color: #100525;
   overscroll-behavior-y: auto;
   /* iOS WKWebView: sin estos defaults los taps en cualquier elemento
@@ -66,6 +137,9 @@ body {
      CSS/JS controlar 100% el feedback. */
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
+  /* Defensa final contra overflow horizontal (clip permite que children con
+     position:fixed sigan respetando viewport, hidden lo rompería). */
+  overflow-x: clip;
 }
 
 /* iOS Capacitor: touch-action manipulation en todos los elementos
@@ -203,17 +277,15 @@ h1, h2, h3 {
 
   /* iOS Capacitor / iOS PWA: durante la animación del teclado el WKWebView
      reacomoda su frame y por unos frames algunos píxeles de las esquinas
-     inferiores no quedan pintados por <body>. Si <html> tiene un background
-     oscuro (el que usamos en cold start para evitar el flash blanco) eso
-     se ve como "bordes negros" alrededor del teclado. Cuando la app ya
-     terminó el boot dark (sin clases focus-dark-boot/focus-continuity)
-     forzamos el bg de <html> al mismo surface que <body>, para que cualquier
-     gap durante transiciones del teclado se vea consistente y nunca negro. */
+     inferiores no quedan pintados por <body>. Reforzamos que html siempre
+     pinte el surface (excepto en boot dark/continuity, donde queremos el
+     fondo del splash). Las reglas base ya hacen esto en todos los browsers,
+     pero is-capacitor con !important blinda el caso real de iOS. */
   html.is-capacitor:not(.focus-dark-boot):not(.focus-continuity) {
-    background-color: #fafafd !important;
+    background-color: var(--app-bg) !important;
   }
   html.is-capacitor.dark:not(.focus-dark-boot):not(.focus-continuity) {
-    background-color: #191919 !important;
+    background-color: var(--app-bg-dark) !important;
   }
 
   /* Fuerza una capa de composición GPU. Útil para containers con animaciones

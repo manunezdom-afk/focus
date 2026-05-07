@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es" style="background-color:#06080f">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -68,11 +68,21 @@
     </noscript>
 
     <style>
-      /* Bg base dark — clave para PWA standalone iOS: antes el <body> quedaba
-         #fcf8fb por defecto y había un flash blanco entre el splash de iOS y el
-         primer render de React. Ahora html/body arrancan oscuros y el salto es
-         continuo con el splash del icono. */
-      html, body { background-color: #06080f; margin: 0; }
+      /* Margin reset universal. El bg lo define src/index.css con --app-bg
+         (claro) por default y --boot-bg (oscuro) cuando hay clases
+         focus-dark-boot/focus-continuity. Antes html arrancaba con
+         background-color:#06080f hard-coded en el <html>, lo que provocaba
+         que durante transiciones del teclado iOS o al cerrar overlays
+         apareciera un "borde negro" porque html era oscuro y body claro.
+         Ahora ambos comparten --app-bg salvo durante boot dark. */
+      html, body { margin: 0; }
+      /* Boot dark — sólo cuando hay welcome/onboarding pendiente (clase
+         añadida por el script inline más abajo). Mantiene continuidad con
+         el splash inline #focus-splash y con el splash nativo de iOS. */
+      html.focus-dark-boot, html.focus-dark-boot body,
+      html.focus-continuity, html.focus-continuity body {
+        background-color: #06080f;
+      }
 
       /* Cinturón de seguridad: mientras Material Symbols no haya cargado,
          ocultamos el texto del span (font-size:0) para que nunca se filtren
@@ -81,20 +91,8 @@
          y los iconos vuelven a su tamaño normal. */
       .material-symbols-outlined { font-size: 0; }
       html.ms-loaded .material-symbols-outlined { font-size: inherit; }
-
-      /* Continuidad landing→app: si llegamos con el flag en sessionStorage,
-         el body arranca oscuro para que no haya flash blanco entre la
-         landing dark y el threshold scene dark. Se remueve al terminar. */
-      html.focus-continuity, html.focus-continuity body { background: #06080f !important; }
-
-      /* Dark boot: cuando arranca la app y todavía va a renderizar un frame
-         oscuro encima (onboarding o welcome), mantenemos html/body negros
-         hasta que la experiencia inicial termine. Evita el flash blanco de
-         1 frame que ocurre entre el unmount del splash inline y el mount
-         de React. La clase se añade al vuelo desde el <script> de abajo
-         (antes de que React corra) y se remueve desde JS cuando la
-         experiencia de bienvenida/onboarding dispara su exit. */
-      html.focus-dark-boot, html.focus-dark-boot body { background: #06080f !important; }
+      /* Las reglas de bg para focus-continuity y focus-dark-boot ya viven
+         arriba (junto al margin reset). Aquí ya no se duplican. */
 
       /* ── Instant boot splash ───────────────────────────────────────────────
          HTML+CSS puros dentro de #root. Pinta al instante con el primer parseo

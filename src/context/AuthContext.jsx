@@ -95,6 +95,9 @@ export function AuthProvider({ children }) {
 
   // Deep-link OAuth callback para Google en app nativa (Capacitor).
   // Escucha me.usefocus.app://login-callback?code=... y cierra la sesión.
+  // Tras canjear el code por session, cerramos el Safari View Controller
+  // que abrió signInWithGoogle — sin esto el usuario se quedaría con el
+  // Safari encima de la app aunque ya hubiera vuelto autenticado.
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || !supabase) return
     let handle
@@ -102,6 +105,13 @@ export function AuthProvider({ children }) {
       if (!url.startsWith('me.usefocus.app://login-callback')) return
       const { data, error } = await supabase.auth.exchangeCodeForSession(url)
       if (!error && data?.session?.user) setUser(data.session.user)
+      try {
+        const { Browser } = await import('@capacitor/browser')
+        await Browser.close()
+      } catch {
+        // Si el plugin no está disponible (escenario raro), seguimos: la
+        // sesión ya está abierta y el usuario puede cerrar Safari manual.
+      }
     }).then(h => { handle = h })
     return () => { handle?.remove() }
   }, [])
@@ -223,7 +233,18 @@ export function AuthProvider({ children }) {
   const signInWithGoogle = useCallback(async () => {
     if (!supabase) throw new Error('Supabase no configurado')
     if (Capacitor.isNativePlatform()) {
-      // Nativo: abre Google en Safari externo y vuelve a la app vía deep link
+      // Nativo iOS/Android: pedimos a Supabase el URL de OAuth con
+      // skipBrowserRedirect=true (no queremos que el SDK toque el WebView
+      // de Capacitor — eso sacaría al usuario de la app), y abrimos esa
+      // URL con @capacitor/browser. Browser.open() es la API oficial de
+      // Capacitor para abrir Safari View Controller (iOS) o Chrome Custom
+      // Tabs (Android), que es donde DEBE vivir el flujo OAuth para que
+      // Google reconozca al usuario y muestre su selector de cuenta.
+      //
+      // Antes usábamos window.open(url, '_system') que en Capacitor 8 sin
+      // el plugin Browser instalado no abre nada de forma confiable — ese
+      // era el bug "el botón se aprieta y no pasa nada en mobile". Con
+      // Browser.open() + dismiss del callback, el flujo es atómico.
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -232,8 +253,22 @@ export function AuthProvider({ children }) {
         },
       })
       if (error) throw error
-      if (data?.url) window.open(data.url, '_system')
+      if (!data?.url) throw new Error('OAuth URL no recibida del backend')
+      const { Browser } = await import('@capacitor/browser')
+      await Browser.open({ url: data.url, presentationStyle: 'popover' })
+      // El cierre del Safari View Controller lo dispara appUrlOpen una vez
+      // que Google redirige al deep link. Lo cerramos defensivamente acá
+      // para que si algo en el flujo falla, el usuario no quede mirando
+      // un Safari abierto sin volver a la app.
+      // Browser.close() también lo llamamos desde appUrlOpen tras hacer
+      // exchangeCodeForSession para garantizar el cierre.
     } else {
+      // Web (incluye PWA mobile y desktop): NO usar skipBrowserRedirect.
+      // Dejamos que Supabase haga `window.location.assign(url)` síncrono
+      // al final de su flujo interno — eso preserva el user gesture y
+      // evita que iOS Safari standalone bloquee la navegación. Antes la
+      // implementación esperaba con await y luego intentaba window.open,
+      // perdiendo el gesture y quedándose en blanco en mobile.
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: window.location.origin },

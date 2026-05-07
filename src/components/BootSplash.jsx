@@ -61,9 +61,10 @@ export default function BootSplash() {
       initial={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: FADE_OUT_MS / 1000, ease: [0.22, 1, 0.36, 1] }}
-      className="fixed inset-0 z-[200] flex items-center justify-center"
+      className="fixed inset-0 flex items-center justify-center"
       style={{
         background: 'radial-gradient(ellipse at 50% 42%, #0a1226 0%, #06080f 70%)',
+        zIndex: 'var(--z-splash)',
       }}
       aria-hidden="true"
     >

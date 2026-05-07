@@ -733,7 +733,13 @@ export default function App() {
     {/* Aurora ambiente — firma de marca, continuidad con landing.
         Renderizada fuera del wrapper principal para que el bg-surface no la tape. */}
     <AuroraBackground variant="app" intensity={0.55} />
-    <div className="relative z-[1] min-h-screen overflow-hidden">
+    {/* AppShell: contenedor principal mobile-first. min-h-dvh respeta la
+        altura visible en iOS (svh sería sin barras, dvh es la altura útil
+        actual incl. toolbar dinámica) — evita el "agujero negro" inferior
+        que dejaba 100vh cuando la barra de navegación de Safari aparece o
+        cuando el WKWebView se reduce por el teclado. overflow-x clip
+        bloquea cualquier scroll horizontal accidental sin romper sticky. */}
+    <div className="relative z-[1] min-h-dvh [overflow-x:clip] bg-[var(--app-bg)] dark:bg-[var(--app-bg-dark)]">
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -754,9 +760,12 @@ export default function App() {
       {/* Banda de offline. Discreta pero constante — el usuario necesita saber
           que sus cambios viven locales hasta que vuelva la red, y no hay otra
           fuente de señal obvia (las mutaciones no fallan, las guardamos en
-          cola). z-index bajo para no competir con toasts/modales. */}
+          cola). z-banner para no competir con toasts/modales. */}
       {!isOnline && (
-        <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top,0px)+56px)] z-[30] pointer-events-none flex justify-center px-4">
+        <div
+          className="fixed inset-x-0 top-[calc(env(safe-area-inset-top,0px)+56px)] pointer-events-none flex justify-center px-4"
+          style={{ zIndex: 'var(--z-banner)' }}
+        >
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/90 text-white text-[11px] font-semibold shadow-lg backdrop-blur">
             <span className="material-symbols-outlined text-[14px]">cloud_off</span>
             Sin conexión · guardando local
@@ -883,7 +892,8 @@ export default function App() {
           initial={{ y: 100, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.6, type: 'spring', damping: 20 }}
-          className="fixed bottom-0 left-0 right-0 z-40"
+          className="fixed bottom-0 left-0 right-0"
+          style={{ zIndex: 'var(--z-bottom-nav)' }}
         >
           <BottomNavBar activeView={navView} onNavigate={navigate} />
         </motion.div>

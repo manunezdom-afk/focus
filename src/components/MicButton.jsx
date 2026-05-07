@@ -89,7 +89,7 @@ export default function MicButton({
       disabled={disabled}
       aria-label={isListening ? 'Detener dictado' : 'Dictar con voz'}
       aria-pressed={isListening}
-      className={`relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl transition-colors select-none disabled:opacity-40 disabled:cursor-not-allowed ${
+      className={`relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl transition-colors select-none disabled:opacity-40 disabled:cursor-not-allowed ${
         isListening
           ? 'bg-[#7c6bff] text-white'
           : 'text-[#7c6bff] hover:bg-[#7c6bff]/10'
