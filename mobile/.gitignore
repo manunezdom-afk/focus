@@ -40,5 +40,5 @@ yarn-error.*
 app-example
 
 # generated native folders
-/ios
+# ios/ is committed (CNG: expo prebuild -p ios) — Pods/ is excluded via ios/.gitignore
 /android
