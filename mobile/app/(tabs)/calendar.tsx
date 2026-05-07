@@ -1,7 +1,15 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CreateEventSheet } from '@/components/CreateEventSheet';
@@ -9,15 +17,18 @@ import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
 import { DayPicker } from '@/components/calendar/DayPicker';
 import { DayTimeline } from '@/components/calendar/DayTimeline';
-import { SmartDaySummary } from '@/components/calendar/SmartDaySummary';
-import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { addDaysISO, isToday, todayISO } from '@/src/data/today';
-import type { Task } from '@/src/data/types';
 import { useEvents } from '@/src/data/useEvents';
-import { useTasks } from '@/src/data/useTasks';
+
+// Pantalla Calendario — blueprint Stitch "Calendario Principal" traducido a RN.
+// Estructura: header con título dinámico (Hoy / Mañana / fecha completa) +
+// grilla semanal de 7 chips + timeline de eventos con estado past/now/upcoming.
+// FAB flotante para crear evento. Empty state con CTA sutil hacia Nova.
+//
+// Datos: solo Supabase via useEvents('all'). No mocks, no demos.
 
 function dayLabelLong(dateISO: string): string {
   const [y, m, d] = dateISO.split('-').map((s) => parseInt(s, 10));
@@ -27,50 +38,34 @@ function dayLabelLong(dateISO: string): string {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
-  }).format(dt).replace(',', '');
+  }).format(dt);
 }
 
-function selectedDaySubject(dateISO: string): string {
-  if (isToday(dateISO)) return 'Hoy';
-  if (dateISO === addDaysISO(todayISO(), 1)) return 'Mañana';
-  return `El ${dayLabelLong(dateISO)}`;
+function capitalize(text: string): string {
+  if (!text) return text;
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-function countLabel(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
-
-function buildHeaderSubtitle(dateISO: string, eventCount: number, taskCount: number): string {
-  const subject = selectedDaySubject(dateISO);
-  if (eventCount === 0 && taskCount === 0) {
-    return `${subject} tienes espacio libre para planificar con calma.`;
+function buildHeadline(dateISO: string): { primary: string; secondary?: string } {
+  const longLabel = capitalize(dayLabelLong(dateISO));
+  if (isToday(dateISO)) {
+    return { primary: 'Hoy', secondary: longLabel };
   }
-  if (eventCount === 0) {
-    return `${subject} no tienes eventos y hay ${countLabel(taskCount, 'tarea pendiente', 'tareas pendientes')}.`;
+  if (dateISO === addDaysISO(todayISO(), 1)) {
+    return { primary: 'Mañana', secondary: longLabel };
   }
-  if (taskCount === 0) {
-    return `${subject} tienes ${countLabel(eventCount, 'evento', 'eventos')} en agenda.`;
-  }
-  return `${subject} tienes ${countLabel(eventCount, 'evento', 'eventos')} y ${countLabel(taskCount, 'tarea pendiente', 'tareas pendientes')}.`;
-}
-
-function relevantPendingTasks(tasks: Task[], dateISO: string): Task[] {
-  if (!isToday(dateISO)) return [];
-  const todayTasks = tasks.filter((task) => !task.done && (task.category === 'hoy' || !task.category));
-  if (todayTasks.length > 0) return todayTasks;
-  return tasks.filter((task) => !task.done);
+  return { primary: longLabel };
 }
 
 export default function CalendarScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const events = useEvents('all');
-  const tasks = useTasks();
   const [selectedDate, setSelectedDate] = useState<string>(todayISO());
   const [showSheet, setShowSheet] = useState(false);
 
-  // Mapa fecha → cantidad de eventos. Se usa para mostrar los puntos en
-  // los chips del DayPicker. Un único pase O(n) sobre el array completo.
+  // Mapa fecha → cantidad de eventos. El DayPicker lo lee para mostrar el
+  // dot debajo del número de día.
   const eventCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const e of events.events) {
@@ -107,90 +102,80 @@ export default function CalendarScreen() {
 
   function handleRefresh() {
     void events.refresh();
-    void tasks.refresh();
   }
 
-  const pendingTasksForDay = useMemo(
-    () => relevantPendingTasks(tasks.tasks, selectedDate),
-    [tasks.tasks, selectedDate],
-  );
-
-  const taskPreview = useMemo(() => pendingTasksForDay.slice(0, 3), [pendingTasksForDay]);
-
-  const showLoading =
-    events.loading &&
-    events.events.length === 0 &&
-    (tasks.loading || tasks.tasks.length === 0);
-  const refreshing = events.refreshing || tasks.refreshing;
-  const error = events.error || tasks.error;
-  const subtitle = buildHeaderSubtitle(
-    selectedDate,
-    eventsForSelectedDay.length,
-    pendingTasksForDay.length,
-  );
+  const showLoading = events.loading && events.events.length === 0;
+  const headline = buildHeadline(selectedDate);
+  const hasEvents = eventsForSelectedDay.length > 0;
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
       {showLoading ? (
         <LoadingState />
       ) : (
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={c.text}
-            />
-          }
-        >
-          <ScreenHeader
-            eyebrow="Calendario"
-            title="Tu agenda"
-            subtitle={subtitle}
-            rightAction={<AddHeaderButton onPress={openCreate} />}
-          />
-
-          {error ? (
-            <View style={styles.bannerWrap}>
-              <ErrorBanner
-                message="No pudimos cargar todos tus datos."
-                onRetry={handleRefresh}
+        <>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={events.refreshing}
+                onRefresh={handleRefresh}
+                tintColor={c.text}
               />
+            }
+          >
+            <View style={styles.header}>
+              <Text style={[styles.headline, { color: c.text }]}>{headline.primary}</Text>
+              {headline.secondary ? (
+                <Text style={[styles.subheadline, { color: c.textMuted }]}>
+                  {headline.secondary}
+                </Text>
+              ) : null}
             </View>
-          ) : null}
 
-          <DayPicker
-            selectedDate={selectedDate}
-            onSelect={selectDay}
-            eventCounts={eventCounts}
-          />
+            {events.error ? (
+              <View style={styles.bannerWrap}>
+                <ErrorBanner
+                  message="No pudimos cargar tus eventos."
+                  onRetry={handleRefresh}
+                />
+              </View>
+            ) : null}
 
-          <View style={styles.summaryWrap}>
-            <SmartDaySummary
-              dateISO={selectedDate}
-              events={eventsForSelectedDay}
-              pendingTasksCount={pendingTasksForDay.length}
-              onPlanWithNova={goToNova}
+            <DayPicker
+              selectedDate={selectedDate}
+              onSelect={selectDay}
+              eventCounts={eventCounts}
             />
-          </View>
 
-          {eventsForSelectedDay.length > 0 ? (
-            <DayTimeline dateISO={selectedDate} events={eventsForSelectedDay} />
-          ) : (
-            <View style={styles.emptyWrap}>
-              <EmptyAgendaState
-                selectedDate={selectedDate}
-                onCreateEvent={openCreate}
-                onAskNova={goToNova}
-              />
-            </View>
-          )}
+            {hasEvents ? (
+              <DayTimeline dateISO={selectedDate} events={eventsForSelectedDay} />
+            ) : (
+              <View style={styles.emptyWrap}>
+                <EmptyAgendaState
+                  selectedDate={selectedDate}
+                  onCreateEvent={openCreate}
+                  onAskNova={goToNova}
+                />
+              </View>
+            )}
+          </ScrollView>
 
-          {taskPreview.length > 0 ? (
-            <RelatedTasksPreview tasks={taskPreview} total={pendingTasksForDay.length} />
-          ) : null}
-        </ScrollView>
+          <Pressable
+            onPress={openCreate}
+            style={({ pressed }) => [
+              styles.fab,
+              {
+                backgroundColor: pressed ? c.primaryPressed : c.primary,
+                shadowColor: c.primary,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Añadir evento"
+          >
+            <IconSymbol name="plus" size={26} color={c.onPrimary} />
+          </Pressable>
+        </>
       )}
 
       <CreateEventSheet
@@ -206,28 +191,6 @@ export default function CalendarScreen() {
   );
 }
 
-function AddHeaderButton({ onPress }: { onPress: () => void }) {
-  const scheme = useColorScheme() ?? 'light';
-  const c = Colors[scheme];
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.addButton,
-        {
-          backgroundColor: pressed ? c.primaryPressed : c.primary,
-          shadowColor: c.primary,
-        },
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel="Añadir evento"
-    >
-      <IconSymbol name="plus" size={17} color={c.onPrimary} />
-      <Text style={[styles.addButtonText, { color: c.onPrimary }]}>Añadir</Text>
-    </Pressable>
-  );
-}
-
 function EmptyAgendaState({
   selectedDate,
   onCreateEvent,
@@ -239,24 +202,23 @@ function EmptyAgendaState({
 }) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const title = isToday(selectedDate)
-    ? 'No tienes eventos para hoy.'
-    : 'No tienes eventos para este día.';
+  const subject = isToday(selectedDate)
+    ? 'hoy'
+    : selectedDate === addDaysISO(todayISO(), 1)
+      ? 'mañana'
+      : 'este día';
 
   return (
     <View style={[styles.emptyCard, { backgroundColor: c.surface, borderColor: c.border }]}>
-      <View
-        style={[
-          styles.emptyIcon,
-          { backgroundColor: c.surfaceTint, borderColor: c.border },
-        ]}
-      >
+      <View style={[styles.emptyIcon, { backgroundColor: c.surfaceTint }]}>
         <IconSymbol name="calendar" size={24} color={c.primary} />
       </View>
       <View style={styles.emptyCopy}>
-        <Text style={[styles.emptyTitle, { color: c.text }]}>{title}</Text>
+        <Text style={[styles.emptyTitle, { color: c.text }]}>
+          {`No tienes eventos para ${subject}.`}
+        </Text>
         <Text style={[styles.emptyDescription, { color: c.textMuted }]}>
-          Puedes crear un evento manualmente o pedirle a Nova que te ayude a planificar.
+          Añade uno manualmente o pídele a Nova que te ayude a organizar el día.
         </Text>
       </View>
       <View style={styles.emptyActions}>
@@ -264,7 +226,7 @@ function EmptyAgendaState({
           onPress={onCreateEvent}
           style={({ pressed }) => [
             styles.primaryCta,
-            { backgroundColor: c.primary, opacity: pressed ? 0.85 : 1 },
+            { backgroundColor: pressed ? c.primaryPressed : c.primary },
           ]}
           accessibilityRole="button"
           accessibilityLabel="Añadir evento"
@@ -282,47 +244,13 @@ function EmptyAgendaState({
             },
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Pedirle a Nova"
+          accessibilityLabel="Planificar con Nova"
         >
           <IconSymbol name="sparkles" size={17} color={c.primary} />
-          <Text style={[styles.secondaryCtaText, { color: c.primary }]}>Pedirle a Nova</Text>
+          <Text style={[styles.secondaryCtaText, { color: c.primary }]}>
+            Planificar con Nova
+          </Text>
         </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function RelatedTasksPreview({ tasks, total }: { tasks: Task[]; total: number }) {
-  const scheme = useColorScheme() ?? 'light';
-  const c = Colors[scheme];
-
-  return (
-    <View style={styles.tasksWrap}>
-      <View style={styles.sectionHeader}>
-        <Text style={[styles.sectionTitle, { color: c.text }]}>Tareas relacionadas</Text>
-        <Text style={[styles.sectionCount, { color: c.textSubtle }]}>
-          {countLabel(total, 'pendiente', 'pendientes')}
-        </Text>
-      </View>
-      <View style={[styles.tasksCard, { backgroundColor: c.surface, borderColor: c.border }]}>
-        {tasks.map((task, index) => (
-          <View
-            key={task.id}
-            style={[
-              styles.taskRow,
-              { borderBottomColor: c.border },
-              index === tasks.length - 1 ? styles.taskLastRow : null,
-            ]}
-          >
-            <View style={[styles.taskCheck, { borderColor: c.borderStrong }]} />
-            <View style={styles.taskTextCol}>
-              <Text style={[styles.taskTitle, { color: c.text }]} numberOfLines={2}>
-                {task.label}
-              </Text>
-              <Text style={[styles.taskMeta, { color: c.textSubtle }]}>{task.priority}</Text>
-            </View>
-          </View>
-        ))}
       </View>
     </View>
   );
@@ -330,50 +258,47 @@ function RelatedTasksPreview({ tasks, total }: { tasks: Task[]; total: number })
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  bannerWrap: { paddingHorizontal: Spacing.lg },
 
   scrollContent: {
-    paddingBottom: Spacing['3xl'],
+    paddingBottom: 140, // espacio extra para que la lista no quede tapada por el FAB
     gap: Spacing.lg,
   },
 
-  summaryWrap: {
+  header: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.xs,
+    gap: 2,
+  },
+  headline: {
+    ...Typography.display,
+    fontSize: 32,
+    lineHeight: 38,
+  },
+  subheadline: {
+    ...Typography.body,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+
+  bannerWrap: {
     paddingHorizontal: Spacing.lg,
   },
 
   emptyWrap: {
     paddingHorizontal: Spacing.lg,
   },
-
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    minHeight: 38,
-    paddingHorizontal: Spacing.md,
-    borderRadius: Radius.full,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  addButtonText: {
-    ...Typography.caption,
-    fontWeight: '800',
-  },
-
   emptyCard: {
     borderRadius: Radius['2xl'],
     borderWidth: StyleSheet.hairlineWidth,
     padding: Spacing.lg,
     gap: Spacing.lg,
+    alignItems: 'flex-start',
   },
   emptyIcon: {
     width: 52,
     height: 52,
     borderRadius: Radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -391,6 +316,7 @@ const styles = StyleSheet.create({
   emptyActions: {
     flexDirection: 'row',
     gap: Spacing.sm,
+    alignSelf: 'stretch',
   },
   primaryCta: {
     flex: 1,
@@ -420,55 +346,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 
-  tasksWrap: {
-    paddingHorizontal: Spacing.lg,
-    gap: Spacing.sm,
-  },
-  sectionHeader: {
-    paddingHorizontal: Spacing.xs,
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-  },
-  sectionTitle: {
-    ...Typography.title3,
-  },
-  sectionCount: {
-    ...Typography.caption,
-    fontWeight: '700',
-  },
-  tasksCard: {
-    borderRadius: Radius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  taskRow: {
-    flexDirection: 'row',
+  fab: {
+    position: 'absolute',
+    right: Spacing.lg,
+    bottom: 100, // libra el tab bar (~80px + breathing room)
+    width: 56,
+    height: 56,
+    borderRadius: Radius.lg,
     alignItems: 'center',
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  taskLastRow: {
-    borderBottomWidth: 0,
-  },
-  taskCheck: {
-    width: 20,
-    height: 20,
-    borderRadius: Radius.full,
-    borderWidth: 2,
-  },
-  taskTextCol: {
-    flex: 1,
-    gap: 2,
-  },
-  taskTitle: {
-    ...Typography.bodyStrong,
-  },
-  taskMeta: {
-    ...Typography.micro,
-    textTransform: 'uppercase',
-    fontWeight: '700',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
   },
 });

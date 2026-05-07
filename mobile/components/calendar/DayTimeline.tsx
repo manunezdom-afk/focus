@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { SectionLabel } from '@/components/ui/SectionLabel';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { isToday } from '@/src/data/today';
@@ -12,11 +11,9 @@ type Props = {
   events: EventItem[]; // ya filtrados al día seleccionado
 };
 
-type TimeParts = {
-  start: string;
-  end: string | null;
-  duration: string | null;
-};
+// Estado temporal de un evento dentro del día. `now` solo aplica cuando
+// el día seleccionado es hoy y el reloj está dentro del rango del evento.
+type Window = 'past' | 'now' | 'upcoming' | 'untimed';
 
 function minutesOf(value: string | null): number | null {
   if (!value) return null;
@@ -28,144 +25,151 @@ function minutesOf(value: string | null): number | null {
   return h * 60 + mm;
 }
 
-function durationLabel(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (h > 0 && m > 0) return `${h} h ${m} min`;
-  if (h > 0) return `${h} h`;
-  return `${m} min`;
-}
-
-function parseTime(time: string): TimeParts {
-  if (!time) return { start: '', end: null, duration: null };
+function parseTimeRange(time: string): { start: string | null; end: string | null } {
+  if (!time) return { start: null, end: null };
   const cleaned = time.replace(/[–—]/g, '-').replace(/\s/g, '');
   const match = cleaned.match(/^(\d{1,2}:\d{2})(?:-(\d{1,2}:\d{2}))?$/);
-  if (!match) return { start: time, end: null, duration: null };
-
-  const start = match[1];
-  const end = match[2] ?? null;
-  const startMinutes = minutesOf(start);
-  const endMinutes = minutesOf(end);
-  const duration =
-    startMinutes !== null && endMinutes !== null && endMinutes > startMinutes
-      ? durationLabel(endMinutes - startMinutes)
-      : null;
-
-  return { start, end, duration };
+  if (!match) return { start: null, end: null };
+  return { start: match[1], end: match[2] ?? null };
 }
 
-function startOf(event: EventItem): string | null {
-  return parseTime(event.time).start || null;
+// Si no hay end time asumimos 60 min de duración para decidir si está
+// "ahora" / "pasado". Suficiente para destacar el evento vigente sin
+// inventar UI de "in progress".
+const DEFAULT_DURATION_MIN = 60;
+
+function classify(event: EventItem, isCurrentDay: boolean, nowMinutes: number): Window {
+  const { start, end } = parseTimeRange(event.time);
+  if (!start) return 'untimed';
+  if (!isCurrentDay) return 'upcoming';
+
+  const startMin = minutesOf(start);
+  if (startMin === null) return 'untimed';
+  const endMin = minutesOf(end) ?? startMin + DEFAULT_DURATION_MIN;
+
+  if (nowMinutes >= startMin && nowMinutes < endMin) return 'now';
+  if (nowMinutes >= endMin) return 'past';
+  return 'upcoming';
 }
 
-function sortTimed(events: EventItem[]): EventItem[] {
+function sortByTime(events: EventItem[]): EventItem[] {
   return [...events].sort((a, b) => {
-    const am = minutesOf(startOf(a));
-    const bm = minutesOf(startOf(b));
+    const am = minutesOf(parseTimeRange(a.time).start);
+    const bm = minutesOf(parseTimeRange(b.time).start);
+    // Untimed (todo el día) primero
     if (am === null && bm === null) return a.title.localeCompare(b.title);
-    if (am === null) return 1;
-    if (bm === null) return -1;
+    if (am === null) return -1;
+    if (bm === null) return 1;
     if (am === bm) return a.title.localeCompare(b.title);
     return am - bm;
   });
 }
 
-function timeIsFuture(event: EventItem, now: Date = new Date()): boolean {
-  const minutes = minutesOf(startOf(event));
-  if (minutes === null) return true;
-  return minutes >= now.getHours() * 60 + now.getMinutes();
-}
-
 export function DayTimeline({ dateISO, events }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
+  const isCurrentDay = isToday(dateISO);
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
-  const { allDay, timed } = useMemo(() => {
-    const all = [...events.filter((e) => !e.time)].sort((a, b) => a.title.localeCompare(b.title));
-    const t = sortTimed(events.filter((e) => !!e.time));
-    return { allDay: all, timed: t };
-  }, [events]);
+  const sorted = useMemo(() => sortByTime(events), [events]);
 
-  const nowInsertIndex = useMemo(() => {
-    if (!isToday(dateISO) || timed.length === 0) return null;
-    const firstFuture = timed.findIndex((e) => timeIsFuture(e));
-    return firstFuture === -1 ? timed.length : firstFuture;
-  }, [dateISO, timed]);
-
-  if (events.length === 0) return null;
+  if (sorted.length === 0) return null;
 
   return (
-    <View style={styles.container}>
-      {allDay.length > 0 ? (
-        <View style={styles.section}>
-          <SectionLabel label="Todo el día" count={allDay.length} />
-          <View style={styles.cardStack}>
-            {allDay.map((event) => (
-              <AgendaEventCard key={event.id} event={event} allDay />
-            ))}
-          </View>
-        </View>
-      ) : null}
-
-      {timed.length > 0 ? (
-        <View style={styles.section}>
-          <SectionLabel label="Agenda del día" count={timed.length} />
-          <View style={styles.cardStack}>
-            {timed.map((event, idx) => (
-              <View key={event.id}>
-                {nowInsertIndex === idx ? <NowMarker color={c.primary} /> : null}
-                <AgendaEventCard event={event} />
-                {nowInsertIndex === timed.length && idx === timed.length - 1 ? (
-                  <NowMarker color={c.primary} trailing />
-                ) : null}
-              </View>
-            ))}
-          </View>
-        </View>
-      ) : null}
+    <View style={styles.list}>
+      {sorted.map((event) => {
+        const window = classify(event, isCurrentDay, nowMinutes);
+        return <TimelineRow key={event.id} event={event} window={window} c={c} />;
+      })}
     </View>
   );
 }
 
-function AgendaEventCard({ event, allDay = false }: { event: EventItem; allDay?: boolean }) {
-  const scheme = useColorScheme() ?? 'light';
-  const c = Colors[scheme];
-  const time = parseTime(event.time);
-  const meta = allDay
-    ? 'Todo el día'
-    : [time.end ? `Hasta ${time.end}` : null, time.duration].filter(Boolean).join(' · ');
+function TimelineRow({
+  event,
+  window,
+  c,
+}: {
+  event: EventItem;
+  window: Window;
+  c: typeof Colors.light;
+}) {
+  const { start } = parseTimeRange(event.time);
+  const isPast = window === 'past';
+  const isNow = window === 'now';
+  const isUntimed = window === 'untimed';
+  const timeLabel = isUntimed ? 'Todo' : start ?? '';
+
+  const cardBg = isNow ? c.primaryContainer : c.surface;
+  const cardBorder = isNow ? c.primary : c.border;
+  const cardBorderWidth = isNow ? 2 : StyleSheet.hairlineWidth;
+  const timeColor = isNow
+    ? c.primary
+    : isPast
+      ? c.textSubtle
+      : isUntimed
+        ? c.primary
+        : c.text;
 
   return (
-    <View
-      style={[
-        styles.eventCard,
-        {
-          backgroundColor: c.surface,
-          borderColor: c.border,
-          shadowColor: scheme === 'light' ? '#0f172a' : '#000000',
-        },
-      ]}
-    >
-      <View style={[styles.eventAccent, { backgroundColor: event.featured ? c.primary : c.primaryContainer }]} />
-      <View style={styles.timeColumn}>
-        <Text style={[styles.timeText, { color: allDay ? c.primary : c.text }]}>
-          {allDay ? 'Todo' : time.start}
-        </Text>
-        <Text style={[styles.timeSubtext, { color: c.textSubtle }]}>
-          {allDay ? 'día' : time.end ?? ''}
+    <View style={[styles.row, isPast ? styles.rowPast : null]}>
+      <View style={styles.timeCol}>
+        <Text
+          style={[
+            styles.timeText,
+            { color: timeColor, fontWeight: isNow ? '700' : '600' },
+          ]}
+        >
+          {timeLabel}
         </Text>
       </View>
-      <View style={styles.eventBody}>
-        <Text style={[styles.eventTitle, { color: c.text }]} numberOfLines={2}>
-          {event.title}
-        </Text>
-        {meta ? (
-          <Text style={[styles.eventMeta, { color: c.primary }]} numberOfLines={1}>
-            {meta}
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: cardBg,
+            borderColor: cardBorder,
+            borderWidth: cardBorderWidth,
+            shadowColor: isNow ? c.primary : '#000000',
+            shadowOpacity: isNow ? 0.18 : 0.04,
+            shadowRadius: isNow ? 18 : 8,
+            shadowOffset: { width: 0, height: isNow ? 8 : 4 },
+            elevation: isNow ? 4 : 1,
+          },
+        ]}
+      >
+        <View style={styles.cardHead}>
+          <Text
+            style={[
+              styles.title,
+              {
+                color: c.text,
+                textDecorationLine: isPast ? 'line-through' : 'none',
+                opacity: isPast ? 0.7 : 1,
+              },
+            ]}
+            numberOfLines={2}
+          >
+            {event.title}
           </Text>
-        ) : null}
+          {isNow ? (
+            <View style={[styles.nowBadge, { backgroundColor: c.surface }]}>
+              <Text style={[styles.nowBadgeText, { color: c.primary }]}>Ahora</Text>
+            </View>
+          ) : null}
+        </View>
         {event.description ? (
-          <Text style={[styles.eventDescription, { color: c.textMuted }]} numberOfLines={2}>
+          <Text
+            style={[
+              styles.description,
+              {
+                color: isPast ? c.textSubtle : isNow ? c.primary : c.textMuted,
+                opacity: isPast ? 0.8 : 1,
+              },
+            ]}
+            numberOfLines={2}
+          >
             {event.description}
           </Text>
         ) : null}
@@ -174,111 +178,63 @@ function AgendaEventCard({ event, allDay = false }: { event: EventItem; allDay?:
   );
 }
 
-function NowMarker({ color, trailing = false }: { color: string; trailing?: boolean }) {
-  const scheme = useColorScheme() ?? 'light';
-  const c = Colors[scheme];
-  return (
-    <View
-      style={[
-        nowStyles.row,
-        { backgroundColor: c.surface, borderBottomColor: c.border },
-        trailing ? nowStyles.trailing : null,
-      ]}
-    >
-      <View style={[nowStyles.dot, { backgroundColor: color }]} />
-      <View style={[nowStyles.line, { backgroundColor: color }]} />
-      <Text style={[nowStyles.label, { color }]}>Ahora</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: {
+  list: {
+    paddingHorizontal: Spacing.lg,
     gap: Spacing.md,
   },
-  section: {
-    gap: Spacing.xs,
-  },
-  cardStack: {
-    marginHorizontal: Spacing.lg,
-    gap: Spacing.sm,
-  },
-  eventCard: {
-    minHeight: 88,
-    borderRadius: Radius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    overflow: 'hidden',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.05,
-    shadowRadius: 16,
-    elevation: 2,
-  },
-  eventAccent: {
-    width: 4,
-  },
-  timeColumn: {
-    width: 72,
-    paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing.md,
-  },
-  timeText: {
-    ...Typography.bodyStrong,
-    fontSize: 16,
-    lineHeight: 20,
-    fontVariant: ['tabular-nums'],
-  },
-  timeSubtext: {
-    ...Typography.caption,
-    fontVariant: ['tabular-nums'],
-    marginTop: 2,
-  },
-  eventBody: {
-    flex: 1,
-    gap: 4,
-    paddingVertical: Spacing.lg,
-    paddingRight: Spacing.lg,
-  },
-  eventTitle: {
-    ...Typography.title3,
-    fontSize: 17,
-    lineHeight: 23,
-  },
-  eventMeta: {
-    ...Typography.caption,
-    fontWeight: '700',
-  },
-  eventDescription: {
-    ...Typography.caption,
-  },
-});
-
-const nowStyles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 6,
-    gap: Spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    alignItems: 'flex-start',
   },
-  trailing: {
-    borderBottomWidth: 0,
+  rowPast: {
+    opacity: 0.7,
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  timeCol: {
+    width: 56,
+    paddingTop: Spacing.md + 2,
+    paddingRight: Spacing.sm,
   },
-  line: {
+  timeText: {
+    ...Typography.caption,
+    fontSize: 13,
+    lineHeight: 16,
+    fontVariant: ['tabular-nums'],
+  },
+  card: {
     flex: 1,
-    height: StyleSheet.hairlineWidth,
-    opacity: 0.6,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    gap: 4,
   },
-  label: {
+  cardHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+  },
+  title: {
+    flex: 1,
+    ...Typography.bodyStrong,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  nowBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: Radius.full,
+  },
+  nowBadgeText: {
     ...Typography.micro,
-    fontWeight: '700',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '800',
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.4,
+  },
+  description: {
+    ...Typography.caption,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });

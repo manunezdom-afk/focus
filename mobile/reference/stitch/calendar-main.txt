@@ -1,0 +1,156 @@
+<!--
+  Stitch blueprint — Calendario Principal (versión final 2026-05-07).
+  Solo referencia visual. La app real:
+    - usa tokens de @/constants/theme (Colors, Spacing, Radius, Typography)
+    - usa eventos reales de Supabase via useEvents()
+    - NO copia: "Sanctuary", "Morning Standup", "Design Review", "Client Presentation",
+      "Deep Work Block", attendees, "Google Meet", "videocam" badge, etc.
+    - NO usa NativeWind
+-->
+<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Sanctuary - Calendar</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "tertiary-container": "#747477",
+                      "outline-variant": "#c1c6d7",
+                      "on-background": "#1a1b1f",
+                      "surface-container": "#eeedf3",
+                      "on-error": "#ffffff",
+                      "surface-bright": "#faf9fe",
+                      "on-primary-container": "#fefcff",
+                      "on-tertiary": "#ffffff",
+                      "on-primary": "#ffffff",
+                      "tertiary": "#5c5c5f",
+                      "on-surface": "#1a1b1f",
+                      "secondary-fixed-dim": "#c6c6cb",
+                      "on-tertiary-fixed-variant": "#464649",
+                      "surface-dim": "#dad9df",
+                      "inverse-on-surface": "#f1f0f5",
+                      "secondary-fixed": "#e2e2e7",
+                      "background": "#faf9fe",
+                      "surface-variant": "#e3e2e7",
+                      "on-tertiary-container": "#fefcff",
+                      "on-error-container": "#93000a",
+                      "on-secondary-fixed-variant": "#45474b",
+                      "inverse-primary": "#adc6ff",
+                      "surface-container-highest": "#e3e2e7",
+                      "surface-tint": "#005bc1",
+                      "on-surface-variant": "#414755",
+                      "tertiary-fixed": "#e3e2e5",
+                      "secondary": "#5d5e63",
+                      "inverse-surface": "#2f3034",
+                      "primary-fixed": "#d8e2ff",
+                      "surface": "#faf9fe",
+                      "surface-container-lowest": "#ffffff",
+                      "on-secondary": "#ffffff",
+                      "on-primary-fixed": "#001a41",
+                      "surface-container-high": "#e9e7ed",
+                      "primary": "#0058bc",
+                      "tertiary-fixed-dim": "#c7c6c9",
+                      "outline": "#717786",
+                      "primary-fixed-dim": "#adc6ff",
+                      "surface-container-low": "#f4f3f8",
+                      "on-primary-fixed-variant": "#004493",
+                      "error": "#ba1a1a",
+                      "secondary-container": "#dfdfe4",
+                      "primary-container": "#0070eb",
+                      "error-container": "#ffdad6",
+                      "on-secondary-fixed": "#1a1c1f",
+                      "on-secondary-container": "#616267",
+                      "on-tertiary-fixed": "#1b1b1e"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "margin": "32px",
+                      "lg": "24px",
+                      "xxl": "48px",
+                      "xl": "32px",
+                      "xs": "4px",
+                      "sm": "8px",
+                      "unit": "4px",
+                      "gutter": "24px",
+                      "md": "16px"
+              }
+            }
+          }
+        }
+    </script>
+</head>
+<body class="bg-surface-container-lowest min-h-screen text-on-surface flex flex-col antialiased">
+<header class="bg-surface w-full top-0 sticky z-40 border-b border-surface-variant flex justify-between items-center px-lg py-md">
+  <button class="text-primary p-sm rounded-full"><span class="material-symbols-outlined">menu</span></button>
+  <h1 class="font-display-xl text-headline-md font-bold text-primary">Sanctuary</h1>
+  <div class="h-10 w-10 rounded-full bg-surface-container overflow-hidden">[avatar]</div>
+</header>
+
+<main class="flex-grow flex flex-col w-full max-w-4xl mx-auto px-lg pt-lg pb-xxl relative">
+  <section class="mb-xxl">
+    <h2 class="font-headline-lg text-headline-lg text-on-surface mb-lg">Hoy</h2>
+    <div class="flex justify-between items-center w-full px-sm">
+      <!-- 7 day chips: L M X J V S D / 12 13 14(active) 15 16 17 18 -->
+      <!-- active: bg-primary text-on-primary rounded-full circle around day number -->
+    </div>
+  </section>
+
+  <section class="flex flex-col space-y-md">
+    <!-- Past event: opacity-60, line-through title -->
+    <div class="flex items-start w-full opacity-60">
+      <div class="w-16 flex-shrink-0 pt-xs"><span class="font-label-md">09:00</span></div>
+      <div class="flex-grow bg-surface border border-surface-variant rounded-lg p-md ml-sm">
+        <h3 class="font-semibold line-through">Morning Standup</h3>
+        <p class="text-body-sm text-on-surface-variant">Conference Room A</p>
+      </div>
+    </div>
+
+    <!-- Current/Now event: highlighted with primary border, bg-primary-fixed, "Now" badge -->
+    <div class="flex items-start w-full relative">
+      <div class="w-16 flex-shrink-0 pt-xs relative z-10"><span class="text-primary font-bold">11:30</span></div>
+      <div class="absolute left-16 top-4 w-[calc(100%-4rem)] h-px bg-primary opacity-50"></div>
+      <div class="absolute left-14 top-[14px] w-2 h-2 rounded-full bg-primary"></div>
+      <div class="flex-grow bg-primary-fixed border-2 border-primary rounded-lg p-md ml-sm shadow-[0px_4px_20px_rgba(0,112,235,0.15)]">
+        <h3 class="font-bold text-on-primary-fixed">Design Review: Sanctuary UI</h3>
+        <p class="text-on-primary-fixed-variant">videocam Google Meet</p>
+        <span class="bg-surface bg-opacity-50 px-sm py-xs rounded-full text-primary font-bold">Now</span>
+        <!-- attendees avatars row: 2 fotos + "+2" badge -->
+      </div>
+    </div>
+
+    <!-- Future event: bg-surface, border, regular -->
+    <div class="flex items-start w-full">
+      <div class="w-16 pt-xs"><span class="font-label-md">14:00</span></div>
+      <div class="flex-grow bg-surface border border-surface-variant rounded-lg p-md ml-sm">
+        <h3 class="font-semibold">Client Presentation</h3>
+        <p class="text-body-sm text-on-surface-variant">Boardroom</p>
+      </div>
+    </div>
+
+    <div class="flex items-start w-full">
+      <div class="w-16 pt-xs"><span class="font-label-md">16:30</span></div>
+      <div class="flex-grow bg-surface border border-surface-variant rounded-lg p-md ml-sm">
+        <h3 class="font-semibold">Deep Work Block</h3>
+        <p class="text-body-sm text-on-surface-variant">do_not_disturb_on Focus time</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAB: bottom-24 right-lg, w-14 h-14, bg-primary, rounded-2xl, "+" icon -->
+  <button class="fixed bottom-24 right-lg w-14 h-14 bg-primary text-on-primary rounded-2xl shadow-[0px_8px_30px_rgba(0,88,188,0.3)]">+</button>
+</main>
+
+<!-- Bottom nav: 4 tabs (calendar_month active, event_note, smart_toy, checklist) -->
+</body></html>
