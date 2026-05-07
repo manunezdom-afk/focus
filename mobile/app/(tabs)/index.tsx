@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
-import { useMemo } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo } from 'react';
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ErrorBanner } from '@/components/ErrorBanner';
@@ -70,6 +70,24 @@ export default function MiDiaScreen() {
     void events.refresh();
     void tasks.refresh();
   }
+
+  const handleDeleteEvent = useCallback(
+    (id: string, title: string) => {
+      Alert.alert(
+        '¿Eliminar evento?',
+        title,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Eliminar',
+            style: 'destructive',
+            onPress: () => void events.removeEvent(id),
+          },
+        ],
+      );
+    },
+    [events],
+  );
 
   const hasAnyItem = events.events.length > 0 || pendingTasks.length > 0;
 
@@ -147,6 +165,7 @@ export default function MiDiaScreen() {
                     key={evt.id}
                     event={evt}
                     isPast={timeToH(evt.time) < nowH}
+                    onDeletePress={() => handleDeleteEvent(evt.id, evt.title)}
                   />
                 ))}
               </View>

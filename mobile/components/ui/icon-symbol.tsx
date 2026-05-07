@@ -25,6 +25,7 @@ const MAPPING = {
   'plus': 'add',
   'plus.circle.fill': 'add-circle',
   'xmark': 'close',
+  'trash.fill': 'delete',
 } as IconMapping;
 
 export function IconSymbol({
