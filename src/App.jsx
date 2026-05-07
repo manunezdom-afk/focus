@@ -27,7 +27,6 @@ import UndoToast                   from './components/UndoToast'
 import FirstLaunchOnboarding, { useOnboardingGate } from './components/FirstLaunchOnboarding'
 import PlannerView                 from './views/PlannerView'
 import { useFirstRunSequence }     from './hooks/useFirstRunSequence'
-import { writeIncomingPairCode, normalizeUserCode } from './utils/devicePairing'
 
 // Lazy: vistas y sheets secundarias. Solo bajan cuando el usuario navega a
 // ellas, con lo que el bundle inicial en iPhone baja ~200 KB (parse+eval
@@ -255,36 +254,6 @@ export default function App() {
       }
     } catch {}
   }, [user, showWelcome, showOnboardingNow]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Deep-link de vinculación: ?pair=XXXXXXXX en la URL.
-  //
-  // Caso típico: el dispositivo LOGUEADO muestra un QR con el URL de la app +
-  // ?pair=CODE. La cámara nativa del dispositivo nuevo lee ese QR y abre el
-  // link en Safari/PWA. Levantamos el código, lo guardamos en sessionStorage
-  // y limpiamos la URL para que un refresh no lo reaplique. Si NO hay sesión
-  // (caso esperado), el AuthModal lo consume en `device_scan` y canjea. Si
-  // ya hay sesión, el código se ignora — el QR no está pensado para reusar
-  // en el mismo dispositivo que lo generó.
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      const url = new URL(window.location.href)
-      const raw = url.searchParams.get('pair')
-      if (!raw) return
-      const code = normalizeUserCode(raw)
-      // Siempre limpiamos el parámetro de la URL (aunque el código sea
-      // inválido, no queremos que quede colgando en la barra).
-      url.searchParams.delete('pair')
-      const next = url.pathname + (url.search ? url.search : '') + (url.hash || '')
-      window.history.replaceState(window.history.state, '', next)
-      if (!code) return
-      writeIncomingPairCode(code)
-      if (!authModal) setAuthModal(true)
-    } catch {}
-    // Solo corremos una vez al montar; si más adelante cambia la URL vía
-    // navigate/popstate, el usuario tendrá que scanear de nuevo.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const initialView = () => {
     try {
