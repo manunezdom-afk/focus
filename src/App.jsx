@@ -210,18 +210,20 @@ function SheetFallback({ label = 'Cargando' }) {
 }
 
 export default function App() {
-  const { authModal, setAuthModal, user } = useAuth()
+  const { authModal, setAuthModal, user, loading: authLoading } = useAuth()
   const { show: showOnboarding, complete: completeOnboarding } = useOnboardingGate()
   // El welcome es la "threshold scene" que saluda una vez por día. En primer
   // uso lo mostramos antes del onboarding para que el link no "caiga" directo
   // en una pantalla de instrucciones: splash → bienvenida breve → tutorial.
   const { show: showWelcomeRaw, dismiss: dismissWelcome } = useWelcomeGate()
   const showWelcome = showWelcomeRaw
-  // BootSplash: pantalla con el icono de marca, ~1s en cada apertura
-  // (estilo Instagram/Spotify). Independiente de welcome/onboarding —
-  // siempre va primero, luego encima entra welcome (sólo primera vez)
-  // o el planner directo.
-  const { show: showBootSplash } = useBootSplash()
+  // BootSplash: pantalla con el icono de marca en cada apertura
+  // (estilo Instagram/Spotify). Se mantiene visible al menos ~700ms y
+  // hasta que `authLoading=false` — así evitamos el flash de "app sin
+  // sesión" en cold start cuando Supabase tarda en hidratar el JWT
+  // persistido (típico 200-1500ms en iPhone). Cap defensivo a 4s
+  // dentro del hook por si auth se cuelga.
+  const { show: showBootSplash } = useBootSplash(authLoading)
   const showOnboardingNow = showOnboarding && !showWelcome
 
   // Precarga CalendarView y TasksView tras el primer frame para que la primera

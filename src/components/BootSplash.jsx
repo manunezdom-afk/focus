@@ -28,14 +28,53 @@ import AuroraBackground from './AuroraBackground'
 // 350+320 (~670ms total) el usuario reportaba "no dura nada".
 const MIN_VISIBLE_MS = 700
 const FADE_OUT_MS = 420
+// Cap defensivo: si auth queda en loading por un bug del SDK o conexión
+// muerta, no nos quedamos colgados con la pantalla de splash para siempre.
+// 4s es el peor cold start razonable de iPhone; pasarlo es señal de que
+// algo está roto y conviene mostrar la app igual (el modal de login se
+// abrirá cuando el user toque "Iniciar sesión", o el banner de offline).
+const MAX_VISIBLE_MS = 4000
 
-export function useBootSplash() {
-  const [show, setShow] = useState(true)
+/**
+ * Mantiene el splash visible al menos MIN_VISIBLE_MS y no más de
+ * MAX_VISIBLE_MS. Si se le pasa `authLoading=true`, también espera a que
+ * baje a false antes de ocultarse — así evitamos que la app principal
+ * se vea con `user=null` antes de que Supabase termine de hidratar la
+ * sesión persistida (cold start típico en iPhone tarda 200-1500ms).
+ *
+ * authLoading es opcional para mantener compatibilidad con los pocos
+ * sitios donde el splash se monta sin contexto de auth (storybook,
+ * primer render del index.html antes de AuthProvider).
+ */
+export function useBootSplash(authLoading = false) {
+  // 'visible' | 'min-met' | 'hidden'
+  // visible:  estamos en la ventana mínima. Aunque auth esté listo, esperamos.
+  // min-met:  pasó el min — listo para ocultarse en cuanto auth termine.
+  // hidden:   ya nos fuimos, no volvemos.
+  const [phase, setPhase] = useState('visible')
+
+  // 1. Marca el final del MIN_VISIBLE_MS.
   useEffect(() => {
-    const id = setTimeout(() => setShow(false), MIN_VISIBLE_MS)
+    if (phase !== 'visible') return
+    const id = setTimeout(() => setPhase('min-met'), MIN_VISIBLE_MS)
     return () => clearTimeout(id)
-  }, [])
-  return { show }
+  }, [phase])
+
+  // 2. Una vez pasado el min, ocultamos en cuanto auth dejó de cargar
+  //    (o forzamos por cap a MAX_VISIBLE_MS).
+  useEffect(() => {
+    if (phase === 'hidden') return
+    if (phase === 'min-met' && !authLoading) {
+      setPhase('hidden')
+      return
+    }
+    // Cap defensivo desde el primer mount (no espera al min): si auth
+    // se cuelga 4s, igual liberamos la pantalla.
+    const id = setTimeout(() => setPhase('hidden'), MAX_VISIBLE_MS)
+    return () => clearTimeout(id)
+  }, [phase, authLoading])
+
+  return { show: phase !== 'hidden' }
 }
 
 // Icono oficial de la app como PNG para fidelidad total al diseño.

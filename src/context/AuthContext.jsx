@@ -87,6 +87,11 @@ export function AuthProvider({ children }) {
         }
         if (event === 'SIGNED_OUT') {
           setRecoveryMode(false)
+          // SIGNED_OUT puede llegar desde OTRA pestaña (storage event)
+          // o desde un refresh token expirado/revocado — casos en los
+          // que nuestro signOut() no corrió. Aseguramos limpieza de
+          // datos privados aunque sea redundante con signOut() local.
+          try { clearPrivateUserDataLocal() } catch {}
         }
       }
     )
