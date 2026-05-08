@@ -9,6 +9,7 @@ import { rejectCrossSiteUnsafe, setCorsHeaders } from './_lib/security.js'
 import { getSupabaseAdmin, getUserIdFromAuth } from './_supabaseAdmin.js'
 import { ACTION_TYPES, checkLimit, getUserPlan, recordUsage } from './_lib/usageLimits.js'
 import { trackAIUsageEvent } from './_lib/aiUsageTracking.js'
+import { filterCalendarEditActions, strippedEditMessage } from './_lib/calendarIntent.js'
 
 const MODEL_ID = 'claude-haiku-4-5-20251001'
 
@@ -160,7 +161,24 @@ export default async function handler(req, res) {
   // contabiliza nova_message una sola vez si todo salió bien.
   function finalize(parsed) {
     const out = parsed && typeof parsed === 'object' ? { ...parsed } : { reply: '', actions: [] }
-    const actions = Array.isArray(out.actions) ? out.actions : []
+    let actions = Array.isArray(out.actions) ? out.actions : []
+
+    // Defensa server-side contra ediciones no pedidas (BLOQUE C).
+    // Si el usuario NO usó verbos explícitos de edición ("mueve", "cambia",
+    // "edita", "borra", etc), strippeamos cualquier edit_event /
+    // update_event / delete_event que el modelo haya emitido — el system
+    // prompt ya tiene la regla, esto es la red.
+    const editFilter = filterCalendarEditActions(actions, message)
+    if (editFilter.stripped.length > 0) {
+      console.warn(
+        '[focus-assistant] stripped edit actions without explicit intent:',
+        editFilter.stripped.map(a => a.type).join(','),
+      )
+      const note = strippedEditMessage(editFilter.stripped)
+      out.reply = `${out.reply || ''}${out.reply ? '\n\n' : ''}${note}`
+      actions = editFilter.actions
+      out.actions = actions
+    }
 
     // Si las smart_actions están bloqueadas por cuota: stripeamos las
     // acciones (excepto 'remember' que es transparente y barata) y avisamos
