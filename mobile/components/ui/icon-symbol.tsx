@@ -30,9 +30,14 @@ const MAPPING = {
   'checkmark': 'check',
   'pencil': 'edit',
   'square.and.arrow.down': 'file-download',
+  'square.and.arrow.up': 'share',
   'sun.max': 'wb-sunny',
   'camera': 'photo-camera',
   'camera.fill': 'photo-camera',
+  'tray.fill': 'inbox',
+  'bell.fill': 'notifications',
+  'person.crop.circle.fill': 'account-circle',
+  'arrow.clockwise': 'refresh',
 } as IconMapping;
 
 export function IconSymbol({

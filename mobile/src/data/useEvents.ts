@@ -94,6 +94,7 @@ export function useEvents(mode: Mode = 'all') {
         _cache.set(cacheKey, { data: events, at: Date.now() });
         setState({ events, loading: false, refreshing: false, error: null });
       } catch (err: any) {
+        console.warn('[useEvents] fetch failed:', err?.message ?? err, 'code:', err?.code, 'status:', err?.status);
         setState((s) => ({
           ...s,
           loading: false,

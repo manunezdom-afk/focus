@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -851,7 +852,9 @@ export default function NovaScreen() {
         </Animated.View>
 
         {isEmpty ? (
-          <View style={styles.emptyArea}>
+          // Pressable wrapper para dismiss del teclado al tocar fuera —
+          // los Pressables hijos (pills) consumen sus propios taps.
+          <Pressable style={styles.emptyArea} onPress={Keyboard.dismiss}>
             <Animated.View
               entering={FadeInDown.delay(120).duration(380)}
               style={styles.pillsWrap}
@@ -899,7 +902,7 @@ export default function NovaScreen() {
                 </Text>
               </Animated.View>
             ) : null}
-          </View>
+          </Pressable>
         ) : (
           <FlatList
             ref={listRef}
@@ -908,6 +911,7 @@ export default function NovaScreen() {
             renderItem={({ item }) => <ChatBubble message={item} />}
             contentContainerStyle={styles.listContent}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
             ListFooterComponent={
               lastIsError ? (

@@ -1,10 +1,13 @@
+import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -12,7 +15,6 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
 import { NovaInputBar, type NovaInputSeed } from '@/components/nova/NovaInputBar';
@@ -20,7 +22,8 @@ import { EmptyDayState } from '@/components/planner/EmptyDayState';
 import { NextBlockCard } from '@/components/planner/NextBlockCard';
 import { TimelineEventBlock } from '@/components/planner/TimelineEventBlock';
 import { TimelineTaskBlock } from '@/components/planner/TimelineTaskBlock';
-import { Colors, Spacing } from '@/constants/theme';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { todayLabelLong } from '@/src/data/today';
 import { useEvents } from '@/src/data/useEvents';
@@ -99,6 +102,12 @@ export default function MiDiaScreen() {
     void tasks.refresh();
   }, [events, tasks]);
 
+  const handleShare = useCallback(() => {
+    void Share.share({
+      message: 'Mira Focus, mi app para organizar el día con IA: https://usefocus.me',
+    });
+  }, []);
+
   const handleDeleteEvent = useCallback(
     (id: string, title: string) => {
       Alert.alert('¿Eliminar evento?', title, [
@@ -166,6 +175,46 @@ export default function MiDiaScreen() {
             />
           }
         >
+          {/* ── Top icon row (perfil, compartir, bandeja Nova, notificaciones) ── */}
+          <Animated.View entering={FadeInDown.duration(280)} style={styles.iconRow}>
+            <Pressable
+              onPress={() => router.push('/(tabs)/settings')}
+              hitSlop={6}
+              style={({ pressed }) => [styles.iconBtn, { opacity: pressed ? 0.5 : 1 }]}
+              accessibilityLabel="Perfil"
+              accessibilityRole="button"
+            >
+              <IconSymbol name="person.crop.circle.fill" size={26} color={c.primary} />
+            </Pressable>
+            <Pressable
+              onPress={handleShare}
+              hitSlop={6}
+              style={({ pressed }) => [styles.iconBtn, { opacity: pressed ? 0.5 : 1 }]}
+              accessibilityLabel="Compartir"
+              accessibilityRole="button"
+            >
+              <IconSymbol name="square.and.arrow.up" size={22} color={c.text} />
+            </Pressable>
+            <Pressable
+              onPress={() => router.push('/(tabs)/nova')}
+              hitSlop={6}
+              style={({ pressed }) => [styles.iconBtn, { opacity: pressed ? 0.5 : 1 }]}
+              accessibilityLabel="Bandeja de Nova"
+              accessibilityRole="button"
+            >
+              <IconSymbol name="tray.fill" size={22} color={c.text} />
+            </Pressable>
+            <Pressable
+              onPress={() => router.push('/(tabs)/settings')}
+              hitSlop={6}
+              style={({ pressed }) => [styles.iconBtn, { opacity: pressed ? 0.5 : 1 }]}
+              accessibilityLabel="Notificaciones"
+              accessibilityRole="button"
+            >
+              <IconSymbol name="bell.fill" size={22} color={c.text} />
+            </Pressable>
+          </Animated.View>
+
           {/* ── Header AI-native con entrada animada ─────────────────── */}
           <Animated.View entering={FadeInDown.duration(360)} style={styles.header}>
             <Text style={[styles.titleLine, { color: c.text }]}>Mi día</Text>
@@ -175,29 +224,36 @@ export default function MiDiaScreen() {
             </Text>
           </Animated.View>
 
-          {error ? (
-            <View style={styles.bannerWrap}>
-              <ErrorBanner
-                message="No pudimos cargar tus datos."
-                onRetry={handleRefresh}
-              />
-            </View>
+          {/* Error compacto — chip discreto en vez de banner gigante. No
+              bloquea el empty state: el usuario sigue pudiendo pedirle a
+              Nova que cree algo, y la próxima sincronización lo refleja. */}
+          {error && !loading ? (
+            <Pressable
+              onPress={handleRefresh}
+              style={({ pressed }) => [
+                styles.errorChip,
+                {
+                  backgroundColor: scheme === 'dark' ? 'rgba(239,68,68,0.15)' : '#fef2f2',
+                  borderColor: scheme === 'dark' ? 'rgba(239,68,68,0.4)' : '#fecaca',
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Sin conexión, toca para reintentar"
+            >
+              <IconSymbol name="arrow.clockwise" size={12} color="#dc2626" />
+              <Text style={styles.errorChipText}>Sin conexión · Reintentar</Text>
+            </Pressable>
           ) : null}
 
           {loading ? (
             <LoadingState />
           ) : !hasAnyItem ? (
-            // Si hay error y la lista está vacía, no mostramos el empty
-            // hero — el ErrorBanner de arriba ya da la señal correcta y
-            // tiene su Reintentar. Mostrar "Hoy está libre" además del
-            // banner sería confundir al usuario.
-            error ? null : (
-              <View style={styles.emptyFill}>
-                <Animated.View entering={FadeInDown.delay(140).duration(420)}>
-                  <EmptyDayState onPickPrompt={seedNova} />
-                </Animated.View>
-              </View>
-            )
+            <View style={styles.emptyFill}>
+              <Animated.View entering={FadeInDown.delay(140).duration(420)}>
+                <EmptyDayState onPickPrompt={seedNova} />
+              </Animated.View>
+            </View>
           ) : (
             <>
               {/* Timeline: eventos por hora + tareas hoy al final */}
@@ -282,6 +338,23 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 200,
   },
 
+  // Fila de íconos top-right — perfil, compartir, bandeja Nova, notif.
+  // alignSelf: flex-end agrupa todo a la derecha como en la versión web.
+  iconRow: {
+    flexDirection: 'row',
+    alignSelf: 'flex-end',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.xs,
+    gap: Spacing.md + 2,
+  },
+  iconBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   // Header tighter — antes paddingBottom Spacing['2xl']+xs (28px) creaba
   // un hueco grande entre saludo y primer evento. Spacing.xl da una
   // separación clara sin agujero.
@@ -290,6 +363,26 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
     paddingBottom: Spacing.xl,
     gap: 4,
+  },
+
+  // Chip de error compacto — reemplaza el ErrorBanner gigante. Toca para
+  // reintentar, no bloquea el resto de la pantalla.
+  errorChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: Spacing.md,
+  },
+  errorChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#dc2626',
+    letterSpacing: 0.2,
   },
   titleLine: {
     fontSize: 30,
@@ -307,6 +400,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  bannerWrap: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
   timelineWrap: { paddingTop: Spacing.sm },
 });
