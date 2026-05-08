@@ -227,7 +227,11 @@ export default function CalendarScreen() {
                     events={eventsForSelectedDay}
                     onDeleteEvent={handleDeleteEvent}
                   />
-                ) : (
+                ) : events.error ? null : (
+                  // Cuando hay error de fetch + 0 eventos del día, el
+                  // ErrorBanner de arriba ya cubre la señal. Mostrar
+                  // "Día libre. Todo tuyo." al mismo tiempo confundiría
+                  // al usuario sobre si la agenda está vacía o si falló.
                   <Animated.View
                     entering={FadeInDown.delay(130).duration(380)}
                     style={styles.emptyWrap}

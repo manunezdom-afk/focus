@@ -209,7 +209,11 @@ export default function TasksScreen() {
 
   const showLoadingState = tasks.loading && tasks.tasks.length === 0;
   const totalTasks = tasks.tasks.length;
-  const isFullyEmpty = !showLoadingState && totalTasks === 0;
+  // No mostrar el empty hero (con example ghost cards) cuando hay error
+  // de carga y 0 tareas — el usuario podría pensar que su lista está
+  // vacía cuando en realidad falló el fetch. En ese caso dejamos solo
+  // el ErrorBanner con su botón Reintentar.
+  const isFullyEmpty = !showLoadingState && !tasks.error && totalTasks === 0;
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>

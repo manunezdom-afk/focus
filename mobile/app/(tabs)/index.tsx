@@ -190,11 +190,17 @@ export default function MiDiaScreen() {
           {loading ? (
             <LoadingState />
           ) : !hasAnyItem ? (
-            <View style={styles.emptyFill}>
-              <Animated.View entering={FadeInDown.delay(140).duration(420)}>
-                <EmptyDayState onPickPrompt={seedNova} />
-              </Animated.View>
-            </View>
+            // Si hay error y la lista está vacía, no mostramos el empty
+            // hero — el ErrorBanner de arriba ya da la señal correcta y
+            // tiene su Reintentar. Mostrar "Hoy está libre" además del
+            // banner sería confundir al usuario.
+            error ? null : (
+              <View style={styles.emptyFill}>
+                <Animated.View entering={FadeInDown.delay(140).duration(420)}>
+                  <EmptyDayState onPickPrompt={seedNova} />
+                </Animated.View>
+              </View>
+            )
           ) : (
             <>
               {/* Timeline: eventos por hora + tareas hoy al final */}
