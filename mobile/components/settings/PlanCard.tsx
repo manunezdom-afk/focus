@@ -22,7 +22,7 @@ const ACTION_LABELS: Record<string, string> = {
   [NOVA_SMART_ACTION]: 'Acciones inteligentes',
   organize_day:        'Organizar día',
   weekly_planning:     'Planificación semanal',
-  voice_ai:            'Voz con IA',
+  voice_ai:            'Dictado a Nova',
   [PHOTO_ANALYSIS]:    'Análisis de fotos',
 };
 
@@ -146,14 +146,21 @@ export function PlanCard({ data, loading }: Props) {
             <IconSymbol name="sparkles" size={11} color={c.onPrimary} />
             <Text style={[styles.badgeText, { color: c.onPrimary }]}>{data.planLabel}</Text>
           </View>
+          {data.betaUnlimited ? (
+            <View style={[styles.badge, { backgroundColor: '#16a34a' }]}>
+              <Text style={[styles.badgeText, { color: '#ffffff' }]}>BETA · ILIMITADO</Text>
+            </View>
+          ) : null}
         </View>
       </View>
 
       <Text style={[styles.description, { color: c.textMuted }]}>
-        {PLAN_DESCRIPTIONS[data.plan] ?? 'Plan activo'}
+        {data.betaUnlimited
+          ? 'Durante beta, los límites de uso de IA están desactivados temporalmente. Volveremos a activarlos cuando salgamos de beta.'
+          : PLAN_DESCRIPTIONS[data.plan] ?? 'Plan activo'}
       </Text>
 
-      {orderedActionTypes.length > 0 ? (
+      {data.betaUnlimited ? null : orderedActionTypes.length > 0 ? (
         <View style={styles.actionsList}>
           {orderedActionTypes.map((actionType) => (
             <ActionRow

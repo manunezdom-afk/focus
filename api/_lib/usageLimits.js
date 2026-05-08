@@ -321,11 +321,33 @@ async function getUsage(admin, userId, actionType, limitCfg) {
 }
 
 /**
+ * Modo beta global. Cuando BETA_UNLIMITED=true en env vars del backend,
+ * checkLimit devuelve siempre ok=true (soft) sin consultar DB ni
+ * incrementar contadores de bloqueo. recordUsage SIGUE escribiendo en
+ * ai_usage / ai_usage_events para medir costos — solo se desactiva el
+ * enforcement de límites, no la observabilidad.
+ *
+ * Activar/desactivar:
+ *   - Vercel → Project Settings → Environment Variables → BETA_UNLIMITED
+ *   - Dejar vacío o "false" para reactivar límites por plan.
+ *
+ * UI: el cliente puede leer si beta unlimited está activo via
+ * GET /api/me/plan (campo `betaUnlimited` agregado más abajo).
+ */
+function isBetaUnlimited() {
+  const v = String(process.env.BETA_UNLIMITED || '').trim().toLowerCase()
+  return v === 'true' || v === '1' || v === 'yes'
+}
+
+export { isBetaUnlimited }
+
+/**
  * Verifica si el usuario tiene cuota disponible para action_type. NO escribe.
  *
  * Devuelve:
  *   { ok: true,  remaining, plan, period }    — dentro del límite
  *   { ok: true,  soft: true, plan, reason }   — DB no disponible (no bloqueamos)
+ *   { ok: true,  soft: true, plan, beta: true } — BETA_UNLIMITED activo
  *   { ok: false, plan, action_type, period, used, limit, resetAt, message }
  *
  * Uso típico:
@@ -341,6 +363,13 @@ export async function checkLimit(admin, userId, plan, actionType) {
   if (!VALID_ACTION_TYPES.has(actionType)) {
     console.warn('[usageLimits] action_type desconocido:', actionType)
     return { ok: true, soft: true, plan }
+  }
+
+  // BETA_UNLIMITED: bypass total de enforcement. Sigue corriendo
+  // recordUsage abajo (en focus-assistant.js) así que ai_usage_events
+  // refleja el costo real para tracking de presupuesto.
+  if (isBetaUnlimited()) {
+    return { ok: true, soft: true, plan: normalizePlan(plan), beta: true }
   }
 
   const effectivePlan = normalizePlan(plan)

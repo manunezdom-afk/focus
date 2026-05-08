@@ -28,12 +28,17 @@ export type UserPlanInfo = {
   // Mapa de action_type → uso.
   // action_type ∈ {'nova_message', 'nova_smart_action', 'organize_day', 'weekly_planning', 'voice_ai', 'photo_analysis'}
   usage: Record<string, UsageActionInfo>;
+  // Si el backend tiene BETA_UNLIMITED=true en env vars, este flag llega
+  // como true y la UI lo muestra ("Beta · uso ilimitado") en lugar de
+  // las barras de uso habituales.
+  betaUnlimited?: boolean;
 };
 
 const FALLBACK_PLAN: UserPlanInfo = {
   plan: 'free',
   planLabel: 'Free',
   usage: {},
+  betaUnlimited: false,
 };
 
 // Lee el plan del usuario actual. Si la red falla o el endpoint todavía no
@@ -49,6 +54,7 @@ export async function fetchUserPlan(): Promise<UserPlanInfo> {
       plan: (data.plan as PlanId) ?? 'free',
       planLabel: typeof data.planLabel === 'string' ? data.planLabel : 'Free',
       usage: (data.usage && typeof data.usage === 'object') ? data.usage : {},
+      betaUnlimited: data.betaUnlimited === true,
     };
   } catch {
     return FALLBACK_PLAN;

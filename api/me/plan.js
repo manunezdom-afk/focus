@@ -30,7 +30,7 @@
 import { rateLimited, clientIp } from '../_lib/rateLimit.js'
 import { rejectCrossSiteUnsafe, setCorsHeaders } from '../_lib/security.js'
 import { getSupabaseAdmin, getUserIdFromAuth } from '../_supabaseAdmin.js'
-import { getUserPlan, getUsageSnapshot, PLANS } from '../_lib/usageLimits.js'
+import { getUserPlan, getUsageSnapshot, isBetaUnlimited, PLANS } from '../_lib/usageLimits.js'
 
 export const maxDuration = 10
 
@@ -58,6 +58,8 @@ export default async function handler(req, res) {
   if (!userId) return res.status(401).json({ error: 'auth_required' })
 
   const admin = getSupabaseAdmin()
+  const beta = isBetaUnlimited()
+
   if (!admin) {
     // Backend mal configurado — devolvemos un default seguro (free, sin
     // usage) para que la UI siga renderizando algo coherente.
@@ -65,6 +67,7 @@ export default async function handler(req, res) {
       plan: PLANS.FREE,
       planLabel: PLAN_LABELS[PLANS.FREE],
       usage: {},
+      betaUnlimited: beta,
     })
   }
 
@@ -75,6 +78,7 @@ export default async function handler(req, res) {
       plan,
       planLabel: PLAN_LABELS[plan] || PLAN_LABELS[PLANS.FREE],
       usage: snapshot?.actions ?? {},
+      betaUnlimited: beta,
     })
   } catch (err) {
     console.error('[me/plan] unexpected', err?.name || 'Error')
@@ -83,6 +87,7 @@ export default async function handler(req, res) {
       plan: PLANS.FREE,
       planLabel: PLAN_LABELS[PLANS.FREE],
       usage: {},
+      betaUnlimited: beta,
     })
   }
 }
