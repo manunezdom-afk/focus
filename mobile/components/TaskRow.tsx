@@ -128,7 +128,8 @@ export function TaskRow({
         {
           backgroundColor: c.surface,
           borderBottomColor: c.border,
-          opacity: pressed ? 0.7 : task.done && !selectionMode ? 0.55 : 1,
+          opacity: pressed ? 0.82 : task.done && !selectionMode ? 0.55 : 1,
+          transform: [{ scale: pressed ? 0.995 : 1 }],
         },
       ]}
       accessibilityRole="checkbox"
@@ -173,7 +174,13 @@ export function TaskRow({
         <Pressable
           onPress={handleCycle}
           hitSlop={8}
-          style={styles.cycleBtn}
+          style={({ pressed }) => [
+            styles.cycleBtn,
+            {
+              backgroundColor: pressed ? c.surfaceMuted : 'transparent',
+              transform: [{ scale: pressed ? 0.94 : 1 }],
+            },
+          ]}
           accessibilityLabel="Mover a otro bucket"
           accessibilityRole="button"
         >
@@ -216,6 +223,7 @@ const styles = StyleSheet.create({
   cycleBtn: {
     width: 28,
     height: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },

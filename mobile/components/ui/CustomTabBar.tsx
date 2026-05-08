@@ -2,7 +2,7 @@ import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -116,10 +116,10 @@ function ScaleTabItem({
     <Pressable
       onPress={onPress}
       onPressIn={() => {
-        scale.value = withSpring(0.88, { damping: 12, stiffness: 500, mass: 0.4 });
+        scale.value = withTiming(0.94, { duration: 70 });
       }}
       onPressOut={() => {
-        scale.value = withSpring(1, { damping: 14, stiffness: 400, mass: 0.4 });
+        scale.value = withTiming(1, { duration: 110 });
       }}
       style={styles.tab}
       accessibilityRole="button"
@@ -136,9 +136,9 @@ function ScaleTabItem({
 // damping 32). Cuando inactiva, opacity = 0 y scale = 0.
 function Dot({ focused, color }: { focused: boolean; color: string }) {
   const animStyle = useAnimatedStyle(() => ({
-    opacity: withSpring(focused ? 1 : 0, { stiffness: 500, damping: 32 }),
+    opacity: withTiming(focused ? 1 : 0, { duration: 120 }),
     transform: [
-      { scale: withSpring(focused ? 1 : 0, { stiffness: 500, damping: 32 }) },
+      { scale: withTiming(focused ? 1 : 0, { duration: 120 }) },
     ],
   }));
   return (
@@ -169,7 +169,7 @@ function TabIcon({
   inactiveColor: string;
 }) {
   const style = useAnimatedStyle(() => ({
-    transform: [{ scale: withTiming(focused ? 1.08 : 1, { duration: 220 }) }],
+    transform: [{ scale: withTiming(focused ? 1.04 : 1, { duration: 140 }) }],
   }));
   return (
     <Animated.View style={style}>

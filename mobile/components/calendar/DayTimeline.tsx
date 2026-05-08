@@ -124,7 +124,7 @@ function TimelineRow({
   const isNow = window === 'now';
   const isUntimed = window === 'untimed';
   const timeLabel = isUntimed ? 'Todo' : start ?? '';
-  const enterDelay = Math.min(160 + enterIndex * 50, 400);
+  const enterDelay = Math.min(60 + enterIndex * 24, 160);
 
   // Color por tipo de bloque — evento azul, recordatorio ámbar, focus cyan.
   const kind = detectEventKind({ title: event.title, section: event.section });
@@ -143,7 +143,7 @@ function TimelineRow({
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(enterDelay).duration(320)}
+      entering={FadeInDown.delay(enterDelay).duration(190)}
       style={[styles.row, isPast ? styles.rowPast : null]}
     >
       <View style={styles.timeCol}>
@@ -215,7 +215,14 @@ function TimelineRow({
             <Pressable
               onPress={onDeletePress}
               hitSlop={8}
-              style={({ pressed }) => [styles.deleteBtn, { opacity: pressed ? 0.5 : 1 }]}
+              style={({ pressed }) => [
+                styles.deleteBtn,
+                {
+                  backgroundColor: pressed ? c.surfaceMuted : 'transparent',
+                  opacity: pressed ? 0.65 : 1,
+                  transform: [{ scale: pressed ? 0.92 : 1 }],
+                },
+              ]}
               accessibilityLabel="Eliminar evento"
               accessibilityRole="button"
             >
@@ -326,6 +333,8 @@ const styles = StyleSheet.create({
   deleteBtn: {
     paddingTop: 2,
     paddingHorizontal: 2,
+    paddingVertical: 2,
+    borderRadius: Radius.full,
   },
   description: {
     ...Typography.caption,

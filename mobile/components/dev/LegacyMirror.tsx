@@ -26,7 +26,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 
 const STORAGE_KEY = 'focus.dev.legacyOrigin';
 
-const ROUTE_PRESETS: Array<{ label: string; path: string }> = [
+const ROUTE_PRESETS: { label: string; path: string }[] = [
   { label: 'Mi día (Planner)', path: '/' },
   { label: 'Calendario', path: '/calendar' },
   { label: 'Tareas', path: '/tasks' },
@@ -130,7 +130,7 @@ export function LegacyMirror() {
             </Text>
           </View>
           <Text style={[styles.body, { color: c.textMuted }]}>
-            Vite imprimirá una URL "Network:" con tu IP LAN. Pégala aquí (ej.{' '}
+            Vite imprimirá una URL Network: con tu IP LAN. Pégala aquí (ej.{' '}
             <Text style={{ color: c.primary }}>http://192.168.1.10:5173</Text>).
           </Text>
           <TextInput

@@ -18,7 +18,6 @@ import Animated, {
   FadeIn,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -154,6 +153,8 @@ export function NovaInputBar({
 
   const userProfile = useUserProfile();
   const memoriesHook = useMemories();
+  const seedText = seed?.text;
+  const seedN = seed?.n;
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [reply, setReply] = useState<ReplyState | null>(null);
@@ -212,16 +213,16 @@ export function NovaInputBar({
   // Seed cross-tab (consume del store global) + seed via prop (chip del
   // empty state) ambos pre-llenan el input.
   useEffect(() => {
-    if (seed && seed.n > 0 && seed.text) {
-      setDraft(seed.text);
+    if (seedN && seedN > 0 && seedText) {
+      setDraft(seedText);
     }
-  }, [seed?.n, seed?.text]);
+  }, [seedN, seedText]);
 
   const focus = useSharedValue(0);
   const sendScale = useSharedValue(1);
   const animatedBarStyle = useAnimatedStyle(() => ({
-    shadowOpacity: 0.07 + focus.value * 0.13,
-    shadowRadius: 14 + focus.value * 10,
+    shadowOpacity: 0.07 + focus.value * 0.08,
+    shadowRadius: 12 + focus.value * 5,
   }));
   const sendBtnStyle = useAnimatedStyle(() => ({
     transform: [{ scale: sendScale.value }],
@@ -445,7 +446,10 @@ export function NovaInputBar({
           <Pressable
             onPress={continueInNova}
             hitSlop={6}
-            style={({ pressed }) => [styles.continueLink, { opacity: pressed ? 0.6 : 1 }]}
+            style={({ pressed }) => [
+              styles.continueLink,
+              { opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.985 : 1 }] },
+            ]}
             accessibilityRole="button"
             accessibilityLabel="Continuar conversación con Nova"
           >
@@ -478,10 +482,10 @@ export function NovaInputBar({
           maxLength={2000}
           editable={!sending}
           onFocus={() => {
-            focus.value = withTiming(1, { duration: 220 });
+            focus.value = withTiming(1, { duration: 160 });
           }}
           onBlur={() => {
-            focus.value = withTiming(0, { duration: 220 });
+            focus.value = withTiming(0, { duration: 160 });
           }}
         />
         <Pressable
@@ -490,7 +494,10 @@ export function NovaInputBar({
           disabled={analyzingPhoto || sending}
           style={({ pressed }) => [
             styles.cameraBtn,
-            { opacity: (analyzingPhoto || sending) ? 0.35 : pressed ? 0.6 : 1 },
+            {
+              opacity: (analyzingPhoto || sending) ? 0.35 : pressed ? 0.65 : 1,
+              transform: [{ scale: pressed && !analyzingPhoto && !sending ? 0.92 : 1 }],
+            },
           ]}
           accessibilityLabel="Enviar foto a Nova"
           accessibilityRole="button"
@@ -509,6 +516,7 @@ export function NovaInputBar({
             {
               backgroundColor: dictation.state === 'listening' ? '#dc2626' : 'transparent',
               opacity: pressed ? 0.6 : 1,
+              transform: [{ scale: pressed ? 0.92 : 1 }],
             },
           ]}
           accessibilityLabel={
@@ -530,10 +538,10 @@ export function NovaInputBar({
           onPress={send}
           disabled={!canSend}
           onPressIn={() => {
-            sendScale.value = withSpring(0.86, { damping: 10, stiffness: 500, mass: 0.4 });
+            sendScale.value = withTiming(0.94, { duration: 70 });
           }}
           onPressOut={() => {
-            sendScale.value = withSpring(1, { damping: 12, stiffness: 400, mass: 0.4 });
+            sendScale.value = withTiming(1, { duration: 110 });
           }}
           style={{ opacity: !canSend ? 0.35 : 1 }}
           accessibilityLabel="Enviar a Nova"

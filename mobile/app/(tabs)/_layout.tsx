@@ -5,7 +5,13 @@ import { CustomTabBar } from '@/components/ui/CustomTabBar';
 export default function TabLayout() {
   return (
     <Tabs
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        animation: 'none',
+        freezeOnBlur: true,
+        lazy: true,
+        tabBarHideOnKeyboard: true,
+      }}
       tabBar={(props) => <CustomTabBar {...props} />}
     >
       <Tabs.Screen name="index" options={{ title: 'Mi día' }} />

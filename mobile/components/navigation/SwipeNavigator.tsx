@@ -2,7 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef } from 'react';
-import { Keyboard, Platform } from 'react-native';
+import { Keyboard, Platform, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -20,8 +20,10 @@ type Props = {
   children: React.ReactNode;
 };
 
-const SWIPE_DIST = 80;
 const SWIPE_VEL = 500;
+const AXIS_DECIDE_PX = 8;
+const AXIS_LOCK_RATIO = 1.55;
+const SYSTEM_EDGE_PX = 20;
 
 // Wrapper de swipe horizontal entre tabs con feedback visual estilo iOS.
 //
@@ -40,25 +42,32 @@ const SWIPE_VEL = 500;
 //   · activeOffsetX/failOffsetY mantienen scroll vertical intacto.
 export function SwipeNavigator({ currentTab, children }: Props) {
   const navigation = useNavigation<{ navigate: (name: string) => void }>();
+  const { width } = useWindowDimensions();
   const tabIndex = TAB_ORDER.indexOf(currentTab);
 
   const translateX = useSharedValue(0);
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const keyboardOpen = useSharedValue(false);
   const keyboardOpenRef = useRef(false);
+  const swipeDistance = Math.min(Math.max(width * 0.28, 72), 116);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const showSub = Keyboard.addListener(showEvent, () => {
       keyboardOpenRef.current = true;
+      keyboardOpen.value = true;
     });
     const hideSub = Keyboard.addListener(hideEvent, () => {
       keyboardOpenRef.current = false;
+      keyboardOpen.value = false;
     });
     return () => {
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [keyboardOpen]);
 
   // Red de seguridad: cuando esta tab gana foco, el translateX vuelve a 0.
   // Cubre cualquier caso donde un gesto interrumpido haya dejado el valor
@@ -97,8 +106,44 @@ export function SwipeNavigator({ currentTab, children }: Props) {
   const isLast = tabIndex === TAB_ORDER.length - 1;
 
   const pan = Gesture.Pan()
-    .activeOffsetX([-15, 15])
-    .failOffsetY([-15, 15])
+    .manualActivation(true)
+    .cancelsTouchesInView(false)
+    .onTouchesDown((e, manager) => {
+      'worklet';
+      const touch = e.allTouches[0];
+      if (!touch || keyboardOpen.value || touch.absoluteX < SYSTEM_EDGE_PX) {
+        manager.fail();
+        return;
+      }
+      startX.value = touch.absoluteX;
+      startY.value = touch.absoluteY;
+    })
+    .onTouchesMove((e, manager) => {
+      'worklet';
+      if (keyboardOpen.value) {
+        manager.fail();
+        return;
+      }
+
+      const touch = e.allTouches[0];
+      if (!touch) {
+        manager.fail();
+        return;
+      }
+
+      const dx = touch.absoluteX - startX.value;
+      const dy = touch.absoluteY - startY.value;
+      const ax = Math.abs(dx);
+      const ay = Math.abs(dy);
+
+      if (ax < AXIS_DECIDE_PX && ay < AXIS_DECIDE_PX) return;
+
+      if (ax > ay * AXIS_LOCK_RATIO) {
+        manager.activate();
+      } else {
+        manager.fail();
+      }
+    })
     .onUpdate((e) => {
       'worklet';
       const goingRight = e.translationX > 0;
@@ -112,20 +157,26 @@ export function SwipeNavigator({ currentTab, children }: Props) {
     .onEnd((e) => {
       'worklet';
       const passed =
-        Math.abs(e.translationX) > SWIPE_DIST || Math.abs(e.velocityX) > SWIPE_VEL;
+        Math.abs(e.translationX) > swipeDistance || Math.abs(e.velocityX) > SWIPE_VEL;
       const goingLeft = e.translationX < 0;
       const goingRight = e.translationX > 0;
 
-      if (passed && goingLeft && !isLast) {
+      if (!keyboardOpen.value && passed && goingLeft && !isLast) {
         runOnJS(goNext)();
         // Spring rápido a 0 — el cambio de tab cubre el reset visualmente.
-        translateX.value = withSpring(0, { damping: 26, stiffness: 320, mass: 0.5 });
-      } else if (passed && goingRight && !isFirst) {
+        translateX.value = withSpring(0, { damping: 28, stiffness: 360, mass: 0.45 });
+      } else if (!keyboardOpen.value && passed && goingRight && !isFirst) {
         runOnJS(goPrev)();
-        translateX.value = withSpring(0, { damping: 26, stiffness: 320, mass: 0.5 });
+        translateX.value = withSpring(0, { damping: 28, stiffness: 360, mass: 0.45 });
       } else {
         // No pasó el threshold: vuelve con spring más lento (sensación elástica).
-        translateX.value = withSpring(0, { damping: 22, stiffness: 220, mass: 0.6 });
+        translateX.value = withSpring(0, { damping: 28, stiffness: 300, mass: 0.55 });
+      }
+    })
+    .onFinalize(() => {
+      'worklet';
+      if (translateX.value !== 0) {
+        translateX.value = withSpring(0, { damping: 28, stiffness: 320, mass: 0.55 });
       }
     });
 

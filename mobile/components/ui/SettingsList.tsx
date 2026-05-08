@@ -99,6 +99,7 @@ export function SettingsRow({
       android_ripple={{ color: c.surfaceMuted }}
       style={({ pressed }) => ({
         backgroundColor: pressed ? c.surfaceMuted : 'transparent',
+        transform: [{ scale: pressed ? 0.995 : 1 }],
       })}
       accessibilityRole="button"
       accessibilityLabel={label}

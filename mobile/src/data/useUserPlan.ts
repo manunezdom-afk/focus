@@ -15,7 +15,7 @@ const INITIAL: State = { data: null, loading: true, error: null };
 
 // Cache module-level — el plan cambia muy poco (admin lo cambia una vez,
 // usuario nunca lo edita él mismo). TTL 5 min: suficiente para que el
-// uso de Nova se actualice si abrís Ajustes después de chatear.
+// uso de Nova se actualice si abres Ajustes después de chatear.
 const STALE_MS = 5 * 60_000;
 const _cache = new Map<string, { data: UserPlanInfo; at: number }>();
 

@@ -137,7 +137,7 @@ export default function TasksScreen() {
 
   // Particiona en 4 buckets: Próximas (dueDate set) primero, luego las 3
   // categorías clásicas. Una tarea con dueDate aparece SOLO en Próximas;
-  // si querés que también aparezca en Hoy, no setees dueDate.
+  // si quieres que también aparezca en Hoy, no setees dueDate.
   // Próximas se ordena por dueDate ASC, luego dueTime ASC NULLS LAST.
   const byBucket = useMemo(() => {
     const out: Record<Bucket, Task[]> = {
@@ -300,7 +300,10 @@ export default function TasksScreen() {
             styles.scrollContent,
             isFullyEmpty && styles.scrollContentEmpty,
           ]}
+          directionalLockEnabled
+          keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
               refreshing={tasks.refreshing}
@@ -310,7 +313,7 @@ export default function TasksScreen() {
           }
         >
           {/* ── Header — eyebrow + título compacto, mismo lenguaje que Calendario ── */}
-          <Animated.View entering={FadeInDown.duration(320)} style={styles.header}>
+          <Animated.View entering={FadeInDown.duration(200)} style={styles.header}>
             <Text style={[styles.eyebrow, { color: c.primary }]} numberOfLines={1}>
               {summary.headerSubtitle}
             </Text>
@@ -320,7 +323,7 @@ export default function TasksScreen() {
           {/* Smart summary card — copy desde datos reales, sin orb */}
           {!showLoadingState && totalTasks > 0 ? (
             <Animated.View
-              entering={FadeInDown.delay(60).duration(360)}
+              entering={FadeInDown.delay(35).duration(220)}
               style={styles.summaryWrap}
             >
               <View
@@ -347,7 +350,7 @@ export default function TasksScreen() {
           {/* Card de progreso de hoy (cuando hay tareas hoy) */}
           {todayTasks.length > 0 ? (
             <Animated.View
-              entering={FadeInDown.delay(100).duration(360)}
+              entering={FadeInDown.delay(55).duration(220)}
               style={styles.progressWrap}
             >
               <ProgressCard done={todayDone} total={todayTasks.length} />
@@ -358,7 +361,7 @@ export default function TasksScreen() {
               que mostrar (no inventamos métricas con un dataset vacío). */}
           {!showLoadingState && totalTasks > 0 ? (
             <Animated.View
-              entering={FadeInDown.delay(140).duration(360)}
+              entering={FadeInDown.delay(75).duration(220)}
               style={styles.weeklyWrap}
             >
               <WeeklyStatsCard tasks={tasks.tasks} />
@@ -399,6 +402,7 @@ export default function TasksScreen() {
                     backgroundColor: selectionMode ? c.primaryContainer : c.surface,
                     borderColor: selectionMode ? c.primary : c.border,
                     opacity: pressed ? 0.7 : 1,
+                    transform: [{ scale: pressed ? 0.985 : 1 }],
                   },
                 ]}
                 accessibilityRole="button"
@@ -438,7 +442,7 @@ export default function TasksScreen() {
                 return (
                   <Animated.View
                     key={bucket}
-                    entering={FadeInDown.delay(140 + idx * 70).duration(360)}
+                    entering={FadeInDown.delay(80 + idx * 35).duration(220)}
                     style={styles.categoryWrap}
                   >
                     <View style={styles.catHeader}>
@@ -459,7 +463,10 @@ export default function TasksScreen() {
                           hitSlop={8}
                           style={({ pressed }) => [
                             styles.addBtn,
-                            { backgroundColor: pressed ? c.surfaceTint : 'transparent' },
+                            {
+                              backgroundColor: pressed ? c.surfaceTint : 'transparent',
+                              transform: [{ scale: pressed ? 0.92 : 1 }],
+                            },
                           ]}
                           accessibilityRole="button"
                           accessibilityLabel={`Añadir tarea a ${CAT_LABELS[cat]}`}
@@ -477,6 +484,7 @@ export default function TasksScreen() {
                           {
                             borderColor: c.border,
                             backgroundColor: pressed ? c.surfaceTint : 'transparent',
+                            transform: [{ scale: pressed ? 0.992 : 1 }],
                           },
                         ]}
                         accessibilityRole="button"
@@ -547,6 +555,7 @@ export default function TasksScreen() {
                                     backgroundColor:
                                       draftPriority === p ? c.surfaceTint : 'transparent',
                                     opacity: pressed ? 0.7 : 1,
+                                    transform: [{ scale: pressed ? 0.96 : 1 }],
                                   },
                                 ]}
                                 accessibilityRole="button"
@@ -644,6 +653,7 @@ export default function TasksScreen() {
                   styles.bulkBarBtn,
                   {
                     backgroundColor: pressed ? c.primaryPressed : c.primary,
+                    transform: [{ scale: pressed ? 0.98 : 1 }],
                   },
                 ]}
                 accessibilityRole="button"
@@ -698,7 +708,7 @@ function FullyEmptyState({
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(120).duration(380)}
+      entering={FadeInDown.delay(60).duration(220)}
       style={styles.emptyWrap}
     >
       <View style={[styles.emptyCard, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -713,7 +723,10 @@ function FullyEmptyState({
           onPress={onCreate}
           style={({ pressed }) => [
             styles.primaryBtn,
-            { backgroundColor: pressed ? c.primaryPressed : c.primary },
+            {
+              backgroundColor: pressed ? c.primaryPressed : c.primary,
+              transform: [{ scale: pressed ? 0.985 : 1 }],
+            },
           ]}
           accessibilityRole="button"
           accessibilityLabel="Crear nueva tarea"
@@ -725,7 +738,11 @@ function FullyEmptyState({
           onPress={onAskNova}
           style={({ pressed }) => [
             styles.secondaryBtn,
-            { borderColor: c.border, backgroundColor: pressed ? c.surfaceMuted : 'transparent' },
+            {
+              borderColor: c.border,
+              backgroundColor: pressed ? c.surfaceMuted : 'transparent',
+              transform: [{ scale: pressed ? 0.985 : 1 }],
+            },
           ]}
           accessibilityRole="button"
           accessibilityLabel="Pedirle a Nova que organice"

@@ -92,7 +92,9 @@ export function useTasks() {
         _cache.set(userId, { data: tasks, at: Date.now() });
         setState({ tasks, loading: false, refreshing: false, error: null });
       } catch (err: any) {
-        console.warn('[useTasks] fetch failed:', err?.message ?? err, 'code:', err?.code, 'status:', err?.status);
+        if (__DEV__) {
+          console.warn('[useTasks] fetch failed:', err?.message ?? err, 'code:', err?.code, 'status:', err?.status);
+        }
         setState((s) => ({
           ...s,
           loading: false,

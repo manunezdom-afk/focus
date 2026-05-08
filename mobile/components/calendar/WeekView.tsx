@@ -82,13 +82,16 @@ export function WeekView({ selectedDate, events, onSelectDay, onChangeWeek }: Pr
   }
 
   return (
-    <Animated.View entering={FadeInDown.duration(280)} style={styles.container}>
+    <Animated.View entering={FadeInDown.duration(190)} style={styles.container}>
       {/* Header de la semana */}
       <View style={styles.navRow}>
         <Pressable
           onPress={() => navigateWeek(-1)}
           hitSlop={10}
-          style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.5 : 1 }]}
+          style={({ pressed }) => [
+            styles.navBtn,
+            { opacity: pressed ? 0.65 : 1, transform: [{ scale: pressed ? 0.94 : 1 }] },
+          ]}
           accessibilityRole="button"
           accessibilityLabel="Semana anterior"
         >
@@ -98,7 +101,10 @@ export function WeekView({ selectedDate, events, onSelectDay, onChangeWeek }: Pr
         <Pressable
           onPress={() => navigateWeek(1)}
           hitSlop={10}
-          style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.5 : 1 }]}
+          style={({ pressed }) => [
+            styles.navBtn,
+            { opacity: pressed ? 0.65 : 1, transform: [{ scale: pressed ? 0.94 : 1 }] },
+          ]}
           accessibilityRole="button"
           accessibilityLabel="Semana siguiente"
         >
@@ -128,6 +134,7 @@ export function WeekView({ selectedDate, events, onSelectDay, onChangeWeek }: Pr
                       ? c.surfaceMuted
                       : c.surface,
                   borderColor: c.border,
+                  transform: [{ scale: pressed ? 0.992 : 1 }],
                 },
               ]}
               accessibilityRole="button"

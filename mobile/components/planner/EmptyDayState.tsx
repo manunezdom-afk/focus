@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
+import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 type Props = {
@@ -13,7 +13,7 @@ type Props = {
 
 // Iconos de los chips. Solo usamos íconos del MAPPING actual de
 // icon-symbol.tsx para no introducir mappings nuevos.
-const PROMPTS: Array<{ label: string; icon: 'sparkles' | 'calendar' | 'checklist' }> = [
+const PROMPTS: { label: string; icon: 'sparkles' | 'calendar' | 'checklist' }[] = [
   { label: 'Planifica mi día', icon: 'sparkles' },
   { label: 'Agenda gym mañana a las 7', icon: 'calendar' },
   { label: 'Reserva 2h enfocadas esta tarde', icon: 'checklist' },
@@ -35,13 +35,13 @@ export function EmptyDayState({ onPickPrompt }: Props) {
           <IconSymbol name="sparkles" size={22} color={c.primary} />
         </View>
         <Animated.Text
-          entering={FadeInDown.delay(60).duration(320)}
+          entering={FadeInDown.delay(40).duration(220)}
           style={[styles.title, { color: c.text }]}
         >
           Hoy está libre.
         </Animated.Text>
         <Animated.Text
-          entering={FadeInDown.delay(120).duration(320)}
+          entering={FadeInDown.delay(70).duration(220)}
           style={[styles.desc, { color: c.textMuted }]}
         >
           ¿Por dónde empezamos? Toca un ejemplo o escríbele a Nova.
@@ -53,7 +53,7 @@ export function EmptyDayState({ onPickPrompt }: Props) {
         {PROMPTS.map((p, idx) => (
           <Animated.View
             key={p.label}
-            entering={FadeInDown.delay(200 + idx * 70).duration(340)}
+            entering={FadeInDown.delay(110 + idx * 35).duration(220)}
           >
             <Pressable
               onPress={() => onPickPrompt(p.label)}

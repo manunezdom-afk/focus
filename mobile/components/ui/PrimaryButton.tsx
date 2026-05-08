@@ -99,10 +99,11 @@ export function PrimaryButton({
         sizeStyle,
         {
           backgroundColor: bg,
-          opacity: disabled ? 0.4 : pressed ? 0.85 : 1,
+          opacity: disabled ? 0.4 : pressed ? 0.88 : 1,
           borderColor,
           borderWidth: borderColor ? 1 : 0,
         },
+        pressed && !disabled && !loading ? styles.pressed : null,
         style,
       ]}
       accessibilityRole="button"
@@ -127,6 +128,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: Radius.full,
+  },
+  pressed: {
+    transform: [{ scale: 0.985 }],
   },
   sizeSm: {
     paddingHorizontal: Spacing.md,

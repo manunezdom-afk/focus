@@ -75,7 +75,8 @@ export function IconButton({
           height: dim,
           borderRadius: Radius.full,
           backgroundColor: bg,
-          opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
+          opacity: disabled ? 0.4 : pressed ? 0.78 : 1,
+          transform: [{ scale: pressed && !disabled ? 0.94 : 1 }],
         },
       ]}
       accessibilityRole="button"

@@ -31,7 +31,7 @@ export function ChatBubble({ message }: Props) {
 
   return (
     <Animated.View
-      entering={FadeInDown.springify().damping(18).stiffness(340).mass(0.7)}
+      entering={FadeInDown.duration(160)}
       style={[styles.row, isUser ? styles.rowUser : styles.rowAssistant]}
     >
       <View
@@ -42,7 +42,10 @@ export function ChatBubble({ message }: Props) {
         ]}
       >
         {isSending && !message.content ? (
-          <ActivityIndicator size="small" color={fg} />
+          <View style={styles.thinkingRow}>
+            <ActivityIndicator size="small" color={fg} />
+            <Text style={[styles.thinkingText, { color: fg }]}>Nova está pensando...</Text>
+          </View>
         ) : (
           <Text style={[styles.text, { color: fg }]} selectable>
             {message.content}
@@ -89,6 +92,15 @@ const styles = StyleSheet.create({
   },
   text: {
     ...Typography.body,
+  },
+  thinkingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  thinkingText: {
+    ...Typography.caption,
+    fontWeight: '600',
   },
   chipsRow: {
     flexDirection: 'row',

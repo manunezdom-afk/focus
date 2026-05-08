@@ -60,7 +60,10 @@ export function DayPicker({ selectedDate, onSelect, eventCounts }: Props) {
         <Pressable
           onPress={() => navigateWeek(-1)}
           hitSlop={10}
-          style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.5 : 1 }]}
+          style={({ pressed }) => [
+            styles.navBtn,
+            { opacity: pressed ? 0.65 : 1, transform: [{ scale: pressed ? 0.94 : 1 }] },
+          ]}
           accessibilityRole="button"
           accessibilityLabel="Semana anterior"
         >
@@ -70,7 +73,10 @@ export function DayPicker({ selectedDate, onSelect, eventCounts }: Props) {
         <Pressable
           onPress={() => navigateWeek(1)}
           hitSlop={10}
-          style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.5 : 1 }]}
+          style={({ pressed }) => [
+            styles.navBtn,
+            { opacity: pressed ? 0.65 : 1, transform: [{ scale: pressed ? 0.94 : 1 }] },
+          ]}
           accessibilityRole="button"
           accessibilityLabel="Semana siguiente"
         >
@@ -92,7 +98,13 @@ export function DayPicker({ selectedDate, onSelect, eventCounts }: Props) {
                 if (Platform.OS === 'ios') void Haptics.selectionAsync();
                 onSelect(dateISO);
               }}
-              style={({ pressed }) => [styles.dayCol, { opacity: pressed ? 0.7 : 1 }]}
+              style={({ pressed }) => [
+                styles.dayCol,
+                {
+                  opacity: pressed ? 0.78 : 1,
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
+                },
+              ]}
               accessibilityRole="button"
               accessibilityLabel={`${WEEKDAY_LABELS[idx]} ${dayNum(dateISO)}`}
               accessibilityState={{ selected: isSelected }}

@@ -29,7 +29,10 @@ export function ErrorBanner({ message, onRetry }: Props) {
       {onRetry ? (
         <Pressable
           onPress={onRetry}
-          style={({ pressed }) => [styles.button, { opacity: pressed ? 0.7 : 1 }]}
+          style={({ pressed }) => [
+            styles.button,
+            { opacity: pressed ? 0.78 : 1, transform: [{ scale: pressed ? 0.96 : 1 }] },
+          ]}
           accessibilityRole="button"
         >
           <Text style={[styles.buttonText, { color: c.danger }]}>Reintentar</Text>

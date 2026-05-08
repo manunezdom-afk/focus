@@ -166,7 +166,10 @@ export default function MiDiaScreen() {
       >
         <ScrollView
           contentContainerStyle={[styles.scrollContent, !hasAnyItem && !loading && styles.scrollContentEmpty]}
+          directionalLockEnabled
+          keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -176,11 +179,14 @@ export default function MiDiaScreen() {
           }
         >
           {/* ── Top icon row (perfil, compartir, bandeja Nova, notificaciones) ── */}
-          <Animated.View entering={FadeInDown.duration(280)} style={styles.iconRow}>
+          <Animated.View entering={FadeInDown.duration(180)} style={styles.iconRow}>
             <Pressable
               onPress={() => router.push('/(tabs)/settings')}
               hitSlop={6}
-              style={({ pressed }) => [styles.iconBtn, { opacity: pressed ? 0.5 : 1 }]}
+              style={({ pressed }) => [
+                styles.iconBtn,
+                { opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] },
+              ]}
               accessibilityLabel="Perfil"
               accessibilityRole="button"
             >
@@ -189,7 +195,10 @@ export default function MiDiaScreen() {
             <Pressable
               onPress={handleShare}
               hitSlop={6}
-              style={({ pressed }) => [styles.iconBtn, { opacity: pressed ? 0.5 : 1 }]}
+              style={({ pressed }) => [
+                styles.iconBtn,
+                { opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] },
+              ]}
               accessibilityLabel="Compartir"
               accessibilityRole="button"
             >
@@ -198,7 +207,10 @@ export default function MiDiaScreen() {
             <Pressable
               onPress={() => router.push('/(tabs)/nova')}
               hitSlop={6}
-              style={({ pressed }) => [styles.iconBtn, { opacity: pressed ? 0.5 : 1 }]}
+              style={({ pressed }) => [
+                styles.iconBtn,
+                { opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] },
+              ]}
               accessibilityLabel="Bandeja de Nova"
               accessibilityRole="button"
             >
@@ -207,7 +219,10 @@ export default function MiDiaScreen() {
             <Pressable
               onPress={() => router.push('/(tabs)/settings')}
               hitSlop={6}
-              style={({ pressed }) => [styles.iconBtn, { opacity: pressed ? 0.5 : 1 }]}
+              style={({ pressed }) => [
+                styles.iconBtn,
+                { opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] },
+              ]}
               accessibilityLabel="Notificaciones"
               accessibilityRole="button"
             >
@@ -216,7 +231,7 @@ export default function MiDiaScreen() {
           </Animated.View>
 
           {/* ── Header AI-native con entrada animada ─────────────────── */}
-          <Animated.View entering={FadeInDown.duration(360)} style={styles.header}>
+          <Animated.View entering={FadeInDown.duration(220)} style={styles.header}>
             <Text style={[styles.titleLine, { color: c.text }]}>Mi día</Text>
             <Text style={[styles.subLine, { color: c.primary }]} numberOfLines={1}>
               <Text style={styles.subLineStrong}>{greeting}</Text>
@@ -250,7 +265,7 @@ export default function MiDiaScreen() {
             <LoadingState />
           ) : !hasAnyItem ? (
             <View style={styles.emptyFill}>
-              <Animated.View entering={FadeInDown.delay(140).duration(420)}>
+              <Animated.View entering={FadeInDown.delay(60).duration(240)}>
                 <EmptyDayState onPickPrompt={seedNova} />
               </Animated.View>
             </View>

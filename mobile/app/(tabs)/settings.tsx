@@ -6,7 +6,6 @@ import {
   Alert,
   Linking,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,7 +20,6 @@ import { DeleteAccountSheet } from '@/components/settings/DeleteAccountSheet';
 import { MemoriesSheet } from '@/components/settings/MemoriesSheet';
 import { PersonalitySheet } from '@/components/settings/PersonalitySheet';
 import { PlanCard } from '@/components/settings/PlanCard';
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import { SettingsRow, SettingsSection } from '@/components/ui/SettingsList';
 import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -261,9 +259,14 @@ export default function SettingsScreen() {
       </View>
 
       <SwipeNavigator currentTab="settings">
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        directionalLockEnabled
+        keyboardDismissMode="on-drag"
+        scrollEventThrottle={16}
+      >
         {/* Header premium — título 40px + subtítulo humano */}
-        <Animated.View entering={FadeInDown.duration(360)} style={styles.header}>
+        <Animated.View entering={FadeInDown.duration(200)} style={styles.header}>
           <Text style={[styles.titleLine, { color: c.text }]}>Ajustes</Text>
           <Text style={[styles.subLine, { color: c.textMuted }]} numberOfLines={1}>
             Administra tu cuenta y preferencias.
@@ -272,7 +275,7 @@ export default function SettingsScreen() {
 
         <View style={styles.body}>
           {/* AccountCard — avatar circular con inicial del email + status real */}
-          <Animated.View entering={FadeInDown.delay(60).duration(360)}>
+          <Animated.View entering={FadeInDown.delay(30).duration(200)}>
             <View
               style={[
                 styles.accountCard,
@@ -311,14 +314,14 @@ export default function SettingsScreen() {
               wrapper para no anidar card-en-card; usamos un title propio
               para que la jerarquía visual coincida con el resto de secciones. */}
           {isAuthenticated ? (
-            <Animated.View entering={FadeInDown.delay(90).duration(360)} style={styles.planSection}>
+            <Animated.View entering={FadeInDown.delay(45).duration(200)} style={styles.planSection}>
               <Text style={[styles.planSectionTitle, { color: c.textSubtle }]}>PLAN</Text>
               <PlanCard data={userPlan.data} loading={userPlan.loading} />
             </Animated.View>
           ) : null}
 
           {/* ── Cuenta ───────────────────────────────────────────────── */}
-          <Animated.View entering={FadeInDown.delay(120).duration(360)}>
+          <Animated.View entering={FadeInDown.delay(60).duration(200)}>
             <SettingsSection title="Cuenta">
               <SettingsRow
                 isFirst
@@ -344,7 +347,7 @@ export default function SettingsScreen() {
           </Animated.View>
 
           {/* ── Nova ─────────────────────────────────────────────────── */}
-          <Animated.View entering={FadeInDown.delay(180).duration(360)}>
+          <Animated.View entering={FadeInDown.delay(80).duration(200)}>
             <SettingsSection title="Nova">
               <SettingsRow
                 isFirst
@@ -373,7 +376,7 @@ export default function SettingsScreen() {
               expo-notifications no está linkeado en este binario (caso
               típico antes del primer rebuild después de agregar la dep),
               mostramos copy honesta y un Alert con instrucciones. */}
-          <Animated.View entering={FadeInDown.delay(240).duration(360)}>
+          <Animated.View entering={FadeInDown.delay(100).duration(200)}>
             <SettingsSection title="Notificaciones">
               <SettingsRow
                 isFirst
@@ -400,7 +403,7 @@ export default function SettingsScreen() {
           </Animated.View>
 
           {/* ── Preferencias ─────────────────────────────────────────── */}
-          <Animated.View entering={FadeInDown.delay(300).duration(360)}>
+          <Animated.View entering={FadeInDown.delay(120).duration(200)}>
             <SettingsSection title="Preferencias">
               <SettingsRow
                 isFirst
@@ -421,7 +424,7 @@ export default function SettingsScreen() {
           </Animated.View>
 
           {/* ── Privacidad y datos ───────────────────────────────────── */}
-          <Animated.View entering={FadeInDown.delay(360).duration(360)}>
+          <Animated.View entering={FadeInDown.delay(140).duration(200)}>
             <SettingsSection title="Privacidad y datos">
               <SettingsRow
                 isFirst
@@ -445,7 +448,7 @@ export default function SettingsScreen() {
 
           {/* ── Desarrollo (solo __DEV__) ────────────────────────────── */}
           {__DEV__ ? (
-            <Animated.View entering={FadeInDown.delay(420).duration(360)}>
+            <Animated.View entering={FadeInDown.delay(160).duration(200)}>
               <SettingsSection title="Desarrollo">
                 <SettingsRow
                   isFirst
@@ -459,7 +462,7 @@ export default function SettingsScreen() {
           ) : null}
 
           {/* ── Aplicación ───────────────────────────────────────────── */}
-          <Animated.View entering={FadeInDown.delay(__DEV__ ? 480 : 420).duration(360)}>
+          <Animated.View entering={FadeInDown.delay(__DEV__ ? 180 : 160).duration(200)}>
             <SettingsSection title="Aplicación">
               <SettingsRow
                 isFirst
@@ -472,7 +475,7 @@ export default function SettingsScreen() {
 
           {/* Footer pequeño con marca calmada */}
           <Animated.View
-            entering={FadeInDown.delay(540).duration(420)}
+            entering={FadeInDown.delay(200).duration(220)}
             style={styles.footer}
           >
             <Text style={[styles.footerText, { color: c.textSubtle }]}>

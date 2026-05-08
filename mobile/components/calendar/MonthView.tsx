@@ -88,13 +88,16 @@ export function MonthView({ selectedDate, eventCounts, onSelectDay, onChangeMont
   }
 
   return (
-    <Animated.View entering={FadeInDown.duration(280)} style={styles.container}>
+    <Animated.View entering={FadeInDown.duration(190)} style={styles.container}>
       {/* Header del mes con chevrons */}
       <View style={styles.navRow}>
         <Pressable
           onPress={handlePrev}
           hitSlop={10}
-          style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.5 : 1 }]}
+          style={({ pressed }) => [
+            styles.navBtn,
+            { opacity: pressed ? 0.65 : 1, transform: [{ scale: pressed ? 0.94 : 1 }] },
+          ]}
           accessibilityRole="button"
           accessibilityLabel="Mes anterior"
         >
@@ -104,7 +107,10 @@ export function MonthView({ selectedDate, eventCounts, onSelectDay, onChangeMont
         <Pressable
           onPress={handleNext}
           hitSlop={10}
-          style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.5 : 1 }]}
+          style={({ pressed }) => [
+            styles.navBtn,
+            { opacity: pressed ? 0.65 : 1, transform: [{ scale: pressed ? 0.94 : 1 }] },
+          ]}
           accessibilityRole="button"
           accessibilityLabel="Mes siguiente"
         >
@@ -140,7 +146,13 @@ export function MonthView({ selectedDate, eventCounts, onSelectDay, onChangeMont
                 if (Platform.OS === 'ios') void Haptics.selectionAsync();
                 onSelectDay(dateISO);
               }}
-              style={({ pressed }) => [styles.cell, { opacity: pressed ? 0.65 : 1 }]}
+              style={({ pressed }) => [
+                styles.cell,
+                {
+                  opacity: pressed ? 0.75 : 1,
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
+                },
+              ]}
               accessibilityRole="button"
               accessibilityLabel={`Día ${dayNum}`}
               accessibilityState={{ selected }}

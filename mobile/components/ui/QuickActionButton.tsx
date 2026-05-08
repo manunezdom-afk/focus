@@ -37,7 +37,8 @@ export function QuickActionButton({ label, iconName, onPress, disabled = false }
         {
           backgroundColor: c.surface,
           borderColor: c.border,
-          opacity: disabled ? 0.4 : pressed ? 0.85 : 1,
+          opacity: disabled ? 0.4 : pressed ? 0.88 : 1,
+          transform: [{ scale: pressed && !disabled ? 0.985 : 1 }],
         },
       ]}
       accessibilityRole="button"

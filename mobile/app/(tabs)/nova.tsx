@@ -31,7 +31,7 @@ import { ChatBubble } from '@/components/ChatBubble';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
 import { NovaOrb } from '@/components/nova/NovaOrb';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
+import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/src/auth/AuthProvider';
 import type { CreateEventInput, EventPatch } from '@/src/data/events';
@@ -259,6 +259,7 @@ export default function NovaScreen() {
   const tasks = useTasks();
   const memoriesHook = useMemories();
   const userProfile = useUserProfile();
+  const novaPersonality = userProfile.profile?.novaPersonality ?? 'focus';
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -358,8 +359,8 @@ export default function NovaScreen() {
   // Focus glow animado en el composer (mismo patrón que PlannerNovaInput).
   const focus = useSharedValue(0);
   const animatedComposerStyle = useAnimatedStyle(() => ({
-    shadowOpacity: 0.07 + focus.value * 0.13,
-    shadowRadius: 14 + focus.value * 10,
+    shadowOpacity: 0.07 + focus.value * 0.08,
+    shadowRadius: 12 + focus.value * 5,
   }));
 
   // Aplica una lista de acciones contra los hooks de tasks/events. Las
@@ -499,7 +500,7 @@ export default function NovaScreen() {
               m.id === placeholder.id
                 ? {
                     ...m,
-                    content: 'No detecté ningún evento en esa foto. Probá con otra más clara.',
+                    content: 'No detecté ningún evento en esa foto. Intenta con otra más clara.',
                     status: 'sent' as const,
                   }
                 : m,
@@ -687,7 +688,7 @@ export default function NovaScreen() {
           tasks: tasks.tasks,
           memories: memoriesHook.memories,
           history,
-          novaPersonality: userProfile.profile?.novaPersonality ?? 'focus',
+          novaPersonality,
         });
 
         const actions = Array.isArray(reply.actions) ? reply.actions : [];
@@ -778,7 +779,7 @@ export default function NovaScreen() {
         setSending(false);
       }
     },
-    [draft, sending, messages, events, tasks, applyActions],
+    [draft, sending, messages, events, tasks, memoriesHook.memories, novaPersonality, applyActions],
   );
 
   // Auto-scroll al final cuando llega un mensaje nuevo.
@@ -810,6 +811,7 @@ export default function NovaScreen() {
     () => tasks.tasks.filter((t) => !t.done && t.category === 'hoy').length,
     [tasks.tasks],
   );
+  const contextDate = useMemo(() => formatContextDate(), []);
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
@@ -842,8 +844,8 @@ export default function NovaScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       >
         {/* Barra de contexto mínima — fecha + estado del día */}
-        <Animated.View entering={FadeInDown.duration(280)} style={styles.contextBar}>
-          <Text style={[styles.contextDate, { color: c.text }]}>{formatContextDate()}</Text>
+        <Animated.View entering={FadeInDown.duration(180)} style={styles.contextBar}>
+          <Text style={[styles.contextDate, { color: c.text }]}>{contextDate}</Text>
           <Text style={[styles.contextSub, { color: c.textMuted }]}>
             {pendingTodayCount > 0
               ? `${pendingTodayCount} tarea${pendingTodayCount > 1 ? 's' : ''} pendiente${pendingTodayCount > 1 ? 's' : ''}`
@@ -856,13 +858,13 @@ export default function NovaScreen() {
           // los Pressables hijos (pills) consumen sus propios taps.
           <Pressable style={styles.emptyArea} onPress={Keyboard.dismiss}>
             <Animated.View
-              entering={FadeInDown.delay(120).duration(380)}
+              entering={FadeInDown.delay(60).duration(220)}
               style={styles.pillsWrap}
             >
               {suggestedPrompts.map((s, idx) => (
                 <Animated.View
                   key={s.label}
-                  entering={FadeInDown.delay(160 + idx * 55).duration(300)}
+                  entering={FadeInDown.delay(90 + idx * 30).duration(200)}
                 >
                   <Pressable
                     onPress={() => void handleSend(s.label)}
@@ -872,7 +874,7 @@ export default function NovaScreen() {
                         backgroundColor: pressed ? c.primaryContainer : c.surface,
                         borderColor: pressed ? c.primary : c.border,
                         opacity: pressed ? 0.9 : 1,
-                        transform: [{ scale: pressed ? 0.97 : 1 }],
+                        transform: [{ scale: pressed ? 0.985 : 1 }],
                       },
                     ]}
                     accessibilityRole="button"
@@ -893,7 +895,7 @@ export default function NovaScreen() {
             */}
             {Platform.OS === 'ios' && dictation.available ? (
               <Animated.View
-                entering={FadeInDown.delay(360).duration(380)}
+                entering={FadeInDown.delay(160).duration(220)}
                 style={styles.dictationHint}
                 accessibilityRole="text"
               >
@@ -910,8 +912,10 @@ export default function NovaScreen() {
             keyExtractor={(m) => m.id}
             renderItem={({ item }) => <ChatBubble message={item} />}
             contentContainerStyle={styles.listContent}
+            directionalLockEnabled
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
+            scrollEventThrottle={16}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
             ListFooterComponent={
               lastIsError ? (
@@ -924,7 +928,8 @@ export default function NovaScreen() {
                       {
                         backgroundColor: c.surface,
                         borderColor: c.border,
-                        opacity: sending ? 0.5 : pressed ? 0.7 : 1,
+                        opacity: sending ? 0.5 : pressed ? 0.78 : 1,
+                        transform: [{ scale: pressed && !sending ? 0.985 : 1 }],
                       },
                     ]}
                     accessibilityRole="button"
@@ -957,7 +962,10 @@ export default function NovaScreen() {
           <Pressable
             onPress={() => inputRef.current?.focus()}
             hitSlop={8}
-            style={styles.orbBtn}
+            style={({ pressed }) => [
+              styles.orbBtn,
+              { opacity: pressed ? 0.78 : 1, transform: [{ scale: pressed ? 0.94 : 1 }] },
+            ]}
             accessibilityLabel="Escribe a Nova"
             accessibilityRole="button"
           >
@@ -985,10 +993,10 @@ export default function NovaScreen() {
             editable={!sending}
             maxLength={2000}
             onFocus={() => {
-              focus.value = withTiming(1, { duration: 220 });
+              focus.value = withTiming(1, { duration: 160 });
             }}
             onBlur={() => {
-              focus.value = withTiming(0, { duration: 220 });
+              focus.value = withTiming(0, { duration: 160 });
             }}
           />
 
@@ -999,7 +1007,10 @@ export default function NovaScreen() {
             hitSlop={10}
             style={({ pressed }) => [
               styles.cameraBtn,
-              { opacity: analyzingPhoto || sending ? 0.3 : pressed ? 0.5 : 0.45 },
+              {
+                opacity: analyzingPhoto || sending ? 0.3 : pressed ? 0.62 : 0.45,
+                transform: [{ scale: pressed && !analyzingPhoto && !sending ? 0.92 : 1 }],
+              },
             ]}
             accessibilityRole="button"
             accessibilityLabel="Digitalizar nota o post-it"
@@ -1021,6 +1032,7 @@ export default function NovaScreen() {
               {
                 backgroundColor: dictation.state === 'listening' ? '#dc2626' : 'transparent',
                 opacity: pressed ? 0.6 : 1,
+                transform: [{ scale: pressed ? 0.92 : 1 }],
               },
             ]}
             accessibilityRole="button"
@@ -1047,6 +1059,7 @@ export default function NovaScreen() {
               {
                 backgroundColor: c.primary,
                 opacity: !draft.trim() || sending ? 0.35 : pressed ? 0.85 : 1,
+                transform: [{ scale: pressed && !!draft.trim() && !sending ? 0.94 : 1 }],
               },
             ]}
             accessibilityRole="button"

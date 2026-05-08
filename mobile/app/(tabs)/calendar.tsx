@@ -139,6 +139,10 @@ export default function CalendarScreen() {
         >
           <ScrollView
             contentContainerStyle={styles.scrollContent}
+            directionalLockEnabled
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="handled"
+            scrollEventThrottle={16}
             refreshControl={
               <RefreshControl
                 refreshing={events.refreshing}
@@ -148,14 +152,14 @@ export default function CalendarScreen() {
             }
           >
             {/* ── Header: eyebrow mes + título ─────────────────────────── */}
-            <Animated.View entering={FadeInDown.duration(320)} style={styles.header}>
+            <Animated.View entering={FadeInDown.duration(200)} style={styles.header}>
               <Text style={[styles.eyebrow, { color: c.primary }]}>{monthLabel}</Text>
               <Text style={[styles.title, { color: c.text }]}>Calendario</Text>
             </Animated.View>
 
             {/* ── Toggle Día / Semana / Mes + botón añadir ─────────────── */}
             <Animated.View
-              entering={FadeInDown.delay(40).duration(320)}
+              entering={FadeInDown.delay(30).duration(200)}
               style={styles.toggleRow}
             >
               <View style={[styles.togglePills, { backgroundColor: c.surfaceMuted }]}>
@@ -172,6 +176,7 @@ export default function CalendarScreen() {
                           ? { backgroundColor: c.surface, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2 }
                           : null,
                         !isActive && pressed ? { opacity: 0.7 } : null,
+                        pressed ? { transform: [{ scale: 0.985 }] } : null,
                       ]}
                       accessibilityRole="button"
                       accessibilityState={{ selected: isActive }}
@@ -195,7 +200,10 @@ export default function CalendarScreen() {
                 onPress={openCreate}
                 style={({ pressed }) => [
                   styles.addBtn,
-                  { backgroundColor: pressed ? c.primaryPressed : c.primary },
+                  {
+                    backgroundColor: pressed ? c.primaryPressed : c.primary,
+                    transform: [{ scale: pressed ? 0.94 : 1 }],
+                  },
                 ]}
                 accessibilityRole="button"
                 accessibilityLabel="Añadir evento"
@@ -213,7 +221,7 @@ export default function CalendarScreen() {
             {/* ── Vista Día: selector semanal + timeline / empty ─────────── */}
             {activeView === 'Día' ? (
               <>
-                <Animated.View entering={FadeInDown.delay(80).duration(320)}>
+                <Animated.View entering={FadeInDown.delay(50).duration(200)}>
                   <DayPicker
                     selectedDate={selectedDate}
                     onSelect={selectDay}
@@ -233,7 +241,7 @@ export default function CalendarScreen() {
                   // "Día libre. Todo tuyo." al mismo tiempo confundiría
                   // al usuario sobre si la agenda está vacía o si falló.
                   <Animated.View
-                    entering={FadeInDown.delay(130).duration(380)}
+                    entering={FadeInDown.delay(70).duration(220)}
                     style={styles.emptyWrap}
                   >
                     <EmptyAgendaState
@@ -338,7 +346,10 @@ function EmptyAgendaState({
         onPress={onCreateEvent}
         style={({ pressed }) => [
           styles.primaryBtn,
-          { backgroundColor: pressed ? c.primaryPressed : c.primary },
+          {
+            backgroundColor: pressed ? c.primaryPressed : c.primary,
+            transform: [{ scale: pressed ? 0.985 : 1 }],
+          },
         ]}
         accessibilityRole="button"
         accessibilityLabel="Añadir evento"
@@ -354,6 +365,7 @@ function EmptyAgendaState({
           {
             borderColor: c.border,
             backgroundColor: pressed ? c.surfaceMuted : 'transparent',
+            transform: [{ scale: pressed ? 0.985 : 1 }],
           },
         ]}
         accessibilityRole="button"
@@ -369,7 +381,11 @@ function EmptyAgendaState({
         }
         style={({ pressed }) => [
           styles.tertiaryBtn,
-          { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
+          {
+            borderColor: c.border,
+            opacity: pressed ? 0.7 : 1,
+            transform: [{ scale: pressed ? 0.985 : 1 }],
+          },
         ]}
         accessibilityRole="button"
         accessibilityLabel="Importar agenda"

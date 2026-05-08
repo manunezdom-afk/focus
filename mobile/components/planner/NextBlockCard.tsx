@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
@@ -35,13 +36,17 @@ export function NextBlockCard({ events }: Props) {
   const now = new Date();
   const nowH = now.getHours() + now.getMinutes() / 60;
 
-  const timed = events
-    .map((e) => ({ event: e, range: timeRange(e.time) }))
-    .filter(
-      (x): x is { event: EventItem; range: { startH: number; endH: number | null } } =>
-        x.range !== null,
-    )
-    .sort((a, b) => a.range.startH - b.range.startH);
+  const timed = useMemo(
+    () =>
+      events
+        .map((e) => ({ event: e, range: timeRange(e.time) }))
+        .filter(
+          (x): x is { event: EventItem; range: { startH: number; endH: number | null } } =>
+            x.range !== null,
+        )
+        .sort((a, b) => a.range.startH - b.range.startH),
+    [events],
+  );
 
   // Sin eventos con hora → no renderizamos la card.
   if (timed.length === 0) return null;
@@ -89,7 +94,7 @@ export function NextBlockCard({ events }: Props) {
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(360).duration(400)}
+      entering={FadeInDown.delay(120).duration(220)}
       style={[
         styles.wrap,
         {

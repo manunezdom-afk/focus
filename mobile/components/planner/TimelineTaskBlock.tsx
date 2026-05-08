@@ -27,14 +27,14 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, onSwipeDelete
 
   const taskColors = getBlockColors('task', scheme);
   const accent = taskColors.accent;
-  const enterDelay = Math.min(50 + enterIndex * 30, 200);
+  const enterDelay = Math.min(30 + enterIndex * 18, 110);
 
   const renderRightActions = () => (
     <Pressable
       onPress={onSwipeDelete ?? onDeletePress}
       style={({ pressed }) => [
         styles.swipeAction,
-        { opacity: pressed ? 0.8 : 1 },
+        { opacity: pressed ? 0.86 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] },
       ]}
       accessibilityLabel="Eliminar tarea"
       accessibilityRole="button"
@@ -46,7 +46,7 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, onSwipeDelete
 
   const card = (
     <Animated.View
-      entering={FadeInDown.delay(enterDelay).springify().damping(20).stiffness(320).mass(0.7)}
+      entering={FadeInDown.delay(enterDelay).duration(180)}
       style={styles.row}
     >
       <View style={styles.timeCol}>
@@ -87,7 +87,8 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, onSwipeDelete
                     styles.doneBtn,
                     {
                       backgroundColor: c.primaryContainer,
-                      opacity: pressed ? 0.6 : 1,
+                      opacity: pressed ? 0.78 : 1,
+                      transform: [{ scale: pressed ? 0.96 : 1 }],
                     },
                   ]}
                   accessibilityLabel="Marcar tarea hecha"
@@ -103,7 +104,11 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, onSwipeDelete
                   hitSlop={8}
                   style={({ pressed }) => [
                     styles.deleteBtn,
-                    { opacity: pressed ? 0.5 : 1 },
+                    {
+                      backgroundColor: pressed ? c.surfaceMuted : 'transparent',
+                      opacity: pressed ? 0.72 : 1,
+                      transform: [{ scale: pressed ? 0.92 : 1 }],
+                    },
                   ]}
                   accessibilityLabel="Eliminar tarea"
                   accessibilityRole="button"
@@ -216,6 +221,9 @@ const styles = StyleSheet.create({
   },
   deleteBtn: {
     paddingTop: 2,
+    paddingHorizontal: 3,
+    paddingVertical: 3,
+    borderRadius: Radius.full,
   },
   swipeAction: {
     width: DELETE_WIDTH,

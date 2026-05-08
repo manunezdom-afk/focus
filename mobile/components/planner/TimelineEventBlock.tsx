@@ -41,7 +41,7 @@ export function TimelineEventBlock({
   const c = Colors[scheme];
   const timeLabel = startTimeStr(event.time) || '—';
 
-  const enterDelay = Math.min(50 + enterIndex * 30, 200);
+  const enterDelay = Math.min(30 + enterIndex * 18, 110);
 
   const hasDescription =
     !!event.description &&
@@ -59,7 +59,7 @@ export function TimelineEventBlock({
       onPress={onSwipeDelete ?? onDeletePress}
       style={({ pressed }) => [
         styles.swipeAction,
-        { opacity: pressed ? 0.8 : 1 },
+        { opacity: pressed ? 0.86 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] },
       ]}
       accessibilityLabel="Eliminar evento"
       accessibilityRole="button"
@@ -71,7 +71,7 @@ export function TimelineEventBlock({
 
   const card = (
     <Animated.View
-      entering={FadeInDown.delay(enterDelay).springify().damping(20).stiffness(320).mass(0.7)}
+      entering={FadeInDown.delay(enterDelay).duration(180)}
       style={styles.row}
     >
       <View style={styles.timeCol}>
@@ -124,7 +124,8 @@ export function TimelineEventBlock({
                     {
                       borderColor: done ? c.success : c.borderStrong,
                       backgroundColor: done ? c.success : 'transparent',
-                      opacity: pressed ? 0.6 : 1,
+                      opacity: pressed ? 0.72 : 1,
+                      transform: [{ scale: pressed ? 0.9 : 1 }],
                     },
                   ]}
                   accessibilityLabel={done ? 'Desmarcar evento' : 'Marcar evento hecho'}
@@ -142,7 +143,11 @@ export function TimelineEventBlock({
                   hitSlop={10}
                   style={({ pressed }) => [
                     styles.deleteBtn,
-                    { opacity: pressed ? 0.4 : 0.55 },
+                    {
+                      backgroundColor: pressed ? c.surfaceMuted : 'transparent',
+                      opacity: pressed ? 0.72 : 0.55,
+                      transform: [{ scale: pressed ? 0.92 : 1 }],
+                    },
                   ]}
                   accessibilityLabel="Eliminar evento"
                   accessibilityRole="button"
@@ -269,6 +274,9 @@ const styles = StyleSheet.create({
   },
   deleteBtn: {
     paddingTop: 1,
+    paddingHorizontal: 3,
+    paddingVertical: 3,
+    borderRadius: Radius.full,
   },
   description: {
     ...Typography.caption,

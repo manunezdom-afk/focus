@@ -95,7 +95,7 @@ export function TaskDetailSheet({ task, visible, onDismiss, onSave, onDelete }: 
   const trimmed = label.trim();
   // Normalizamos fecha/hora una vez para detectar dirty + validez.
   // 'INVALID' significa que el usuario tipeó algo que no parsea — no
-  // se considera "limpio" (no podés guardar una basura).
+  // se considera "limpio" (no puedes guardar una basura).
   const dueDateNormalized = normalizeDate(dueDateText); // null | 'INVALID' | 'YYYY-MM-DD'
   const dueTimeNormalized = normalizeTime(dueTimeText);
   const dueDateInvalid = dueDateNormalized === 'INVALID';
