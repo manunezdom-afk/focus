@@ -1,4 +1,3 @@
-import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
@@ -29,7 +28,7 @@ function startTimeStr(time: string): string {
 const DOT_SIZE = 8;
 const COL_GAP = 20;
 
-function TimelineEventBlockBase({
+export function TimelineEventBlock({
   event,
   isPast,
   done,
@@ -168,21 +167,12 @@ function TimelineEventBlockBase({
   );
 }
 
-// React.memo con custom equality: comparamos solo los props "data" (event,
-// isPast, done, enterIndex). Ignoramos callbacks porque vienen como inline
-// arrow functions desde Mi Día (.map() crea closures nuevos por render),
-// y de igual forma su comportamiento solo depende del id del evento que
-// envuelven — recrearlas no afecta la lógica. Sin esta memoización, togglear
-// "hecho" en una tarjeta forzaba re-render de TODAS las tarjetas del
-// timeline (cada una con su propia FadeInDown + getBlockColors + detectEventKind).
-export const TimelineEventBlock = memo(TimelineEventBlockBase, (prev, next) => {
-  return (
-    prev.event === next.event &&
-    prev.isPast === next.isPast &&
-    prev.done === next.done &&
-    prev.enterIndex === next.enterIndex
-  );
-});
+// Nota: NO envolver con React.memo manualmente. Expo SDK 54 tiene
+// `reactCompiler: true` (app.json), que transforma cada función-componente a
+// su forma optimizada con cache interno. Wrapping manual con memo() devuelve
+// un objeto que React Fabric no sabe llamar — crash:
+// "Component is not a function (it is Object)" al renderizar Mi Día.
+// El compilador ya hace memoización; confiar en él.
 
 const styles = StyleSheet.create({
   row: {

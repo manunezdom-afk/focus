@@ -1,5 +1,4 @@
 import * as Haptics from 'expo-haptics';
-import { memo } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Colors, Spacing, Typography } from '@/constants/theme';
@@ -37,7 +36,7 @@ type Props = {
 // Match legacy TasksView item:
 //   px-3 py-2.5 rounded-xl border bg-surface-container-lowest
 //   checkmark + label + priority badge
-function TaskRowBase({
+export function TaskRow({
   task,
   onToggle,
   onDelete,
@@ -185,19 +184,8 @@ function TaskRowBase({
   );
 }
 
-// React.memo: comparamos task por referencia + flags visuales (selectionMode,
-// selected, showPriority). Ignoramos callbacks (onToggle/onDelete/etc) porque
-// vienen de useTasks via stable refs OR son closures inline cuyo comportamiento
-// solo depende del id que envuelven. En Tareas con 30+ rows, togglear una sin
-// memo dispara re-render de todas — con memo, solo se re-renderiza la afectada.
-export const TaskRow = memo(TaskRowBase, (prev, next) => {
-  return (
-    prev.task === next.task &&
-    prev.selectionMode === next.selectionMode &&
-    prev.selected === next.selected &&
-    prev.showPriority === next.showPriority
-  );
-});
+// Sin React.memo: ver nota en TimelineEventBlock.tsx — reactCompiler:true
+// hace memoización automática y wrapping manual rompe Fabric.
 
 const styles = StyleSheet.create({
   row: {
