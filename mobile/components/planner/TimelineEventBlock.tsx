@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
@@ -28,7 +29,7 @@ function startTimeStr(time: string): string {
 const DOT_SIZE = 8;
 const COL_GAP = 20;
 
-export function TimelineEventBlock({
+function TimelineEventBlockBase({
   event,
   isPast,
   done,
@@ -166,6 +167,22 @@ export function TimelineEventBlock({
     </Animated.View>
   );
 }
+
+// React.memo con custom equality: comparamos solo los props "data" (event,
+// isPast, done, enterIndex). Ignoramos callbacks porque vienen como inline
+// arrow functions desde Mi Día (.map() crea closures nuevos por render),
+// y de igual forma su comportamiento solo depende del id del evento que
+// envuelven — recrearlas no afecta la lógica. Sin esta memoización, togglear
+// "hecho" en una tarjeta forzaba re-render de TODAS las tarjetas del
+// timeline (cada una con su propia FadeInDown + getBlockColors + detectEventKind).
+export const TimelineEventBlock = memo(TimelineEventBlockBase, (prev, next) => {
+  return (
+    prev.event === next.event &&
+    prev.isPast === next.isPast &&
+    prev.done === next.done &&
+    prev.enterIndex === next.enterIndex
+  );
+});
 
 const styles = StyleSheet.create({
   row: {

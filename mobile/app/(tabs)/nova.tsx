@@ -1,3 +1,4 @@
+import { useIsFocused } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
@@ -244,6 +245,10 @@ export default function NovaScreen() {
   const c = Colors[scheme];
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  // Cuando la pantalla pierde foco (otra tab activa), pausamos NovaOrb para
+  // no quemar UI thread con worklets (3 ColorSpot orbitales + pulses) que
+  // nadie ve. Reanimated.cancelAnimation libera el frame loop al instante.
+  const isFocused = useIsFocused();
 
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -907,7 +912,12 @@ export default function NovaScreen() {
             accessibilityLabel="Escribe a Nova"
             accessibilityRole="button"
           >
-            <NovaOrb size={28} ambient={false} active={draft.length > 0 || sending} />
+            <NovaOrb
+              size={28}
+              ambient={false}
+              active={draft.length > 0 || sending}
+              paused={!isFocused}
+            />
           </Pressable>
 
           <TextInput

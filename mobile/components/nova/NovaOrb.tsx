@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { View } from 'react-native';
 import Animated, {
+  cancelAnimation,
   Easing,
   useAnimatedStyle,
   useSharedValue,
@@ -39,6 +40,12 @@ type Props = {
   // Modo "escribiendo" — añade un pulso secundario más rápido sobre el breathing.
   // Activar cuando el usuario está ingresando texto o Nova está respondiendo.
   active?: boolean;
+  // Pausa todos los worklets (rotación de ColorSpots + pulse + activePulse).
+  // Padre lo activa cuando la pantalla pierde foco (vía useIsFocused) para
+  // no quemar UI thread cuando el orbe ni siquiera es visible. Sin esto,
+  // las animaciones de NovaOrb seguían corriendo desde el primer mount —
+  // 60fps × 3 spots con cos/sin trig + 2 pulses adicionales.
+  paused?: boolean;
 };
 
 // Spot de color orbitando dentro del orbe. Usa trigonometría en worklet
@@ -52,6 +59,7 @@ function ColorSpot({
   reverse = false,
   initialAngle,
   opacity,
+  paused,
 }: {
   size: number;
   color: string;
@@ -60,20 +68,28 @@ function ColorSpot({
   reverse?: boolean;
   initialAngle: number;
   opacity: number;
+  paused: boolean;
 }) {
   const angle = useSharedValue(initialAngle);
 
   useEffect(() => {
-    angle.value = initialAngle;
+    if (paused) {
+      // Cancela el withRepeat en vuelo y deja al spot quieto en su ángulo
+      // actual. No lo "rebobinamos" a initialAngle porque visualmente sería
+      // un salto — preferimos congelar donde estaba.
+      cancelAnimation(angle);
+      return;
+    }
     angle.value = withRepeat(
-      withTiming(initialAngle + (reverse ? -360 : 360), {
+      withTiming(angle.value + (reverse ? -360 : 360), {
         duration,
         easing: Easing.linear,
       }),
       -1,
       false,
     );
-  }, []);
+    return () => cancelAnimation(angle);
+  }, [paused, duration, reverse, angle]);
 
   const spotSize = size * 0.62;
 
@@ -112,14 +128,28 @@ function ColorSpot({
 //     se muestre correctamente en iOS.
 //   · Capa de recorte (overflow:hidden) para que los spots no salgan del círculo.
 //   · 3 spots (cyan, violeta, índigo claro) orbitando a velocidades distintas.
-export function NovaOrb({ size = 64, ambient = true, breathing = false, active = false }: Props) {
+export function NovaOrb({
+  size = 64,
+  ambient = true,
+  breathing = false,
+  active = false,
+  paused = false,
+}: Props) {
   const scheme = useColorScheme() ?? 'light';
   const dark = scheme === 'dark';
   const p = NOVA_PALETTE[dark ? 'dark' : 'light'];
 
+  // Cuando paused=true (ej. NovaScreen perdió foco), forzamos breathing y
+  // active a false sin tocar el padre — el padre puede seguir pasando los
+  // valores originales sin enterarse. Así, todos los withRepeat caen en
+  // los caminos "no animar" de los effects siguientes.
+  const breathingActive = breathing && !paused;
+  const motionActive = active && !paused;
+
   const pulse = useSharedValue(1);
   useEffect(() => {
-    if (!breathing) {
+    if (!breathingActive) {
+      cancelAnimation(pulse);
       pulse.value = 1;
       return;
     }
@@ -128,21 +158,24 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false, active =
       -1,
       true,
     );
-  }, [breathing, pulse]);
+    return () => cancelAnimation(pulse);
+  }, [breathingActive, pulse]);
 
   // Pulso secundario más rápido cuando active (el usuario escribe / Nova responde).
   const activePulse = useSharedValue(0);
   useEffect(() => {
-    if (active) {
+    if (motionActive) {
       activePulse.value = withRepeat(
         withTiming(1, { duration: 520, easing: Easing.inOut(Easing.quad) }),
         -1,
         true,
       );
     } else {
+      cancelAnimation(activePulse);
       activePulse.value = withTiming(0, { duration: 280 });
     }
-  }, [active, activePulse]);
+    return () => cancelAnimation(activePulse);
+  }, [motionActive, activePulse]);
 
   const orbAnimStyle = useAnimatedStyle(() => {
     'worklet';
@@ -226,6 +259,7 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false, active =
           duration={3400}
           initialAngle={0}
           opacity={0.7}
+          paused={paused}
         />
         {/* Spot 2 — azul medio, gira en sentido antihorario */}
         <ColorSpot
@@ -236,6 +270,7 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false, active =
           reverse
           initialAngle={120}
           opacity={0.6}
+          paused={paused}
         />
         {/* Spot 3 — cobalto profundo, radio pequeño más centrado */}
         <ColorSpot
@@ -245,6 +280,7 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false, active =
           duration={2600}
           initialAngle={240}
           opacity={0.5}
+          paused={paused}
         />
 
         {/* Reflejo superior izquierdo */}

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
@@ -17,7 +18,7 @@ type Props = {
 const DOT_SIZE = 8;
 const COL_GAP = 20;
 
-export function TimelineTaskBlock({ task, onToggle, onDeletePress, enterIndex = 0 }: Props) {
+function TimelineTaskBlockBase({ task, onToggle, onDeletePress, enterIndex = 0 }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
@@ -102,6 +103,14 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, enterIndex = 
     </Animated.View>
   );
 }
+
+// React.memo: comparamos task por referencia + enterIndex. Las callbacks
+// inline desde Mi Día se ignoran porque su comportamiento depende del task
+// envuelto — recrearlas no cambia nada. Evita re-render de toda la lista
+// cuando se toggle/borra una tarea individual.
+export const TimelineTaskBlock = memo(TimelineTaskBlockBase, (prev, next) => {
+  return prev.task === next.task && prev.enterIndex === next.enterIndex;
+});
 
 const styles = StyleSheet.create({
   row: {
