@@ -158,7 +158,7 @@ export default function CalendarScreen() {
               entering={FadeInDown.delay(40).duration(320)}
               style={styles.toggleRow}
             >
-              <View style={styles.togglePills}>
+              <View style={[styles.togglePills, { backgroundColor: c.surfaceMuted }]}>
                 {VIEWS.map((v) => {
                   const isActive = v === activeView;
                   return (
@@ -418,7 +418,9 @@ const styles = StyleSheet.create({
   togglePills: {
     flexDirection: 'row',
     gap: 4,
-    backgroundColor: '#f1f5f9',
+    // backgroundColor se setea inline desde el theme (c.surfaceMuted) para
+    // que respete dark mode. Antes estaba hardcodeado a '#f1f5f9' y
+    // chocaba con el resto del UI en oscuro.
     borderRadius: Radius.full,
     padding: 3,
   },

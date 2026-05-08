@@ -13,6 +13,7 @@ import {
   type CreateEventInput,
   type EventPatch,
 } from './events';
+import { todayISO } from './today';
 import type { EventItem } from './types';
 
 type Mode = 'today' | 'all';
@@ -117,9 +118,18 @@ export function useEvents(mode: Mode = 'all') {
       if (!userId || !cacheKey) return null;
       try {
         const created = await createEvent(userId, input);
-        setState((s) => ({ ...s, events: [...s.events, created], error: null }));
-        // Invalidar ambas variantes del caché para que el Calendario y Mi Día
-        // vean el evento nuevo la próxima vez que ganen foco.
+        // En mode='today' el fetch SQL filtra por `eq('date', todayISO())`,
+        // pero un optimistic add ciego mete eventos futuros (ej: "agenda
+        // gym mañana") en el state local de Mi Día hasta el próximo focus.
+        // Solo agregamos al state local cuando el evento corresponde a la
+        // vista actual; igualmente invalidamos las dos cachés para que la
+        // otra vista lo vea al ganar foco.
+        const belongsHere = mode === 'all' || created.date === todayISO();
+        setState((s) =>
+          belongsHere
+            ? { ...s, events: [...s.events, created], error: null }
+            : { ...s, error: null },
+        );
         _cache.delete(`${userId}:today`);
         _cache.delete(`${userId}:all`);
         return created;
@@ -128,7 +138,7 @@ export function useEvents(mode: Mode = 'all') {
         return null;
       }
     },
-    [userId, cacheKey],
+    [userId, mode, cacheKey],
   );
 
   // removeEvent lee de stateRef (no de state capturado) → función estable.
