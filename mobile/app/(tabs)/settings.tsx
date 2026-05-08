@@ -15,14 +15,17 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
+import { DeleteAccountSheet } from '@/components/settings/DeleteAccountSheet';
 import { MemoriesSheet } from '@/components/settings/MemoriesSheet';
 import { PersonalitySheet } from '@/components/settings/PersonalitySheet';
+import { PlanCard } from '@/components/settings/PlanCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { SettingsRow, SettingsSection } from '@/components/ui/SettingsList';
 import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/src/auth/AuthProvider';
 import { useMemories } from '@/src/data/useMemories';
+import { useUserPlan } from '@/src/data/useUserPlan';
 import { useUserProfile } from '@/src/data/useUserProfile';
 
 // Etiqueta del esquema de color actual del sistema (no preference real
@@ -58,9 +61,11 @@ export default function SettingsScreen() {
   const { user, signOut } = useAuth();
   const profile = useUserProfile();
   const memoriesHook = useMemories();
+  const userPlan = useUserPlan();
   const [loggingOut, setLoggingOut] = useState(false);
   const [showPersonality, setShowPersonality] = useState(false);
   const [showMemories, setShowMemories] = useState(false);
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
 
   const isAuthenticated = !!user;
   const email = user?.email ?? null;
@@ -98,6 +103,32 @@ export default function SettingsScreen() {
       feature,
       hint ?? 'Esta función estará disponible en la próxima versión.',
       [{ text: 'Entendido', style: 'default' }],
+    );
+  }
+
+  // Doble cinturón para borrar cuenta:
+  //   1) Alert de bienvenida con copy fuerte de App Store-grade.
+  //   2) Si el usuario continúa, abrimos DeleteAccountSheet que requiere
+  //      tipear "ELIMINAR" para activar el botón rojo.
+  // Si la API responde OK, corremos signOut local — AuthGate detecta
+  // session=null y redirige a /(auth)/login automáticamente.
+  function startDeleteFlow() {
+    if (!isAuthenticated) return;
+    if (Platform.OS === 'ios') {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
+    Alert.alert(
+      'Eliminar cuenta',
+      'Vas a eliminar de forma permanente tu cuenta y todos tus datos: eventos, tareas, memorias de Nova, uso de IA y configuración. No se pueden recuperar.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Continuar',
+          style: 'destructive',
+          onPress: () => setShowDeleteAccount(true),
+        },
+      ],
+      { cancelable: true },
     );
   }
 
@@ -173,6 +204,20 @@ export default function SettingsScreen() {
             </View>
           </Animated.View>
 
+          {/* ── Plan ─────────────────────────────────────────────────────
+              Card con badge real del plan (Free/Early Access/Admin/etc),
+              descripción honesta y barras de uso de IA con reset_at por
+              acción. Datos vienen de /api/me/plan; con red caída renderiza
+              fallback "Free" sin números (no inventamos). Sin SettingsSection
+              wrapper para no anidar card-en-card; usamos un title propio
+              para que la jerarquía visual coincida con el resto de secciones. */}
+          {isAuthenticated ? (
+            <Animated.View entering={FadeInDown.delay(90).duration(360)} style={styles.planSection}>
+              <Text style={[styles.planSectionTitle, { color: c.textSubtle }]}>PLAN</Text>
+              <PlanCard data={userPlan.data} loading={userPlan.loading} />
+            </Animated.View>
+          ) : null}
+
           {/* ── Cuenta ───────────────────────────────────────────────── */}
           <Animated.View entering={FadeInDown.delay(120).duration(360)}>
             <SettingsSection title="Cuenta">
@@ -190,15 +235,11 @@ export default function SettingsScreen() {
                 onPress={isAuthenticated ? confirmSignOut : undefined}
               />
               <SettingsRow
-                iconName="xmark"
+                iconName="trash.fill"
                 label="Eliminar cuenta"
-                sub="Solicitar eliminación permanente (próximamente)"
-                onPress={() =>
-                  comingSoon(
-                    'Eliminar cuenta',
-                    'La eliminación permanente requiere un flujo seguro. La habilitaremos pronto.',
-                  )
-                }
+                sub="Borrar de forma permanente la cuenta y todos los datos"
+                danger
+                onPress={isAuthenticated ? startDeleteFlow : undefined}
               />
             </SettingsSection>
           </Animated.View>
@@ -349,6 +390,17 @@ export default function SettingsScreen() {
         loading={memoriesHook.loading}
         onDelete={memoriesHook.removeMemory}
       />
+
+      <DeleteAccountSheet
+        visible={showDeleteAccount}
+        onDismiss={() => setShowDeleteAccount(false)}
+        onSuccess={async () => {
+          // El endpoint ya invalidó el JWT en server. Cerramos sesión local
+          // para que cacheRegistry limpie los Maps de useEvents/useTasks/etc
+          // y AuthGate del root layout redirija a /(auth)/login.
+          await signOut();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -408,6 +460,20 @@ const styles = StyleSheet.create({
   body: {
     paddingHorizontal: Spacing.lg,
     gap: Spacing.lg,
+  },
+
+  // Sección "Plan" — no usamos SettingsSection wrapper porque PlanCard ya
+  // tiene su propio borde y meterla adentro generaría card-en-card. Mismo
+  // tracking visual que las otras section titles para coherencia.
+  planSection: {
+    gap: Spacing.sm,
+  },
+  planSectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    paddingHorizontal: Spacing.sm,
   },
 
   // AccountCard
