@@ -674,10 +674,12 @@ export default function NovaScreen() {
       }
 
       try {
-        // Excluir bubbles de error del history que mandamos al backend —
-        // si no, el modelo ve "[mensaje de error]" como turno previo y se
-        // confunde. El user msg recién creado siempre va incluido.
-        const history = [...messages, userMsg].filter((m) => m.status !== 'error');
+        // El `message` ya va como parámetro separado en sendNovaMessage →
+        // focus-assistant.js lo agrega al final. NO incluirlo en history
+        // evita que Anthropic reciba dos `user` consecutivos con el mismo
+        // contenido (API error) y garantiza que el modelo vea el historial
+        // correcto con alternancia user/assistant.
+        const history = messages.filter((m) => m.status !== 'error');
         const reply = await sendNovaMessage({
           message: text,
           events: events.events,

@@ -210,6 +210,7 @@ export default function MiDiaScreen() {
                     done={doneEventIds.has(evt.id)}
                     onToggleDone={() => toggleEventDone(evt.id)}
                     onDeletePress={() => handleDeleteEvent(evt.id, evt.title)}
+                    onSwipeDelete={() => void events.removeEvent(evt.id)}
                     enterIndex={idx}
                   />
                 ))}
@@ -219,6 +220,7 @@ export default function MiDiaScreen() {
                     task={t}
                     onToggle={tasks.toggleTask}
                     onDeletePress={() => handleDeleteTask(t.id, t.label)}
+                    onSwipeDelete={() => void tasks.removeTask(t.id)}
                     enterIndex={sortedEvents.length + idx}
                   />
                 ))}

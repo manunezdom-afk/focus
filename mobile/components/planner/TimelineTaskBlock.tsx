@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Swipeable } from 'react-native-gesture-handler';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -11,33 +12,48 @@ type Props = {
   task: Task;
   onToggle?: (id: string) => void;
   onDeletePress?: () => void;
+  // Swipe-to-delete: borra sin Alert (la intención del gesto es suficiente).
+  onSwipeDelete?: () => void;
   enterIndex?: number;
 };
 
 const DOT_SIZE = 8;
 const COL_GAP = 20;
+const DELETE_WIDTH = 80;
 
-export function TimelineTaskBlock({ task, onToggle, onDeletePress, enterIndex = 0 }: Props) {
+export function TimelineTaskBlock({ task, onToggle, onDeletePress, onSwipeDelete, enterIndex = 0 }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
-  // Tareas siempre van morado/violeta; la prioridad la marca el chip.
   const taskColors = getBlockColors('task', scheme);
   const accent = taskColors.accent;
   const enterDelay = Math.min(160 + enterIndex * 50, 400);
 
-  return (
+  const renderRightActions = () => (
+    <Pressable
+      onPress={onSwipeDelete ?? onDeletePress}
+      style={({ pressed }) => [
+        styles.swipeAction,
+        { opacity: pressed ? 0.8 : 1 },
+      ]}
+      accessibilityLabel="Eliminar tarea"
+      accessibilityRole="button"
+    >
+      <IconSymbol name="trash.fill" size={18} color="#fff" />
+      <Text style={styles.swipeActionLabel}>Eliminar</Text>
+    </Pressable>
+  );
+
+  const card = (
     <Animated.View
       entering={FadeInDown.delay(enterDelay).duration(320)}
       style={styles.row}
     >
-      {/* Columna izquierda: ícono check_box (en lugar de hora) */}
       <View style={styles.timeCol}>
         <IconSymbol name="checklist" size={18} color={c.textSubtle} />
       </View>
 
       <View style={styles.cardCol}>
-        {/* Dot conector — morado de tarea */}
         <View style={[styles.dot, { backgroundColor: accent }]} />
 
         <View
@@ -101,16 +117,33 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, enterIndex = 
       </View>
     </Animated.View>
   );
+
+  if (!onSwipeDelete && !onDeletePress) return card;
+
+  return (
+    <Swipeable
+      renderRightActions={renderRightActions}
+      friction={2}
+      rightThreshold={DELETE_WIDTH * 0.6}
+      overshootRight={false}
+      containerStyle={styles.swipeContainer}
+    >
+      {card}
+    </Swipeable>
+  );
 }
 
-// Sin React.memo: ver nota en TimelineEventBlock.tsx — reactCompiler:true
-// hace memoización automática y wrapping manual rompe Fabric.
+// Sin React.memo: reactCompiler:true hace memoización automática.
 
 const styles = StyleSheet.create({
+  swipeContainer: {
+    overflow: 'hidden',
+  },
   row: {
     flexDirection: 'row',
     columnGap: COL_GAP,
     paddingHorizontal: Spacing.lg,
+    backgroundColor: 'transparent',
   },
   timeCol: {
     width: 52,
@@ -131,8 +164,6 @@ const styles = StyleSheet.create({
     borderRadius: DOT_SIZE / 2,
     zIndex: 1,
   },
-  // Card suave consistente con TimelineEventBlock: borderRadius amplio,
-  // acento lateral fino + shadow muy sutil.
   card: {
     borderWidth: StyleSheet.hairlineWidth,
     borderLeftWidth: 3,
@@ -185,5 +216,21 @@ const styles = StyleSheet.create({
   },
   deleteBtn: {
     paddingTop: 2,
+  },
+  swipeAction: {
+    width: DELETE_WIDTH,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginBottom: Spacing['3xl'],
+    borderRadius: 16,
+    marginRight: Spacing.lg,
+  },
+  swipeActionLabel: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });

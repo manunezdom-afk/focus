@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Swipeable } from 'react-native-gesture-handler';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -10,13 +11,11 @@ import type { EventItem } from '@/src/data/types';
 type Props = {
   event: EventItem;
   isPast: boolean;
-  // Estado "done" local (legacy lo persiste en localStorage; mobile lo guarda
-  // en memoria del padre). Se pierde al cambiar de tab — coherente con un
-  // "checkpoint visual" que aún no tiene schema persistido.
   done: boolean;
   onToggleDone?: () => void;
   onDeletePress?: () => void;
-  // Índice para stagger en la entrada animada. El padre lo pasa.
+  // Swipe-to-delete: borra sin Alert (la intención del gesto ya es suficiente).
+  onSwipeDelete?: () => void;
   enterIndex?: number;
 };
 
@@ -27,6 +26,7 @@ function startTimeStr(time: string): string {
 
 const DOT_SIZE = 8;
 const COL_GAP = 20;
+const DELETE_WIDTH = 80;
 
 export function TimelineEventBlock({
   event,
@@ -34,41 +34,50 @@ export function TimelineEventBlock({
   done,
   onToggleDone,
   onDeletePress,
+  onSwipeDelete,
   enterIndex = 0,
 }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const timeLabel = startTimeStr(event.time) || '—';
 
-  // Stagger 50ms por bloque, máx 240ms para que el último no tarde demasiado.
   const enterDelay = Math.min(160 + enterIndex * 50, 400);
 
-  // Ignorar descriptions que parecen fechas ISO (artefacto legacy).
   const hasDescription =
     !!event.description &&
     !/^\d{4}-\d{2}-\d{2}$/.test(event.description.trim());
 
-  // El evento se ve "apagado" si está hecho o ya pasó.
   const dim = done || isPast;
 
-  // Color por tipo de bloque: evento azul, recordatorio ámbar, focus cyan.
-  // Cuando está hecho, ganamos el verde de éxito por encima de la categoría.
   const kind = detectEventKind({ title: event.title, section: event.section });
   const kindColors = getBlockColors(kind, scheme);
   const dotColor = done ? c.success : kindColors.accent;
   const accentColor = done ? c.success : kindColors.accent;
 
-  return (
+  const renderRightActions = () => (
+    <Pressable
+      onPress={onSwipeDelete ?? onDeletePress}
+      style={({ pressed }) => [
+        styles.swipeAction,
+        { opacity: pressed ? 0.8 : 1 },
+      ]}
+      accessibilityLabel="Eliminar evento"
+      accessibilityRole="button"
+    >
+      <IconSymbol name="trash.fill" size={18} color="#fff" />
+      <Text style={styles.swipeActionLabel}>Eliminar</Text>
+    </Pressable>
+  );
+
+  const card = (
     <Animated.View
       entering={FadeInDown.delay(enterDelay).duration(320)}
       style={styles.row}
     >
-      {/* Columna hora — 52px fija, texto alineado a la derecha */}
       <View style={styles.timeCol}>
         <Text style={[styles.timeText, { color: c.textMuted }]}>{timeLabel}</Text>
       </View>
 
-      {/* Columna tarjeta — flex 1, contiene dot absoluto + card */}
       <View style={styles.cardCol}>
         <View style={[styles.dot, { backgroundColor: dotColor }]} />
 
@@ -83,14 +92,8 @@ export function TimelineEventBlock({
             },
           ]}
         >
-          {/* Chip de categoría — distingue evento / recordatorio / enfocado */}
           <View style={styles.kindRow}>
-            <View
-              style={[
-                styles.kindChip,
-                { backgroundColor: kindColors.badge },
-              ]}
-            >
+            <View style={[styles.kindChip, { backgroundColor: kindColors.badge }]}>
               <Text style={[styles.kindChipText, { color: kindColors.badgeText }]}>
                 {kindColors.label}
               </Text>
@@ -159,20 +162,34 @@ export function TimelineEventBlock({
       </View>
     </Animated.View>
   );
+
+  if (!onSwipeDelete && !onDeletePress) return card;
+
+  return (
+    <Swipeable
+      renderRightActions={renderRightActions}
+      friction={2}
+      rightThreshold={DELETE_WIDTH * 0.6}
+      overshootRight={false}
+      containerStyle={styles.swipeContainer}
+    >
+      {card}
+    </Swipeable>
+  );
 }
 
-// Nota: NO envolver con React.memo manualmente. Expo SDK 54 tiene
-// `reactCompiler: true` (app.json), que transforma cada función-componente a
-// su forma optimizada con cache interno. Wrapping manual con memo() devuelve
-// un objeto que React Fabric no sabe llamar — crash:
-// "Component is not a function (it is Object)" al renderizar Mi Día.
-// El compilador ya hace memoización; confiar en él.
+// Sin React.memo: ver nota en TimelineEventBlock — reactCompiler:true
+// hace memoización automática; wrapping manual rompe Fabric.
 
 const styles = StyleSheet.create({
+  swipeContainer: {
+    overflow: 'hidden',
+  },
   row: {
     flexDirection: 'row',
     columnGap: COL_GAP,
     paddingHorizontal: Spacing.lg,
+    backgroundColor: 'transparent',
   },
   timeCol: {
     width: 52,
@@ -198,9 +215,6 @@ const styles = StyleSheet.create({
     borderRadius: DOT_SIZE / 2,
     zIndex: 1,
   },
-  // Card más proporcional y elegante: padding reducido para que no se
-  // sienta gigante con un solo evento, acento lateral fino (3px), shadow
-  // mínima — el peso visual está en el contenido, no en el contenedor.
   card: {
     borderWidth: StyleSheet.hairlineWidth,
     borderLeftWidth: 3,
@@ -245,8 +259,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm + 2,
   },
-  // Done = checkbox circular minimalista. No grita "HECHO" — solo
-  // un check si está done, hueco si no. Estética estilo iOS Reminders.
   doneCircle: {
     width: 18,
     height: 18,
@@ -263,5 +275,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     marginTop: 2,
+  },
+  // Acción swipe roja — estilo iOS nativo
+  swipeAction: {
+    width: DELETE_WIDTH,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginBottom: Spacing['3xl'],
+    borderRadius: 14,
+    marginRight: Spacing.lg,
+  },
+  swipeActionLabel: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });
