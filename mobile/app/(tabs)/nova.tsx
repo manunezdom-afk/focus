@@ -355,7 +355,22 @@ export default function NovaScreen() {
             const d = describeApplied(a, eventTitleById, taskLabelById);
             if (d) applied.push(d);
           }
-        } else if (a.type === 'mark_task_done' || a.type === 'toggle_task') {
+        } else if (a.type === 'mark_task_done') {
+          // Idempotente: si la tarea ya está done, no la destogglee.
+          // Nova pide marcar como hecha; si ya lo está, NO-OP en backend
+          // pero sí emitimos el chip "Tarea marcada" para que el usuario
+          // confirme visualmente que la acción fue procesada.
+          const id = a?.id ?? a?.payload?.id;
+          if (id) {
+            const t = tasks.tasks.find((x) => x.id === id);
+            if (t && !t.done) {
+              await tasks.toggleTask(id);
+            }
+            const d = describeApplied(a, eventTitleById, taskLabelById);
+            if (d) applied.push(d);
+          }
+        } else if (a.type === 'toggle_task') {
+          // Toggle explícito: invierte el estado actual sin importar cuál sea.
           const id = a?.id ?? a?.payload?.id;
           if (id) {
             await tasks.toggleTask(id);
@@ -608,7 +623,10 @@ export default function NovaScreen() {
       }
 
       try {
-        const history = [...messages, userMsg];
+        // Excluir bubbles de error del history que mandamos al backend —
+        // si no, el modelo ve "[mensaje de error]" como turno previo y se
+        // confunde. El user msg recién creado siempre va incluido.
+        const history = [...messages, userMsg].filter((m) => m.status !== 'error');
         const reply = await sendNovaMessage({
           message: text,
           events: events.events,
@@ -629,12 +647,16 @@ export default function NovaScreen() {
 
         // Render del mensaje del assistant — antes de pedir confirmación
         // para que el usuario lea el contexto que acompaña la propuesta.
+        // Si el modelo no devolvió texto pero sí aplicó acciones, mostramos
+        // "Listo." como confirmación humana en lugar de un "…" mudo.
+        const trimmedReply = reply.message?.trim() ?? '';
+        const fallbackContent = applied.length > 0 ? 'Listo.' : '…';
         setMessages((prev) =>
           prev.map((m) =>
             m.id === placeholder.id
               ? {
                   ...m,
-                  content: reply.message?.trim() || '…',
+                  content: trimmedReply || fallbackContent,
                   status: 'sent' as const,
                   appliedActions: applied.length > 0 ? applied : undefined,
                 }
@@ -722,8 +744,9 @@ export default function NovaScreen() {
     if (sending) return;
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (!lastUser) return;
-    // Quitar el último assistant fallido para no acumular ruido.
-    setMessages((prev) => prev.filter((m) => m.id !== lastMsg.id));
+    // Quitar AMBOS — el assistant fallido y el user msg original — para que
+    // handleSend cree el par fresco sin duplicar el bubble del usuario.
+    setMessages((prev) => prev.filter((m) => m.id !== lastMsg.id && m.id !== lastUser.id));
     void handleSend(lastUser.content);
   }, [sending, messages, lastMsg, handleSend]);
 
@@ -807,6 +830,25 @@ export default function NovaScreen() {
                 </Animated.View>
               ))}
             </Animated.View>
+
+            {/*
+              Dictation hint (iOS only): el teclado nativo ya trae botón de
+              micrófono cuando Dictation está activado en Ajustes. No es un
+              botón propio — solo le decimos al usuario que existe esa opción.
+              No fingimos grabación ni manejamos audio: el dictado lo hace el
+              teclado y el texto cae directo en el TextInput.
+            */}
+            {Platform.OS === 'ios' ? (
+              <Animated.View
+                entering={FadeInDown.delay(360).duration(380)}
+                style={styles.dictationHint}
+                accessibilityRole="text"
+              >
+                <Text style={[styles.dictationHintText, { color: c.textSubtle }]}>
+                  Toca el micrófono del teclado para dictarle a Nova.
+                </Text>
+              </Animated.View>
+            ) : null}
           </View>
         ) : (
           <FlatList
@@ -1015,6 +1057,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     lineHeight: 18,
+  },
+
+  // Hint sutil de dictado — texto pequeño, no parece un botón.
+  dictationHint: {
+    marginTop: Spacing.xl,
+    paddingHorizontal: Spacing.xl,
+    alignItems: 'center',
+  },
+  dictationHintText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '400',
+    textAlign: 'center',
+    letterSpacing: 0.1,
   },
 
   listContent: {

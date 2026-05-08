@@ -25,6 +25,7 @@ import { sendNovaMessage, type NovaActionShape } from '@/src/data/nova';
 import { setNovaSeed } from '@/src/data/novaSeedStore';
 import type { CreateTaskInput } from '@/src/data/tasks';
 import type { EventItem, Task } from '@/src/data/types';
+import { useMemories } from '@/src/data/useMemories';
 import { useUserProfile } from '@/src/data/useUserProfile';
 
 // Contexto por pantalla — Nova ajusta placeholder y agrega un hint sutil
@@ -145,6 +146,7 @@ export function NovaInputBar({
   const c = Colors[scheme];
 
   const userProfile = useUserProfile();
+  const memoriesHook = useMemories();
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [reply, setReply] = useState<ReplyState | null>(null);
@@ -184,6 +186,10 @@ export function NovaInputBar({
         events,
         tasks,
         history: [],
+        // Mismo contexto que la pantalla principal de Nova: pasamos las
+        // memorias del usuario para que las respuestas cortas del mini-input
+        // (Mi Día / Calendario / Tareas) tengan el mismo grado de contexto.
+        memories: memoriesHook.memories,
         novaPersonality: userProfile.profile?.novaPersonality ?? 'focus',
       });
 
@@ -224,7 +230,7 @@ export function NovaInputBar({
     } finally {
       setSending(false);
     }
-  }, [draft, sending, events, tasks, onAddEvent, onAddTask, onRefresh, context, userProfile.profile]);
+  }, [draft, sending, events, tasks, onAddEvent, onAddTask, onRefresh, context, userProfile.profile, memoriesHook.memories]);
 
   // Tap en el chevron del reply o en el bubble: salta a la pantalla Nova
   // con el último mensaje + reply ya enviado (vía seedStore). Permite
