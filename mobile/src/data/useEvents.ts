@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
 import {
@@ -22,35 +22,63 @@ type State = {
 
 const INITIAL: State = { events: [], loading: true, refreshing: false, error: null };
 
-// `mode` decide qué cargar:
-// · 'today' → solo eventos con date == hoy (Mi Día)
-// · 'all'   → últimos 200 eventos del usuario, ordenados por fecha asc (Calendario)
-//
-// Mismo patrón simple que useTasks: useFocusEffect refresca al ganar foco,
-// `refresh()` para pull-to-refresh.
-//
-// `addEvent` hace optimistic insert (lo metemos al state inmediatamente y
-// si falla revertimos). Devuelve el evento creado o null si error.
+// Cache module-level compartido. La clave es `${userId}:${mode}` para
+// separar 'today' (Mi Día) de 'all' (Calendario / Nova).
+const STALE_MS = 30_000;
+type CacheEntry = { data: EventItem[]; at: number };
+const _cache = new Map<string, CacheEntry>();
+
+// In-flight dedup por clave.
+const _inFlight = new Map<string, Promise<EventItem[]>>();
+
 export function useEvents(mode: Mode = 'all') {
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const [state, setState] = useState<State>(INITIAL);
 
+  // Ref que siempre apunta al último state para acceder en callbacks
+  // sin ponerlo en deps (evita que removeEvent/addEvent se recreen por cada cambio).
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  const cacheKey = userId ? `${userId}:${mode}` : null;
+
   const load = useCallback(
     async (loadMode: 'initial' | 'refresh' = 'initial') => {
-      if (!userId) {
+      if (!userId || !cacheKey) {
         setState({ events: [], loading: false, refreshing: false, error: null });
         return;
       }
+
+      // TTL guard: en 'initial', servir desde caché si los datos son frescos.
+      if (loadMode === 'initial') {
+        const cached = _cache.get(cacheKey);
+        if (cached && Date.now() - cached.at < STALE_MS) {
+          if (stateRef.current.events.length > 0) return;
+          setState({ events: cached.data, loading: false, refreshing: false, error: null });
+          return;
+        }
+      }
+
       setState((s) => ({
         ...s,
         loading: loadMode === 'initial' && s.events.length === 0,
         refreshing: loadMode === 'refresh',
         error: null,
       }));
+
       try {
-        const events =
-          mode === 'today' ? await fetchTodayEvents(userId) : await fetchEvents(userId);
+        // Dedup: reutilizar request en vuelo si ya hay una para esta clave.
+        let promise = _inFlight.get(cacheKey);
+        if (!promise) {
+          promise = mode === 'today'
+            ? fetchTodayEvents(userId)
+            : fetchEvents(userId);
+          _inFlight.set(cacheKey, promise);
+          promise.finally(() => _inFlight.delete(cacheKey));
+        }
+        const events = await promise;
+        _cache.set(cacheKey, { data: events, at: Date.now() });
         setState({ events, loading: false, refreshing: false, error: null });
       } catch (err: any) {
         setState((s) => ({
@@ -61,7 +89,7 @@ export function useEvents(mode: Mode = 'all') {
         }));
       }
     },
-    [userId, mode],
+    [userId, mode, cacheKey],
   );
 
   useFocusEffect(
@@ -74,32 +102,38 @@ export function useEvents(mode: Mode = 'all') {
 
   const addEvent = useCallback(
     async (input: CreateEventInput): Promise<EventItem | null> => {
-      if (!userId) return null;
+      if (!userId || !cacheKey) return null;
       try {
         const created = await createEvent(userId, input);
         setState((s) => ({ ...s, events: [...s.events, created], error: null }));
+        // Invalidar ambas variantes del caché para que el Calendario y Mi Día
+        // vean el evento nuevo la próxima vez que ganen foco.
+        _cache.delete(`${userId}:today`);
+        _cache.delete(`${userId}:all`);
         return created;
       } catch (err: any) {
         setState((s) => ({ ...s, error: err?.message ?? 'create_event_failed' }));
         return null;
       }
     },
-    [userId],
+    [userId, cacheKey],
   );
 
+  // removeEvent lee de stateRef (no de state capturado) → función estable.
   const removeEvent = useCallback(
     async (id: string) => {
-      if (!userId) return;
-      const prev = state.events;
+      if (!userId || !cacheKey) return;
+      const before = stateRef.current.events;
       setState((s) => ({ ...s, events: s.events.filter((e) => e.id !== id) }));
+      _cache.delete(`${userId}:today`);
+      _cache.delete(`${userId}:all`);
       try {
         await deleteEvent(userId, id);
       } catch (err: any) {
-        // Revertir
-        setState((s) => ({ ...s, events: prev, error: err?.message ?? 'delete_event_failed' }));
+        setState((s) => ({ ...s, events: before, error: err?.message ?? 'delete_event_failed' }));
       }
     },
-    [userId, state.events],
+    [userId, cacheKey],
   );
 
   return {
