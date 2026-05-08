@@ -40,12 +40,13 @@ export const VALID_PLANS = new Set(Object.values(PLANS))
 // contadores de la URL: si mañana mudamos focus-assistant a /api/v2/nova,
 // el contador sigue siendo 'nova_message'.
 export const ACTION_TYPES = Object.freeze({
-  NOVA_MESSAGE:      'nova_message',       // 1 turno de chat con Nova (focus-assistant)
-  NOVA_SMART_ACTION: 'nova_smart_action',  // turno donde Nova devuelve actions[] (crear/editar)
-  ORGANIZE_DAY:      'organize_day',       // futuro: reorganizar Mi Día con IA
-  WEEKLY_PLANNING:   'weekly_planning',    // futuro: planificación semanal con IA
-  VOICE_AI:          'voice_ai',           // futuro: transcripción/dictado con IA backend
-  PHOTO_ANALYSIS:    'photo_analysis',     // analyze-photo (vision)
+  NOVA_MESSAGE:         'nova_message',          // 1 turno de chat con Nova (focus-assistant)
+  NOVA_SMART_ACTION:    'nova_smart_action',     // turno donde Nova devuelve actions[] (crear/editar)
+  NOVA_PREMIUM_MESSAGE: 'nova_premium_message',  // escalación a Sonnet cuando Haiku falla o emite acciones riesgosas
+  ORGANIZE_DAY:         'organize_day',          // futuro: reorganizar Mi Día con IA
+  WEEKLY_PLANNING:      'weekly_planning',       // futuro: planificación semanal con IA
+  VOICE_AI:             'voice_ai',              // futuro: transcripción/dictado con IA backend
+  PHOTO_ANALYSIS:       'photo_analysis',        // analyze-photo (vision)
 })
 
 export const VALID_ACTION_TYPES = new Set(Object.values(ACTION_TYPES))
@@ -75,44 +76,49 @@ const HUGE = 100_000  // techo alto para admin sin perder enforcement total
 
 const LIMITS = Object.freeze({
   [PLANS.FREE]: {
-    [ACTION_TYPES.NOVA_MESSAGE]:      { daily: 20  },
-    [ACTION_TYPES.NOVA_SMART_ACTION]: { daily: 10  },
-    [ACTION_TYPES.ORGANIZE_DAY]:      { daily: 3   },
-    [ACTION_TYPES.WEEKLY_PLANNING]:   { weekly: 1  },
-    [ACTION_TYPES.VOICE_AI]:          { daily: 10  },
-    [ACTION_TYPES.PHOTO_ANALYSIS]:    { daily: 5   },
+    [ACTION_TYPES.NOVA_MESSAGE]:         { daily: 20  },
+    [ACTION_TYPES.NOVA_SMART_ACTION]:    { daily: 10  },
+    [ACTION_TYPES.NOVA_PREMIUM_MESSAGE]: { daily: 5   },
+    [ACTION_TYPES.ORGANIZE_DAY]:         { daily: 3   },
+    [ACTION_TYPES.WEEKLY_PLANNING]:      { weekly: 1  },
+    [ACTION_TYPES.VOICE_AI]:             { daily: 10  },
+    [ACTION_TYPES.PHOTO_ANALYSIS]:       { daily: 5   },
   },
   [PLANS.EARLY_ACCESS]: {
-    [ACTION_TYPES.NOVA_MESSAGE]:      { daily: 60  },
-    [ACTION_TYPES.NOVA_SMART_ACTION]: { daily: 30  },
-    [ACTION_TYPES.ORGANIZE_DAY]:      { daily: 10  },
-    [ACTION_TYPES.WEEKLY_PLANNING]:   { weekly: 3  },
-    [ACTION_TYPES.VOICE_AI]:          { daily: 30  },
-    [ACTION_TYPES.PHOTO_ANALYSIS]:    { daily: 15  },
+    [ACTION_TYPES.NOVA_MESSAGE]:         { daily: 60  },
+    [ACTION_TYPES.NOVA_SMART_ACTION]:    { daily: 30  },
+    [ACTION_TYPES.NOVA_PREMIUM_MESSAGE]: { daily: 20  },
+    [ACTION_TYPES.ORGANIZE_DAY]:         { daily: 10  },
+    [ACTION_TYPES.WEEKLY_PLANNING]:      { weekly: 3  },
+    [ACTION_TYPES.VOICE_AI]:             { daily: 30  },
+    [ACTION_TYPES.PHOTO_ANALYSIS]:       { daily: 15  },
   },
   [PLANS.PLUS]: {
-    [ACTION_TYPES.NOVA_MESSAGE]:      { daily: 200 },
-    [ACTION_TYPES.NOVA_SMART_ACTION]: { daily: 100 },
-    [ACTION_TYPES.ORGANIZE_DAY]:      { daily: 30  },
-    [ACTION_TYPES.WEEKLY_PLANNING]:   { weekly: 10 },
-    [ACTION_TYPES.VOICE_AI]:          { daily: 100 },
-    [ACTION_TYPES.PHOTO_ANALYSIS]:    { daily: 50  },
+    [ACTION_TYPES.NOVA_MESSAGE]:         { daily: 200 },
+    [ACTION_TYPES.NOVA_SMART_ACTION]:    { daily: 100 },
+    [ACTION_TYPES.NOVA_PREMIUM_MESSAGE]: { daily: 50  },
+    [ACTION_TYPES.ORGANIZE_DAY]:         { daily: 30  },
+    [ACTION_TYPES.WEEKLY_PLANNING]:      { weekly: 10 },
+    [ACTION_TYPES.VOICE_AI]:             { daily: 100 },
+    [ACTION_TYPES.PHOTO_ANALYSIS]:       { daily: 50  },
   },
   [PLANS.PRO]: {
-    [ACTION_TYPES.NOVA_MESSAGE]:      { daily: 1000 },
-    [ACTION_TYPES.NOVA_SMART_ACTION]: { daily: 500  },
-    [ACTION_TYPES.ORGANIZE_DAY]:      { daily: 100  },
-    [ACTION_TYPES.WEEKLY_PLANNING]:   { weekly: 30  },
-    [ACTION_TYPES.VOICE_AI]:          { daily: 500  },
-    [ACTION_TYPES.PHOTO_ANALYSIS]:    { daily: 200  },
+    [ACTION_TYPES.NOVA_MESSAGE]:         { daily: 1000 },
+    [ACTION_TYPES.NOVA_SMART_ACTION]:    { daily: 500  },
+    [ACTION_TYPES.NOVA_PREMIUM_MESSAGE]: { daily: 200  },
+    [ACTION_TYPES.ORGANIZE_DAY]:         { daily: 100  },
+    [ACTION_TYPES.WEEKLY_PLANNING]:      { weekly: 30  },
+    [ACTION_TYPES.VOICE_AI]:             { daily: 500  },
+    [ACTION_TYPES.PHOTO_ANALYSIS]:       { daily: 200  },
   },
   [PLANS.ADMIN]: {
-    [ACTION_TYPES.NOVA_MESSAGE]:      { daily: HUGE },
-    [ACTION_TYPES.NOVA_SMART_ACTION]: { daily: HUGE },
-    [ACTION_TYPES.ORGANIZE_DAY]:      { daily: HUGE },
-    [ACTION_TYPES.WEEKLY_PLANNING]:   { weekly: HUGE },
-    [ACTION_TYPES.VOICE_AI]:          { daily: HUGE },
-    [ACTION_TYPES.PHOTO_ANALYSIS]:    { daily: HUGE },
+    [ACTION_TYPES.NOVA_MESSAGE]:         { daily: HUGE },
+    [ACTION_TYPES.NOVA_SMART_ACTION]:    { daily: HUGE },
+    [ACTION_TYPES.NOVA_PREMIUM_MESSAGE]: { daily: HUGE },
+    [ACTION_TYPES.ORGANIZE_DAY]:         { daily: HUGE },
+    [ACTION_TYPES.WEEKLY_PLANNING]:      { weekly: HUGE },
+    [ACTION_TYPES.VOICE_AI]:             { daily: HUGE },
+    [ACTION_TYPES.PHOTO_ANALYSIS]:       { daily: HUGE },
   },
 })
 
@@ -132,6 +138,8 @@ export const MESSAGES = Object.freeze({
       'Llegaste al límite diario de dictado por voz en el plan gratis. Vuelve mañana o escribe directamente.',
     [ACTION_TYPES.PHOTO_ANALYSIS]:
       'Llegaste al límite diario de análisis de fotos en el plan gratis. Vuelve mañana o agrega los eventos manualmente.',
+    [ACTION_TYPES.NOVA_PREMIUM_MESSAGE]:
+      'Llegaste al límite diario de respuestas avanzadas de Nova en el plan gratis. Las respuestas normales siguen disponibles.',
   },
   [PLANS.EARLY_ACCESS]: {
     [ACTION_TYPES.NOVA_MESSAGE]:
@@ -146,6 +154,8 @@ export const MESSAGES = Object.freeze({
       'Llegaste al límite de dictado por voz en Early Access por hoy. Vuelve mañana.',
     [ACTION_TYPES.PHOTO_ANALYSIS]:
       'Llegaste al límite de análisis de fotos en Early Access por hoy. Vuelve mañana.',
+    [ACTION_TYPES.NOVA_PREMIUM_MESSAGE]:
+      'Llegaste al límite ampliado de respuestas avanzadas de Nova en Early Access. Las respuestas normales siguen disponibles.',
   },
 })
 

@@ -12,6 +12,10 @@ import { trackAIUsageEvent } from './_lib/aiUsageTracking.js'
 import { filterCalendarEditActions, strippedEditMessage } from './_lib/calendarIntent.js'
 
 const MODEL_ID = 'claude-haiku-4-5-20251001'
+// Sonnet 4.6 = fallback "premium" cuando Haiku falla en escenarios críticos
+// (ediciones de calendario sin verbo explícito, JSON inválido tras reintento,
+// truncation por max_tokens). Más caro pero solo se usa en ~3-8% de requests.
+const FALLBACK_MODEL_ID = 'claude-sonnet-4-6-20251022'
 
 // Necesario en Pro plan: por defecto Vercel mata la función a los 10s, lo
 // cual era menor que el timeout de 25s del SDK de Anthropic — el handler
@@ -114,13 +118,18 @@ export default async function handler(req, res) {
     { role: 'user', content: message },
   ]
 
-  async function runClaude(extra = '', attempt = 1) {
+  // runClaude — modelId opcional permite escalar a Sonnet sin duplicar lógica.
+  // Cuando se llama con FALLBACK_MODEL_ID, action_type pasa a NOVA_PREMIUM_MESSAGE
+  // así ai_usage_events distingue claramente las escalaciones del flujo normal.
+  async function runClaude(extra = '', attempt = 1, modelId = MODEL_ID) {
+    const isPremium = modelId === FALLBACK_MODEL_ID
+    const actionType = isPremium ? ACTION_TYPES.NOVA_PREMIUM_MESSAGE : ACTION_TYPES.NOVA_MESSAGE
     const extraMsgs = extra ? [{ role: 'user', content: extra }] : []
     const start = Date.now()
     let response
     try {
       response = await anthropic.messages.create({
-        model: MODEL_ID,
+        model: modelId,
         max_tokens: 1500,
         system: systemPrompt,
         messages: [...messages, ...extraMsgs],
@@ -131,14 +140,14 @@ export default async function handler(req, res) {
       trackAIUsageEvent({
         admin,
         userId,
-        action_type: ACTION_TYPES.NOVA_MESSAGE,
+        action_type: actionType,
         endpoint: 'focus-assistant',
-        model: MODEL_ID,
+        model: modelId,
         usage: { input_tokens: 0, output_tokens: 0, source: 'unavailable' },
         success: false,
         error_type: err?.name || 'upstream_error',
         duration_ms: Date.now() - start,
-        metadata: { plan, retry_attempt: attempt },
+        metadata: { plan, retry_attempt: attempt, premium_escalated: isPremium },
       }).catch(() => {})
       throw err
     }
@@ -146,20 +155,49 @@ export default async function handler(req, res) {
     trackAIUsageEvent({
       admin,
       userId,
-      action_type: ACTION_TYPES.NOVA_MESSAGE,
+      action_type: actionType,
       endpoint: 'focus-assistant',
-      model: response?.model || MODEL_ID,
+      model: response?.model || modelId,
       anthropicResponse: response,
       success: true,
       duration_ms: Date.now() - start,
-      metadata: { plan, retry_attempt: attempt },
+      metadata: { plan, retry_attempt: attempt, premium_escalated: isPremium },
     }).catch(() => {})
     return response
   }
 
+  // Detecta si un response de Haiku necesita escalarse a Sonnet:
+  // - hit max_tokens (truncation)
+  // - output cerca del límite (1300/1500 tokens — riesgo de respuesta cortada)
+  // - filterCalendarEditActions strippeó acciones (Haiku quería editar sin
+  //   intent explícito, Sonnet con prompt refinado debería dar mejor add_event)
+  function shouldEscalateToSonnet(response, strippedCount) {
+    if (response?.stop_reason === 'max_tokens') return true
+    const outputTokens = response?.usage?.output_tokens || 0
+    if (outputTokens > 1300) return true
+    if (strippedCount > 0) return true
+    return false
+  }
+
+  // Reintenta con Sonnet cuando Haiku tropezó. Mensaje de refuerzo recuerda
+  // las reglas duras del system prompt (no editar sin verbo, fecha=hoy si solo
+  // hay hora). El user message original sigue en `messages`.
+  async function escalateToSonnet() {
+    return runClaude(
+      'IMPORTANTE: tu respuesta anterior con Haiku falló o emitió ediciones sin que el usuario lo pidiera. Reintenta siguiendo ESTAS REGLAS DURAS:\n' +
+        '1) NUNCA uses edit_event/update_event/delete_event a menos que el usuario haya escrito un verbo explícito de edición (mueve, cambia, edita, modifica, reagenda, pásalo, corre, adelanta, atrasa, borra, elimina, cancela, quita).\n' +
+        '2) Si el usuario menciona hora sin fecha, date=hoy (sin importar si la hora ya pasó). Si quería otro día, lo dirá ("mañana", "viernes").\n' +
+        '3) Eventos similares de OTRO DÍA NO bloquean creación nueva — son eventos distintos.\n' +
+        '4) Si dudás entre crear y editar, SIEMPRE elegí add_event.\n' +
+        '5) Cierra todas las llaves del JSON; sin texto fuera del objeto.',
+      1,
+      FALLBACK_MODEL_ID,
+    )
+  }
+
   // Procesa la respuesta del modelo, aplica enforcement de smart_action y
-  // contabiliza nova_message una sola vez si todo salió bien.
-  function finalize(parsed) {
+  // contabiliza nova_message (+ nova_premium_message si hubo escalación).
+  function finalize(parsed, { escalated = false } = {}) {
     const out = parsed && typeof parsed === 'object' ? { ...parsed } : { reply: '', actions: [] }
     let actions = Array.isArray(out.actions) ? out.actions : []
 
@@ -203,10 +241,15 @@ export default async function handler(req, res) {
     // Fire-and-forget: no esperamos a que termine el upsert para responder.
     // Si falla, el usuario tuvo su respuesta y el contador queda como está
     // (peor caso: pierde +1 contra sí mismo si la próxima llamada lo cuenta).
+    // Cuando hubo escalación a Sonnet, también incrementamos NOVA_PREMIUM_MESSAGE
+    // para que las cuotas de la cohort beta puedan verlo separado.
     Promise.resolve()
       .then(() => recordUsage(admin, userId, ACTION_TYPES.NOVA_MESSAGE))
       .then(() => appliedSmartAction
         ? recordUsage(admin, userId, ACTION_TYPES.NOVA_SMART_ACTION)
+        : null)
+      .then(() => escalated
+        ? recordUsage(admin, userId, ACTION_TYPES.NOVA_PREMIUM_MESSAGE)
         : null)
       .catch(() => {})
 
@@ -214,26 +257,24 @@ export default async function handler(req, res) {
   }
 
   try {
+    // PASO 1 — Haiku (modelo barato, cubre 90%+ de los requests).
     const d1 = await runClaude('', 1)
     const r1 = (d1.content?.[0]?.text ?? '').trim()
+    let parsed
     try {
-      return finalize(safeParseAssistantJSON(r1))
+      parsed = safeParseAssistantJSON(r1)
     } catch {
-      const d2 = await runClaude(
-        'Tu respuesta anterior tuvo JSON inválido o incompleto. Reintenta ahora. Responde SOLO con un objeto JSON válido siguiendo exactamente el formato indicado. Cierra todas las llaves y corchetes.',
-        2,
-      )
-      const r2 = (d2.content?.[0]?.text ?? '').trim()
+      // PASO 2a — JSON inválido: reintenta directamente con Sonnet (Path B).
+      // No reintentamos con Haiku porque ya falló al parsear; Sonnet con el
+      // prompt de refuerzo suele dar JSON limpio en una sola pasada.
       try {
-        return finalize(safeParseAssistantJSON(r2))
+        const dPremium = await escalateToSonnet()
+        const rPremium = (dPremium.content?.[0]?.text ?? '').trim()
+        return finalize(safeParseAssistantJSON(rPremium), { escalated: true })
       } catch {
-        // Sin loggear el contenido crudo: incluye datos del usuario
-        // (eventos, tareas, memorias) y filtra a Vercel logs. La métrica útil
-        // (tasa de fallo) la podemos derivar del status code 502.
-        console.error('[focus-assistant] JSON parse failed after retry')
-        // Aún si el parse falló dos veces, el modelo SI gastó tokens. Contamos
-        // la acción para evitar que un atacante use mensajes mal formateados
-        // intencionalmente para bypassear el contador.
+        console.error('[focus-assistant] JSON parse failed after Sonnet escalation')
+        // Aún si el parse falló dos veces (Haiku + Sonnet), los modelos SÍ
+        // gastaron tokens. Contamos la acción base para evitar abuso.
         recordUsage(admin, userId, ACTION_TYPES.NOVA_MESSAGE).catch(() => {})
         return res.status(502).json({
           error: 'llm_bad_output',
@@ -242,6 +283,30 @@ export default async function handler(req, res) {
         })
       }
     }
+
+    // PASO 2b — Haiku parseó OK pero ¿la respuesta es de calidad suficiente?
+    // Detectamos signals de "esto va a salir mal" (ediciones strippeadas,
+    // truncation) y escalamos a Sonnet con prompt refinado.
+    const haikuActions = Array.isArray(parsed?.actions) ? parsed.actions : []
+    const preFilter = filterCalendarEditActions(haikuActions, message)
+    const escalateNeeded = shouldEscalateToSonnet(d1, preFilter.stripped.length)
+
+    if (escalateNeeded) {
+      try {
+        const dPremium = await escalateToSonnet()
+        const rPremium = (dPremium.content?.[0]?.text ?? '').trim()
+        const parsedPremium = safeParseAssistantJSON(rPremium)
+        return finalize(parsedPremium, { escalated: true })
+      } catch {
+        // Sonnet también falló al parsear → caemos al Haiku original (que
+        // al menos parseó OK). filterCalendarEditActions en finalize()
+        // strippea las ediciones malas y agrega la nota humana al reply.
+        console.warn('[focus-assistant] Sonnet escalation failed, falling back to Haiku response')
+        return finalize(parsed, { escalated: false })
+      }
+    }
+
+    return finalize(parsed, { escalated: false })
   } catch (err) {
     const status = err?.status || err?.response?.status
     if (status === 401) {
