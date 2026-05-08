@@ -336,14 +336,14 @@ export function TaskDetailSheet({ task, visible, onDismiss, onSave, onDelete }: 
                 styles.dateInput,
                 {
                   color: c.text,
-                  borderColor: dueDateInvalid ? '#dc2626' : c.border,
+                  borderColor: dueDateInvalid ? c.danger : c.border,
                   backgroundColor: c.surfaceMuted,
                 },
               ]}
               accessibilityLabel="Fecha en formato AAAA-MM-DD"
             />
             {dueDateInvalid ? (
-              <Text style={[styles.errorHint, { color: '#dc2626' }]}>
+              <Text style={[styles.errorHint, { color: c.danger }]}>
                 Formato inválido. Usa YYYY-MM-DD (ej: 2026-12-31) o deja vacío.
               </Text>
             ) : null}
@@ -367,14 +367,14 @@ export function TaskDetailSheet({ task, visible, onDismiss, onSave, onDelete }: 
                     styles.dateInput,
                     {
                       color: c.text,
-                      borderColor: dueTimeInvalid ? '#dc2626' : c.border,
+                      borderColor: dueTimeInvalid ? c.danger : c.border,
                       backgroundColor: c.surfaceMuted,
                     },
                   ]}
                   accessibilityLabel="Hora en formato HH:MM"
                 />
                 {dueTimeInvalid ? (
-                  <Text style={[styles.errorHint, { color: '#dc2626' }]}>
+                  <Text style={[styles.errorHint, { color: c.danger }]}>
                     Formato inválido. Usa HH:MM (ej: 09:30) o HH:MM-HH:MM.
                   </Text>
                 ) : null}
@@ -397,8 +397,8 @@ export function TaskDetailSheet({ task, visible, onDismiss, onSave, onDelete }: 
                   { borderColor: '#fecaca', backgroundColor: '#fef2f2' },
                 ]}
               >
-                <IconSymbol name="xmark" size={14} color={'#dc2626'} />
-                <Text style={[styles.errorText, { color: '#dc2626' }]} numberOfLines={4}>
+                <IconSymbol name="xmark" size={14} color={c.danger} />
+                <Text style={[styles.errorText, { color: c.danger }]} numberOfLines={4}>
                   {saveError}
                 </Text>
               </View>
@@ -432,8 +432,8 @@ export function TaskDetailSheet({ task, visible, onDismiss, onSave, onDelete }: 
                 accessibilityRole="button"
                 accessibilityLabel="Eliminar tarea"
               >
-                <IconSymbol name="trash" size={15} color={'#dc2626'} />
-                <Text style={[styles.deleteText, { color: '#dc2626' }]}>Eliminar</Text>
+                <IconSymbol name="trash" size={15} color={c.danger} />
+                <Text style={[styles.deleteText, { color: c.danger }]}>Eliminar</Text>
               </Pressable>
             </View>
           </ScrollView>

@@ -103,7 +103,7 @@ export function DeleteAccountSheet({ visible, onDismiss, onSuccess }: Props) {
           <View style={[styles.handle, { backgroundColor: c.border }]} />
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.body}>
             <View style={[styles.iconWrap, { backgroundColor: '#fee2e2' }]}>
-              <IconSymbol name="trash.fill" size={26} color={'#dc2626'} />
+              <IconSymbol name="trash.fill" size={26} color={c.danger} />
             </View>
             <Text style={[styles.heading, { color: c.text }]}>Eliminar cuenta</Text>
             <Text style={[styles.subheading, { color: c.textMuted }]}>
@@ -114,7 +114,7 @@ export function DeleteAccountSheet({ visible, onDismiss, onSuccess }: Props) {
 
             <View style={[styles.warnBox, { backgroundColor: c.surfaceMuted, borderColor: c.border }]}>
               <Text style={[styles.warnTitle, { color: c.text }]}>Para confirmar, escribe:</Text>
-              <Text style={[styles.warnPhrase, { color: '#dc2626' }]}>{REQUIRED_PHRASE}</Text>
+              <Text style={[styles.warnPhrase, { color: c.danger }]}>{REQUIRED_PHRASE}</Text>
             </View>
 
             <TextInput
@@ -132,7 +132,7 @@ export function DeleteAccountSheet({ visible, onDismiss, onSuccess }: Props) {
                 styles.input,
                 {
                   color: c.text,
-                  borderColor: matches ? '#dc2626' : c.border,
+                  borderColor: matches ? c.danger : c.border,
                   backgroundColor: c.surfaceMuted,
                 },
               ]}
@@ -141,8 +141,8 @@ export function DeleteAccountSheet({ visible, onDismiss, onSuccess }: Props) {
 
             {error ? (
               <View style={[styles.errorBox, { borderColor: '#fecaca', backgroundColor: '#fef2f2' }]}>
-                <IconSymbol name="xmark" size={14} color={'#dc2626'} />
-                <Text style={[styles.errorText, { color: '#dc2626' }]} numberOfLines={3}>
+                <IconSymbol name="xmark" size={14} color={c.danger} />
+                <Text style={[styles.errorText, { color: c.danger }]} numberOfLines={3}>
                   {error}
                 </Text>
               </View>
@@ -158,7 +158,7 @@ export function DeleteAccountSheet({ visible, onDismiss, onSuccess }: Props) {
                     backgroundColor: canConfirm
                       ? pressed
                         ? '#b91c1c'
-                        : '#dc2626'
+                        : c.danger
                       : c.surfaceMuted,
                   },
                 ]}

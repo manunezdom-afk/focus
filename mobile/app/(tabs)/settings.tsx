@@ -249,17 +249,13 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
       {/* Hero halo — patrón compartido con Mi Día / Calendar / Nova / Tareas. */}
+      {/* Halo sutil — un solo blob, mismo patrón que Mi Día post-c220d66.
+          Antes eran dos círculos pesados. Ahora ambient sutil. */}
       <View style={styles.heroHaloLayer} pointerEvents="none">
         <View
           style={[
             styles.heroHaloCircle,
-            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.45 : 0.55 },
-          ]}
-        />
-        <View
-          style={[
-            styles.heroHaloCircleSoft,
-            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.18 : 0.22 },
+            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.22 : 0.32 },
           ]}
         />
       </View>
@@ -533,32 +529,23 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   scroll: { paddingBottom: Spacing['3xl'] + 60 },
 
-  // Hero halo (mismos números que las otras pantallas principales)
+  // Hero halo — espejo del de Mi Día (1 solo círculo, opacity baja).
   heroHaloLayer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: 380,
+    height: 280,
     overflow: 'hidden',
   },
   heroHaloCircle: {
     position: 'absolute',
-    top: -120,
-    left: -60,
-    right: -60,
-    height: 320,
-    borderBottomLeftRadius: 240,
-    borderBottomRightRadius: 240,
-  },
-  heroHaloCircleSoft: {
-    position: 'absolute',
-    top: 60,
-    left: -120,
-    right: -120,
+    top: -160,
+    left: -80,
+    right: -80,
     height: 280,
-    borderRadius: 240,
-    transform: [{ scaleY: 0.55 }],
+    borderBottomLeftRadius: 200,
+    borderBottomRightRadius: 200,
   },
 
   // Header premium
