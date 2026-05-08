@@ -15,6 +15,7 @@ import Animated, {
   FadeIn,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -212,9 +213,13 @@ export function NovaInputBar({
   }, [seed?.n, seed?.text]);
 
   const focus = useSharedValue(0);
+  const sendScale = useSharedValue(1);
   const animatedBarStyle = useAnimatedStyle(() => ({
     shadowOpacity: 0.07 + focus.value * 0.13,
     shadowRadius: 14 + focus.value * 10,
+  }));
+  const sendBtnStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: sendScale.value }],
   }));
 
   // Si hay reply, lo limpia tras 6s para que la barra no quede ocupada.
@@ -411,18 +416,23 @@ export function NovaInputBar({
         <Pressable
           onPress={send}
           disabled={!canSend}
-          style={({ pressed }) => [
-            styles.sendBtn,
-            { backgroundColor: c.primary, opacity: !canSend ? 0.35 : pressed ? 0.85 : 1 },
-          ]}
+          onPressIn={() => {
+            sendScale.value = withSpring(0.86, { damping: 10, stiffness: 500, mass: 0.4 });
+          }}
+          onPressOut={() => {
+            sendScale.value = withSpring(1, { damping: 12, stiffness: 400, mass: 0.4 });
+          }}
+          style={{ opacity: !canSend ? 0.35 : 1 }}
           accessibilityLabel="Enviar a Nova"
           accessibilityRole="button"
         >
-          {sending ? (
-            <ActivityIndicator color={c.onPrimary} size="small" />
-          ) : (
-            <IconSymbol name="arrow.up" size={16} color={c.onPrimary} />
-          )}
+          <Animated.View style={[styles.sendBtn, { backgroundColor: c.primary }, sendBtnStyle]}>
+            {sending ? (
+              <ActivityIndicator color={c.onPrimary} size="small" />
+            ) : (
+              <IconSymbol name="arrow.up" size={16} color={c.onPrimary} />
+            )}
+          </Animated.View>
         </Pressable>
       </Animated.View>
     </View>

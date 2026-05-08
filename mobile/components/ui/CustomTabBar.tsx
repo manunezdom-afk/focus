@@ -2,7 +2,7 @@ import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 
 import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -66,14 +66,9 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
         }
 
         return (
-          <Pressable
+          <ScaleTabItem
             key={route.key}
             onPress={handlePress}
-            style={({ pressed }) => [
-              styles.tab,
-              { transform: [{ scale: pressed ? 0.94 : 1 }] },
-            ]}
-            accessibilityRole="button"
             accessibilityLabel={cfg.label}
             accessibilityState={{ selected: focused }}
           >
@@ -93,10 +88,46 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
               {cfg.label}
             </Text>
             <Dot focused={focused} color={c.primary} />
-          </Pressable>
+          </ScaleTabItem>
         );
       })}
     </View>
+  );
+}
+
+// Tab item con spring scale en UI thread — reemplaza el pressed?0.94:1 del
+// Pressable que corría en JS thread y causaba micro-jank perceptible.
+function ScaleTabItem({
+  onPress,
+  accessibilityLabel,
+  accessibilityState,
+  children,
+}: {
+  onPress: () => void;
+  accessibilityLabel: string;
+  accessibilityState: { selected: boolean };
+  children: React.ReactNode;
+}) {
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={() => {
+        scale.value = withSpring(0.88, { damping: 12, stiffness: 500, mass: 0.4 });
+      }}
+      onPressOut={() => {
+        scale.value = withSpring(1, { damping: 14, stiffness: 400, mass: 0.4 });
+      }}
+      style={styles.tab}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={accessibilityState}
+    >
+      <Animated.View style={[styles.tabInner, animStyle]}>{children}</Animated.View>
+    </Pressable>
   );
 }
 
@@ -160,8 +191,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 48,
+  },
+  tabInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 4,
     gap: 2,
+    width: '100%',
   },
   label: {
     fontSize: 10.5,

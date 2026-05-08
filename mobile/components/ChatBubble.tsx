@@ -1,5 +1,5 @@
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -31,7 +31,7 @@ export function ChatBubble({ message }: Props) {
 
   return (
     <Animated.View
-      entering={FadeIn.duration(200)}
+      entering={FadeInDown.springify().damping(18).stiffness(340).mass(0.7)}
       style={[styles.row, isUser ? styles.rowUser : styles.rowAssistant]}
     >
       <View

@@ -41,7 +41,7 @@ export function TimelineEventBlock({
   const c = Colors[scheme];
   const timeLabel = startTimeStr(event.time) || '—';
 
-  const enterDelay = Math.min(160 + enterIndex * 50, 400);
+  const enterDelay = Math.min(50 + enterIndex * 30, 200);
 
   const hasDescription =
     !!event.description &&
@@ -71,7 +71,7 @@ export function TimelineEventBlock({
 
   const card = (
     <Animated.View
-      entering={FadeInDown.delay(enterDelay).duration(320)}
+      entering={FadeInDown.delay(enterDelay).springify().damping(20).stiffness(320).mass(0.7)}
       style={styles.row}
     >
       <View style={styles.timeCol}>

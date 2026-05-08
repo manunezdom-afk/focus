@@ -27,7 +27,7 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, onSwipeDelete
 
   const taskColors = getBlockColors('task', scheme);
   const accent = taskColors.accent;
-  const enterDelay = Math.min(160 + enterIndex * 50, 400);
+  const enterDelay = Math.min(50 + enterIndex * 30, 200);
 
   const renderRightActions = () => (
     <Pressable
@@ -46,7 +46,7 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, onSwipeDelete
 
   const card = (
     <Animated.View
-      entering={FadeInDown.delay(enterDelay).duration(320)}
+      entering={FadeInDown.delay(enterDelay).springify().damping(20).stiffness(320).mass(0.7)}
       style={styles.row}
     >
       <View style={styles.timeCol}>
