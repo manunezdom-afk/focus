@@ -8,8 +8,29 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+
+// Paleta Nova: gradiente azul puro (cyan brillante → cobalto profundo).
+// Aislada de Colors.primary para que el orbe luzca su identidad azul propia
+// independientemente del primary indigo de la marca usado en botones/UI.
+const NOVA_PALETTE = {
+  light: {
+    base: '#2563eb',     // royal blue 600 — superficie del orbe
+    shadow: '#1d4ed8',   // cobalt blue 700 — sombra
+    halo: '#dbeafe',     // blue 100 — anillo ambiente
+    spotCyan: '#22d3ee', // cyan 400 — highlight cálido
+    spotMid: '#3b82f6',  // blue 500 — punto intermedio
+    spotDeep: '#1e40af', // blue 800 — profundo
+  },
+  dark: {
+    base: '#3b82f6',     // blue 500 — más luminoso sobre fondo oscuro
+    shadow: '#2563eb',   // royal
+    halo: '#1e3a8a',     // blue 900
+    spotCyan: '#67e8f9', // cyan 300
+    spotMid: '#60a5fa',  // blue 400
+    spotDeep: '#1d4ed8', // blue 700
+  },
+};
 
 type Props = {
   size?: number;
@@ -93,8 +114,8 @@ function ColorSpot({
 //   · 3 spots (cyan, violeta, índigo claro) orbitando a velocidades distintas.
 export function NovaOrb({ size = 64, ambient = true, breathing = false, active = false }: Props) {
   const scheme = useColorScheme() ?? 'light';
-  const c = Colors[scheme];
   const dark = scheme === 'dark';
+  const p = NOVA_PALETTE[dark ? 'dark' : 'light'];
 
   const pulse = useSharedValue(1);
   useEffect(() => {
@@ -135,11 +156,6 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false, active =
   const haloDiameter = size * 1.7;
   const orbitR = size * 0.2;
 
-  // Colores de los spots por modo
-  const spotCyan = dark ? '#22d3ee' : '#38bdf8';
-  const spotViolet = dark ? '#c084fc' : '#a78bfa';
-  const spotIndigo = dark ? '#818cf8' : '#93c5fd';
-
   return (
     <View
       style={{
@@ -149,7 +165,7 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false, active =
         justifyContent: 'center',
       }}
     >
-      {/* Halo ambiente */}
+      {/* Halo ambiente — tinte azul cobalto suave */}
       {ambient ? (
         <Animated.View
           pointerEvents="none"
@@ -159,8 +175,8 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false, active =
               width: haloDiameter,
               height: haloDiameter,
               borderRadius: haloDiameter / 2,
-              backgroundColor: c.primaryContainer,
-              opacity: dark ? 0.45 : 0.55,
+              backgroundColor: p.halo,
+              opacity: dark ? 0.5 : 0.6,
             },
             haloAnimStyle,
           ]}
@@ -176,10 +192,10 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false, active =
             width: size,
             height: size,
             borderRadius: size / 2,
-            backgroundColor: c.primary,
-            shadowColor: c.primary,
+            backgroundColor: p.base,
+            shadowColor: p.shadow,
             shadowOffset: { width: 0, height: size * 0.18 },
-            shadowOpacity: 0.48,
+            shadowOpacity: 0.5,
             shadowRadius: size * 0.42,
             elevation: 6,
           },
@@ -187,7 +203,7 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false, active =
         ]}
       />
 
-      {/* Orbe con recorte — spots de color confinados al círculo */}
+      {/* Orbe con recorte — spots de azul confinados al círculo */}
       <Animated.View
         style={[
           {
@@ -195,36 +211,36 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false, active =
             height: size,
             borderRadius: size / 2,
             overflow: 'hidden',
-            backgroundColor: c.primary,
+            backgroundColor: p.base,
             alignItems: 'center',
             justifyContent: 'center',
           },
           orbAnimStyle,
         ]}
       >
-        {/* Spot 1 — cyan, gira en sentido horario */}
+        {/* Spot 1 — cyan brillante, gira en sentido horario */}
         <ColorSpot
           size={size}
-          color={spotCyan}
+          color={p.spotCyan}
           orbitR={orbitR}
           duration={3400}
           initialAngle={0}
           opacity={0.7}
         />
-        {/* Spot 2 — violeta, gira en sentido antihorario */}
+        {/* Spot 2 — azul medio, gira en sentido antihorario */}
         <ColorSpot
           size={size}
-          color={spotViolet}
+          color={p.spotMid}
           orbitR={orbitR * 1.1}
           duration={4800}
           reverse
           initialAngle={120}
           opacity={0.6}
         />
-        {/* Spot 3 — índigo claro, radio pequeño más centrado */}
+        {/* Spot 3 — cobalto profundo, radio pequeño más centrado */}
         <ColorSpot
           size={size}
-          color={spotIndigo}
+          color={p.spotDeep}
           orbitR={orbitR * 0.65}
           duration={2600}
           initialAngle={240}
