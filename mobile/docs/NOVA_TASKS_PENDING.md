@@ -5,7 +5,18 @@ agregar dependencias nativas (con su correspondiente `pod install` / build
 nativo) o cambiar el schema de Supabase. Todo lo que se podía hacer en
 JS/TS puro ya está implementado.
 
-> Última actualización: 2026-05-07 (commit que cierra Phase 2/3 de los pendientes Nova).
+> Última actualización: 2026-05-07.
+
+## Estado actual
+
+| Pendiente | Estado |
+|-----------|--------|
+| Voz Nova | **Pendiente** — bloqueado por regla "no crear backend nuevo" |
+| Cámara/foto agenda | ✅ **Hecho** (commit `e007309`) — falta `pod install` local |
+| Subtareas / linkedEventId | **Pendiente** — migración SQL preparada en `supabase/migrations/016_*.sql`, esperando OK |
+| Tareas con fecha/hora propia | **Pendiente** — migración SQL preparada en `supabase/migrations/017_*.sql`, esperando OK |
+| `remember` action | ✅ **Hecho** (commit `e007309`) — usa tabla `user_memories` ya existente |
+| Shortcut ⌘K | Diferido (baja prioridad) |
 
 ---
 
