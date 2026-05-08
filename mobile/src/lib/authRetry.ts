@@ -22,12 +22,12 @@ async function tryRefreshSession(): Promise<boolean> {
   try {
     const { error } = await supabase.auth.refreshSession();
     if (error) {
-      console.warn('[authRetry] refreshSession failed:', error.message);
+      if (__DEV__) console.warn('[authRetry] refreshSession failed:', error.message);
       return false;
     }
     return true;
   } catch (e: any) {
-    console.warn('[authRetry] refreshSession threw:', e?.message);
+    if (__DEV__) console.warn('[authRetry] refreshSession threw:', e?.message);
     return false;
   }
 }
@@ -39,10 +39,10 @@ export async function withAuthRetry<T>(fn: () => Promise<T>, label = 'request'):
     return await fn();
   } catch (err: any) {
     if (!isAuthError(err)) {
-      console.warn(`[${label}] failed:`, err?.message ?? err);
+      if (__DEV__) console.warn(`[${label}] failed:`, err?.message ?? err);
       throw err;
     }
-    console.warn(`[${label}] auth error → trying refresh + retry`);
+    if (__DEV__) console.warn(`[${label}] auth error → trying refresh + retry`);
     const ok = await tryRefreshSession();
     if (!ok) throw err;
     return await fn();

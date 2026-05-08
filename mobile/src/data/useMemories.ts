@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
 import { withAuthRetry } from '../lib/authRetry';
+import { registerCacheClear } from './cacheRegistry';
 import {
   type CreateMemoryInput,
   deleteMemory as apiDeleteMemory,
@@ -24,6 +25,12 @@ const STALE_MS = 60_000;
 type CacheEntry = { data: Memory[]; at: number };
 const _cache = new Map<string, CacheEntry>();
 const _inFlight = new Map<string, Promise<Memory[]>>();
+
+// Limpieza al signOut — evita filtrar datos del usuario anterior.
+registerCacheClear(() => {
+  _cache.clear();
+  _inFlight.clear();
+});
 
 export function useMemories() {
   const { user } = useAuth();

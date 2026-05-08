@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
 import { withAuthRetry } from '../lib/authRetry';
+import { registerCacheClear } from './cacheRegistry';
 import {
   fetchUserProfile,
   type NovaPersonality,
@@ -23,6 +24,11 @@ const INITIAL: State = { profile: null, loading: true, saving: false, error: nul
 // una vez y se queda). TTL 5min.
 const STALE_MS = 5 * 60_000;
 const _cache = new Map<string, { profile: UserProfile; at: number }>();
+
+// Limpieza al signOut — evita filtrar datos del usuario anterior.
+registerCacheClear(() => {
+  _cache.clear();
+});
 
 export function useUserProfile() {
   const { user } = useAuth();

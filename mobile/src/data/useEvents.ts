@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
 import { withAuthRetry } from '../lib/authRetry';
+import { registerCacheClear } from './cacheRegistry';
 import {
   createEvent,
   deleteEvent,
@@ -33,6 +34,12 @@ const _cache = new Map<string, CacheEntry>();
 
 // In-flight dedup por clave.
 const _inFlight = new Map<string, Promise<EventItem[]>>();
+
+// Limpieza al signOut — evita filtrar datos del usuario anterior.
+registerCacheClear(() => {
+  _cache.clear();
+  _inFlight.clear();
+});
 
 export function useEvents(mode: Mode = 'all') {
   const { user } = useAuth();

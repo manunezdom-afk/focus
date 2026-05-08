@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react';
 
+import { clearNovaHistory } from '../data/novaPersist';
 import { supabase } from '../lib/supabase';
 
 type AuthState = {
@@ -48,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .getSession()
       .then(({ data, error }) => {
         if (cancelled) return;
-        if (error) {
+        if (error && __DEV__) {
           console.warn('[Focus mobile] getSession error', error.message);
         }
         setSession(data?.session ?? null);
@@ -80,6 +81,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: session?.user ?? null,
       signOut: async () => {
         if (!supabase) return;
+        // Capturamos el userId antes del signOut para poder limpiar el
+        // chat persistido de Nova de este usuario. cacheRegistry escucha el
+        // evento SIGNED_OUT y vacía los Maps de useEvents/useTasks/etc.
+        const uid = session?.user?.id ?? null;
+        if (uid) {
+          void clearNovaHistory(uid);
+        }
         await supabase.auth.signOut();
         // onAuthStateChange limpiará session — pero forzamos por si el listener
         // tarda (UI siente más rápido el logout).

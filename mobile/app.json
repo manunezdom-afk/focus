@@ -15,7 +15,10 @@
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": []
+        "UIBackgroundModes": [],
+        "NSCameraUsageDescription": "Focus usa la cámara para que Nova lea tu agenda o notas escritas y las convierta en eventos automáticamente.",
+        "NSPhotoLibraryUsageDescription": "Focus accede a tus fotos para que Nova analice imágenes de agenda y las transforme en eventos.",
+        "NSMicrophoneUsageDescription": "Focus usa el micrófono para que puedas dictarle a Nova en lugar de escribir."
       }
     },
     "android": {

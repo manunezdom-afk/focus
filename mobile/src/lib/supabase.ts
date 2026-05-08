@@ -11,10 +11,12 @@ const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 if (!url || !anonKey) {
   // Log warning pero no tirar — la app puede arrancar y mostrar un mensaje en
   // login pidiendo configurar `.env`. Tirar acá rompe el splash screen.
-  console.warn(
-    '[Focus mobile] Faltan EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY. ' +
-      'Copia mobile/.env.example a mobile/.env y completa los valores del proyecto Supabase.',
-  );
+  if (__DEV__) {
+    console.warn(
+      '[Focus mobile] Faltan EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY. ' +
+        'Copia mobile/.env.example a mobile/.env y completa los valores del proyecto Supabase.',
+    );
+  }
 }
 
 export const supabase: SupabaseClient | null =

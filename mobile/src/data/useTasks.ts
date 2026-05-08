@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
 import { withAuthRetry } from '../lib/authRetry';
+import { registerCacheClear } from './cacheRegistry';
 import {
   createTask as apiCreateTask,
   deleteTask as apiDeleteTask,
@@ -34,6 +35,12 @@ const _cache = new Map<string, CacheEntry>();
 // In-flight dedup: si ya hay una request en vuelo para este userId,
 // ambas instancias esperan el mismo promise en lugar de disparar dos.
 const _inFlight = new Map<string, Promise<Task[]>>();
+
+// Limpieza al signOut — evita filtrar datos del usuario anterior.
+registerCacheClear(() => {
+  _cache.clear();
+  _inFlight.clear();
+});
 
 export function useTasks() {
   const { user } = useAuth();
