@@ -1,9 +1,10 @@
 import * as Application from 'expo-application';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -15,6 +16,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
+import { AppearanceSheet } from '@/components/settings/AppearanceSheet';
 import { DeleteAccountSheet } from '@/components/settings/DeleteAccountSheet';
 import { MemoriesSheet } from '@/components/settings/MemoriesSheet';
 import { PersonalitySheet } from '@/components/settings/PersonalitySheet';
@@ -24,15 +26,37 @@ import { SettingsRow, SettingsSection } from '@/components/ui/SettingsList';
 import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/src/auth/AuthProvider';
+import {
+  getPermissionStatus as getNotificationPermissionStatus,
+  isAvailable as isNotificationsAvailable,
+  type PermissionStatus as NotificationPermissionStatus,
+  requestPermissions as requestNotificationPermissions,
+  scheduleTestNotification,
+} from '@/src/lib/notifications';
 import { useMemories } from '@/src/data/useMemories';
 import { useUserPlan } from '@/src/data/useUserPlan';
 import { useUserProfile } from '@/src/data/useUserProfile';
+import { useThemePreference } from '@/src/theme/ThemePreferenceProvider';
+import type { ThemePreference } from '@/src/lib/themePreference';
 
-// Etiqueta del esquema de color actual del sistema (no preference real
-// todavía — Expo sigue al sistema). Si en el futuro existe preferencia
-// persistida (light/dark/system), cambiar este helper para leerla.
-function appearanceLabel(scheme: 'light' | 'dark'): string {
-  return scheme === 'dark' ? 'Siguiendo el sistema · Oscuro' : 'Siguiendo el sistema · Claro';
+function appearanceLabel(preference: ThemePreference, effective: 'light' | 'dark'): string {
+  if (preference === 'light') return 'Forzado claro';
+  if (preference === 'dark') return 'Forzado oscuro';
+  return effective === 'dark' ? 'Siguiendo el sistema · Oscuro' : 'Siguiendo el sistema · Claro';
+}
+
+function notificationsLabel(status: NotificationPermissionStatus, available: boolean): string {
+  if (!available) return 'Requiere reinstalar la app · ver detalles';
+  switch (status) {
+    case 'granted':
+      return 'Activadas · te avisamos antes de cada bloque';
+    case 'denied':
+      return 'Bloqueadas en Ajustes del sistema';
+    case 'undetermined':
+      return 'Pulsa para pedir permiso al sistema';
+    default:
+      return 'Pulsa para configurar';
+  }
 }
 
 function personalitySubLabel(p?: 'focus' | 'cercana' | 'estrategica' | null): string {
@@ -62,10 +86,28 @@ export default function SettingsScreen() {
   const profile = useUserProfile();
   const memoriesHook = useMemories();
   const userPlan = useUserPlan();
+  const themePref = useThemePreference();
   const [loggingOut, setLoggingOut] = useState(false);
   const [showPersonality, setShowPersonality] = useState(false);
   const [showMemories, setShowMemories] = useState(false);
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const [showAppearance, setShowAppearance] = useState(false);
+
+  // Notificaciones — el módulo nativo expo-notifications puede o no estar
+  // disponible (depende de si el binario actual tiene la lib linkeada).
+  // Si no está, mostramos copy honesta "Requiere reinstalar".
+  const notifAvailable = isNotificationsAvailable();
+  const [notifStatus, setNotifStatus] = useState<NotificationPermissionStatus>('undetermined');
+  const [notifBusy, setNotifBusy] = useState(false);
+
+  const refreshNotifStatus = useCallback(async () => {
+    const next = await getNotificationPermissionStatus();
+    setNotifStatus(next);
+  }, []);
+
+  useEffect(() => {
+    void refreshNotifStatus();
+  }, [refreshNotifStatus]);
 
   const isAuthenticated = !!user;
   const email = user?.email ?? null;
@@ -102,6 +144,67 @@ export default function SettingsScreen() {
     Alert.alert(
       feature,
       hint ?? 'Esta función estará disponible en la próxima versión.',
+      [{ text: 'Entendido', style: 'default' }],
+    );
+  }
+
+  // Pide permisos al sistema. Si ya está denegado, abre Ajustes del SO
+  // (única forma de revertirlo en iOS — el sistema cachea el "denied").
+  async function handleNotificationsToggle() {
+    if (!notifAvailable || notifBusy) return;
+    setNotifBusy(true);
+    try {
+      if (notifStatus === 'denied') {
+        // Linking.openSettings abre la página de la app en Settings.app.
+        Alert.alert(
+          'Notificaciones bloqueadas',
+          'iOS recuerda tu rechazo previo. Abre Ajustes del sistema para activarlas manualmente.',
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Abrir Ajustes', onPress: () => void Linking.openSettings() },
+          ],
+        );
+        return;
+      }
+      const next = await requestNotificationPermissions();
+      setNotifStatus(next);
+      if (next === 'granted' && Platform.OS === 'ios') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } finally {
+      setNotifBusy(false);
+    }
+  }
+
+  // Programa una notificación local 5s adelante. Comprobante end-to-end
+  // de que el flow funciona en device sin necesidad de APNs.
+  async function handleSendTestNotification() {
+    if (!notifAvailable || notifBusy) return;
+    if (notifStatus !== 'granted') {
+      Alert.alert(
+        'Permiso requerido',
+        'Activa primero las notificaciones para recibir esta prueba.',
+      );
+      return;
+    }
+    setNotifBusy(true);
+    try {
+      const result = await scheduleTestNotification();
+      if (result.ok) {
+        Alert.alert('Prueba programada', 'Recibirás una notificación en unos segundos.');
+        if (Platform.OS === 'ios') void Haptics.selectionAsync();
+      } else {
+        Alert.alert('No pudimos programar', 'Reintenta o reinicia la app.');
+      }
+    } finally {
+      setNotifBusy(false);
+    }
+  }
+
+  function handleNotificationsUnavailable() {
+    Alert.alert(
+      'Notificaciones no disponibles',
+      'El binario instalado no tiene el módulo nativo de notificaciones. Reinstala la app desde Xcode (mobile/ios/Focus.xcworkspace) tras correr "npx expo prebuild --clean" + "pod install".',
       [{ text: 'Entendido', style: 'default' }],
     );
   }
@@ -269,27 +372,34 @@ export default function SettingsScreen() {
             </SettingsSection>
           </Animated.View>
 
-          {/* ── Notificaciones ───────────────────────────────────────── */}
+          {/* ── Notificaciones ───────────────────────────────────────────
+              V1: solo notificaciones locales (sin APNs push remoto). Si
+              expo-notifications no está linkeado en este binario (caso
+              típico antes del primer rebuild después de agregar la dep),
+              mostramos copy honesta y un Alert con instrucciones. */}
           <Animated.View entering={FadeInDown.delay(240).duration(360)}>
             <SettingsSection title="Notificaciones">
               <SettingsRow
                 isFirst
                 iconName="sparkles"
-                label="Recordatorios inteligentes"
-                sub="Próximamente · pediremos permiso al activar"
-                onPress={() =>
-                  comingSoon(
-                    'Recordatorios',
-                    'Nova te avisará antes de cada bloque importante. Te pediremos permiso de notificaciones cuando lo actives.',
-                  )
+                label="Recordatorios"
+                sub={notificationsLabel(notifStatus, notifAvailable)}
+                onPress={
+                  !notifAvailable
+                    ? handleNotificationsUnavailable
+                    : notifBusy
+                      ? undefined
+                      : handleNotificationsToggle
                 }
               />
-              <SettingsRow
-                iconName="sparkles"
-                label="Horario silencioso"
-                sub="Sin alertas en horas marcadas (próximamente)"
-                onPress={() => comingSoon('Horario silencioso')}
-              />
+              {notifAvailable && notifStatus === 'granted' ? (
+                <SettingsRow
+                  iconName="checklist"
+                  label="Enviar notificación de prueba"
+                  sub="Te llegará en ~5 segundos para confirmar que todo funciona"
+                  onPress={notifBusy ? undefined : handleSendTestNotification}
+                />
+              ) : null}
             </SettingsSection>
           </Animated.View>
 
@@ -300,7 +410,11 @@ export default function SettingsScreen() {
                 isFirst
                 iconName="sun.max.fill"
                 label="Apariencia"
-                sub={appearanceLabel(scheme)}
+                sub={appearanceLabel(themePref.preference, themePref.effective)}
+                onPress={() => {
+                  if (Platform.OS === 'ios') void Haptics.selectionAsync();
+                  setShowAppearance(true);
+                }}
               />
               <SettingsRow
                 iconName="sparkles"
@@ -399,6 +513,16 @@ export default function SettingsScreen() {
           // para que cacheRegistry limpie los Maps de useEvents/useTasks/etc
           // y AuthGate del root layout redirija a /(auth)/login.
           await signOut();
+        }}
+      />
+
+      <AppearanceSheet
+        visible={showAppearance}
+        onDismiss={() => setShowAppearance(false)}
+        selected={themePref.preference}
+        onSelect={async (next) => {
+          await themePref.setPreference(next);
+          setShowAppearance(false);
         }}
       />
     </SafeAreaView>

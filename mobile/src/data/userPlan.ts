@@ -76,7 +76,7 @@ export async function deleteAccount(): Promise<{ ok: true } | { ok: false; code:
       code,
       message: humanMessageForDeleteError(code),
     };
-  } catch (err: any) {
+  } catch {
     return {
       ok: false,
       code: 'network_error',
