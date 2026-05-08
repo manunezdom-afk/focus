@@ -2,6 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
+import { withAuthRetry } from '../lib/authRetry';
 import {
   createTask as apiCreateTask,
   deleteTask as apiDeleteTask,
@@ -71,10 +72,12 @@ export function useTasks() {
       }));
 
       try {
-        // Dedup: reutilizar request en vuelo si la hay.
+        // Dedup: reutilizar request en vuelo si la hay. withAuthRetry
+        // refresca la sesión si tira 401 y reintenta una vez (caso típico:
+        // app abierta tras horas y access_token expirado).
         let promise = _inFlight.get(userId);
         if (!promise) {
-          promise = fetchTasks(userId);
+          promise = withAuthRetry(() => fetchTasks(userId), 'fetchTasks');
           _inFlight.set(userId, promise);
           promise.finally(() => _inFlight.delete(userId));
         }

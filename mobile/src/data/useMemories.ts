@@ -2,8 +2,10 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
+import { withAuthRetry } from '../lib/authRetry';
 import {
   type CreateMemoryInput,
+  deleteMemory as apiDeleteMemory,
   fetchMemories,
   type Memory,
   upsertMemory,
@@ -49,7 +51,7 @@ export function useMemories() {
       try {
         let promise = _inFlight.get(userId);
         if (!promise) {
-          promise = fetchMemories(userId);
+          promise = withAuthRetry(() => fetchMemories(userId), 'fetchMemories');
           _inFlight.set(userId, promise);
           promise.finally(() => _inFlight.delete(userId));
         }
@@ -90,11 +92,27 @@ export function useMemories() {
     [userId],
   );
 
+  const removeMemory = useCallback(
+    async (id: string): Promise<void> => {
+      if (!userId) return;
+      const before = stateRef.current.memories;
+      setState((s) => ({ ...s, memories: s.memories.filter((m) => m.id !== id) }));
+      _cache.delete(userId);
+      try {
+        await withAuthRetry(() => apiDeleteMemory(userId, id), 'deleteMemory');
+      } catch (err: any) {
+        setState((s) => ({ ...s, memories: before, error: err?.message ?? 'memory_delete_failed' }));
+      }
+    },
+    [userId],
+  );
+
   return {
     memories: state.memories,
     loading: state.loading,
     error: state.error,
     addMemory,
+    removeMemory,
     refresh: () => load(true),
   };
 }

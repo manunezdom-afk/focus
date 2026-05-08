@@ -2,6 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
+import { withAuthRetry } from '../lib/authRetry';
 import {
   createEvent,
   deleteEvent,
@@ -71,11 +72,13 @@ export function useEvents(mode: Mode = 'all') {
 
       try {
         // Dedup: reutilizar request en vuelo si ya hay una para esta clave.
+        // Si la sesión expiró, withAuthRetry refresca y reintenta una vez.
         let promise = _inFlight.get(cacheKey);
         if (!promise) {
-          promise = mode === 'today'
-            ? fetchTodayEvents(userId)
-            : fetchEvents(userId);
+          promise = withAuthRetry(
+            () => (mode === 'today' ? fetchTodayEvents(userId) : fetchEvents(userId)),
+            'fetchEvents',
+          );
           _inFlight.set(cacheKey, promise);
           promise.finally(() => _inFlight.delete(cacheKey));
         }

@@ -5,6 +5,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { detectEventKind, getBlockColors } from '@/src/data/blockColors';
 import { isToday } from '@/src/data/today';
 import type { EventItem } from '@/src/data/types';
 
@@ -91,6 +92,7 @@ export function DayTimeline({ dateISO, events, onDeleteEvent }: Props) {
             event={event}
             window={window}
             c={c}
+            scheme={scheme}
             enterIndex={idx}
             onDeletePress={
               onDeleteEvent ? () => onDeleteEvent(event.id, event.title) : undefined
@@ -106,12 +108,14 @@ function TimelineRow({
   event,
   window,
   c,
+  scheme,
   enterIndex,
   onDeletePress,
 }: {
   event: EventItem;
   window: Window;
   c: typeof Colors.light;
+  scheme: 'light' | 'dark';
   enterIndex: number;
   onDeletePress?: () => void;
 }) {
@@ -122,6 +126,10 @@ function TimelineRow({
   const timeLabel = isUntimed ? 'Todo' : start ?? '';
   const enterDelay = Math.min(160 + enterIndex * 50, 400);
 
+  // Color por tipo de bloque — evento azul, recordatorio ámbar, focus cyan.
+  const kind = detectEventKind({ title: event.title, section: event.section });
+  const kindColors = getBlockColors(kind, scheme);
+
   const cardBg = isNow ? c.primaryContainer : c.surface;
   const cardBorder = isNow ? c.primary : c.border;
   const cardBorderWidth = isNow ? 2 : StyleSheet.hairlineWidth;
@@ -130,7 +138,7 @@ function TimelineRow({
     : isPast
       ? c.textSubtle
       : isUntimed
-        ? c.primary
+        ? kindColors.accent
         : c.text;
 
   return (
@@ -155,6 +163,8 @@ function TimelineRow({
             backgroundColor: cardBg,
             borderColor: cardBorder,
             borderWidth: cardBorderWidth,
+            borderLeftColor: kindColors.accent,
+            borderLeftWidth: 3,
             shadowColor: isNow ? c.primary : '#000000',
             shadowOpacity: isNow ? 0.18 : 0.04,
             shadowRadius: isNow ? 18 : 8,
@@ -163,6 +173,15 @@ function TimelineRow({
           },
         ]}
       >
+        {/* Chip de categoría arriba del título */}
+        <View style={styles.kindRow}>
+          <View style={[styles.kindChip, { backgroundColor: kindColors.badge }]}>
+            <Text style={[styles.kindChipText, { color: kindColors.badgeText }]}>
+              {kindColors.label}
+            </Text>
+          </View>
+        </View>
+
         <View style={styles.cardHead}>
           <Text
             style={[
@@ -251,6 +270,21 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     padding: Spacing.md,
     gap: 4,
+  },
+  kindRow: {
+    flexDirection: 'row',
+    marginBottom: 2,
+  },
+  kindChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radius.full,
+  },
+  kindChipText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   cardHead: {
     flexDirection: 'row',

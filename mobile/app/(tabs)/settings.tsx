@@ -15,11 +15,15 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
+import { MemoriesSheet } from '@/components/settings/MemoriesSheet';
+import { PersonalitySheet } from '@/components/settings/PersonalitySheet';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { SettingsRow, SettingsSection } from '@/components/ui/SettingsList';
 import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/src/auth/AuthProvider';
+import { useMemories } from '@/src/data/useMemories';
+import { useUserProfile } from '@/src/data/useUserProfile';
 
 // Etiqueta del esquema de color actual del sistema (no preference real
 // todavía — Expo sigue al sistema). Si en el futuro existe preferencia
@@ -28,11 +32,35 @@ function appearanceLabel(scheme: 'light' | 'dark'): string {
   return scheme === 'dark' ? 'Siguiendo el sistema · Oscuro' : 'Siguiendo el sistema · Claro';
 }
 
+function personalitySubLabel(p?: 'focus' | 'cercana' | 'estrategica' | null): string {
+  switch (p) {
+    case 'cercana':
+      return 'Tono cercano · cálido';
+    case 'estrategica':
+      return 'Tono estratégico · con razón';
+    case 'focus':
+      return 'Tono enfocado · directo';
+    default:
+      return 'Tono enfocado · directo';
+  }
+}
+
+function memoriesSubLabel(count: number, loading: boolean): string {
+  if (loading && count === 0) return 'Cargando…';
+  if (count === 0) return 'Sin memorias guardadas';
+  if (count === 1) return '1 memoria guardada';
+  return `${count} memorias guardadas`;
+}
+
 export default function SettingsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const { user, signOut } = useAuth();
+  const profile = useUserProfile();
+  const memoriesHook = useMemories();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [showPersonality, setShowPersonality] = useState(false);
+  const [showMemories, setShowMemories] = useState(false);
 
   const isAuthenticated = !!user;
   const email = user?.email ?? null;
@@ -182,24 +210,20 @@ export default function SettingsScreen() {
                 isFirst
                 iconName="sparkles"
                 label="Personalidad de Nova"
-                sub="Tono enfocado · Predeterminado"
-                onPress={() =>
-                  comingSoon(
-                    'Personalidad de Nova',
-                    'Elige cómo te habla Nova: enfocado, cálido, directo o coach. Próximamente.',
-                  )
-                }
+                sub={personalitySubLabel(profile.profile?.novaPersonality)}
+                onPress={() => {
+                  if (Platform.OS === 'ios') void Haptics.selectionAsync();
+                  setShowPersonality(true);
+                }}
               />
               <SettingsRow
                 iconName="sparkles"
                 label="Memorias de Nova"
-                sub="Lo que Nova guarda sobre ti (próximamente)"
-                onPress={() =>
-                  comingSoon(
-                    'Memorias de Nova',
-                    'Verás y editarás lo que Nova recuerda sobre tus rutinas, relaciones y metas.',
-                  )
-                }
+                sub={memoriesSubLabel(memoriesHook.memories.length, memoriesHook.loading)}
+                onPress={() => {
+                  if (Platform.OS === 'ios') void Haptics.selectionAsync();
+                  setShowMemories(true);
+                }}
               />
             </SettingsSection>
           </Animated.View>
@@ -307,6 +331,24 @@ export default function SettingsScreen() {
         </View>
       </ScrollView>
       </SwipeNavigator>
+
+      <PersonalitySheet
+        visible={showPersonality}
+        onDismiss={() => setShowPersonality(false)}
+        selected={profile.profile?.novaPersonality ?? 'focus'}
+        saving={profile.saving}
+        onSelect={async (p) => {
+          await profile.setNovaPersonality(p);
+        }}
+      />
+
+      <MemoriesSheet
+        visible={showMemories}
+        onDismiss={() => setShowMemories(false)}
+        memories={memoriesHook.memories}
+        loading={memoriesHook.loading}
+        onDelete={memoriesHook.removeMemory}
+      />
     </SafeAreaView>
   );
 }

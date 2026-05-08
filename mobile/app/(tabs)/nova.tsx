@@ -42,6 +42,7 @@ import type { CreateTaskInput } from '@/src/data/tasks';
 import { useEvents } from '@/src/data/useEvents';
 import { useMemories } from '@/src/data/useMemories';
 import { useTasks } from '@/src/data/useTasks';
+import { useUserProfile } from '@/src/data/useUserProfile';
 import { expandRecurrence } from '@/src/utils/expandRecurrence';
 
 // Pantalla Nova — corazón inteligente de Focus.
@@ -199,6 +200,7 @@ export default function NovaScreen() {
   const events = useEvents('all');
   const tasks = useTasks();
   const memoriesHook = useMemories();
+  const userProfile = useUserProfile();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -562,6 +564,7 @@ export default function NovaScreen() {
           tasks: tasks.tasks,
           memories: memoriesHook.memories,
           history,
+          novaPersonality: userProfile.profile?.novaPersonality ?? 'focus',
         });
 
         const actions = Array.isArray(reply.actions) ? reply.actions : [];

@@ -25,6 +25,7 @@ import { sendNovaMessage, type NovaActionShape } from '@/src/data/nova';
 import { setNovaSeed } from '@/src/data/novaSeedStore';
 import type { CreateTaskInput } from '@/src/data/tasks';
 import type { EventItem, Task } from '@/src/data/types';
+import { useUserProfile } from '@/src/data/useUserProfile';
 
 // Contexto por pantalla — Nova ajusta placeholder y agrega un hint sutil
 // al prompt cuando lo que el usuario dice es ambiguo. La intención es que
@@ -143,6 +144,7 @@ export function NovaInputBar({
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
+  const userProfile = useUserProfile();
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [reply, setReply] = useState<ReplyState | null>(null);
@@ -182,6 +184,7 @@ export function NovaInputBar({
         events,
         tasks,
         history: [],
+        novaPersonality: userProfile.profile?.novaPersonality ?? 'focus',
       });
 
       const applied: string[] = [];
@@ -221,7 +224,7 @@ export function NovaInputBar({
     } finally {
       setSending(false);
     }
-  }, [draft, sending, events, tasks, onAddEvent, onAddTask, onRefresh, context]);
+  }, [draft, sending, events, tasks, onAddEvent, onAddTask, onRefresh, context, userProfile.profile]);
 
   // Tap en el chevron del reply o en el bubble: salta a la pantalla Nova
   // con el último mensaje + reply ya enviado (vía seedStore). Permite

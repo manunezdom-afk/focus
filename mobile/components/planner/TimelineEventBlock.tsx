@@ -4,6 +4,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { detectEventKind, getBlockColors } from '@/src/data/blockColors';
 import type { EventItem } from '@/src/data/types';
 
 type Props = {
@@ -50,9 +51,12 @@ export function TimelineEventBlock({
   // El evento se ve "apagado" si está hecho o ya pasó.
   const dim = done || isPast;
 
-  // Color del dot — verde si hecho, primary si futuro/activo.
-  const dotColor = done ? c.success : c.primary;
-  const accentColor = done ? c.success : c.primary;
+  // Color por tipo de bloque: evento azul, recordatorio ámbar, focus cyan.
+  // Cuando está hecho, ganamos el verde de éxito por encima de la categoría.
+  const kind = detectEventKind({ title: event.title, section: event.section });
+  const kindColors = getBlockColors(kind, scheme);
+  const dotColor = done ? c.success : kindColors.accent;
+  const accentColor = done ? c.success : kindColors.accent;
 
   return (
     <Animated.View
@@ -79,6 +83,20 @@ export function TimelineEventBlock({
             },
           ]}
         >
+          {/* Chip de categoría — distingue evento / recordatorio / enfocado */}
+          <View style={styles.kindRow}>
+            <View
+              style={[
+                styles.kindChip,
+                { backgroundColor: kindColors.badge },
+              ]}
+            >
+              <Text style={[styles.kindChipText, { color: kindColors.badgeText }]}>
+                {kindColors.label}
+              </Text>
+            </View>
+          </View>
+
           <View style={styles.titleRow}>
             <Text
               style={[
@@ -194,6 +212,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 4,
     elevation: 1,
+  },
+  kindRow: {
+    flexDirection: 'row',
+    marginBottom: 2,
+  },
+  kindChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radius.full,
+  },
+  kindChipText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   titleRow: {
     flexDirection: 'row',

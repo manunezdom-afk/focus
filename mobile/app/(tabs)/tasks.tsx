@@ -220,7 +220,10 @@ export default function TasksScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isFullyEmpty && styles.scrollContentEmpty,
+          ]}
           keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
@@ -298,7 +301,9 @@ export default function TasksScreen() {
           {showLoadingState ? <LoadingState /> : null}
 
           {isFullyEmpty ? (
-            <FullyEmptyState onCreate={() => openAddFor('hoy')} onAskNova={goToNovaForTasksSeed} />
+            <View style={styles.emptyFill}>
+              <FullyEmptyState onCreate={() => openAddFor('hoy')} onAskNova={goToNovaForTasksSeed} />
+            </View>
           ) : null}
 
           {!showLoadingState && !isFullyEmpty ? (
@@ -559,7 +564,57 @@ function FullyEmptyState({
           <Text style={[styles.secondaryBtnText, { color: c.primary }]}>Organizar con Nova</Text>
         </Pressable>
       </View>
+
+      {/* Ejemplos fantasma — desaparecen cuando aparece la primera tarea
+          real (porque isFullyEmpty pasa a false y este bloque entero no se
+          renderiza). Solo demuestra cómo se ven las tareas. */}
+      <Text style={[styles.exampleHeader, { color: c.textSubtle }]}>
+        ASÍ SE VERÁN TUS TAREAS
+      </Text>
+      <View style={styles.exampleList}>
+        <ExampleTaskCard label="Llamar al dentista" priority="Media" colorScheme={scheme} />
+        <ExampleTaskCard label="Terminar propuesta de cliente" priority="Alta" colorScheme={scheme} />
+        <ExampleTaskCard label="Comprar cumpleaños mamá" priority="Baja" colorScheme={scheme} />
+      </View>
     </Animated.View>
+  );
+}
+
+// Tarjeta fantasma — solo visual. No persiste, no es interactiva. Se muestra
+// debajo del card "Tu lista está limpia" para enseñar cómo se verán las
+// tareas reales. Cuando el usuario crea su primera tarea, isFullyEmpty pasa
+// a false y este bloque desaparece completo.
+function ExampleTaskCard({
+  label,
+  priority,
+  colorScheme,
+}: {
+  label: string;
+  priority: 'Alta' | 'Media' | 'Baja';
+  colorScheme: 'light' | 'dark';
+}) {
+  const c = Colors[colorScheme];
+  const accent = '#7c3aed'; // morado tarea, igual que TimelineTaskBlock
+  const priColor =
+    priority === 'Alta' ? '#dc2626' : priority === 'Baja' ? c.textSubtle : accent;
+
+  return (
+    <View
+      style={[
+        styles.exampleCard,
+        { backgroundColor: c.surface, borderColor: c.border, borderLeftColor: accent },
+      ]}
+    >
+      <View style={[styles.exampleCheck, { borderColor: c.borderStrong }]} />
+      <View style={styles.exampleBody}>
+        <Text style={[styles.exampleLabel, { color: c.textMuted }]} numberOfLines={1}>
+          {label}
+        </Text>
+      </View>
+      <View style={[styles.examplePriPill, { backgroundColor: c.surfaceMuted }]}>
+        <Text style={[styles.examplePriText, { color: priColor }]}>{priority}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -567,6 +622,8 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   flex: { flex: 1 },
   scrollContent: { paddingBottom: Spacing['3xl'] },
+  scrollContentEmpty: { flexGrow: 1, paddingBottom: 16 },
+  emptyFill: { flex: 1, justifyContent: 'center' },
 
   // Header — eyebrow + title estilo Calendario (compacto, fino)
   header: {
@@ -629,10 +686,55 @@ const styles = StyleSheet.create({
   weeklyWrap: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.lg },
   bannerWrap: { paddingHorizontal: Spacing.lg },
 
-  // Empty state — mismo lenguaje visual que Calendario
+  // Empty state — mismo lenguaje visual que Calendario.
+  // Sin marginTop: el wrapper emptyFill centra verticalmente el card.
   emptyWrap: {
     paddingHorizontal: Spacing.lg,
-    marginTop: 32,
+    gap: Spacing.md,
+  },
+  exampleHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textAlign: 'center',
+    marginTop: Spacing.md,
+  },
+  exampleList: {
+    gap: 8,
+    opacity: 0.5,
+  },
+  exampleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 12,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: 3,
+  },
+  exampleCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+  },
+  exampleBody: {
+    flex: 1,
+  },
+  exampleLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  examplePriPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radius.full,
+  },
+  examplePriText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.4,
   },
   emptyCard: {
     borderRadius: Radius['2xl'],

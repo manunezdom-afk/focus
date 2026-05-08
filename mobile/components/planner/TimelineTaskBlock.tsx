@@ -4,6 +4,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { getBlockColors } from '@/src/data/blockColors';
 import type { Task } from '@/src/data/types';
 
 type Props = {
@@ -16,22 +17,13 @@ type Props = {
 const DOT_SIZE = 8;
 const COL_GAP = 20;
 
-function priorityAccent(c: ReturnType<typeof getColors>, p: string): string {
-  if (p === 'Alta') return c.danger;
-  if (p === 'Baja') return c.borderStrong;
-  return c.primary;
-}
-
-// Helper para tipar el retorno de Colors[scheme] sin importar paleta cruda.
-function getColors(scheme: 'light' | 'dark') {
-  return Colors[scheme];
-}
-
 export function TimelineTaskBlock({ task, onToggle, onDeletePress, enterIndex = 0 }: Props) {
   const scheme = useColorScheme() ?? 'light';
-  const c = getColors(scheme);
+  const c = Colors[scheme];
 
-  const accent = priorityAccent(c, task.priority);
+  // Tareas siempre van morado/violeta; la prioridad la marca el chip.
+  const taskColors = getBlockColors('task', scheme);
+  const accent = taskColors.accent;
   const enterDelay = Math.min(160 + enterIndex * 50, 400);
 
   return (
@@ -45,8 +37,8 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, enterIndex = 
       </View>
 
       <View style={styles.cardCol}>
-        {/* Dot conector — color apagado para distinguir tareas de eventos */}
-        <View style={[styles.dot, { backgroundColor: c.borderStrong }]} />
+        {/* Dot conector — morado de tarea */}
+        <View style={[styles.dot, { backgroundColor: accent }]} />
 
         <View
           style={[
@@ -60,9 +52,9 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, enterIndex = 
         >
           <View style={styles.titleRow}>
             <View style={styles.titleCol}>
-              <View style={[styles.badge, { backgroundColor: c.surfaceTint }]}>
-                <Text style={[styles.badgeText, { color: c.primary }]}>
-                  PENDIENTE DE HOY
+              <View style={[styles.badge, { backgroundColor: taskColors.badge }]}>
+                <Text style={[styles.badgeText, { color: taskColors.badgeText }]}>
+                  TAREA · {task.priority.toUpperCase()}
                 </Text>
               </View>
               <Text style={[styles.title, { color: c.text }]} numberOfLines={2}>
