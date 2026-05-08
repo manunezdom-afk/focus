@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -47,7 +47,7 @@ import { expandRecurrence } from '@/src/utils/expandRecurrence';
 
 // Pantalla Nova — corazón inteligente de Focus.
 //
-// Estructura: header con NovaOrb + título → empty state (orb hero + chips)
+// Estructura: header con NovaOrb + título → empty state (orb hero + pills)
 // O FlatList de chat → composer fijo abajo.
 //
 // Action processor: aplica add_event/add_task con shape válida via hooks
@@ -61,12 +61,63 @@ type SuggestedPrompt = {
   icon: 'sparkles' | 'calendar' | 'checklist';
 };
 
-const SUGGESTED_PROMPTS: SuggestedPrompt[] = [
-  { label: 'Organiza mi día', icon: 'sparkles' },
-  { label: 'Agenda gym mañana a las 7', icon: 'calendar' },
-  { label: 'Reserva 2h enfocadas esta tarde', icon: 'checklist' },
-  { label: '¿Qué tengo pendiente?', icon: 'sparkles' },
-];
+function timeGreeting(): string {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return 'Buenos días.';
+  if (h >= 12 && h < 19) return 'Buenas tardes.';
+  return 'Buenas noches.';
+}
+
+function useContextualPrompts(
+  evts: import('@/src/data/types').EventItem[],
+  tsks: import('@/src/data/types').Task[],
+): SuggestedPrompt[] {
+  return useMemo(() => {
+    const hour = new Date().getHours();
+    const today = new Date().toISOString().split('T')[0];
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowISO = tomorrow.toISOString().split('T')[0];
+
+    const pendingToday = tsks.filter((t) => !t.done && t.category === 'hoy');
+    const todayEvts = evts.filter((e) => e.date === today);
+    const tomorrowEvts = evts.filter((e) => e.date === tomorrowISO);
+
+    const result: SuggestedPrompt[] = [];
+
+    if (hour >= 5 && hour < 12) {
+      if (pendingToday.length > 0) {
+        result.push({ label: `Prioriza mis ${pendingToday.length} tareas de hoy`, icon: 'sparkles' });
+      } else if (todayEvts.length > 0) {
+        result.push({ label: `Repasa mis ${todayEvts.length} eventos de hoy`, icon: 'calendar' });
+      } else {
+        result.push({ label: 'Organiza mi mañana', icon: 'sparkles' });
+      }
+      result.push({ label: '2h enfocadas esta mañana', icon: 'checklist' });
+    } else if (hour >= 12 && hour < 19) {
+      if (pendingToday.length > 0) {
+        const lbl = pendingToday[0].label;
+        const short = lbl.length > 22 ? lbl.slice(0, 22) + '…' : lbl;
+        result.push({ label: `¿Termino "${short}"?`, icon: 'sparkles' });
+      } else {
+        result.push({ label: '¿Qué me falta hoy?', icon: 'sparkles' });
+      }
+      result.push({ label: 'Mueve algo a mañana', icon: 'calendar' });
+    } else {
+      if (tomorrowEvts.length > 0) {
+        result.push({ label: `Mañana tienes ${tomorrowEvts.length} eventos`, icon: 'calendar' });
+      } else {
+        result.push({ label: 'Planifica mi mañana', icon: 'calendar' });
+      }
+      result.push({ label: 'Cierra el día', icon: 'sparkles' });
+    }
+
+    result.push({ label: '¿Qué tengo esta semana?', icon: 'sparkles' });
+    result.push({ label: 'Agenda algo nuevo', icon: 'calendar' });
+
+    return result.slice(0, 4);
+  }, [evts, tsks]);
+}
 
 // Lectura defensiva de las acciones que devuelve Nova. Tolerantes a
 // `a.event` (legacy) o `a.payload.event` (forma nueva). Si la shape es
@@ -677,6 +728,7 @@ export default function NovaScreen() {
   }, [sending, messages, lastMsg, handleSend]);
 
   const isEmpty = messages.length === 0;
+  const suggestedPrompts = useContextualPrompts(events.events, tasks.tasks);
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
@@ -722,44 +774,44 @@ export default function NovaScreen() {
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.emptyHero}>
-              <NovaOrb size={64} ambient breathing />
-              <Text style={[styles.emptyTitle, { color: c.text }]}>¿Qué necesitas?</Text>
+              <NovaOrb size={80} ambient breathing />
+              <Text style={[styles.emptyGreeting, { color: c.text }]}>{timeGreeting()}</Text>
               <Text style={[styles.emptyDesc, { color: c.textMuted }]}>
-                Te ayudo a agendar, mover o limpiar tu día. Siempre confirmas antes de aplicar.
+                Dime qué necesitas o elige una sugerencia.
               </Text>
             </View>
 
-            <View style={styles.suggestionsCol}>
-              {SUGGESTED_PROMPTS.map((s, idx) => (
+            <Animated.View
+              entering={FadeInDown.delay(200).duration(360)}
+              style={styles.pillsWrap}
+            >
+              {suggestedPrompts.map((s, idx) => (
                 <Animated.View
                   key={s.label}
-                  entering={FadeInDown.delay(220 + idx * 60).duration(320)}
+                  entering={FadeInDown.delay(240 + idx * 55).duration(300)}
                 >
                   <Pressable
                     onPress={() => void handleSend(s.label)}
                     style={({ pressed }) => [
-                      styles.suggestion,
+                      styles.pill,
                       {
-                        backgroundColor: c.surface,
-                        borderColor: c.border,
-                        opacity: pressed ? 0.7 : 1,
-                        transform: [{ scale: pressed ? 0.98 : 1 }],
+                        backgroundColor: pressed ? c.primaryContainer : c.surface,
+                        borderColor: pressed ? c.primary : c.border,
+                        opacity: pressed ? 0.9 : 1,
+                        transform: [{ scale: pressed ? 0.97 : 1 }],
                       },
                     ]}
                     accessibilityRole="button"
                     accessibilityLabel={`Enviar a Nova: ${s.label}`}
                   >
-                    <View style={[styles.suggestionIcon, { backgroundColor: c.primaryContainer }]}>
-                      <IconSymbol name={s.icon} size={16} color={c.primary} />
-                    </View>
-                    <Text style={[styles.suggestionText, { color: c.text }]} numberOfLines={1}>
+                    <IconSymbol name={s.icon} size={13} color={c.primary} />
+                    <Text style={[styles.pillText, { color: c.text }]} numberOfLines={1}>
                       {s.label}
                     </Text>
-                    <IconSymbol name="chevron.right" size={14} color={c.textSubtle} />
                   </Pressable>
                 </Animated.View>
               ))}
-            </View>
+            </Animated.View>
           </Animated.ScrollView>
         ) : (
           <FlatList
@@ -943,48 +995,50 @@ const styles = StyleSheet.create({
   emptyHero: {
     alignItems: 'center',
     gap: Spacing.sm,
-    paddingTop: Spacing.xs,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.xs,
   },
-  emptyTitle: {
-    fontSize: 19,
+  emptyGreeting: {
+    fontSize: 22,
     fontWeight: '700',
-    lineHeight: 24,
-    letterSpacing: -0.3,
+    lineHeight: 28,
+    letterSpacing: -0.4,
     textAlign: 'center',
-    marginTop: Spacing.xs,
+    marginTop: Spacing.sm,
   },
   emptyDesc: {
     fontSize: 14,
     fontWeight: '400',
     lineHeight: 20,
     textAlign: 'center',
-    maxWidth: 320,
+    maxWidth: 280,
   },
 
-  suggestionsCol: {
-    gap: 10,
+  pillsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.sm,
   },
-  suggestion: {
+  pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: 6,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    paddingHorizontal: Spacing.md + 2,
-    paddingVertical: 14,
+    borderRadius: Radius.full,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
-  suggestionIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  suggestionText: {
-    fontSize: 15,
+  pillText: {
+    fontSize: 14,
     fontWeight: '500',
-    lineHeight: 20,
-    flex: 1,
+    lineHeight: 18,
   },
 
   listContent: {

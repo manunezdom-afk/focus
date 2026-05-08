@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -13,26 +13,85 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 
 type Props = {
   size?: number;
-  // Halo ambiente (anillo tinted exterior). false en headers compactos.
   ambient?: boolean;
-  // Respiración infinita 1↔1.05 cada 1.6s. Default false para no
-  // gastar UI thread con animaciones invisibles. Activar SOLO en orbs
-  // grandes hero (size >= 80) que el usuario está mirando directamente.
   breathing?: boolean;
 };
 
-// Firma visual de Nova en mobile. Adaptación del NovaOrb legacy
-// (radial-gradient + breathing) sin requerir gradient lib: orb sólido
-// indigo + highlight superior izquierdo simulando reflejo + halo
-// ambient opcional.
-//
-// Performance: la respiración (`withRepeat` infinito) corre en UI thread
-// pero igual consume worklet cycles. Default off para que en headers
-// compactos (Tasks summary, Nova header) sea estática. Solo los hero
-// orbs grandes (Nova empty 88px, Tasks empty 84px) la activan.
+// Spot de color orbitando dentro del orbe. Usa trigonometría en worklet
+// (Math.cos/sin disponibles en Reanimated 3 JSI) para mover la mancha
+// en un círculo de radio `orbitR` centrado en el orbe.
+function ColorSpot({
+  size,
+  color,
+  orbitR,
+  duration,
+  reverse = false,
+  initialAngle,
+  opacity,
+}: {
+  size: number;
+  color: string;
+  orbitR: number;
+  duration: number;
+  reverse?: boolean;
+  initialAngle: number;
+  opacity: number;
+}) {
+  const angle = useSharedValue(initialAngle);
+
+  useEffect(() => {
+    angle.value = initialAngle;
+    angle.value = withRepeat(
+      withTiming(initialAngle + (reverse ? -360 : 360), {
+        duration,
+        easing: Easing.linear,
+      }),
+      -1,
+      false,
+    );
+  }, []);
+
+  const spotSize = size * 0.62;
+
+  const animStyle = useAnimatedStyle(() => {
+    'worklet';
+    const rad = (angle.value * Math.PI) / 180;
+    return {
+      transform: [
+        { translateX: Math.cos(rad) * orbitR },
+        { translateY: Math.sin(rad) * orbitR },
+      ],
+    };
+  });
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        {
+          position: 'absolute',
+          width: spotSize,
+          height: spotSize,
+          borderRadius: spotSize / 2,
+          backgroundColor: color,
+          opacity,
+        },
+        animStyle,
+      ]}
+    />
+  );
+}
+
+// Firma visual de Nova — orbe vivo con manchas de color orbitando.
+// Simula un mesh-gradient animado sin librerías externas:
+//   · Capa de sombra separada (no overflow:hidden) para que la sombra
+//     se muestre correctamente en iOS.
+//   · Capa de recorte (overflow:hidden) para que los spots no salgan del círculo.
+//   · 3 spots (cyan, violeta, índigo claro) orbitando a velocidades distintas.
 export function NovaOrb({ size = 64, ambient = true, breathing = false }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
+  const dark = scheme === 'dark';
 
   const pulse = useSharedValue(1);
   useEffect(() => {
@@ -41,7 +100,7 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false }: Props)
       return;
     }
     pulse.value = withRepeat(
-      withTiming(1.05, { duration: 1600, easing: Easing.inOut(Easing.quad) }),
+      withTiming(1.06, { duration: 1800, easing: Easing.inOut(Easing.quad) }),
       -1,
       true,
     );
@@ -55,7 +114,12 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false }: Props)
   }));
 
   const haloDiameter = size * 1.7;
-  const highlightSize = size * 0.36;
+  const orbitR = size * 0.2;
+
+  // Colores de los spots por modo
+  const spotCyan = dark ? '#22d3ee' : '#38bdf8';
+  const spotViolet = dark ? '#c084fc' : '#a78bfa';
+  const spotIndigo = dark ? '#818cf8' : '#93c5fd';
 
   return (
     <View
@@ -66,6 +130,7 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false }: Props)
         justifyContent: 'center',
       }}
     >
+      {/* Halo ambiente */}
       {ambient ? (
         <Animated.View
           pointerEvents="none"
@@ -76,61 +141,101 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false }: Props)
               height: haloDiameter,
               borderRadius: haloDiameter / 2,
               backgroundColor: c.primaryContainer,
-              opacity: scheme === 'dark' ? 0.45 : 0.55,
+              opacity: dark ? 0.45 : 0.55,
             },
             haloAnimStyle,
           ]}
         />
       ) : null}
 
+      {/* Capa de sombra — separada para que overflow:hidden no la corte */}
       <Animated.View
+        pointerEvents="none"
         style={[
-          styles.orb,
           {
+            position: 'absolute',
             width: size,
             height: size,
             borderRadius: size / 2,
             backgroundColor: c.primary,
             shadowColor: c.primary,
             shadowOffset: { width: 0, height: size * 0.18 },
-            shadowOpacity: 0.42,
-            shadowRadius: size * 0.36,
+            shadowOpacity: 0.48,
+            shadowRadius: size * 0.42,
             elevation: 6,
           },
           orbAnimStyle,
         ]}
+      />
+
+      {/* Orbe con recorte — spots de color confinados al círculo */}
+      <Animated.View
+        style={[
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            overflow: 'hidden',
+            backgroundColor: c.primary,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          orbAnimStyle,
+        ]}
       >
-        {/* Highlight superior izquierdo — simula reflejo radial sin gradient lib */}
+        {/* Spot 1 — cyan, gira en sentido horario */}
+        <ColorSpot
+          size={size}
+          color={spotCyan}
+          orbitR={orbitR}
+          duration={3400}
+          initialAngle={0}
+          opacity={0.7}
+        />
+        {/* Spot 2 — violeta, gira en sentido antihorario */}
+        <ColorSpot
+          size={size}
+          color={spotViolet}
+          orbitR={orbitR * 1.1}
+          duration={4800}
+          reverse
+          initialAngle={120}
+          opacity={0.6}
+        />
+        {/* Spot 3 — índigo claro, radio pequeño más centrado */}
+        <ColorSpot
+          size={size}
+          color={spotIndigo}
+          orbitR={orbitR * 0.65}
+          duration={2600}
+          initialAngle={240}
+          opacity={0.5}
+        />
+
+        {/* Reflejo superior izquierdo */}
         <View
           pointerEvents="none"
           style={{
             position: 'absolute',
-            top: size * 0.14,
-            left: size * 0.18,
-            width: highlightSize,
-            height: highlightSize,
-            borderRadius: highlightSize / 2,
-            backgroundColor: 'rgba(255,255,255,0.32)',
+            top: size * 0.1,
+            left: size * 0.14,
+            width: size * 0.3,
+            height: size * 0.3,
+            borderRadius: size * 0.15,
+            backgroundColor: 'rgba(255,255,255,0.26)',
           }}
         />
-        {/* Punto interior brillante — pequeño foco al centro */}
+        {/* Punto brillante central */}
         <View
           pointerEvents="none"
           style={{
-            width: size * 0.16,
-            height: size * 0.16,
-            borderRadius: (size * 0.16) / 2,
-            backgroundColor: 'rgba(255,255,255,0.65)',
+            width: size * 0.13,
+            height: size * 0.13,
+            borderRadius: size * 0.065,
+            backgroundColor: 'rgba(255,255,255,0.72)',
           }}
         />
       </Animated.View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  orb: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
