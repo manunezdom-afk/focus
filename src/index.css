@@ -15,15 +15,15 @@
   /* Easing */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* Nova brand — azul-índigo Focus */
-  --nova:      #6366f1;
-  --nova-glow: 99, 102, 241;  /* formato r,g,b para uso en rgba() */
+  /* Nova brand — royal blue Focus */
+  --nova:      #3b82f6;
+  --nova-glow: 59, 130, 246;  /* formato r,g,b para uso en rgba() */
 
-  /* Brand gradient stops (Focus: índigo → violeta → lila) */
-  --grad-1: #5b5ef5;
-  --grad-2: #6366f1;
-  --grad-3: #a78bfa;
-  --grad-4: #c084fc;
+  /* Brand gradient stops (Focus: cyan → cobalt) */
+  --grad-1: #2563eb;
+  --grad-2: #3b82f6;
+  --grad-3: #60a5fa;
+  --grad-4: #22d3ee;
 
   /* App surface — color único de fondo de la app. Se mantiene en sincro
      html/body/AppShell para que ningún borde, esquina o gap durante

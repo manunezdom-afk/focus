@@ -5,36 +5,35 @@ export default {
   theme: {
     extend: {
       colors: {
-        // ── Focus Nova indigo-azul — reemplaza el blue de Material Design.
-        // Palette más azul que el violeta anterior (#7c6bff → #6366f1).
-        // Todos los text-blue-xxx / bg-blue-xxx pasan a índigo sin tocar componentes.
+        // ── Focus Nova royal blue — reemplaza el indigo previo.
+        // Tailwind blue scale estándar. Anchor: blue.600 = #2563eb (royal).
         blue: {
-          50:  '#eef2ff',
-          100: '#e0e7ff',
-          200: '#c7d2fe',
-          300: '#a5b4fc',
-          400: '#818cf8',
-          500: '#6366f1',
-          600: '#5b5ef5',  // anchor: Focus Nova azul-índigo
-          700: '#4338ca',
-          800: '#3730a3',
-          900: '#312e81',
-          950: '#1e1b4b',
+          50:  '#eff6ff',
+          100: '#dbeafe',
+          200: '#bfdbfe',
+          300: '#93c5fd',
+          400: '#60a5fa',
+          500: '#3b82f6',
+          600: '#2563eb',  // anchor: Focus Nova royal blue
+          700: '#1d4ed8',
+          800: '#1e40af',
+          900: '#1e3a8a',
+          950: '#172554',
         },
 
         // ── Semantic / brand tokens ──────────────────────────────────────
-        'primary':           '#5b5ef5',  // Nova azul-índigo
-        'primary-container': '#e0e7ff',
+        'primary':           '#2563eb',  // Nova royal blue
+        'primary-container': '#dbeafe',
         'on-primary':        '#ffffff',
-        'on-primary-fixed':  '#1a006b',
+        'on-primary-fixed':  '#0c1c4d',
 
-        'secondary':           '#6366f1',
-        'secondary-container': '#e0e7ff',
+        'secondary':           '#3b82f6',
+        'secondary-container': '#dbeafe',
         'on-secondary':        '#ffffff',
 
-        'nova':      '#6366f1',
-        'nova-soft': '#e0e7ff',
-        'nova-mid':  '#a5b4fc',
+        'nova':      '#3b82f6',
+        'nova-soft': '#dbeafe',
+        'nova-mid':  '#93c5fd',
 
         // ── Surfaces (ecosystem: papel violeta-frío) ─────────────────────
         'background': '#fafafd',
@@ -64,11 +63,11 @@ export default {
         'on-error':           '#ffffff',
         'on-error-container': '#93000a',
 
-        // ── Brand gradient stops ─────────────────────────────────────────
-        'grad-1': '#5b5ef5',
-        'grad-2': '#6366f1',
-        'grad-3': '#a78bfa',
-        'grad-4': '#c084fc',
+        // ── Brand gradient stops (cyan → cobalt) ────────────────────────
+        'grad-1': '#2563eb',  // royal blue
+        'grad-2': '#3b82f6',  // blue 500
+        'grad-3': '#60a5fa',  // blue 400
+        'grad-4': '#22d3ee',  // cyan 400
       },
 
       transitionTimingFunction: {
