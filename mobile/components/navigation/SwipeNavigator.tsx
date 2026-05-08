@@ -1,14 +1,14 @@
 import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef } from 'react';
-import { Dimensions, Keyboard, Platform } from 'react-native';
+import { Keyboard, Platform } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
-  withTiming,
 } from 'react-native-reanimated';
 
 // Orden estricto de tabs — debe coincidir con (tabs)/_layout.tsx.
@@ -20,19 +20,24 @@ type Props = {
   children: React.ReactNode;
 };
 
-const SCREEN_W = Dimensions.get('window').width;
 const SWIPE_DIST = 80;
 const SWIPE_VEL = 500;
 
-// Wrapper de swipe horizontal entre tabs con feedback visual estilo iOS:
+// Wrapper de swipe horizontal entre tabs con feedback visual estilo iOS.
+//
+// Diseño:
 //   · Durante el pan, el contenido sigue al dedo con translateX 1:1.
 //   · En los extremos (primer/última tab) hay rubber-band damping.
-//   · Al soltar pasando el threshold, el contenido sale de pantalla y
-//     navegamos al tab adyacente — al volver al render con tabIndex nuevo,
-//     translateX está en 0 y entra natural.
-//   · Si no pasa el threshold, vuelve a 0 con spring suave.
+//   · Al soltar pasando el threshold, navegamos INMEDIATAMENTE y el
+//     translateX hace spring rápido a 0. El cambio de tab cubre el spring
+//     visualmente — el usuario percibe "snap" iOS sin que el contenido
+//     anterior quede off-screen.
+//   · CRÍTICO: cada SwipeNavigator es una instancia por tab montada (RN
+//     mantiene tabs en memoria). Si dejáramos translateX en -SCREEN_W al
+//     navegar, al volver a esa tab el contenido seguiría trasladado y se
+//     vería en blanco. Por eso animamos siempre de vuelta a 0 y, además,
+//     useFocusEffect resetea translateX al ganar foco como red de seguridad.
 //   · activeOffsetX/failOffsetY mantienen scroll vertical intacto.
-//   · navigate del Tab navigator local (más rápido que expo-router router).
 export function SwipeNavigator({ currentTab, children }: Props) {
   const navigation = useNavigation<{ navigate: (name: string) => void }>();
   const tabIndex = TAB_ORDER.indexOf(currentTab);
@@ -55,11 +60,14 @@ export function SwipeNavigator({ currentTab, children }: Props) {
     };
   }, []);
 
-  // Reset translate cuando cambia la tab (al volver del navigate, el
-  // contenido nuevo aparece centrado sin flicker).
-  useEffect(() => {
-    translateX.value = 0;
-  }, [tabIndex, translateX]);
+  // Red de seguridad: cuando esta tab gana foco, el translateX vuelve a 0.
+  // Cubre cualquier caso donde un gesto interrumpido haya dejado el valor
+  // intermedio (ej. crash de la animación, navegación por tap del tab bar).
+  useFocusEffect(
+    useCallback(() => {
+      translateX.value = 0;
+    }, [translateX]),
+  );
 
   const navigateTo = useCallback(
     (name: string) => {
@@ -96,7 +104,7 @@ export function SwipeNavigator({ currentTab, children }: Props) {
       const goingRight = e.translationX > 0;
       const goingLeft = e.translationX < 0;
       // Rubber-band en los bordes: si no hay tab a la que ir, el movimiento
-      // se atenúa a un tercio para dar feedback de "no hay más" sin quedarse.
+      // se atenúa para dar feedback de "no hay más" sin quedarse pegado.
       const atEdge = (goingRight && isFirst) || (goingLeft && isLast);
       const factor = atEdge ? 0.28 : 1;
       translateX.value = e.translationX * factor;
@@ -109,13 +117,14 @@ export function SwipeNavigator({ currentTab, children }: Props) {
       const goingRight = e.translationX > 0;
 
       if (passed && goingLeft && !isLast) {
-        // Sale por la izquierda; navegación dispara y al re-render volverá a 0.
-        translateX.value = withTiming(-SCREEN_W, { duration: 200 });
         runOnJS(goNext)();
+        // Spring rápido a 0 — el cambio de tab cubre el reset visualmente.
+        translateX.value = withSpring(0, { damping: 26, stiffness: 320, mass: 0.5 });
       } else if (passed && goingRight && !isFirst) {
-        translateX.value = withTiming(SCREEN_W, { duration: 200 });
         runOnJS(goPrev)();
+        translateX.value = withSpring(0, { damping: 26, stiffness: 320, mass: 0.5 });
       } else {
+        // No pasó el threshold: vuelve con spring más lento (sensación elástica).
         translateX.value = withSpring(0, { damping: 22, stiffness: 220, mass: 0.6 });
       }
     });
