@@ -102,10 +102,12 @@ export function startListening(listener: VoiceListener, options?: {
     return () => {};
   }
 
-  const { ExpoSpeechRecognitionModule, addSpeechRecognitionListener } = V;
+  const { ExpoSpeechRecognitionModule } = V;
 
-  if (!ExpoSpeechRecognitionModule || !addSpeechRecognitionListener) {
-    listener.onError('unavailable', 'El módulo de voz tiene una versión incompatible.');
+  // expo-speech-recognition v3 eliminó addSpeechRecognitionListener.
+  // Los eventos se suscriben directamente en el native module vía .addListener.
+  if (!ExpoSpeechRecognitionModule?.addListener) {
+    listener.onError('unavailable', 'El módulo de voz no está disponible. Reinstala la app.');
     return () => {};
   }
 
@@ -122,7 +124,7 @@ export function startListening(listener: VoiceListener, options?: {
 
   try {
     subs.push(
-      addSpeechRecognitionListener('result', (event: any) => {
+      ExpoSpeechRecognitionModule.addListener('result', (event: any) => {
         // event.results: [{ transcript, confidence }]
         const transcript = event?.results?.[0]?.transcript?.trim?.() ?? '';
         if (!transcript) return;
@@ -134,14 +136,14 @@ export function startListening(listener: VoiceListener, options?: {
       }),
     );
     subs.push(
-      addSpeechRecognitionListener('error', (event: any) => {
+      ExpoSpeechRecognitionModule.addListener('error', (event: any) => {
         const code = event?.error ?? 'unknown';
         const message = event?.message ?? 'No pude escuchar.';
         listener.onError(String(code), String(message));
       }),
     );
     subs.push(
-      addSpeechRecognitionListener('end', () => {
+      ExpoSpeechRecognitionModule.addListener('end', () => {
         listener.onEnd?.();
         cleanup();
       }),

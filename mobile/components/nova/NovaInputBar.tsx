@@ -1,7 +1,10 @@
 import * as Haptics from 'expo-haptics';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Platform,
@@ -25,6 +28,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useDictation } from '@/src/lib/useDictation';
 import type { CreateEventInput } from '@/src/data/events';
 import { sendNovaMessage, type NovaActionShape } from '@/src/data/nova';
+import { analyzePhoto } from '@/src/data/photo';
 import { setNovaSeed } from '@/src/data/novaSeedStore';
 import type { CreateTaskInput } from '@/src/data/tasks';
 import type { EventItem, Task } from '@/src/data/types';
@@ -153,6 +157,7 @@ export function NovaInputBar({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [reply, setReply] = useState<ReplyState | null>(null);
+  const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
 
   // Dictado real on-device via expo-speech-recognition (iOS Speech).
   // El texto final se appendea al draft (con espacio si ya hay algo).
@@ -228,6 +233,97 @@ export function NovaInputBar({
     const t = setTimeout(() => setReply(null), 6000);
     return () => clearTimeout(t);
   }, [reply]);
+
+  const processPhoto = useCallback(async (uri: string) => {
+    if (analyzingPhoto) return;
+    setAnalyzingPhoto(true);
+    if (Platform.OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      const compressed = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1280 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+      const base64 = compressed.base64 ?? '';
+      if (!base64) throw new Error('No pude leer la imagen.');
+
+      const detected = await analyzePhoto({ base64, mediaType: 'image/jpeg' });
+
+      if (detected.length === 0) {
+        setReply({ text: 'No detecté ningún evento en esa foto. Intenta con otra más clara.', appliedActions: [], isError: false });
+        return;
+      }
+
+      const applied: string[] = [];
+      for (const ev of detected) {
+        const created = await onAddEvent({
+          title: ev.title,
+          date: ev.date ?? null,
+          time: ev.time ?? null,
+          description: ev.description ?? undefined,
+        });
+        if (created) applied.push(`Agregado: ${ev.title}`);
+      }
+      onRefresh();
+
+      const summary = detected.length === 1
+        ? 'Detecté 1 evento en la foto y lo agregué a tu calendario.'
+        : `Detecté ${detected.length} eventos en la foto y los agregué.`;
+      setReply({ text: summary, appliedActions: applied, isError: false });
+    } catch (err: any) {
+      setReply({ text: err?.message ?? 'No pude analizar la foto.', appliedActions: [], isError: true });
+      if (Platform.OS === 'ios') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    } finally {
+      setAnalyzingPhoto(false);
+    }
+  }, [analyzingPhoto, onAddEvent, onRefresh]);
+
+  const launchPhotoSource = useCallback(async (source: 'camera' | 'library') => {
+    try {
+      if (source === 'camera') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permiso de cámara requerido', 'Activa el acceso a la cámara en Ajustes para que Nova analice fotos de tu agenda.');
+          return;
+        }
+        const result = await ImagePicker.launchCameraAsync({ allowsEditing: false, quality: 1 });
+        if (!result.canceled && result.assets[0]?.uri) void processPhoto(result.assets[0].uri);
+      } else {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permiso de galería requerido', 'Activa el acceso a Fotos en Ajustes para que Nova analice imágenes.');
+          return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+          allowsEditing: false,
+          quality: 1,
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        });
+        if (!result.canceled && result.assets[0]?.uri) void processPhoto(result.assets[0].uri);
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'No pude abrir el selector de imagen.');
+    }
+  }, [processPhoto]);
+
+  const openPhotoSource = useCallback(() => {
+    if (analyzingPhoto || sending) return;
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: ['Cancelar', 'Tomar foto', 'Elegir de galería'], cancelButtonIndex: 0 },
+        (idx) => {
+          if (idx === 1) void launchPhotoSource('camera');
+          else if (idx === 2) void launchPhotoSource('library');
+        },
+      );
+    } else {
+      Alert.alert('Foto para Nova', '¿Desde dónde?', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Cámara', onPress: () => void launchPhotoSource('camera') },
+        { text: 'Galería', onPress: () => void launchPhotoSource('library') },
+      ]);
+    }
+  }, [analyzingPhoto, sending, launchPhotoSource]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -389,6 +485,23 @@ export function NovaInputBar({
           }}
         />
         <Pressable
+          onPress={openPhotoSource}
+          hitSlop={6}
+          disabled={analyzingPhoto || sending}
+          style={({ pressed }) => [
+            styles.cameraBtn,
+            { opacity: (analyzingPhoto || sending) ? 0.35 : pressed ? 0.6 : 1 },
+          ]}
+          accessibilityLabel="Enviar foto a Nova"
+          accessibilityRole="button"
+        >
+          {analyzingPhoto ? (
+            <ActivityIndicator color={c.primary} size="small" />
+          ) : (
+            <IconSymbol name="camera.fill" size={16} color={c.textSubtle} />
+          )}
+        </Pressable>
+        <Pressable
           onPress={handleMicPress}
           hitSlop={6}
           style={({ pressed }) => [
@@ -531,6 +644,13 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   sendBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cameraBtn: {
     width: 34,
     height: 34,
     borderRadius: 17,
