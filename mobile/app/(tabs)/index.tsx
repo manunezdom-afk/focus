@@ -282,21 +282,21 @@ const styles = StyleSheet.create({
 
   header: {
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
-    paddingBottom: Spacing['2xl'],
-    gap: 6,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.lg,
+    gap: 4,
   },
   titleLine: {
-    fontSize: 40,
+    fontSize: 32,
     fontWeight: '700',
-    lineHeight: 44,
-    letterSpacing: -0.8,
+    lineHeight: 36,
+    letterSpacing: -0.6,
   },
   subLine: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
-    lineHeight: 18,
-    marginTop: 2,
+    lineHeight: 17,
+    marginTop: 1,
   },
   subLineStrong: {
     fontWeight: '700',
