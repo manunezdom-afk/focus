@@ -15,6 +15,9 @@ type Props = {
   size?: number;
   ambient?: boolean;
   breathing?: boolean;
+  // Modo "escribiendo" — añade un pulso secundario más rápido sobre el breathing.
+  // Activar cuando el usuario está ingresando texto o Nova está respondiendo.
+  active?: boolean;
 };
 
 // Spot de color orbitando dentro del orbe. Usa trigonometría en worklet
@@ -88,7 +91,7 @@ function ColorSpot({
 //     se muestre correctamente en iOS.
 //   · Capa de recorte (overflow:hidden) para que los spots no salgan del círculo.
 //   · 3 spots (cyan, violeta, índigo claro) orbitando a velocidades distintas.
-export function NovaOrb({ size = 64, ambient = true, breathing = false }: Props) {
+export function NovaOrb({ size = 64, ambient = true, breathing = false, active = false }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const dark = scheme === 'dark';
@@ -106,9 +109,25 @@ export function NovaOrb({ size = 64, ambient = true, breathing = false }: Props)
     );
   }, [breathing, pulse]);
 
-  const orbAnimStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pulse.value }],
-  }));
+  // Pulso secundario más rápido cuando active (el usuario escribe / Nova responde).
+  const activePulse = useSharedValue(0);
+  useEffect(() => {
+    if (active) {
+      activePulse.value = withRepeat(
+        withTiming(1, { duration: 520, easing: Easing.inOut(Easing.quad) }),
+        -1,
+        true,
+      );
+    } else {
+      activePulse.value = withTiming(0, { duration: 280 });
+    }
+  }, [active, activePulse]);
+
+  const orbAnimStyle = useAnimatedStyle(() => {
+    'worklet';
+    const activeBoost = 1 + activePulse.value * 0.06;
+    return { transform: [{ scale: pulse.value * activeBoost }] };
+  });
   const haloAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: 2 - pulse.value + 0.05 }],
   }));

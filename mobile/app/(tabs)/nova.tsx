@@ -61,11 +61,11 @@ type SuggestedPrompt = {
   icon: 'sparkles' | 'calendar' | 'checklist';
 };
 
-function timeGreeting(): string {
-  const h = new Date().getHours();
-  if (h >= 5 && h < 12) return 'Buenos días.';
-  if (h >= 12 && h < 19) return 'Buenas tardes.';
-  return 'Buenas noches.';
+function formatContextDate(): string {
+  const d = new Date();
+  const weekday = d.toLocaleDateString('es-MX', { weekday: 'long' });
+  const dayMonth = d.toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
+  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}, ${dayMonth}`;
 }
 
 function useContextualPrompts(
@@ -729,21 +729,31 @@ export default function NovaScreen() {
 
   const isEmpty = messages.length === 0;
   const suggestedPrompts = useContextualPrompts(events.events, tasks.tasks);
+  const pendingTodayCount = useMemo(
+    () => tasks.tasks.filter((t) => !t.done && t.category === 'hoy').length,
+    [tasks.tasks],
+  );
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
-      {/* Hero halo — patrón compartido con Mi Día y Calendario. */}
-      <View style={styles.heroHaloLayer} pointerEvents="none">
+      {/* Fondo con dos halos de color suave — indigo arriba-izq, violeta abajo-der */}
+      <View style={styles.bgLayer} pointerEvents="none">
         <View
           style={[
-            styles.heroHaloCircle,
-            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.45 : 0.55 },
+            styles.bgSpot1,
+            {
+              backgroundColor: c.primaryContainer,
+              opacity: scheme === 'dark' ? 0.5 : 0.6,
+            },
           ]}
         />
         <View
           style={[
-            styles.heroHaloCircleSoft,
-            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.18 : 0.22 },
+            styles.bgSpot2,
+            {
+              backgroundColor: scheme === 'dark' ? '#2e1c5f' : '#f3e8ff',
+              opacity: scheme === 'dark' ? 0.6 : 0.7,
+            },
           ]}
         />
       </View>
@@ -754,41 +764,26 @@ export default function NovaScreen() {
         style={styles.flex}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       >
-        {/* Header: orb compacto + título Nova + tagline */}
-        <Animated.View entering={FadeInDown.duration(360)} style={styles.header}>
-          <View style={styles.headerRow}>
-            <NovaOrb size={36} ambient={false} />
-            <View style={styles.headerText}>
-              <Text style={[styles.title, { color: c.text }]}>Nova</Text>
-              <Text style={[styles.subtitle, { color: c.textMuted }]}>
-                Tu asistente para organizar el día.
-              </Text>
-            </View>
-          </View>
+        {/* Barra de contexto mínima — fecha + estado del día */}
+        <Animated.View entering={FadeInDown.duration(280)} style={styles.contextBar}>
+          <Text style={[styles.contextDate, { color: c.text }]}>{formatContextDate()}</Text>
+          <Text style={[styles.contextSub, { color: c.textMuted }]}>
+            {pendingTodayCount > 0
+              ? `${pendingTodayCount} tarea${pendingTodayCount > 1 ? 's' : ''} pendiente${pendingTodayCount > 1 ? 's' : ''}`
+              : 'Día despejado'}
+          </Text>
         </Animated.View>
 
         {isEmpty ? (
-          <Animated.ScrollView
-            entering={FadeInDown.delay(80).duration(420)}
-            contentContainerStyle={styles.emptyContainer}
-            keyboardShouldPersistTaps="handled"
-          >
-            <View style={styles.emptyHero}>
-              <NovaOrb size={80} ambient breathing />
-              <Text style={[styles.emptyGreeting, { color: c.text }]}>{timeGreeting()}</Text>
-              <Text style={[styles.emptyDesc, { color: c.textMuted }]}>
-                Dime qué necesitas o elige una sugerencia.
-              </Text>
-            </View>
-
+          <View style={styles.emptyArea}>
             <Animated.View
-              entering={FadeInDown.delay(200).duration(360)}
+              entering={FadeInDown.delay(120).duration(380)}
               style={styles.pillsWrap}
             >
               {suggestedPrompts.map((s, idx) => (
                 <Animated.View
                   key={s.label}
-                  entering={FadeInDown.delay(240 + idx * 55).duration(300)}
+                  entering={FadeInDown.delay(160 + idx * 55).duration(300)}
                 >
                   <Pressable
                     onPress={() => void handleSend(s.label)}
@@ -812,7 +807,7 @@ export default function NovaScreen() {
                 </Animated.View>
               ))}
             </Animated.View>
-          </Animated.ScrollView>
+          </View>
         ) : (
           <FlatList
             ref={listRef}
@@ -848,43 +843,37 @@ export default function NovaScreen() {
           />
         )}
 
-        {/* Composer — sparkles indicator + TextInput + send con focus glow */}
+        {/* Compositor — orbe de Nova integrado a la izquierda, glass translúcido */}
         <Animated.View
           style={[
             styles.composer,
             {
-              backgroundColor: c.surface,
-              borderColor: c.border,
+              backgroundColor:
+                scheme === 'dark' ? 'rgba(15,23,42,0.88)' : 'rgba(255,255,255,0.90)',
+              borderColor:
+                scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(200,210,255,0.7)',
               shadowColor: '#5b5ef5',
             },
             animatedComposerStyle,
           ]}
         >
+          {/* Orbe: toca para poner foco; pulsa más rápido cuando el usuario escribe */}
           <Pressable
-            onPress={openPhotoSource}
-            disabled={analyzingPhoto || sending}
-            style={({ pressed }) => [
-              styles.leftIndicator,
-              {
-                backgroundColor: c.surfaceTint,
-                opacity: analyzingPhoto || sending ? 0.5 : pressed ? 0.7 : 1,
-              },
-            ]}
+            onPress={() => inputRef.current?.focus()}
+            hitSlop={8}
+            style={styles.orbBtn}
+            accessibilityLabel="Escribe a Nova"
             accessibilityRole="button"
-            accessibilityLabel="Analizar foto de agenda"
           >
-            {analyzingPhoto ? (
-              <ActivityIndicator color={c.primary} size="small" />
-            ) : (
-              <IconSymbol name="camera" size={16} color={c.primary} />
-            )}
+            <NovaOrb size={28} ambient={false} active={draft.length > 0 || sending} />
           </Pressable>
+
           <TextInput
             ref={inputRef}
             value={draft}
             onChangeText={setDraft}
             onSubmitEditing={() => void handleSend()}
-            placeholder="Escribe a Nova…"
+            placeholder="Dime qué necesitas…"
             placeholderTextColor={c.textSubtle}
             style={[styles.input, { color: c.text }]}
             multiline
@@ -901,6 +890,26 @@ export default function NovaScreen() {
               focus.value = withTiming(0, { duration: 220 });
             }}
           />
+
+          {/* Cámara — icono discreto para digitalizar notas/post-its */}
+          <Pressable
+            onPress={openPhotoSource}
+            disabled={analyzingPhoto || sending}
+            hitSlop={10}
+            style={({ pressed }) => [
+              styles.cameraBtn,
+              { opacity: analyzingPhoto || sending ? 0.3 : pressed ? 0.5 : 0.45 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Digitalizar nota o post-it"
+          >
+            {analyzingPhoto ? (
+              <ActivityIndicator color={c.primary} size="small" />
+            ) : (
+              <IconSymbol name="camera" size={15} color={c.textSubtle} />
+            )}
+          </Pressable>
+
           <Pressable
             onPress={() => void handleSend()}
             disabled={sending || !draft.trim()}
@@ -931,95 +940,62 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   flex: { flex: 1 },
 
-  // Hero halo (mismos números que Mi Día / Calendar)
-  heroHaloLayer: {
+  // Fondo: dos halos de color grandes y suaves
+  bgLayer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: 380,
-    overflow: 'hidden',
+    bottom: 0,
   },
-  heroHaloCircle: {
+  bgSpot1: {
     position: 'absolute',
-    top: -120,
-    left: -60,
-    right: -60,
-    height: 320,
-    borderBottomLeftRadius: 240,
-    borderBottomRightRadius: 240,
+    top: -80,
+    left: -100,
+    width: 340,
+    height: 340,
+    borderRadius: 170,
   },
-  heroHaloCircleSoft: {
+  bgSpot2: {
     position: 'absolute',
-    top: 60,
-    left: -120,
-    right: -120,
+    bottom: 60,
+    right: -80,
+    width: 280,
     height: 280,
-    borderRadius: 240,
-    transform: [{ scaleY: 0.55 }],
+    borderRadius: 140,
   },
 
-  header: {
+  // Barra de contexto mínima — fecha + estado
+  contextBar: {
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.sm,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  headerText: {
-    flex: 1,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '700',
-    lineHeight: 36,
-    letterSpacing: -0.6,
-  },
-  subtitle: {
-    fontSize: 13,
-    fontWeight: '500',
-    lineHeight: 18,
-    marginTop: 2,
-  },
-
-  // Empty state — orb grande centrado + título + chips de prompts
-  emptyContainer: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
-    paddingBottom: Spacing.xl,
-    gap: Spacing.lg,
-  },
-  emptyHero: {
-    alignItems: 'center',
-    gap: Spacing.sm,
     paddingTop: Spacing.md,
     paddingBottom: Spacing.xs,
+    gap: 2,
   },
-  emptyGreeting: {
-    fontSize: 22,
+  contextDate: {
+    fontSize: 17,
     fontWeight: '700',
-    lineHeight: 28,
-    letterSpacing: -0.4,
-    textAlign: 'center',
-    marginTop: Spacing.sm,
+    lineHeight: 22,
+    letterSpacing: -0.2,
   },
-  emptyDesc: {
-    fontSize: 14,
+  contextSub: {
+    fontSize: 13,
     fontWeight: '400',
-    lineHeight: 20,
-    textAlign: 'center',
-    maxWidth: 280,
+    lineHeight: 18,
   },
 
+  // Empty state — pills flotando en el espacio abierto
+  emptyArea: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.lg,
+  },
   pillsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
     justifyContent: 'center',
-    paddingHorizontal: Spacing.sm,
   },
   pill: {
     flexDirection: 'row',
@@ -1031,7 +1007,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
+    shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 1,
   },
@@ -1082,22 +1058,25 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 2,
   },
-  leftIndicator: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
+  orbBtn: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingLeft: 2,
   },
   input: {
     flex: 1,
     minHeight: 36,
     maxHeight: 120,
     paddingVertical: 6,
-    paddingHorizontal: 4,
+    paddingHorizontal: 6,
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '400',
+  },
+  cameraBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
   },
   sendBtn: {
     width: 38,
