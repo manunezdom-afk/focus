@@ -594,7 +594,7 @@ function ExampleTaskCard({
   colorScheme: 'light' | 'dark';
 }) {
   const c = Colors[colorScheme];
-  const accent = '#7c3aed'; // morado tarea, igual que TimelineTaskBlock
+  const accent = colorScheme === 'dark' ? '#94a3b8' : '#475569'; // slate, igual que TimelineTaskBlock
   const priColor =
     priority === 'Alta' ? '#dc2626' : priority === 'Baja' ? c.textSubtle : accent;
 

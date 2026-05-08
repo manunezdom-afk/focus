@@ -50,10 +50,12 @@ export function getBlockColors(
         label: 'Recordatorio',
       };
     case 'task':
+      // Slate gray-azulado: distingue tareas de eventos (royal blue brillante)
+      // sin recurrir al violeta. Da sensación de "neutro / a hacer".
       return {
-        accent: '#7c3aed',
-        badge: dark ? '#2e1c5f' : '#ede9fe',
-        badgeText: dark ? '#c4b5fd' : '#6d28d9',
+        accent: dark ? '#94a3b8' : '#475569',
+        badge: dark ? '#1e293b' : '#e2e8f0',
+        badgeText: dark ? '#cbd5e1' : '#334155',
         label: 'Tarea',
       };
     case 'focus':

@@ -751,8 +751,8 @@ export default function NovaScreen() {
           style={[
             styles.bgSpot2,
             {
-              backgroundColor: scheme === 'dark' ? '#2e1c5f' : '#f3e8ff',
-              opacity: scheme === 'dark' ? 0.6 : 0.7,
+              backgroundColor: scheme === 'dark' ? '#164e63' : '#cffafe',
+              opacity: scheme === 'dark' ? 0.5 : 0.65,
             },
           ]}
         />
@@ -852,7 +852,7 @@ export default function NovaScreen() {
                 scheme === 'dark' ? 'rgba(15,23,42,0.88)' : 'rgba(255,255,255,0.90)',
               borderColor:
                 scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(200,210,255,0.7)',
-              shadowColor: '#5b5ef5',
+              shadowColor: '#2563eb',
             },
             animatedComposerStyle,
           ]}

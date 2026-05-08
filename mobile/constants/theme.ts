@@ -1,13 +1,15 @@
 import { Platform } from 'react-native';
 
 // Paleta Focus — alineada con la app web (tailwind.config.js).
-// Primary indigo `#5b5ef5` es el azul Nova oficial.
+// Primary royal blue `#2563eb` es el azul Nova oficial. Reemplazó al indigo
+// `#5b5ef5` para alinear con el splash cobalto y eliminar el tinte violeta
+// en pressed states.
 // Todo cambio acá debería reflejar también la web.
 
-const primary = '#5b5ef5';            // Nova indigo (acción principal)
-const primaryDark = '#4548d4';        // Nova indigo presionado
-const primaryContainer = '#e0e7ff';   // Surface tinted indigo (bubbles)
-const primarySoft = '#eef0ff';        // Surface light tinted
+const primary = '#2563eb';            // Royal blue 600 (acción principal)
+const primaryDark = '#1d4ed8';        // Cobalt blue 700 (presionado)
+const primaryContainer = '#dbeafe';   // Blue 100 — surfaces tintadas / pressed bg
+const primarySoft = '#eff6ff';        // Blue 50 — surface light tint
 
 export const Colors = {
   light: {
@@ -54,14 +56,14 @@ export const Colors = {
     background: '#06080f',
     surface: '#0f172a',
     surfaceMuted: '#1e293b',
-    surfaceTint: '#1e1b4b', // indigo deep
+    surfaceTint: '#1e3a8a', // blue 900 deep
 
     border: '#1e293b',
     borderStrong: '#334155',
 
-    primary: '#7c83ff',          // versión más luminosa para dark
-    primaryPressed: '#5b5ef5',
-    primaryContainer: '#312e81',
+    primary: '#60a5fa',          // Blue 400 — más luminoso para dark
+    primaryPressed: '#3b82f6',   // Blue 500
+    primaryContainer: '#1e3a8a', // Blue 900
     onPrimary: '#ffffff',
 
     success: '#22c55e',
@@ -71,9 +73,9 @@ export const Colors = {
     tint: '#f8fafc',
     icon: '#94a3b8',
     tabIconDefault: '#475569',
-    tabIconSelected: '#7c83ff',
+    tabIconSelected: '#60a5fa',
 
-    accent: '#7c83ff',
+    accent: '#60a5fa',
   },
 };
 
