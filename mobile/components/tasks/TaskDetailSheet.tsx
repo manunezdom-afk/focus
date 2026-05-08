@@ -17,6 +17,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import type { TaskPatch } from '@/src/data/tasks';
+import { addDaysISO, todayISO } from '@/src/data/today';
 import type { Task, TaskPriority } from '@/src/data/types';
 
 const PRIORITIES: TaskPriority[] = ['Alta', 'Media', 'Baja'];
@@ -26,6 +27,33 @@ const CAT_LABELS: Record<(typeof CATEGORIES)[number], string> = {
   semana: 'Esta semana',
   'algún día': 'Algún día',
 };
+
+// Validación de formato. Campos vacíos ('' o whitespace) → null.
+//   YYYY-MM-DD: año 4 digits, mes 1-12, día 1-31. No checa días por mes
+//   (febrero 30 pasaría) — el server hará la validación final si es
+//   crítico. Para una task date eso es aceptable.
+//   HH:MM o HH:MM-HH:MM
+const DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d(\s*-\s*([01]\d|2[0-3]):[0-5]\d)?$/;
+
+function normalizeDate(raw: string): string | null {
+  const t = raw.trim();
+  if (!t) return null;
+  return DATE_RE.test(t) ? t : 'INVALID';
+}
+
+function normalizeTime(raw: string): string | null {
+  const t = raw.trim();
+  if (!t) return null;
+  return TIME_RE.test(t) ? t.replace(/\s/g, '') : 'INVALID';
+}
+
+function humanDateLabel(iso: string | null): string {
+  if (!iso) return 'Sin fecha';
+  if (iso === todayISO()) return 'Hoy';
+  if (iso === addDaysISO(todayISO(), 1)) return 'Mañana';
+  return iso;
+}
 
 type Props = {
   task: Task | null;
@@ -45,7 +73,10 @@ export function TaskDetailSheet({ task, visible, onDismiss, onSave, onDelete }: 
   const [label, setLabel] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('Media');
   const [category, setCategory] = useState<string>('hoy');
+  const [dueDateText, setDueDateText] = useState('');
+  const [dueTimeText, setDueTimeText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Sincroniza el estado local cuando cambia la tarea seleccionada.
   useEffect(() => {
@@ -53,27 +84,68 @@ export function TaskDetailSheet({ task, visible, onDismiss, onSave, onDelete }: 
       setLabel(task.label);
       setPriority(task.priority);
       setCategory(task.category || 'hoy');
+      setDueDateText(task.dueDate ?? '');
+      setDueTimeText(task.dueTime ?? '');
+      setSaveError(null);
     }
   }, [task]);
 
   if (!task) return null;
 
   const trimmed = label.trim();
+  // Normalizamos fecha/hora una vez para detectar dirty + validez.
+  // 'INVALID' significa que el usuario tipeó algo que no parsea — no
+  // se considera "limpio" (no podés guardar una basura).
+  const dueDateNormalized = normalizeDate(dueDateText); // null | 'INVALID' | 'YYYY-MM-DD'
+  const dueTimeNormalized = normalizeTime(dueTimeText);
+  const dueDateInvalid = dueDateNormalized === 'INVALID';
+  const dueTimeInvalid = dueTimeNormalized === 'INVALID';
+  const newDueDate = dueDateInvalid ? task.dueDate : dueDateNormalized; // null o 'YYYY-MM-DD'
+  const newDueTime = dueTimeInvalid ? task.dueTime : dueTimeNormalized;
+
   const dirty =
-    trimmed !== task.label || priority !== task.priority || category !== (task.category || 'hoy');
-  const canSave = dirty && trimmed.length > 0 && !saving;
+    trimmed !== task.label ||
+    priority !== task.priority ||
+    category !== (task.category || 'hoy') ||
+    newDueDate !== (task.dueDate ?? null) ||
+    newDueTime !== (task.dueTime ?? null);
+  const canSave =
+    dirty && trimmed.length > 0 && !saving && !dueDateInvalid && !dueTimeInvalid;
+
+  function applyQuickDueDate(value: string | null) {
+    if (Platform.OS === 'ios') void Haptics.selectionAsync();
+    setDueDateText(value ?? '');
+    // Si quitamos la fecha, también quitamos la hora (no tiene sentido
+    // agendar HH:MM sin día).
+    if (!value) setDueTimeText('');
+  }
 
   async function handleSave() {
     if (!canSave) return;
     setSaving(true);
+    setSaveError(null);
     if (Platform.OS === 'ios') void Haptics.selectionAsync();
     const patch: TaskPatch = {};
     if (trimmed !== task!.label) patch.label = trimmed;
     if (priority !== task!.priority) patch.priority = priority;
     if (category !== (task!.category || 'hoy')) patch.category = category;
+    if (newDueDate !== (task!.dueDate ?? null)) patch.dueDate = newDueDate;
+    if (newDueTime !== (task!.dueTime ?? null)) patch.dueTime = newDueTime;
     try {
       await onSave(task!.id, patch);
       onDismiss();
+    } catch (err: any) {
+      // Si la migración 017 no está aplicada y el usuario seteó dueDate
+      // o dueTime, el server tira "column does not exist". Mostramos
+      // mensaje accionable en lugar de tragarlo.
+      const msg = String(err?.message ?? '');
+      if (/does not exist|42703/i.test(msg) && (patch.dueDate || patch.dueTime)) {
+        setSaveError(
+          'Las columnas de fecha aún no están en el servidor. Aplica la migración 017_task_due_dates.sql en Supabase Dashboard.',
+        );
+      } else {
+        setSaveError(msg || 'No pudimos guardar. Reintenta.');
+      }
     } finally {
       setSaving(false);
     }
@@ -211,6 +283,127 @@ export function TaskDetailSheet({ task, visible, onDismiss, onSave, onDelete }: 
               })}
             </View>
 
+            {/* Fecha (opcional) — chips rápidos + texto manual.
+                Requiere migration 017_task_due_dates.sql en server. */}
+            <Text style={[styles.fieldLabel, { color: c.textMuted }]}>
+              Fecha (opcional)
+            </Text>
+            <View style={styles.chipRow}>
+              {[
+                { id: 'today',     label: 'Hoy',         value: todayISO() },
+                { id: 'tomorrow',  label: 'Mañana',      value: addDaysISO(todayISO(), 1) },
+                { id: 'nextweek',  label: 'En 7 días',   value: addDaysISO(todayISO(), 7) },
+                { id: 'none',      label: 'Sin fecha',   value: null },
+              ].map((opt) => {
+                const active = (newDueDate ?? null) === opt.value;
+                return (
+                  <Pressable
+                    key={opt.id}
+                    onPress={() => applyQuickDueDate(opt.value)}
+                    style={({ pressed }) => [
+                      styles.chip,
+                      {
+                        backgroundColor: active ? c.primaryContainer : c.surfaceMuted,
+                        borderColor: active ? c.primary : c.border,
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        { color: active ? c.primary : c.textMuted, fontWeight: active ? '700' : '500' },
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <TextInput
+              value={dueDateText}
+              onChangeText={setDueDateText}
+              placeholder="YYYY-MM-DD (vacío = sin fecha)"
+              placeholderTextColor={c.textSubtle}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="numbers-and-punctuation"
+              maxLength={10}
+              style={[
+                styles.dateInput,
+                {
+                  color: c.text,
+                  borderColor: dueDateInvalid ? '#dc2626' : c.border,
+                  backgroundColor: c.surfaceMuted,
+                },
+              ]}
+              accessibilityLabel="Fecha en formato AAAA-MM-DD"
+            />
+            {dueDateInvalid ? (
+              <Text style={[styles.errorHint, { color: '#dc2626' }]}>
+                Formato inválido. Usa YYYY-MM-DD (ej: 2026-12-31) o deja vacío.
+              </Text>
+            ) : null}
+
+            {/* Hora (solo si hay fecha — sino no tiene sentido) */}
+            {newDueDate ? (
+              <>
+                <Text style={[styles.fieldLabel, { color: c.textMuted }]}>
+                  Hora (opcional)
+                </Text>
+                <TextInput
+                  value={dueTimeText}
+                  onChangeText={setDueTimeText}
+                  placeholder="HH:MM o HH:MM-HH:MM"
+                  placeholderTextColor={c.textSubtle}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={11}
+                  style={[
+                    styles.dateInput,
+                    {
+                      color: c.text,
+                      borderColor: dueTimeInvalid ? '#dc2626' : c.border,
+                      backgroundColor: c.surfaceMuted,
+                    },
+                  ]}
+                  accessibilityLabel="Hora en formato HH:MM"
+                />
+                {dueTimeInvalid ? (
+                  <Text style={[styles.errorHint, { color: '#dc2626' }]}>
+                    Formato inválido. Usa HH:MM (ej: 09:30) o HH:MM-HH:MM.
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
+
+            {/* Resumen humano cuando hay fecha — confirma al usuario qué
+                va a guardarse antes del tap en "Guardar". */}
+            {newDueDate ? (
+              <Text style={[styles.dueSummary, { color: c.textSubtle }]}>
+                Programada para {humanDateLabel(newDueDate)}
+                {newDueTime ? ` · ${newDueTime}` : ''}
+              </Text>
+            ) : null}
+
+            {saveError ? (
+              <View
+                style={[
+                  styles.errorBox,
+                  { borderColor: '#fecaca', backgroundColor: '#fef2f2' },
+                ]}
+              >
+                <IconSymbol name="xmark" size={14} color={'#dc2626'} />
+                <Text style={[styles.errorText, { color: '#dc2626' }]} numberOfLines={4}>
+                  {saveError}
+                </Text>
+              </View>
+            ) : null}
+
             {/* Acciones */}
             <View style={styles.actions}>
               <Pressable
@@ -315,6 +508,41 @@ const styles = StyleSheet.create({
   chipText: {
     fontSize: 13,
     letterSpacing: 0.1,
+  },
+  dateInput: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    fontSize: 15,
+    lineHeight: 21,
+    minHeight: 40,
+    fontVariant: ['tabular-nums'],
+  },
+  dueSummary: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  errorHint: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: -4,
+  },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: Spacing.sm,
+    borderRadius: Radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: Spacing.sm,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 17,
   },
   actions: {
     marginTop: Spacing.lg,

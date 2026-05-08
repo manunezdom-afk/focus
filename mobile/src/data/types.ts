@@ -14,6 +14,16 @@ export type Task = {
   category: string;
   doneAt: number | null;
   createdAt: string | null;
+  // Campos agregados por las migraciones 016 + 017 (subtareas y fechas).
+  // Si las migraciones no están aplicadas todavía en el server, vienen
+  // como null y la UI degrada limpiamente — no se rompen las screens.
+  parentTaskId: string | null;
+  linkedEventId: string | null;
+  // Formato 'YYYY-MM-DD' (zona local del usuario), igual que events.date.
+  // null = tarea sin fecha (cae a `category` para clasificarla).
+  dueDate: string | null;
+  // Formato 'HH:MM' o 'HH:MM-HH:MM'. null = sin hora puntual.
+  dueTime: string | null;
 };
 
 export type EventItem = {

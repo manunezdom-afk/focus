@@ -32,8 +32,14 @@ import type { Task, TaskPriority } from '@/src/data/types';
 import { useEvents } from '@/src/data/useEvents';
 import { useTasks } from '@/src/data/useTasks';
 
+// Buckets visibles en Tareas. "Próximas" es virtual: agrupa tasks con
+// `dueDate` set, sin importar su `category`. Las otras 3 son la categoría
+// real persistida en DB. El bulk defer solo mueve entre las 3 reales
+// (cambiar category); para mover a Próximas hay que setear dueDate desde
+// el detalle (TaskDetailSheet).
 const CATEGORIES = ['hoy', 'semana', 'algún día'] as const;
 type Category = (typeof CATEGORIES)[number];
+type Bucket = 'proximas' | Category;
 
 const CAT_LABELS: Record<Category, string> = {
   hoy: 'Hoy',
@@ -41,9 +47,17 @@ const CAT_LABELS: Record<Category, string> = {
   'algún día': 'Algún día',
 };
 
-const CAT_ICONS: Record<Category, React.ComponentProps<typeof IconSymbol>['name']> = {
-  hoy: 'sun.max.fill',
-  semana: 'calendar',
+const BUCKET_LABELS: Record<Bucket, string> = {
+  proximas:    'Próximas',
+  hoy:         'Hoy',
+  semana:      'Esta semana',
+  'algún día': 'Algún día',
+};
+
+const BUCKET_ICONS: Record<Bucket, React.ComponentProps<typeof IconSymbol>['name']> = {
+  proximas:    'calendar',
+  hoy:         'sun.max.fill',
+  semana:      'calendar',
   'algún día': 'checklist',
 };
 
@@ -121,16 +135,74 @@ export default function TasksScreen() {
   // Resumen client-side desde datos reales
   const summary = useMemo(() => buildSummary(tasks.tasks), [tasks.tasks]);
 
-  // Particiona por categoría
-  const byCategory = useMemo(() => {
-    const out: Record<Category, Task[]> = { hoy: [], semana: [], 'algún día': [] };
+  // Particiona en 4 buckets: Próximas (dueDate set) primero, luego las 3
+  // categorías clásicas. Una tarea con dueDate aparece SOLO en Próximas;
+  // si querés que también aparezca en Hoy, no setees dueDate.
+  // Próximas se ordena por dueDate ASC, luego dueTime ASC NULLS LAST.
+  const byBucket = useMemo(() => {
+    const out: Record<Bucket, Task[]> = {
+      proximas:    [],
+      hoy:         [],
+      semana:      [],
+      'algún día': [],
+    };
     for (const t of tasks.tasks) {
+      if (t.dueDate) {
+        out.proximas.push(t);
+        continue;
+      }
       const cat = (t.category as Category) || 'hoy';
       if (CATEGORIES.includes(cat)) out[cat].push(t);
       else out['algún día'].push(t);
     }
+    out.proximas.sort((a, b) => {
+      const d = (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
+      if (d !== 0) return d;
+      // Sin hora va al final del día (NULLS LAST).
+      if (!a.dueTime && b.dueTime) return 1;
+      if (a.dueTime && !b.dueTime) return -1;
+      return (a.dueTime ?? '').localeCompare(b.dueTime ?? '');
+    });
     return out;
   }, [tasks.tasks]);
+
+  // Selección múltiple para bulk defer. Visualmente: cada row reemplaza
+  // su badge de prioridad por un checkbox cuando selectionMode=true.
+  // Tap en row toggle selección (no toggle done). Long-press deshabilitado
+  // mientras estamos en selectionMode.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const exitSelection = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  // Mueve todas las tareas seleccionadas a otra category. NO toca dueDate
+  // — para sacarlas de Próximas habría que limpiar el campo desde el
+  // detalle. Aplicamos en paralelo con Promise.all; los errores indivi-
+  // duales caen en el catch interno de patchTask y muestran banner.
+  const bulkDefer = useCallback(
+    async (target: Category) => {
+      if (selectedIds.size === 0) return;
+      const ids = Array.from(selectedIds);
+      if (Platform.OS === 'ios') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+      await Promise.all(ids.map((id) => tasks.patchTask(id, { category: target })));
+      exitSelection();
+    },
+    [selectedIds, tasks, exitSelection],
+  );
 
   function openAddFor(cat: Category) {
     if (Platform.OS === 'ios') {
@@ -310,23 +382,70 @@ export default function TasksScreen() {
             </View>
           ) : null}
 
+          {/* CTA "Seleccionar varias" — visible solo si hay >1 tarea. Activa
+              modo bulk defer. Cuando estamos seleccionando, este CTA cambia a
+              "Cancelar selección" para salir sin aplicar cambios. */}
+          {!showLoadingState && totalTasks > 1 ? (
+            <View style={styles.bulkCtaWrap}>
+              <Pressable
+                onPress={() => {
+                  if (Platform.OS === 'ios') void Haptics.selectionAsync();
+                  if (selectionMode) exitSelection();
+                  else setSelectionMode(true);
+                }}
+                style={({ pressed }) => [
+                  styles.bulkCta,
+                  {
+                    backgroundColor: selectionMode ? c.primaryContainer : c.surface,
+                    borderColor: selectionMode ? c.primary : c.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={selectionMode ? 'Cancelar selección' : 'Seleccionar varias tareas'}
+              >
+                <IconSymbol
+                  name={selectionMode ? 'xmark' : 'checklist'}
+                  size={13}
+                  color={selectionMode ? c.primary : c.textMuted}
+                />
+                <Text
+                  style={[
+                    styles.bulkCtaText,
+                    { color: selectionMode ? c.primary : c.textMuted },
+                  ]}
+                >
+                  {selectionMode
+                    ? `Cancelar (${selectedIds.size} seleccionada${selectedIds.size === 1 ? '' : 's'})`
+                    : 'Seleccionar varias'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           {!showLoadingState && !isFullyEmpty ? (
             <>
-              {CATEGORIES.map((cat, idx) => {
-                const items = byCategory[cat];
+              {(['proximas', 'hoy', 'semana', 'algún día'] as Bucket[]).map((bucket, idx) => {
+                const items = byBucket[bucket];
+                // Próximas se renderiza solo si tiene items (no tiene CTA de
+                // "añadir vacío" — para añadir a Próximas hay que setear
+                // dueDate desde el detalle).
+                if (bucket === 'proximas' && items.length === 0) return null;
                 const pending = items.filter((t) => !t.done).length;
-                const isAddOpenHere = showInput && addCategory === cat;
+                const isCategoryBucket = bucket !== 'proximas';
+                const cat = isCategoryBucket ? (bucket as Category) : null;
+                const isAddOpenHere = showInput && cat !== null && addCategory === cat;
                 return (
                   <Animated.View
-                    key={cat}
+                    key={bucket}
                     entering={FadeInDown.delay(140 + idx * 70).duration(360)}
                     style={styles.categoryWrap}
                   >
                     <View style={styles.catHeader}>
                       <View style={styles.catLeft}>
-                        <IconSymbol name={CAT_ICONS[cat]} size={16} color={c.textMuted} />
+                        <IconSymbol name={BUCKET_ICONS[bucket]} size={16} color={c.textMuted} />
                         <Text style={[styles.catLabel, { color: c.text }]}>
-                          {CAT_LABELS[cat]}
+                          {BUCKET_LABELS[bucket]}
                         </Text>
                         {pending > 0 ? (
                           <Text style={[styles.catCount, { color: c.textSubtle }]}>
@@ -334,21 +453,23 @@ export default function TasksScreen() {
                           </Text>
                         ) : null}
                       </View>
-                      <Pressable
-                        onPress={() => openAddFor(cat)}
-                        hitSlop={8}
-                        style={({ pressed }) => [
-                          styles.addBtn,
-                          { backgroundColor: pressed ? c.surfaceTint : 'transparent' },
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Añadir tarea a ${CAT_LABELS[cat]}`}
-                      >
-                        <IconSymbol name="plus" size={16} color={c.primary} />
-                      </Pressable>
+                      {cat ? (
+                        <Pressable
+                          onPress={() => openAddFor(cat)}
+                          hitSlop={8}
+                          style={({ pressed }) => [
+                            styles.addBtn,
+                            { backgroundColor: pressed ? c.surfaceTint : 'transparent' },
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Añadir tarea a ${CAT_LABELS[cat]}`}
+                        >
+                          <IconSymbol name="plus" size={16} color={c.primary} />
+                        </Pressable>
+                      ) : null}
                     </View>
 
-                    {items.length === 0 && !isAddOpenHere ? (
+                    {cat && items.length === 0 && !isAddOpenHere ? (
                       <Pressable
                         onPress={() => openAddFor(cat)}
                         style={({ pressed }) => [
@@ -380,8 +501,13 @@ export default function TasksScreen() {
                             task={t}
                             onToggle={tasks.toggleTask}
                             onDelete={tasks.removeTask}
-                            onCycleCategory={cycleCategory}
-                            onOpenDetail={setDetailTask}
+                            // El cycle button no tiene sentido cuando estamos
+                            // seleccionando — dejamos solo TaskRow básico.
+                            onCycleCategory={selectionMode ? undefined : cycleCategory}
+                            onOpenDetail={selectionMode ? undefined : setDetailTask}
+                            selectionMode={selectionMode}
+                            selected={selectedIds.has(t.id)}
+                            onToggleSelected={toggleSelected}
                           />
                         ))}
                       </Card>
@@ -492,6 +618,46 @@ export default function TasksScreen() {
         />
       </KeyboardAvoidingView>
 
+      {/* Bulk action bar — aparece solo cuando hay >0 selección. Botones
+          mueven todas las seleccionadas a la category clickeada. NO toca
+          dueDate (las tareas en Próximas siguen ahí; mover a Hoy/Semana/
+          Algún día solo cambia category). */}
+      {selectionMode && selectedIds.size > 0 ? (
+        <Animated.View
+          entering={FadeInDown.duration(220)}
+          style={[
+            styles.bulkBar,
+            { backgroundColor: c.surface, borderColor: c.border, shadowColor: c.text },
+          ]}
+        >
+          <Text style={[styles.bulkBarTitle, { color: c.text }]}>
+            {selectedIds.size === 1
+              ? '1 tarea · Mover a:'
+              : `${selectedIds.size} tareas · Mover a:`}
+          </Text>
+          <View style={styles.bulkBarRow}>
+            {(['hoy', 'semana', 'algún día'] as Category[]).map((target) => (
+              <Pressable
+                key={target}
+                onPress={() => void bulkDefer(target)}
+                style={({ pressed }) => [
+                  styles.bulkBarBtn,
+                  {
+                    backgroundColor: pressed ? c.primaryPressed : c.primary,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`Mover a ${CAT_LABELS[target]}`}
+              >
+                <Text style={[styles.bulkBarBtnText, { color: c.onPrimary }]}>
+                  {CAT_LABELS[target]}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </Animated.View>
+      ) : null}
+
       {/* Flash chip: aparece tras crear varias tareas seguidas (≤4s). */}
       {showFlashChip ? (
         <Animated.View
@@ -571,14 +737,16 @@ function FullyEmptyState({
 
       {/* Ejemplos fantasma — desaparecen cuando aparece la primera tarea
           real (porque isFullyEmpty pasa a false y este bloque entero no se
-          renderiza). Solo demuestra cómo se ven las tareas. */}
+          renderiza). Labels abstractos a propósito: queremos mostrar el
+          formato visual sin sugerir tareas concretas que el usuario podría
+          confundir con datos reales. */}
       <Text style={[styles.exampleHeader, { color: c.textSubtle }]}>
         ASÍ SE VERÁN TUS TAREAS
       </Text>
       <View style={styles.exampleList}>
-        <ExampleTaskCard label="Llamar al dentista" priority="Media" colorScheme={scheme} />
-        <ExampleTaskCard label="Terminar propuesta de cliente" priority="Alta" colorScheme={scheme} />
-        <ExampleTaskCard label="Comprar cumpleaños mamá" priority="Baja" colorScheme={scheme} />
+        <ExampleTaskCard label="Ejemplo · Tarea de prioridad alta" priority="Alta" colorScheme={scheme} />
+        <ExampleTaskCard label="Ejemplo · Tarea de prioridad media" priority="Media" colorScheme={scheme} />
+        <ExampleTaskCard label="Ejemplo · Tarea de prioridad baja" priority="Baja" colorScheme={scheme} />
       </View>
     </Animated.View>
   );
@@ -887,6 +1055,68 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   composerActionPrimary: { fontWeight: '700' },
+
+  // CTA "Seleccionar varias" — pill discreta arriba de la lista. Cuando
+  // selectionMode=true cambia a "Cancelar (N seleccionadas)".
+  bulkCtaWrap: {
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+    alignItems: 'flex-end',
+  },
+  bulkCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  bulkCtaText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+
+  // Bulk action bar — barra abajo con botones de category target.
+  // Visible solo cuando hay al menos 1 seleccionada.
+  bulkBar: {
+    position: 'absolute',
+    bottom: 8,
+    left: Spacing.lg,
+    right: Spacing.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.xl,
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.sm,
+    gap: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  bulkBarTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    textAlign: 'center',
+  },
+  bulkBarRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  bulkBarBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bulkBarBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
 
   // Flash chip — pill superior centrado que avisa "Añadidas N".
   flashChip: {

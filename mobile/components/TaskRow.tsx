@@ -18,6 +18,14 @@ type Props = {
   // Oculta el priority badge cuando la fila va dentro de un contexto donde no
   // tiene sentido (ej: lista compacta de Mi Día con priority menos relevante).
   showPriority?: boolean;
+  // Modo de selección múltiple (bulk defer). Cuando es true:
+  //   - tap en row hace onToggleSelected en lugar de onToggle (done).
+  //   - el checkbox refleja `selected`.
+  //   - long-press se desactiva.
+  // Si selectionMode=true pero no se pasa onToggleSelected, hacemos nada en tap.
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelected?: (id: string) => void;
 };
 
 // Fila de tarea estilo iOS list.
@@ -28,11 +36,29 @@ type Props = {
 // Match legacy TasksView item:
 //   px-3 py-2.5 rounded-xl border bg-surface-container-lowest
 //   checkmark + label + priority badge
-export function TaskRow({ task, onToggle, onDelete, onCycleCategory, onOpenDetail, showPriority = true }: Props) {
+export function TaskRow({
+  task,
+  onToggle,
+  onDelete,
+  onCycleCategory,
+  onOpenDetail,
+  showPriority = true,
+  selectionMode = false,
+  selected = false,
+  onToggleSelected,
+}: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
-  function handleToggle() {
+  function handlePress() {
+    if (selectionMode) {
+      // Tap en row durante bulk defer: toggle selección, no toggle done.
+      if (Platform.OS === 'ios') {
+        void Haptics.selectionAsync();
+      }
+      onToggleSelected?.(task.id);
+      return;
+    }
     if (Platform.OS === 'ios') {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -40,6 +66,7 @@ export function TaskRow({ task, onToggle, onDelete, onCycleCategory, onOpenDetai
   }
 
   function handleLongPress() {
+    if (selectionMode) return; // No long-press cuando estamos seleccionando.
     if (Platform.OS === 'ios') {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
@@ -70,9 +97,29 @@ export function TaskRow({ task, onToggle, onDelete, onCycleCategory, onOpenDetai
     onCycleCategory(task.id, task.category);
   }
 
+  // El "checkbox" del row tiene 2 modos visuales:
+  //   - selectionMode=true → cuadrado relleno con tick si selected, vacío si no
+  //   - selectionMode=false → círculo (chequeo de done) — comportamiento legacy
+  const checkboxBorderColor = selectionMode
+    ? selected
+      ? c.primary
+      : c.borderStrong
+    : task.done
+      ? c.primary
+      : c.borderStrong;
+  const checkboxBg = selectionMode
+    ? selected
+      ? c.primary
+      : 'transparent'
+    : task.done
+      ? c.primary
+      : 'transparent';
+  const checkboxBorderRadius = selectionMode ? 6 : 11;
+  const showTick = selectionMode ? selected : task.done;
+
   return (
     <Pressable
-      onPress={handleToggle}
+      onPress={handlePress}
       onLongPress={handleLongPress}
       delayLongPress={400}
       android_ripple={{ color: c.surfaceMuted }}
@@ -81,32 +128,37 @@ export function TaskRow({ task, onToggle, onDelete, onCycleCategory, onOpenDetai
         {
           backgroundColor: c.surface,
           borderBottomColor: c.border,
-          opacity: pressed ? 0.7 : task.done ? 0.55 : 1,
+          opacity: pressed ? 0.7 : task.done && !selectionMode ? 0.55 : 1,
         },
       ]}
       accessibilityRole="checkbox"
-      accessibilityState={{ checked: task.done }}
+      accessibilityState={{ checked: selectionMode ? selected : task.done }}
       accessibilityLabel={task.label}
-      accessibilityHint="Toca para alternar completado. Mantén presionado para borrar."
+      accessibilityHint={
+        selectionMode
+          ? 'Toca para seleccionar o deseleccionar.'
+          : 'Toca para alternar completado. Mantén presionado para más opciones.'
+      }
     >
       <View
         style={[
           styles.check,
           {
-            borderColor: task.done ? c.primary : c.borderStrong,
-            backgroundColor: task.done ? c.primary : 'transparent',
+            borderColor: checkboxBorderColor,
+            backgroundColor: checkboxBg,
+            borderRadius: checkboxBorderRadius,
           },
         ]}
       >
-        {task.done ? <Text style={styles.checkMark}>✓</Text> : null}
+        {showTick ? <Text style={styles.checkMark}>✓</Text> : null}
       </View>
       <View style={styles.body}>
         <Text
           style={[
             styles.label,
             {
-              color: task.done ? c.textMuted : c.text,
-              textDecorationLine: task.done ? 'line-through' : 'none',
+              color: task.done && !selectionMode ? c.textMuted : c.text,
+              textDecorationLine: task.done && !selectionMode ? 'line-through' : 'none',
             },
           ]}
           numberOfLines={2}
@@ -114,8 +166,10 @@ export function TaskRow({ task, onToggle, onDelete, onCycleCategory, onOpenDetai
           {task.label}
         </Text>
       </View>
-      {showPriority ? <PriorityBadge priority={task.priority} /> : null}
-      {onCycleCategory ? (
+      {/* En selectionMode escondemos badge + botón cycle para que el row
+          se vea limpio y el foco esté en el checkbox. */}
+      {!selectionMode && showPriority ? <PriorityBadge priority={task.priority} /> : null}
+      {!selectionMode && onCycleCategory ? (
         <Pressable
           onPress={handleCycle}
           hitSlop={8}
