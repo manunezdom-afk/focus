@@ -280,17 +280,20 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 200,
   },
 
+  // Header tighter — antes paddingBottom Spacing['2xl']+xs (28px) creaba
+  // un hueco grande entre saludo y primer evento. Spacing.xl da una
+  // separación clara sin agujero.
   header: {
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.sm,
-    paddingBottom: Spacing['2xl'] + Spacing.xs,
+    paddingBottom: Spacing.xl,
     gap: 4,
   },
   titleLine: {
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: '700',
-    lineHeight: 36,
-    letterSpacing: -0.6,
+    lineHeight: 34,
+    letterSpacing: -0.5,
   },
   subLine: {
     fontSize: 13,
