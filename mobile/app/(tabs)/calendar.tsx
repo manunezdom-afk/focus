@@ -26,6 +26,7 @@ import { NovaFab } from '@/components/nova/NovaFab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { setNovaSeed } from '@/src/data/novaSeedStore';
 import { addDaysISO, isToday, todayISO } from '@/src/data/today';
 import { useEvents } from '@/src/data/useEvents';
 
@@ -95,6 +96,18 @@ export default function CalendarScreen() {
   function goToNova() {
     if (Platform.OS === 'ios') void Haptics.selectionAsync();
     router.push('/(tabs)/nova');
+  }
+
+  // CTA "Trabajar enfocado" en empty card → abre Nova con prompt prellenado
+  // sobre bloquear tiempo enfocado para el día seleccionado.
+  function goToNovaFocusSeed() {
+    const today = isToday(selectedDate);
+    setNovaSeed(
+      today
+        ? 'Reserva 2h enfocadas hoy y elimina distracciones.'
+        : `Planifica un bloque enfocado para el ${selectedDate}.`,
+    );
+    goToNova();
   }
 
   const handleDeleteEvent = useCallback(
@@ -214,7 +227,7 @@ export default function CalendarScreen() {
                     <EmptyAgendaState
                       selectedDate={selectedDate}
                       onCreateEvent={openCreate}
-                      onFocusWork={goToNova}
+                      onFocusWork={goToNovaFocusSeed}
                     />
                   </Animated.View>
                 )}

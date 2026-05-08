@@ -1,7 +1,9 @@
 import * as Haptics from 'expo-haptics';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -25,12 +27,16 @@ import { NovaOrb } from '@/components/nova/NovaOrb';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import type { CreateEventInput } from '@/src/data/events';
+import { useAuth } from '@/src/auth/AuthProvider';
+import type { CreateEventInput, EventPatch } from '@/src/data/events';
 import { newClientId } from '@/src/data/ids';
 import { sendNovaMessage, type ChatMessage } from '@/src/data/nova';
+import { loadNovaHistory, saveNovaHistory } from '@/src/data/novaPersist';
+import { consumeNovaSeed } from '@/src/data/novaSeedStore';
 import type { CreateTaskInput } from '@/src/data/tasks';
 import { useEvents } from '@/src/data/useEvents';
 import { useTasks } from '@/src/data/useTasks';
+import { expandRecurrence } from '@/src/utils/expandRecurrence';
 
 // Pantalla Nova — corazón inteligente de Focus.
 //
@@ -80,20 +86,87 @@ function tryTaskFromAction(a: any): CreateTaskInput | null {
   };
 }
 
-function describeApplied(action: any): string | null {
+// Convierte `updates` de edit_event a EventPatch tipado seguro.
+function tryEventPatchFromAction(a: any): EventPatch | null {
+  const u = a?.updates ?? a?.payload?.updates;
+  if (!u || typeof u !== 'object') return null;
+  const patch: EventPatch = {};
+  if (typeof u.title === 'string' && u.title.trim()) patch.title = u.title;
+  if (typeof u.date === 'string') patch.date = u.date;
+  if (u.date === null) patch.date = null;
+  if (typeof u.time === 'string') patch.time = u.time;
+  if (u.time === null) patch.time = null;
+  if (typeof u.description === 'string') patch.description = u.description;
+  if (u.description === null) patch.description = null;
+  if (typeof u.section === 'string') patch.section = u.section;
+  if (typeof u.featured === 'boolean') patch.featured = u.featured;
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+function describeApplied(action: any, eventTitleById?: Map<string, string>, taskLabelById?: Map<string, string>): string | null {
   const any = action as any;
   switch (action.type) {
     case 'add_event': {
       const title = any?.event?.title ?? any?.payload?.event?.title;
       return title ? `Agregado: ${title}` : 'Evento agregado';
     }
+    case 'add_recurring_event': {
+      const title = any?.event?.title ?? any?.payload?.event?.title;
+      return title ? `Recurrente agregado: ${title}` : 'Eventos recurrentes agregados';
+    }
     case 'add_task': {
       const label = any?.task?.label ?? any?.payload?.task?.label;
       return label ? `Tarea agregada: ${label}` : 'Tarea agregada';
     }
+    case 'edit_event': {
+      const id = any?.id ?? any?.payload?.id;
+      const t = id ? eventTitleById?.get(id) : undefined;
+      return t ? `Evento actualizado: ${t}` : 'Evento actualizado';
+    }
+    case 'delete_event': {
+      const id = any?.id ?? any?.payload?.id;
+      const t = id ? eventTitleById?.get(id) : undefined;
+      return t ? `Evento eliminado: ${t}` : 'Evento eliminado';
+    }
+    case 'mark_task_done':
+    case 'toggle_task': {
+      const id = any?.id ?? any?.payload?.id;
+      const l = id ? taskLabelById?.get(id) : undefined;
+      return l ? `Tarea marcada: ${l}` : 'Tarea marcada';
+    }
+    case 'delete_task': {
+      const id = any?.id ?? any?.payload?.id;
+      const l = id ? taskLabelById?.get(id) : undefined;
+      return l ? `Tarea eliminada: ${l}` : 'Tarea eliminada';
+    }
     default:
       return null;
   }
+}
+
+const DESTRUCTIVE_TYPES = new Set(['delete_event', 'delete_task']);
+
+// Resumen humano de una lista de acciones destructivas para el Alert de
+// confirmación. Devuelve "Eliminar 2 eventos y 1 tarea?" o similar.
+function destructiveSummary(actions: any[], eventTitleById: Map<string, string>, taskLabelById: Map<string, string>): string {
+  const events = actions.filter((a) => a.type === 'delete_event');
+  const tasks = actions.filter((a) => a.type === 'delete_task');
+  const parts: string[] = [];
+  if (events.length === 1) {
+    const id = events[0].id ?? events[0].payload?.id;
+    const title = id ? eventTitleById.get(id) : undefined;
+    parts.push(title ? `el evento "${title}"` : '1 evento');
+  } else if (events.length > 1) {
+    parts.push(`${events.length} eventos`);
+  }
+  if (tasks.length === 1) {
+    const id = tasks[0].id ?? tasks[0].payload?.id;
+    const label = id ? taskLabelById.get(id) : undefined;
+    parts.push(label ? `la tarea "${label}"` : '1 tarea');
+  } else if (tasks.length > 1) {
+    parts.push(`${tasks.length} tareas`);
+  }
+  return parts.join(' y ');
 }
 
 export default function NovaScreen() {
@@ -102,12 +175,60 @@ export default function NovaScreen() {
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList<ChatMessage>>(null);
 
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+
   const events = useEvents('all');
   const tasks = useTasks();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+
+  // Cargar historial persistido al montar (una vez por userId). Si falla,
+  // dejamos messages vacío — el usuario no ve nada raro.
+  useEffect(() => {
+    let cancelled = false;
+    if (!userId) {
+      setHistoryLoaded(true);
+      return;
+    }
+    void (async () => {
+      const restored = await loadNovaHistory(userId);
+      if (cancelled) return;
+      setMessages(restored);
+      setHistoryLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // Persistir cambios de messages con un pequeño debounce — solo después
+  // de que cargamos el historial inicial (si no, el primer effect con
+  // messages=[] sobrescribiría el historial real).
+  useEffect(() => {
+    if (!userId || !historyLoaded) return;
+    const t = setTimeout(() => {
+      void saveNovaHistory(userId, messages);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [userId, historyLoaded, messages]);
+
+  // Consume seed cross-tab al ganar foco. Si Calendario/Tareas/Mi Día
+  // dejaron un texto pendiente, lo metemos en el composer para que el
+  // usuario revise y mande (no auto-enviamos por seguridad).
+  useFocusEffect(
+    useCallback(() => {
+      const seed = consumeNovaSeed();
+      if (seed) {
+        setDraft(seed);
+        // Pequeño delay para que el TextInput esté montado.
+        setTimeout(() => inputRef.current?.focus(), 80);
+      }
+    }, []),
+  );
 
   // Focus glow animado en el composer (mismo patrón que PlannerNovaInput).
   const focus = useSharedValue(0);
@@ -115,6 +236,74 @@ export default function NovaScreen() {
     shadowOpacity: 0.07 + focus.value * 0.13,
     shadowRadius: 14 + focus.value * 10,
   }));
+
+  // Aplica una lista de acciones contra los hooks de tasks/events. Las
+  // destructivas ya pasaron por confirmación antes de llegar acá.
+  const applyActions = useCallback(
+    async (actions: any[]): Promise<string[]> => {
+      const applied: string[] = [];
+      const eventTitleById = new Map(events.events.map((e) => [e.id, e.title]));
+      const taskLabelById = new Map(tasks.tasks.map((t) => [t.id, t.label]));
+
+      for (const a of actions) {
+        if (a.type === 'add_event') {
+          const input = tryEventFromAction(a);
+          if (input) {
+            await events.addEvent(input);
+            const d = describeApplied(a);
+            if (d) applied.push(d);
+          }
+        } else if (a.type === 'add_recurring_event') {
+          const expanded = expandRecurrence(a);
+          for (const ev of expanded) await events.addEvent(ev);
+          if (expanded.length > 0) {
+            const d = describeApplied(a);
+            if (d) applied.push(`${d} (${expanded.length})`);
+          }
+        } else if (a.type === 'add_task') {
+          const input = tryTaskFromAction(a);
+          if (input) {
+            await tasks.addTask(input);
+            const d = describeApplied(a);
+            if (d) applied.push(d);
+          }
+        } else if (a.type === 'edit_event') {
+          const id = a?.id ?? a?.payload?.id;
+          const patch = tryEventPatchFromAction(a);
+          if (id && patch) {
+            await events.patchEvent(id, patch);
+            const d = describeApplied(a, eventTitleById, taskLabelById);
+            if (d) applied.push(d);
+          }
+        } else if (a.type === 'delete_event') {
+          const id = a?.id ?? a?.payload?.id;
+          if (id) {
+            await events.removeEvent(id);
+            const d = describeApplied(a, eventTitleById, taskLabelById);
+            if (d) applied.push(d);
+          }
+        } else if (a.type === 'mark_task_done' || a.type === 'toggle_task') {
+          const id = a?.id ?? a?.payload?.id;
+          if (id) {
+            await tasks.toggleTask(id);
+            const d = describeApplied(a, eventTitleById, taskLabelById);
+            if (d) applied.push(d);
+          }
+        } else if (a.type === 'delete_task') {
+          const id = a?.id ?? a?.payload?.id;
+          if (id) {
+            await tasks.removeTask(id);
+            const d = describeApplied(a, eventTitleById, taskLabelById);
+            if (d) applied.push(d);
+          }
+        }
+        // 'remember' aún no soportado en mobile (requiere endpoint o
+        // tabla user_memories — ver mobile/docs/NOVA_TASKS_PENDING.md).
+      }
+      return applied;
+    },
+    [events, tasks],
+  );
 
   const handleSend = useCallback(
     async (overrideText?: string) => {
@@ -152,32 +341,17 @@ export default function NovaScreen() {
           history,
         });
 
-        // Procesar acciones seguras y construir labels de confirmación.
-        const applied: string[] = [];
         const actions = Array.isArray(reply.actions) ? reply.actions : [];
-        for (const a of actions) {
-          if (a.type === 'add_event') {
-            const input = tryEventFromAction(a);
-            if (input) {
-              void events.addEvent(input);
-              const desc = describeApplied(a);
-              if (desc) applied.push(desc);
-            }
-          } else if (a.type === 'add_task') {
-            const input = tryTaskFromAction(a);
-            if (input) {
-              void tasks.addTask(input);
-              const desc = describeApplied(a);
-              if (desc) applied.push(desc);
-            }
-          }
-        }
+        const safeActions = actions.filter(
+          (a) => !DESTRUCTIVE_TYPES.has(a?.type),
+        );
+        const destructive = actions.filter((a) => DESTRUCTIVE_TYPES.has(a?.type));
 
-        // Refrescar para reflejar cambios server-side (delete/edit aún no
-        // procesados en cliente).
-        void events.refresh();
-        void tasks.refresh();
+        // Aplicar primero las acciones seguras (constructivas/edit/toggle).
+        const applied = await applyActions(safeActions);
 
+        // Render del mensaje del assistant — antes de pedir confirmación
+        // para que el usuario lea el contexto que acompaña la propuesta.
         setMessages((prev) =>
           prev.map((m) =>
             m.id === placeholder.id
@@ -190,6 +364,49 @@ export default function NovaScreen() {
               : m,
           ),
         );
+
+        // Propose mode para destructivas: una sola confirmación cubre todas.
+        if (destructive.length > 0) {
+          const eventTitleById = new Map(events.events.map((e) => [e.id, e.title]));
+          const taskLabelById = new Map(tasks.tasks.map((t) => [t.id, t.label]));
+          const summary = destructiveSummary(destructive, eventTitleById, taskLabelById);
+          Alert.alert(
+            '¿Confirmar eliminación?',
+            `Vas a eliminar ${summary}. Esto no se puede deshacer.`,
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Eliminar',
+                style: 'destructive',
+                onPress: () => {
+                  void (async () => {
+                    const dApplied = await applyActions(destructive);
+                    if (dApplied.length > 0) {
+                      // Aumentar el chip del último mensaje con las eliminaciones.
+                      setMessages((prev) =>
+                        prev.map((m) =>
+                          m.id === placeholder.id
+                            ? {
+                                ...m,
+                                appliedActions: [
+                                  ...(m.appliedActions ?? []),
+                                  ...dApplied,
+                                ],
+                              }
+                            : m,
+                        ),
+                      );
+                    }
+                  })();
+                },
+              },
+            ],
+          );
+        }
+
+        // Refrescar para reflejar cambios reales (en caso de algún server-side).
+        void events.refresh();
+        void tasks.refresh();
       } catch (err: any) {
         const errCode = err?.code as string | undefined;
         const errText: string =
@@ -208,7 +425,7 @@ export default function NovaScreen() {
         setSending(false);
       }
     },
-    [draft, sending, messages, events, tasks],
+    [draft, sending, messages, events, tasks, applyActions],
   );
 
   // Auto-scroll al final cuando llega un mensaje nuevo.

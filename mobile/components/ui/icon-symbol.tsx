@@ -26,6 +26,11 @@ const MAPPING = {
   'plus.circle.fill': 'add-circle',
   'xmark': 'close',
   'trash.fill': 'delete',
+  'trash': 'delete-outline',
+  'checkmark': 'check',
+  'pencil': 'edit',
+  'square.and.arrow.down': 'file-download',
+  'sun.max': 'wb-sunny',
 } as IconMapping;
 
 export function IconSymbol({

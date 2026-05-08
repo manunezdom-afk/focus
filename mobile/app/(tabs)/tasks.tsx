@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -20,11 +20,14 @@ import { LoadingState } from '@/components/LoadingState';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
 import { NovaFab } from '@/components/nova/NovaFab';
 import { TaskRow } from '@/components/TaskRow';
+import { TaskDetailSheet } from '@/components/tasks/TaskDetailSheet';
+import { WeeklyStatsCard } from '@/components/tasks/WeeklyStatsCard';
 import { Card } from '@/components/ui/Card';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProgressCard } from '@/components/ui/ProgressCard';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { setNovaSeed } from '@/src/data/novaSeedStore';
 import type { Task, TaskPriority } from '@/src/data/types';
 import { useTasks } from '@/src/data/useTasks';
 
@@ -99,6 +102,12 @@ export default function TasksScreen() {
   const [draft, setDraft] = useState('');
   const [draftPriority, setDraftPriority] = useState<TaskPriority>('Media');
   const [submitting, setSubmitting] = useState(false);
+  const [detailTask, setDetailTask] = useState<Task | null>(null);
+
+  // Tracking de creaciones recientes para el flash chip "Añadidas N".
+  // Es un array de timestamps ms; filtramos a la ventana de 4s en cada
+  // render. Cuando hay 2+ creaciones recientes mostramos el chip.
+  const [recentAdds, setRecentAdds] = useState<number[]>([]);
 
   // Stats: progreso de hoy
   const todayTasks = useMemo(
@@ -150,8 +159,28 @@ export default function TasksScreen() {
       if (Platform.OS === 'ios') {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
+      // Registrar creación reciente para el flash chip.
+      const now = Date.now();
+      setRecentAdds((prev) => [...prev.filter((t) => now - t < 4000), now]);
     }
   }
+
+  // Auto-limpiar el chip cuando la ventana de 4s pase. setTimeout corre
+  // sobre el último timestamp para no acumular timers.
+  useEffect(() => {
+    if (recentAdds.length === 0) return;
+    const lastAt = recentAdds[recentAdds.length - 1];
+    const ttl = 4000 - (Date.now() - lastAt);
+    if (ttl <= 0) {
+      setRecentAdds([]);
+      return;
+    }
+    const id = setTimeout(() => setRecentAdds([]), ttl);
+    return () => clearTimeout(id);
+  }, [recentAdds]);
+
+  const flashCount = recentAdds.length;
+  const showFlashChip = flashCount >= 2;
 
   const cycleCategory = useCallback(
     (id: string, current: string) => {
@@ -167,6 +196,13 @@ export default function TasksScreen() {
       void Haptics.selectionAsync();
     }
     router.push('/(tabs)/nova');
+  }
+
+  // CTA "Crear con Nova" del empty state → abre Nova con prompt para que
+  // pida ayuda planificando los pendientes del día.
+  function goToNovaForTasksSeed() {
+    setNovaSeed('Ayúdame a planificar mis tareas para hoy.');
+    goToNova();
   }
 
   const showLoadingState = tasks.loading && tasks.tasks.length === 0;
@@ -237,6 +273,17 @@ export default function TasksScreen() {
             </Animated.View>
           ) : null}
 
+          {/* Resumen semanal — solo si hay alguna tarea para tener algo
+              que mostrar (no inventamos métricas con un dataset vacío). */}
+          {!showLoadingState && totalTasks > 0 ? (
+            <Animated.View
+              entering={FadeInDown.delay(140).duration(360)}
+              style={styles.weeklyWrap}
+            >
+              <WeeklyStatsCard tasks={tasks.tasks} />
+            </Animated.View>
+          ) : null}
+
           {tasks.error ? (
             <View style={styles.bannerWrap}>
               <ErrorBanner
@@ -249,7 +296,7 @@ export default function TasksScreen() {
           {showLoadingState ? <LoadingState /> : null}
 
           {isFullyEmpty ? (
-            <FullyEmptyState onCreate={() => openAddFor('hoy')} onAskNova={goToNova} />
+            <FullyEmptyState onCreate={() => openAddFor('hoy')} onAskNova={goToNovaForTasksSeed} />
           ) : null}
 
           {!showLoadingState && !isFullyEmpty ? (
@@ -323,6 +370,7 @@ export default function TasksScreen() {
                             onToggle={tasks.toggleTask}
                             onDelete={tasks.removeTask}
                             onCycleCategory={cycleCategory}
+                            onOpenDetail={setDetailTask}
                           />
                         ))}
                       </Card>
@@ -421,7 +469,28 @@ export default function TasksScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
       <NovaFab />
+
+      {/* Flash chip: aparece tras crear varias tareas seguidas (≤4s). */}
+      {showFlashChip ? (
+        <Animated.View
+          entering={FadeInDown.duration(200)}
+          style={[styles.flashChip, { backgroundColor: c.primary, shadowColor: c.primary }]}
+        >
+          <IconSymbol name="checkmark" size={12} color={c.onPrimary} weight="semibold" />
+          <Text style={[styles.flashChipText, { color: c.onPrimary }]}>
+            {`Añadidas ${flashCount}`}
+          </Text>
+        </Animated.View>
+      ) : null}
       </SwipeNavigator>
+
+      <TaskDetailSheet
+        task={detailTask}
+        visible={!!detailTask}
+        onDismiss={() => setDetailTask(null)}
+        onSave={tasks.patchTask}
+        onDelete={tasks.removeTask}
+      />
     </SafeAreaView>
   );
 }
@@ -544,6 +613,7 @@ const styles = StyleSheet.create({
   },
 
   progressWrap: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.lg },
+  weeklyWrap: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.lg },
   bannerWrap: { paddingHorizontal: Spacing.lg },
 
   // Empty state — mismo lenguaje visual que Calendario
@@ -698,4 +768,26 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   composerActionPrimary: { fontWeight: '700' },
+
+  // Flash chip — pill superior centrado que avisa "Añadidas N".
+  flashChip: {
+    position: 'absolute',
+    top: 8,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  flashChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
 });

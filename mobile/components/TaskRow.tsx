@@ -12,6 +12,9 @@ type Props = {
   onDelete: (id: string) => void;
   // Si se pasa, se muestra un botón "↔" inline para mover la tarea entre buckets.
   onCycleCategory?: (id: string, current: string) => void;
+  // Si se pasa, long-press abre el detail sheet en lugar del Alert de borrado.
+  // Cuando es undefined, mantiene el comportamiento clásico (long-press = delete).
+  onOpenDetail?: (task: Task) => void;
   // Oculta el priority badge cuando la fila va dentro de un contexto donde no
   // tiene sentido (ej: lista compacta de Mi Día con priority menos relevante).
   showPriority?: boolean;
@@ -19,13 +22,13 @@ type Props = {
 
 // Fila de tarea estilo iOS list.
 // - Tap = toggle done con haptic Light + animación visual via opacity
-// - Long-press = Alert de confirmación → delete (haptic Warning antes)
+// - Long-press = abre detail sheet (si onOpenDetail) o Alert delete (fallback)
 // - Optional onCycleCategory = botón inline para mover entre hoy/semana/algún día
 //
 // Match legacy TasksView item:
 //   px-3 py-2.5 rounded-xl border bg-surface-container-lowest
 //   checkmark + label + priority badge
-export function TaskRow({ task, onToggle, onDelete, onCycleCategory, showPriority = true }: Props) {
+export function TaskRow({ task, onToggle, onDelete, onCycleCategory, onOpenDetail, showPriority = true }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
@@ -38,7 +41,11 @@ export function TaskRow({ task, onToggle, onDelete, onCycleCategory, showPriorit
 
   function handleLongPress() {
     if (Platform.OS === 'ios') {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    if (onOpenDetail) {
+      onOpenDetail(task);
+      return;
     }
     Alert.alert(
       'Borrar tarea',
