@@ -20,6 +20,9 @@ import { LoadingState } from '@/components/LoadingState';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
 import { DayPicker } from '@/components/calendar/DayPicker';
 import { DayTimeline } from '@/components/calendar/DayTimeline';
+import { MonthView } from '@/components/calendar/MonthView';
+import { WeekView } from '@/components/calendar/WeekView';
+import { NovaFab } from '@/components/nova/NovaFab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -38,7 +41,7 @@ function monthYearLabel(dateISO: string): string {
   return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${y}`;
 }
 
-// Vistas del toggle — solo "Día" está implementada. Semana/Mes son visuales.
+// Vistas del toggle — Día con timeline, Semana en lista vertical, Mes en grilla.
 const VIEWS = ['Día', 'Semana', 'Mes'] as const;
 type CalView = (typeof VIEWS)[number];
 
@@ -47,7 +50,7 @@ export default function CalendarScreen() {
   const c = Colors[scheme];
   const events = useEvents('all');
   const [selectedDate, setSelectedDate] = useState<string>(todayISO());
-  const [activeView] = useState<CalView>('Día');
+  const [activeView, setActiveView] = useState<CalView>('Día');
   const [showSheet, setShowSheet] = useState(false);
 
   const eventCounts = useMemo(() => {
@@ -68,6 +71,20 @@ export default function CalendarScreen() {
   function selectDay(dateISO: string) {
     if (Platform.OS === 'ios') void Haptics.selectionAsync();
     setSelectedDate(dateISO);
+  }
+
+  // Tap en una celda de la vista Mes/Semana: cambia el día y vuelve a la
+  // vista Día (estilo Google Calendar — el detalle siempre se ve en Día).
+  function selectDayAndDrill(dateISO: string) {
+    if (Platform.OS === 'ios') void Haptics.selectionAsync();
+    setSelectedDate(dateISO);
+    setActiveView('Día');
+  }
+
+  function changeView(v: CalView) {
+    if (v === activeView) return;
+    if (Platform.OS === 'ios') void Haptics.selectionAsync();
+    setActiveView(v);
   }
 
   function openCreate() {
@@ -126,12 +143,14 @@ export default function CalendarScreen() {
                   return (
                     <Pressable
                       key={v}
-                      disabled={!isActive}
-                      style={[
+                      onPress={() => changeView(v)}
+                      hitSlop={6}
+                      style={({ pressed }) => [
                         styles.pill,
                         isActive
                           ? { backgroundColor: c.surface, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2 }
                           : null,
+                        !isActive && pressed ? { opacity: 0.7 } : null,
                       ]}
                       accessibilityRole="button"
                       accessibilityState={{ selected: isActive }}
@@ -170,53 +189,60 @@ export default function CalendarScreen() {
               </View>
             ) : null}
 
-            {/* ── Selector de semana ────────────────────────────────────── */}
-            <Animated.View entering={FadeInDown.delay(80).duration(320)}>
-              <DayPicker
-                selectedDate={selectedDate}
-                onSelect={selectDay}
-                eventCounts={eventCounts}
-              />
-            </Animated.View>
+            {/* ── Vista Día: selector semanal + timeline / empty ─────────── */}
+            {activeView === 'Día' ? (
+              <>
+                <Animated.View entering={FadeInDown.delay(80).duration(320)}>
+                  <DayPicker
+                    selectedDate={selectedDate}
+                    onSelect={selectDay}
+                    eventCounts={eventCounts}
+                  />
+                </Animated.View>
 
-            {/* ── Timeline o empty state ────────────────────────────────── */}
-            {hasEvents ? (
-              <DayTimeline
-                dateISO={selectedDate}
-                events={eventsForSelectedDay}
-                onDeleteEvent={handleDeleteEvent}
+                {hasEvents ? (
+                  <DayTimeline
+                    dateISO={selectedDate}
+                    events={eventsForSelectedDay}
+                    onDeleteEvent={handleDeleteEvent}
+                  />
+                ) : (
+                  <Animated.View
+                    entering={FadeInDown.delay(130).duration(380)}
+                    style={styles.emptyWrap}
+                  >
+                    <EmptyAgendaState
+                      selectedDate={selectedDate}
+                      onCreateEvent={openCreate}
+                      onFocusWork={goToNova}
+                    />
+                  </Animated.View>
+                )}
+              </>
+            ) : null}
+
+            {/* ── Vista Semana: lista de los 7 días con eventos resumidos ── */}
+            {activeView === 'Semana' ? (
+              <WeekView
+                selectedDate={selectedDate}
+                events={events.events}
+                onSelectDay={selectDayAndDrill}
+                onChangeWeek={setSelectedDate}
               />
-            ) : (
-              <Animated.View
-                entering={FadeInDown.delay(130).duration(380)}
-                style={styles.emptyWrap}
-              >
-                <EmptyAgendaState
-                  selectedDate={selectedDate}
-                  onCreateEvent={openCreate}
-                  onFocusWork={goToNova}
-                />
-              </Animated.View>
-            )}
+            ) : null}
+
+            {/* ── Vista Mes: grilla 6×7 con puntos por día ──────────────── */}
+            {activeView === 'Mes' ? (
+              <MonthView
+                selectedDate={selectedDate}
+                eventCounts={eventCounts}
+                onSelectDay={selectDayAndDrill}
+                onChangeMonth={setSelectedDate}
+              />
+            ) : null}
           </ScrollView>
 
-          {/* ── Nova pill FAB ─────────────────────────────────────────────── */}
-          <Pressable
-            onPress={goToNova}
-            style={({ pressed }) => [
-              styles.novaFab,
-              {
-                backgroundColor: pressed ? c.primaryPressed : c.primary,
-                shadowColor: c.primary,
-                transform: [{ scale: pressed ? 0.95 : 1 }],
-              },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Abrir Nova"
-          >
-            <IconSymbol name="sparkles" size={15} color={c.onPrimary} />
-            <Text style={[styles.novaFabText, { color: c.onPrimary }]}>Nova</Text>
-          </Pressable>
+          <NovaFab onPress={goToNova} />
         </SwipeNavigator>
       )}
 
@@ -450,25 +476,4 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
 
-  // Nova pill FAB
-  novaFab: {
-    position: 'absolute',
-    right: Spacing.lg,
-    bottom: 96,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
-    borderRadius: Radius.full,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 18,
-    elevation: 8,
-  },
-  novaFabText: {
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: 0.1,
-  },
 });

@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
-import { NovaOrb } from '@/components/nova/NovaOrb';
+import { NovaFab } from '@/components/nova/NovaFab';
 import { TaskRow } from '@/components/TaskRow';
 import { Card } from '@/components/ui/Card';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -106,7 +106,6 @@ export default function TasksScreen() {
     [tasks.tasks],
   );
   const todayDone = useMemo(() => todayTasks.filter((t) => t.done).length, [todayTasks]);
-  const hasPendingToday = todayTasks.some((t) => !t.done);
 
   // Resumen client-side desde datos reales
   const summary = useMemo(() => buildSummary(tasks.tasks), [tasks.tasks]);
@@ -176,22 +175,6 @@ export default function TasksScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
-      {/* Hero halo — patrón compartido con Mi Día / Calendar / Nova. */}
-      <View style={styles.heroHaloLayer} pointerEvents="none">
-        <View
-          style={[
-            styles.heroHaloCircle,
-            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.45 : 0.55 },
-          ]}
-        />
-        <View
-          style={[
-            styles.heroHaloCircleSoft,
-            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.18 : 0.22 },
-          ]}
-        />
-      </View>
-
       <SwipeNavigator currentTab="tasks">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -209,45 +192,16 @@ export default function TasksScreen() {
             />
           }
         >
-          {/* ── Header premium — título + subtítulo dinámico + CTA Nova ── */}
-          <Animated.View entering={FadeInDown.duration(360)} style={styles.header}>
-            <View style={styles.headerRow}>
-              <View style={styles.headerText}>
-                <Text style={[styles.titleLine, { color: c.text }]}>Tareas</Text>
-                <Text style={styles.subLine} numberOfLines={1}>
-                  <Text style={[styles.subLineStrong, { color: c.primary }]}>
-                    {summary.headerSubtitle.split('·')[0].trim().split(' ')[0]}
-                  </Text>
-                  <Text style={{ color: c.textMuted }}>
-                    {`  ·  ${summary.headerSubtitle.replace(/^\S+\s/, '')}`}
-                  </Text>
-                </Text>
-              </View>
-
-              {hasPendingToday ? (
-                <Pressable
-                  onPress={goToNova}
-                  style={({ pressed }) => [
-                    styles.novaCta,
-                    {
-                      backgroundColor: pressed ? c.primaryContainer : c.surfaceTint,
-                      borderColor: c.primary,
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Pedir a Nova que organice"
-                >
-                  <IconSymbol name="sparkles" size={13} color={c.primary} />
-                  <Text style={[styles.novaCtaText, { color: c.primary }]}>
-                    Nova, organízame
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
+          {/* ── Header — eyebrow + título compacto, mismo lenguaje que Calendario ── */}
+          <Animated.View entering={FadeInDown.duration(320)} style={styles.header}>
+            <Text style={[styles.eyebrow, { color: c.primary }]} numberOfLines={1}>
+              {summary.headerSubtitle}
+            </Text>
+            <Text style={[styles.titleLine, { color: c.text }]}>Tareas</Text>
           </Animated.View>
 
-          {/* Smart summary card — siempre visible, copy desde datos reales */}
-          {!showLoadingState ? (
+          {/* Smart summary card — copy desde datos reales, sin orb */}
+          {!showLoadingState && totalTasks > 0 ? (
             <Animated.View
               entering={FadeInDown.delay(60).duration(360)}
               style={styles.summaryWrap}
@@ -258,7 +212,9 @@ export default function TasksScreen() {
                   { backgroundColor: c.surfaceTint, borderColor: c.border },
                 ]}
               >
-                <NovaOrb size={36} ambient={false} />
+                <View style={[styles.summaryIcon, { backgroundColor: c.primaryContainer }]}>
+                  <IconSymbol name="sparkles" size={14} color={c.primary} />
+                </View>
                 <View style={styles.summaryText}>
                   <Text style={[styles.summaryTitle, { color: c.text }]} numberOfLines={2}>
                     {summary.cardTitle}
@@ -464,13 +420,15 @@ export default function TasksScreen() {
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
+      <NovaFab />
       </SwipeNavigator>
     </SafeAreaView>
   );
 }
 
-// Empty state hero cuando no hay NINGUNA tarea (en lugar de mostrar
-// las 3 secciones vacías). NovaOrb central + título + 2 CTAs.
+// Empty state hero cuando no hay NINGUNA tarea. Mismo lenguaje visual que
+// el empty state del Calendario: ícono soft circular, título compacto,
+// dos CTAs y un terciario. Sin orb grande para no saturar.
 function FullyEmptyState({
   onCreate,
   onAskNova,
@@ -483,45 +441,40 @@ function FullyEmptyState({
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(140).duration(420)}
-      style={styles.emptyHero}
+      entering={FadeInDown.delay(120).duration(380)}
+      style={styles.emptyWrap}
     >
-      <NovaOrb size={60} ambient breathing />
-      <Text style={[styles.emptyTitle, { color: c.text }]}>
-        No tienes tareas pendientes.
-      </Text>
-      <Text style={[styles.emptyDesc, { color: c.textMuted }]}>
-        Crea una manualmente o pídele a Nova que organice tus pendientes.
-      </Text>
-      <View style={styles.emptyActions}>
+      <View style={[styles.emptyCard, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryContainer }]}>
+          <IconSymbol name="checklist" size={24} color={c.primary} />
+        </View>
+        <Text style={[styles.emptyTitle, { color: c.text }]}>Sin pendientes.</Text>
+        <Text style={[styles.emptyDesc, { color: c.textMuted }]}>
+          Crea una tarea o pídele a Nova que organice tus pendientes.
+        </Text>
         <Pressable
           onPress={onCreate}
           style={({ pressed }) => [
-            styles.primaryCta,
+            styles.primaryBtn,
             { backgroundColor: pressed ? c.primaryPressed : c.primary },
           ]}
           accessibilityRole="button"
           accessibilityLabel="Crear nueva tarea"
         >
-          <IconSymbol name="plus" size={17} color={c.onPrimary} />
-          <Text style={[styles.primaryCtaText, { color: c.onPrimary }]}>Nueva tarea</Text>
+          <IconSymbol name="plus" size={16} color={c.onPrimary} />
+          <Text style={[styles.primaryBtnText, { color: c.onPrimary }]}>Nueva tarea</Text>
         </Pressable>
         <Pressable
           onPress={onAskNova}
           style={({ pressed }) => [
-            styles.secondaryCta,
-            {
-              backgroundColor: pressed ? c.surfaceTint : c.surface,
-              borderColor: c.border,
-            },
+            styles.secondaryBtn,
+            { borderColor: c.border, backgroundColor: pressed ? c.surfaceMuted : 'transparent' },
           ]}
           accessibilityRole="button"
           accessibilityLabel="Crear con Nova"
         >
-          <IconSymbol name="sparkles" size={17} color={c.primary} />
-          <Text style={[styles.secondaryCtaText, { color: c.primary }]}>
-            Crear con Nova
-          </Text>
+          <IconSymbol name="sparkles" size={16} color={c.primary} />
+          <Text style={[styles.secondaryBtnText, { color: c.primary }]}>Crear con Nova</Text>
         </Pressable>
       </View>
     </Animated.View>
@@ -533,83 +486,30 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scrollContent: { paddingBottom: Spacing['3xl'] },
 
-  // Hero halo — mismos números que Mi Día / Calendar / Nova
-  heroHaloLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 380,
-    overflow: 'hidden',
-  },
-  heroHaloCircle: {
-    position: 'absolute',
-    top: -120,
-    left: -60,
-    right: -60,
-    height: 320,
-    borderBottomLeftRadius: 240,
-    borderBottomRightRadius: 240,
-  },
-  heroHaloCircleSoft: {
-    position: 'absolute',
-    top: 60,
-    left: -120,
-    right: -120,
-    height: 280,
-    borderRadius: 240,
-    transform: [{ scaleY: 0.55 }],
-  },
-
-  // Header premium
+  // Header — eyebrow + title estilo Calendario (compacto, fino)
   header: {
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
-    paddingBottom: Spacing.lg,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.md,
+    gap: 3,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: Spacing.md,
-  },
-  headerText: {
-    flex: 1,
+  eyebrow: {
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 17,
+    letterSpacing: 0.1,
   },
   titleLine: {
-    fontSize: 40,
+    fontSize: 34,
     fontWeight: '700',
-    lineHeight: 44,
-    letterSpacing: -0.8,
-  },
-  subLine: {
-    fontSize: 14,
-    fontWeight: '500',
-    lineHeight: 18,
-    marginTop: 4,
-  },
-  subLineStrong: {
-    fontWeight: '700',
-  },
-  novaCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: Spacing.sm + 2,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 4,
-  },
-  novaCtaText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.2,
+    lineHeight: 38,
+    letterSpacing: -0.7,
   },
 
   // Smart summary card
   summaryWrap: {
     paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   summaryCard: {
     flexDirection: 'row',
@@ -620,14 +520,22 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  summaryIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   summaryText: {
     flex: 1,
     gap: 2,
   },
   summaryTitle: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     lineHeight: 20,
+    letterSpacing: -0.1,
   },
   summaryDesc: {
     fontSize: 13,
@@ -638,60 +546,70 @@ const styles = StyleSheet.create({
   progressWrap: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.lg },
   bannerWrap: { paddingHorizontal: Spacing.lg },
 
-  // Empty state hero (cuando 0 tareas totales)
-  emptyHero: {
+  // Empty state — mismo lenguaje visual que Calendario
+  emptyWrap: {
+    paddingHorizontal: Spacing.lg,
+    marginTop: 32,
+  },
+  emptyCard: {
+    borderRadius: Radius['2xl'],
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: Spacing['2xl'],
+    paddingHorizontal: Spacing.lg,
     alignItems: 'center',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.xl,
-    marginTop: 56,
+    gap: Spacing.md,
+  },
+  emptyIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.xs,
   },
   emptyTitle: {
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: '600',
     lineHeight: 26,
     textAlign: 'center',
-    marginTop: Spacing.sm,
+    letterSpacing: -0.2,
   },
   emptyDesc: {
     fontSize: 14,
     fontWeight: '400',
     lineHeight: 20,
     textAlign: 'center',
-    maxWidth: 320,
+    maxWidth: 280,
+    marginBottom: Spacing.sm,
   },
-  emptyActions: {
+  primaryBtn: {
     flexDirection: 'row',
-    gap: Spacing.sm,
-    marginTop: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 48,
+    borderRadius: Radius.full,
     alignSelf: 'stretch',
   },
-  primaryCta: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: Radius.full,
+  primaryBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.1,
+  },
+  secondaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.xs,
-  },
-  primaryCtaText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  secondaryCta: {
-    flex: 1,
-    minHeight: 46,
+    gap: 8,
+    height: 46,
     borderRadius: Radius.full,
     borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.xs,
+    alignSelf: 'stretch',
   },
-  secondaryCtaText: {
-    fontSize: 14,
-    fontWeight: '700',
+  secondaryBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.1,
   },
 
   categoryWrap: {

@@ -1,9 +1,15 @@
 import { useNavigation } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef } from 'react';
-import { Keyboard, Platform, View } from 'react-native';
+import { Dimensions, Keyboard, Platform } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
 // Orden estricto de tabs — debe coincidir con (tabs)/_layout.tsx.
 const TAB_ORDER = ['index', 'calendar', 'nova', 'tasks', 'settings'] as const;
@@ -14,28 +20,24 @@ type Props = {
   children: React.ReactNode;
 };
 
-// Wrapper minimalista que detecta swipe horizontal y navega entre tabs.
-//
-// Diseño priorizado para STABILITY > efecto visual:
-//   · activeOffsetX([-15, 15]) — solo activa con movimiento X claro.
-//   · failOffsetY([-15, 15])   — falla si el usuario va vertical, cede a
-//     ScrollView/FlatList interno (no rompe scroll).
-//   · NO arrastra el contenido durante el gesto. La pasada anterior
-//     hacía translateX en cada onChange — eso contribuía al lag percibido.
-//     Ahora el gesto es invisible: detecta y dispara navegación cuando
-//     supera el threshold; sin animación de damping.
-//   · Threshold más alto (80px / 500px·s) para evitar disparar por
-//     accidente al hacer scroll diagonal.
-//   · Mientras el teclado está abierto, navega no se ejecuta — el ref
-//     se chequea en JS thread cuando runOnJS dispara la callback.
-//   · navigation.navigate del Tab navigator local (más rápido que
-//     router.navigate de expo-router) — no toca la URL stack.
-//   · Sin nuevas dependencias.
+const SCREEN_W = Dimensions.get('window').width;
+const SWIPE_DIST = 80;
+const SWIPE_VEL = 500;
+
+// Wrapper de swipe horizontal entre tabs con feedback visual estilo iOS:
+//   · Durante el pan, el contenido sigue al dedo con translateX 1:1.
+//   · En los extremos (primer/última tab) hay rubber-band damping.
+//   · Al soltar pasando el threshold, el contenido sale de pantalla y
+//     navegamos al tab adyacente — al volver al render con tabIndex nuevo,
+//     translateX está en 0 y entra natural.
+//   · Si no pasa el threshold, vuelve a 0 con spring suave.
+//   · activeOffsetX/failOffsetY mantienen scroll vertical intacto.
+//   · navigate del Tab navigator local (más rápido que expo-router router).
 export function SwipeNavigator({ currentTab, children }: Props) {
   const navigation = useNavigation<{ navigate: (name: string) => void }>();
   const tabIndex = TAB_ORDER.indexOf(currentTab);
 
-  // Ref JS-thread accesible desde callbacks runOnJS-ed.
+  const translateX = useSharedValue(0);
   const keyboardOpenRef = useRef(false);
 
   useEffect(() => {
@@ -53,47 +55,78 @@ export function SwipeNavigator({ currentTab, children }: Props) {
     };
   }, []);
 
+  // Reset translate cuando cambia la tab (al volver del navigate, el
+  // contenido nuevo aparece centrado sin flicker).
+  useEffect(() => {
+    translateX.value = 0;
+  }, [tabIndex, translateX]);
+
+  const navigateTo = useCallback(
+    (name: string) => {
+      if (Platform.OS === 'ios') {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      navigation.navigate(name);
+    },
+    [navigation],
+  );
+
   const goPrev = useCallback(() => {
     if (keyboardOpenRef.current) return;
     const prev = TAB_ORDER[tabIndex - 1];
     if (!prev) return;
-    if (Platform.OS === 'ios') {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    navigation.navigate(prev);
-  }, [tabIndex, navigation]);
+    navigateTo(prev);
+  }, [tabIndex, navigateTo]);
 
   const goNext = useCallback(() => {
     if (keyboardOpenRef.current) return;
     const next = TAB_ORDER[tabIndex + 1];
     if (!next) return;
-    if (Platform.OS === 'ios') {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    navigation.navigate(next);
-  }, [tabIndex, navigation]);
+    navigateTo(next);
+  }, [tabIndex, navigateTo]);
+
+  const isFirst = tabIndex === 0;
+  const isLast = tabIndex === TAB_ORDER.length - 1;
 
   const pan = Gesture.Pan()
     .activeOffsetX([-15, 15])
     .failOffsetY([-15, 15])
+    .onUpdate((e) => {
+      'worklet';
+      const goingRight = e.translationX > 0;
+      const goingLeft = e.translationX < 0;
+      // Rubber-band en los bordes: si no hay tab a la que ir, el movimiento
+      // se atenúa a un tercio para dar feedback de "no hay más" sin quedarse.
+      const atEdge = (goingRight && isFirst) || (goingLeft && isLast);
+      const factor = atEdge ? 0.28 : 1;
+      translateX.value = e.translationX * factor;
+    })
     .onEnd((e) => {
       'worklet';
-      const SWIPE_DIST = 80;
-      const SWIPE_VEL = 500;
-      if (e.translationX < -SWIPE_DIST || e.velocityX < -SWIPE_VEL) {
-        if (tabIndex < TAB_ORDER.length - 1) {
-          runOnJS(goNext)();
-        }
-      } else if (e.translationX > SWIPE_DIST || e.velocityX > SWIPE_VEL) {
-        if (tabIndex > 0) {
-          runOnJS(goPrev)();
-        }
+      const passed =
+        Math.abs(e.translationX) > SWIPE_DIST || Math.abs(e.velocityX) > SWIPE_VEL;
+      const goingLeft = e.translationX < 0;
+      const goingRight = e.translationX > 0;
+
+      if (passed && goingLeft && !isLast) {
+        // Sale por la izquierda; navegación dispara y al re-render volverá a 0.
+        translateX.value = withTiming(-SCREEN_W, { duration: 200 });
+        runOnJS(goNext)();
+      } else if (passed && goingRight && !isFirst) {
+        translateX.value = withTiming(SCREEN_W, { duration: 200 });
+        runOnJS(goPrev)();
+      } else {
+        translateX.value = withSpring(0, { damping: 22, stiffness: 220, mass: 0.6 });
       }
     });
 
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
   return (
     <GestureDetector gesture={pan}>
-      <View style={{ flex: 1 }}>{children}</View>
+      <Animated.View style={[{ flex: 1 }, animatedStyle]}>{children}</Animated.View>
     </GestureDetector>
   );
 }

@@ -7,7 +7,9 @@ import {
   deleteEvent,
   fetchEvents,
   fetchTodayEvents,
+  updateEvent,
   type CreateEventInput,
+  type EventPatch,
 } from './events';
 import type { EventItem } from './types';
 
@@ -136,6 +138,39 @@ export function useEvents(mode: Mode = 'all') {
     [userId, cacheKey],
   );
 
+  const patchEvent = useCallback(
+    async (id: string, patch: EventPatch): Promise<void> => {
+      if (!userId || !cacheKey) return;
+      const before = stateRef.current.events;
+      setState((s) => ({
+        ...s,
+        events: s.events.map((e) =>
+          e.id === id
+            ? {
+                ...e,
+                ...(patch.title !== undefined ? { title: patch.title } : {}),
+                ...(patch.time !== undefined ? { time: patch.time ?? '' } : {}),
+                ...(patch.date !== undefined ? { date: patch.date } : {}),
+                ...(patch.description !== undefined
+                  ? { description: patch.description ?? '' }
+                  : {}),
+                ...(patch.section !== undefined ? { section: patch.section } : {}),
+                ...(patch.featured !== undefined ? { featured: patch.featured } : {}),
+              }
+            : e,
+        ),
+      }));
+      _cache.delete(`${userId}:today`);
+      _cache.delete(`${userId}:all`);
+      try {
+        await updateEvent(userId, id, patch);
+      } catch (err: any) {
+        setState((s) => ({ ...s, events: before, error: err?.message ?? 'update_event_failed' }));
+      }
+    },
+    [userId, cacheKey],
+  );
+
   return {
     events: state.events,
     loading: state.loading,
@@ -144,5 +179,6 @@ export function useEvents(mode: Mode = 'all') {
     refresh,
     addEvent,
     removeEvent,
+    patchEvent,
   };
 }

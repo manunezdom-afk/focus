@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.sm,
-    paddingBottom: Spacing.lg,
+    paddingBottom: Spacing['2xl'] + Spacing.xs,
     gap: 4,
   },
   titleLine: {
@@ -300,10 +300,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     lineHeight: 17,
-    marginTop: 1,
+    marginTop: 2,
   },
   subLineStrong: {
-    fontWeight: '700',
+    fontWeight: '600',
   },
 
   bannerWrap: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },

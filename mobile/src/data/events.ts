@@ -107,3 +107,34 @@ export async function deleteEvent(userId: string, id: string): Promise<void> {
   const { error } = await supabase.from('events').delete().eq('user_id', userId).eq('id', id);
   if (error) throw error;
 }
+
+// Patch parcial: title/date/time/description/section. Mismo patrón que
+// updateTask. Necesario para la acción `edit_event` de Nova.
+export type EventPatch = {
+  title?: string;
+  date?: string | null;
+  time?: string | null;
+  description?: string | null;
+  section?: string;
+  featured?: boolean;
+};
+
+export async function updateEvent(userId: string, id: string, patch: EventPatch): Promise<void> {
+  if (!supabase) throw new Error('supabase_not_configured');
+  if (Object.keys(patch).length === 0) return;
+  const row: Record<string, unknown> = {};
+  if (patch.title !== undefined) row.title = String(patch.title).trim();
+  if (patch.date !== undefined) row.date = patch.date;
+  if (patch.time !== undefined) row.time = patch.time;
+  if (patch.description !== undefined) {
+    row.description = patch.description == null ? null : String(patch.description).trim() || null;
+  }
+  if (patch.section !== undefined) row.section = patch.section;
+  if (patch.featured !== undefined) row.featured = !!patch.featured;
+  const { error } = await supabase
+    .from('events')
+    .update(row)
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error) throw error;
+}
