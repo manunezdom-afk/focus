@@ -486,7 +486,7 @@ function FullyEmptyState({
       entering={FadeInDown.delay(140).duration(420)}
       style={styles.emptyHero}
     >
-      <NovaOrb size={84} ambient breathing />
+      <NovaOrb size={60} ambient breathing />
       <Text style={[styles.emptyTitle, { color: c.text }]}>
         No tienes tareas pendientes.
       </Text>
@@ -644,6 +644,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.xl,
+    marginTop: 56,
   },
   emptyTitle: {
     fontSize: 20,

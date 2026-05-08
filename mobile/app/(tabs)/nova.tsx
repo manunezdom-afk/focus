@@ -262,7 +262,7 @@ export default function NovaScreen() {
         {/* Header: orb compacto + título Nova + tagline */}
         <Animated.View entering={FadeInDown.duration(360)} style={styles.header}>
           <View style={styles.headerRow}>
-            <NovaOrb size={48} ambient={false} />
+            <NovaOrb size={36} ambient={false} />
             <View style={styles.headerText}>
               <Text style={[styles.title, { color: c.text }]}>Nova</Text>
               <Text style={[styles.subtitle, { color: c.textMuted }]}>
@@ -279,7 +279,7 @@ export default function NovaScreen() {
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.emptyHero}>
-              <NovaOrb size={88} ambient breathing />
+              <NovaOrb size={64} ambient breathing />
               <Text style={[styles.emptyTitle, { color: c.text }]}>¿Qué necesitas?</Text>
               <Text style={[styles.emptyDesc, { color: c.textMuted }]}>
                 Te ayudo a agendar, mover o limpiar tu día. Siempre confirmas antes de aplicar.
@@ -450,8 +450,8 @@ const styles = StyleSheet.create({
 
   header: {
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
-    paddingBottom: Spacing.lg,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.sm,
   },
   headerRow: {
     flexDirection: 'row',
@@ -477,22 +477,22 @@ const styles = StyleSheet.create({
   // Empty state — orb grande centrado + título + chips de prompts
   emptyContainer: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
+    paddingTop: Spacing.md,
     paddingBottom: Spacing.xl,
-    gap: Spacing.xl,
+    gap: Spacing.lg,
   },
   emptyHero: {
     alignItems: 'center',
-    gap: Spacing.md,
-    paddingTop: Spacing.lg,
+    gap: Spacing.sm,
+    paddingTop: Spacing.xs,
   },
   emptyTitle: {
-    fontSize: 22,
+    fontSize: 19,
     fontWeight: '700',
-    lineHeight: 28,
+    lineHeight: 24,
     letterSpacing: -0.3,
     textAlign: 'center',
-    marginTop: Spacing.sm,
+    marginTop: Spacing.xs,
   },
   emptyDesc: {
     fontSize: 14,

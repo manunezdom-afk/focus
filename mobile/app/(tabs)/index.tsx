@@ -159,7 +159,7 @@ export default function MiDiaScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, !hasAnyItem && !loading && styles.scrollContentEmpty]}
           keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
@@ -202,9 +202,11 @@ export default function MiDiaScreen() {
           {loading ? (
             <LoadingState />
           ) : !hasAnyItem ? (
-            <Animated.View entering={FadeInDown.delay(140).duration(420)}>
-              <EmptyDayState onPickPrompt={seedNova} />
-            </Animated.View>
+            <View style={styles.emptyFill}>
+              <Animated.View entering={FadeInDown.delay(140).duration(420)}>
+                <EmptyDayState onPickPrompt={seedNova} />
+              </Animated.View>
+            </View>
           ) : (
             <>
               {/* Timeline: eventos por hora + tareas hoy al final */}
@@ -249,6 +251,8 @@ const styles = StyleSheet.create({
   // del CustomTabBar (que tiene su propia safe area). Sin este margen, el
   // botón "HECHO ✓" del último item podía quedar parcialmente cubierto.
   scrollContent: { paddingBottom: 48 },
+  scrollContentEmpty: { flexGrow: 1 },
+  emptyFill: { flex: 1, justifyContent: 'center', paddingBottom: 48 },
 
   // Hero halo: dos "blobs" tinted indigo apilados en absoluto detrás del
   // header. Sin gradient deps. Crea profundidad ambiente estilo IA sin
