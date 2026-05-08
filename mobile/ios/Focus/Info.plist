@@ -44,6 +44,8 @@
     <string>Focus usa la cámara para que Nova analice fotos de tu agenda y detecte eventos automáticamente.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Focus accede a tu galería para que Nova analice fotos de agendas y detecte eventos.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Focus usa el micrófono para que puedas dictarle a Nova en lugar de escribir.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
       <key>NSAllowsArbitraryLoads</key>
