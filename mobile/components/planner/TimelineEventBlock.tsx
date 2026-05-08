@@ -115,42 +115,36 @@ export function TimelineEventBlock({
               {onToggleDone ? (
                 <Pressable
                   onPress={onToggleDone}
-                  hitSlop={6}
+                  hitSlop={10}
                   style={({ pressed }) => [
-                    styles.doneBtn,
+                    styles.doneCircle,
                     {
-                      backgroundColor: done
-                        ? c.surfaceMuted
-                        : c.primaryContainer,
+                      borderColor: done ? c.success : c.borderStrong,
+                      backgroundColor: done ? c.success : 'transparent',
                       opacity: pressed ? 0.6 : 1,
                     },
                   ]}
                   accessibilityLabel={done ? 'Desmarcar evento' : 'Marcar evento hecho'}
                   accessibilityRole="button"
                 >
-                  <Text
-                    style={[
-                      styles.doneBtnText,
-                      { color: done ? c.success : c.primary },
-                    ]}
-                  >
-                    {done ? '✓ HECHO' : 'HECHO ✓'}
-                  </Text>
+                  {done ? (
+                    <IconSymbol name="checkmark" size={11} color={'#ffffff'} weight="bold" />
+                  ) : null}
                 </Pressable>
               ) : null}
 
               {onDeletePress ? (
                 <Pressable
                   onPress={onDeletePress}
-                  hitSlop={8}
+                  hitSlop={10}
                   style={({ pressed }) => [
                     styles.deleteBtn,
-                    { opacity: pressed ? 0.5 : 1 },
+                    { opacity: pressed ? 0.4 : 0.55 },
                   ]}
                   accessibilityLabel="Eliminar evento"
                   accessibilityRole="button"
                 >
-                  <IconSymbol name="trash.fill" size={14} color={c.textSubtle} />
+                  <IconSymbol name="trash.fill" size={12} color={c.textSubtle} />
                 </Pressable>
               ) : null}
             </View>
@@ -204,65 +198,70 @@ const styles = StyleSheet.create({
     borderRadius: DOT_SIZE / 2,
     zIndex: 1,
   },
-  // Card suave estilo IA moderna: borderRadius más amplio, acento
-  // lateral más fino (3 en vez de 4), shadow muy sutil para anclar
-  // visualmente sin ruido.
+  // Card más proporcional y elegante: padding reducido para que no se
+  // sienta gigante con un solo evento, acento lateral fino (3px), shadow
+  // mínima — el peso visual está en el contenido, no en el contenedor.
   card: {
     borderWidth: StyleSheet.hairlineWidth,
     borderLeftWidth: 3,
-    borderRadius: 16,
-    paddingHorizontal: Spacing.md + 2,
-    paddingVertical: Spacing.md,
-    gap: Spacing.xs,
+    borderRadius: 14,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    gap: 3,
     shadowColor: '#0f172a',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
     elevation: 1,
   },
   kindRow: {
     flexDirection: 'row',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   kindChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 1,
     borderRadius: Radius.full,
   },
   kindChipText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   titleRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: Spacing.sm,
   },
   title: {
     ...Typography.bodyStrong,
+    fontSize: 14,
+    lineHeight: 19,
     flex: 1,
   },
   actionsCol: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
+    gap: Spacing.sm + 2,
   },
-  doneBtn: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: Radius.full,
-  },
-  doneBtnText: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.3,
+  // Done = checkbox circular minimalista. No grita "HECHO" — solo
+  // un check si está done, hueco si no. Estética estilo iOS Reminders.
+  doneCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   deleteBtn: {
-    paddingTop: 2,
+    paddingTop: 1,
   },
   description: {
     ...Typography.caption,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
   },
 });
