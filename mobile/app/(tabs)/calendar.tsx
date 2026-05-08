@@ -26,63 +26,30 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { addDaysISO, isToday, todayISO } from '@/src/data/today';
 import { useEvents } from '@/src/data/useEvents';
 
-// Pantalla Calendario — paridad con CalendarView legacy en estructura visual:
-// header con mes (primary eyebrow) + "Calendario" como título principal,
-// luego selector semanal de días + timeline de eventos del día. Mantiene lo
-// bueno del calendario V1 (DayPicker compacto, FAB, CreateEventSheet) y
-// adopta el header style legacy + hero halo + animaciones de Mi Día.
-//
-// Datos: 100% Supabase via useEvents('all'). No mocks, no demos.
-
 const MONTH_NAMES_ES = [
-  'enero',
-  'febrero',
-  'marzo',
-  'abril',
-  'mayo',
-  'junio',
-  'julio',
-  'agosto',
-  'septiembre',
-  'octubre',
-  'noviembre',
-  'diciembre',
+  'enero','febrero','marzo','abril','mayo','junio',
+  'julio','agosto','septiembre','octubre','noviembre','diciembre',
 ] as const;
 
-function monthLabelOf(dateISO: string): string {
+function monthYearLabel(dateISO: string): string {
   const [y, m] = dateISO.split('-').map((s) => parseInt(s, 10));
   if (!y || !m) return '';
   const name = MONTH_NAMES_ES[m - 1] ?? '';
   return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${y}`;
 }
 
-function dayLabelLong(dateISO: string): string {
-  const [y, m, d] = dateISO.split('-').map((s) => parseInt(s, 10));
-  if (!y || !m || !d) return dateISO;
-  const dt = new Date(y, m - 1, d, 12, 0, 0);
-  return new Intl.DateTimeFormat('es-CO', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  }).format(dt);
-}
-
-function dayContextOf(dateISO: string): string {
-  if (isToday(dateISO)) return 'Hoy';
-  if (dateISO === addDaysISO(todayISO(), 1)) return 'Mañana';
-  // Capitalizamos solo la primera letra del weekday.
-  const label = dayLabelLong(dateISO);
-  return label.charAt(0).toUpperCase() + label.slice(1);
-}
+// Vistas del toggle — solo "Día" está implementada. Semana/Mes son visuales.
+const VIEWS = ['Día', 'Semana', 'Mes'] as const;
+type CalView = (typeof VIEWS)[number];
 
 export default function CalendarScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const events = useEvents('all');
   const [selectedDate, setSelectedDate] = useState<string>(todayISO());
+  const [activeView] = useState<CalView>('Día');
   const [showSheet, setShowSheet] = useState(false);
 
-  // Mapa fecha → cantidad de eventos para los dots del DayPicker.
   const eventCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const e of events.events) {
@@ -96,43 +63,28 @@ export default function CalendarScreen() {
     [events.events, selectedDate],
   );
 
-  const monthLabel = useMemo(() => monthLabelOf(selectedDate), [selectedDate]);
-  const dayContext = useMemo(() => dayContextOf(selectedDate), [selectedDate]);
+  const monthLabel = useMemo(() => monthYearLabel(selectedDate), [selectedDate]);
 
   function selectDay(dateISO: string) {
-    if (Platform.OS === 'ios') {
-      void Haptics.selectionAsync();
-    }
+    if (Platform.OS === 'ios') void Haptics.selectionAsync();
     setSelectedDate(dateISO);
   }
 
   function openCreate() {
-    if (Platform.OS === 'ios') {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
+    if (Platform.OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setShowSheet(true);
   }
 
   function goToNova() {
-    if (Platform.OS === 'ios') {
-      void Haptics.selectionAsync();
-    }
+    if (Platform.OS === 'ios') void Haptics.selectionAsync();
     router.push('/(tabs)/nova');
-  }
-
-  function handleRefresh() {
-    void events.refresh();
   }
 
   const handleDeleteEvent = useCallback(
     (id: string, title: string) => {
       Alert.alert('¿Eliminar evento?', title, [
         { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: () => void events.removeEvent(id),
-        },
+        { text: 'Eliminar', style: 'destructive', onPress: () => void events.removeEvent(id) },
       ]);
     },
     [events],
@@ -143,24 +95,6 @@ export default function CalendarScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
-      {/* ── Hero halo ─────────────────────────────────────────────────
-          Mismo patrón que Mi Día: dos blobs tinted indigo apilados detrás
-          del header. Crea profundidad ambiente sin requerir gradient lib. */}
-      <View style={styles.heroHaloLayer} pointerEvents="none">
-        <View
-          style={[
-            styles.heroHaloCircle,
-            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.45 : 0.55 },
-          ]}
-        />
-        <View
-          style={[
-            styles.heroHaloCircleSoft,
-            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.18 : 0.22 },
-          ]}
-        />
-      </View>
-
       {showLoading ? (
         <LoadingState />
       ) : (
@@ -170,30 +104,74 @@ export default function CalendarScreen() {
             refreshControl={
               <RefreshControl
                 refreshing={events.refreshing}
-                onRefresh={handleRefresh}
+                onRefresh={() => void events.refresh()}
                 tintColor={c.text}
               />
             }
           >
-            {/* ── Header legacy-style: mes eyebrow + "Calendario" ──────── */}
-            <Animated.View entering={FadeInDown.duration(360)} style={styles.header}>
-              <Text style={[styles.titleLine, { color: c.text }]}>Calendario</Text>
-              <Text style={styles.subLine} numberOfLines={1}>
-                <Text style={[styles.subLineMonth, { color: c.primary }]}>{monthLabel}</Text>
-                <Text style={{ color: c.textMuted }}>{`  ·  ${dayContext}`}</Text>
-              </Text>
+            {/* ── Header: eyebrow mes + título ─────────────────────────── */}
+            <Animated.View entering={FadeInDown.duration(320)} style={styles.header}>
+              <Text style={[styles.eyebrow, { color: c.primary }]}>{monthLabel}</Text>
+              <Text style={[styles.title, { color: c.text }]}>Calendario</Text>
+            </Animated.View>
+
+            {/* ── Toggle Día / Semana / Mes + botón añadir ─────────────── */}
+            <Animated.View
+              entering={FadeInDown.delay(40).duration(320)}
+              style={styles.toggleRow}
+            >
+              <View style={styles.togglePills}>
+                {VIEWS.map((v) => {
+                  const isActive = v === activeView;
+                  return (
+                    <Pressable
+                      key={v}
+                      disabled={!isActive}
+                      style={[
+                        styles.pill,
+                        isActive
+                          ? { backgroundColor: c.surface, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2 }
+                          : null,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isActive }}
+                    >
+                      <Text
+                        style={[
+                          styles.pillText,
+                          { color: isActive ? c.text : c.textSubtle },
+                          isActive ? { fontWeight: '700' } : { fontWeight: '500' },
+                        ]}
+                      >
+                        {v}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Botón + para añadir evento sin entrar al empty state */}
+              <Pressable
+                onPress={openCreate}
+                style={({ pressed }) => [
+                  styles.addBtn,
+                  { backgroundColor: pressed ? c.primaryPressed : c.primary },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Añadir evento"
+              >
+                <IconSymbol name="plus" size={16} color={c.onPrimary} weight="semibold" />
+              </Pressable>
             </Animated.View>
 
             {events.error ? (
               <View style={styles.bannerWrap}>
-                <ErrorBanner
-                  message="No pudimos cargar tus eventos."
-                  onRetry={handleRefresh}
-                />
+                <ErrorBanner message="No pudimos cargar tus eventos." onRetry={() => void events.refresh()} />
               </View>
             ) : null}
 
-            <Animated.View entering={FadeInDown.delay(60).duration(360)}>
+            {/* ── Selector de semana ────────────────────────────────────── */}
+            <Animated.View entering={FadeInDown.delay(80).duration(320)}>
               <DayPicker
                 selectedDate={selectedDate}
                 onSelect={selectDay}
@@ -201,6 +179,7 @@ export default function CalendarScreen() {
               />
             </Animated.View>
 
+            {/* ── Timeline o empty state ────────────────────────────────── */}
             {hasEvents ? (
               <DayTimeline
                 dateISO={selectedDate}
@@ -209,32 +188,34 @@ export default function CalendarScreen() {
               />
             ) : (
               <Animated.View
-                entering={FadeInDown.delay(140).duration(420)}
+                entering={FadeInDown.delay(130).duration(380)}
                 style={styles.emptyWrap}
               >
                 <EmptyAgendaState
                   selectedDate={selectedDate}
                   onCreateEvent={openCreate}
-                  onAskNova={goToNova}
+                  onFocusWork={goToNova}
                 />
               </Animated.View>
             )}
           </ScrollView>
 
+          {/* ── Nova pill FAB ─────────────────────────────────────────────── */}
           <Pressable
-            onPress={openCreate}
+            onPress={goToNova}
             style={({ pressed }) => [
-              styles.fab,
+              styles.novaFab,
               {
                 backgroundColor: pressed ? c.primaryPressed : c.primary,
                 shadowColor: c.primary,
-                transform: [{ scale: pressed ? 0.94 : 1 }],
+                transform: [{ scale: pressed ? 0.95 : 1 }],
               },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Añadir evento"
+            accessibilityLabel="Abrir Nova"
           >
-            <IconSymbol name="plus" size={26} color={c.onPrimary} />
+            <IconSymbol name="sparkles" size={15} color={c.onPrimary} />
+            <Text style={[styles.novaFabText, { color: c.onPrimary }]}>Nova</Text>
           </Pressable>
         </SwipeNavigator>
       )}
@@ -252,134 +233,148 @@ export default function CalendarScreen() {
   );
 }
 
+// ── Empty state ────────────────────────────────────────────────────────────────
+
 function EmptyAgendaState({
   selectedDate,
   onCreateEvent,
-  onAskNova,
+  onFocusWork,
 }: {
   selectedDate: string;
   onCreateEvent: () => void;
-  onAskNova: () => void;
+  onFocusWork: () => void;
 }) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const subject = isToday(selectedDate)
-    ? 'hoy'
-    : selectedDate === addDaysISO(todayISO(), 1)
-      ? 'mañana'
-      : 'este día';
+
+  const isCurrentDay = isToday(selectedDate);
+  const isTomorrow = selectedDate === addDaysISO(todayISO(), 1);
+  const title = isCurrentDay || isTomorrow ? 'Día libre. Todo tuyo.' : 'Sin eventos este día.';
+  const desc = isCurrentDay || isTomorrow
+    ? 'Bloquea tu atención, agenda algo o trae tu agenda externa.'
+    : 'Puedes añadir un evento o pedirle a Nova que te ayude a planificar.';
 
   return (
     <View style={[styles.emptyCard, { backgroundColor: c.surface, borderColor: c.border }]}>
-      <View style={[styles.emptyIcon, { backgroundColor: c.primaryContainer }]}>
-        <IconSymbol name="calendar" size={24} color={c.primary} />
+      {/* Icono */}
+      <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryContainer }]}>
+        <IconSymbol name="sun.max.fill" size={26} color={c.primary} />
       </View>
-      <View style={styles.emptyCopy}>
-        <Text style={[styles.emptyTitle, { color: c.text }]}>
-          {`No tienes eventos para ${subject}.`}
-        </Text>
-        <Text style={[styles.emptyDescription, { color: c.textMuted }]}>
-          Añade uno manualmente o pídele a Nova que te ayude a organizar el día.
-        </Text>
-      </View>
-      <View style={styles.emptyActions}>
-        <Pressable
-          onPress={onCreateEvent}
-          style={({ pressed }) => [
-            styles.primaryCta,
-            { backgroundColor: pressed ? c.primaryPressed : c.primary },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Añadir evento"
-        >
-          <IconSymbol name="plus" size={17} color={c.onPrimary} />
-          <Text style={[styles.primaryCtaText, { color: c.onPrimary }]}>Añadir evento</Text>
-        </Pressable>
-        <Pressable
-          onPress={onAskNova}
-          style={({ pressed }) => [
-            styles.secondaryCta,
-            {
-              backgroundColor: pressed ? c.surfaceTint : c.surface,
-              borderColor: c.border,
-            },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Planificar con Nova"
-        >
-          <IconSymbol name="sparkles" size={17} color={c.primary} />
-          <Text style={[styles.secondaryCtaText, { color: c.primary }]}>
-            Planificar con Nova
-          </Text>
-        </Pressable>
-      </View>
+
+      {/* Copy */}
+      <Text style={[styles.emptyTitle, { color: c.text }]}>{title}</Text>
+      <Text style={[styles.emptyDesc, { color: c.textMuted }]}>{desc}</Text>
+
+      {/* Acciones */}
+      <Pressable
+        onPress={onCreateEvent}
+        style={({ pressed }) => [
+          styles.primaryBtn,
+          { backgroundColor: pressed ? c.primaryPressed : c.primary },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="Añadir evento"
+      >
+        <IconSymbol name="plus" size={16} color={c.onPrimary} />
+        <Text style={[styles.primaryBtnText, { color: c.onPrimary }]}>Añadir evento</Text>
+      </Pressable>
+
+      <Pressable
+        onPress={onFocusWork}
+        style={({ pressed }) => [
+          styles.secondaryBtn,
+          {
+            borderColor: c.border,
+            backgroundColor: pressed ? c.surfaceMuted : 'transparent',
+          },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="Trabajar enfocado"
+      >
+        <IconSymbol name="scope" size={16} color={c.primary} />
+        <Text style={[styles.secondaryBtnText, { color: c.primary }]}>Trabajar enfocado</Text>
+      </Pressable>
+
+      <Pressable
+        onPress={() =>
+          Alert.alert('Próximamente', 'La importación de agendas externas estará disponible pronto.')
+        }
+        style={({ pressed }) => [
+          styles.tertiaryBtn,
+          { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="Importar agenda"
+      >
+        <IconSymbol name="square.and.arrow.down" size={14} color={c.textMuted} />
+        <Text style={[styles.tertiaryBtnText, { color: c.textMuted }]}>Importar agenda</Text>
+      </Pressable>
     </View>
   );
 }
 
+// ── Styles ────────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   safe: { flex: 1 },
 
-  // Hero halo — mismos números que Mi Día para consistencia visual.
-  heroHaloLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 380,
-    overflow: 'hidden',
-  },
-  heroHaloCircle: {
-    position: 'absolute',
-    top: -120,
-    left: -60,
-    right: -60,
-    height: 320,
-    borderBottomLeftRadius: 240,
-    borderBottomRightRadius: 240,
-  },
-  heroHaloCircleSoft: {
-    position: 'absolute',
-    top: 60,
-    left: -120,
-    right: -120,
-    height: 280,
-    borderRadius: 240,
-    transform: [{ scaleY: 0.55 }],
-  },
-
   scrollContent: {
-    paddingBottom: 140,
+    paddingBottom: 120,
     gap: Spacing.lg,
   },
 
-  // Header legacy: título grande + subtítulo combinado mes/día. Espejo
-  // de la jerarquía de Mi Día.
   header: {
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
-    paddingBottom: Spacing.sm,
-    gap: 6,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.xs,
+    gap: 3,
   },
-  titleLine: {
-    fontSize: 40,
+  eyebrow: {
+    fontSize: 13,
     fontWeight: '700',
-    lineHeight: 44,
-    letterSpacing: -0.8,
+    lineHeight: 17,
+    letterSpacing: 0.1,
+    textTransform: 'capitalize',
   },
-  subLine: {
-    fontSize: 14,
-    fontWeight: '500',
-    lineHeight: 18,
-    marginTop: 2,
-  },
-  subLineMonth: {
+  title: {
+    fontSize: 34,
     fontWeight: '700',
+    lineHeight: 38,
+    letterSpacing: -0.7,
   },
 
-  bannerWrap: {
-    paddingHorizontal: Spacing.lg,
+  // Toggle Día/Semana/Mes
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.xl,
   },
+  togglePills: {
+    flexDirection: 'row',
+    gap: 4,
+    backgroundColor: '#f1f5f9',
+    borderRadius: Radius.full,
+    padding: 3,
+  },
+  pill: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    borderRadius: Radius.full,
+  },
+  pillText: {
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  addBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  bannerWrap: { paddingHorizontal: Spacing.lg },
 
   emptyWrap: {
     paddingHorizontal: Spacing.lg,
@@ -387,73 +382,93 @@ const styles = StyleSheet.create({
   emptyCard: {
     borderRadius: Radius['2xl'],
     borderWidth: StyleSheet.hairlineWidth,
-    padding: Spacing.lg,
-    gap: Spacing.lg,
-    alignItems: 'flex-start',
+    paddingVertical: Spacing['2xl'],
+    paddingHorizontal: Spacing.lg,
+    alignItems: 'center',
+    gap: Spacing.md,
   },
-  emptyIcon: {
-    width: 52,
-    height: 52,
+  emptyIconWrap: {
+    width: 60,
+    height: 60,
     borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  emptyCopy: {
-    gap: Spacing.xs,
+    marginBottom: Spacing.xs,
   },
   emptyTitle: {
-    ...Typography.title3,
-    fontSize: 18,
-    lineHeight: 24,
+    ...Typography.title2,
+    fontSize: 20,
+    textAlign: 'center',
+    letterSpacing: -0.2,
   },
-  emptyDescription: {
+  emptyDesc: {
     ...Typography.body,
+    textAlign: 'center',
+    maxWidth: 280,
+    marginBottom: Spacing.sm,
   },
-  emptyActions: {
+  primaryBtn: {
     flexDirection: 'row',
-    gap: Spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 48,
+    borderRadius: Radius.full,
     alignSelf: 'stretch',
   },
-  primaryCta: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: Radius.full,
+  primaryBtnText: {
+    ...Typography.bodyStrong,
+    fontSize: 15,
+  },
+  secondaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.xs,
-  },
-  primaryCtaText: {
-    ...Typography.bodyStrong,
-    fontSize: 14,
-  },
-  secondaryCta: {
-    flex: 1,
-    minHeight: 46,
+    gap: 8,
+    height: 46,
     borderRadius: Radius.full,
     borderWidth: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+  },
+  secondaryBtnText: {
+    ...Typography.bodyStrong,
+    fontSize: 15,
+  },
+  tertiaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.xs,
+    gap: 6,
+    height: 38,
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
   },
-  secondaryCtaText: {
-    ...Typography.bodyStrong,
-    fontSize: 14,
+  tertiaryBtnText: {
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 17,
   },
 
-  fab: {
+  // Nova pill FAB
+  novaFab: {
     position: 'absolute',
     right: Spacing.lg,
-    bottom: 100,
-    width: 56,
-    height: 56,
-    borderRadius: Radius.lg,
+    bottom: 96,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    shadowOffset: { width: 0, height: 8 },
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderRadius: Radius.full,
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
-    shadowRadius: 20,
+    shadowRadius: 18,
     elevation: 8,
+  },
+  novaFabText: {
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.1,
   },
 });
