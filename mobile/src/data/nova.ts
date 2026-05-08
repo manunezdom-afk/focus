@@ -10,6 +10,7 @@
 // asegura que el usuario vea "Llegaste al límite diario" en vez de "Error 429".
 
 import { apiFetch } from '@/src/lib/api';
+import type { Memory } from '@/src/data/memories';
 import type { Task, EventItem } from '@/src/data/types';
 
 export type ChatRole = 'user' | 'assistant';
@@ -66,9 +67,10 @@ export async function sendNovaMessage(opts: {
   events: EventItem[];
   tasks: Task[];
   history: ChatMessage[];
+  memories?: Memory[];
   novaPersonality?: string;
 }): Promise<NovaReply> {
-  const { message, events, tasks, history, novaPersonality = 'focus' } = opts;
+  const { message, events, tasks, history, memories = [], novaPersonality = 'focus' } = opts;
 
   // Mantener solo los últimos 20 turnos (igual que web).
   const trimmedHistory = history.slice(-20).map((m) => ({
@@ -84,9 +86,15 @@ export async function sendNovaMessage(opts: {
       events,
       tasks,
       history: trimmedHistory,
-      // Nova en mobile no tiene aún location/profile/memories/behavior. El
-      // backend acepta todos opcionales — la respuesta será un poco menos
-      // contextualizada pero funciona. Siguiente fase: implementar.
+      // Pasamos memories para que Nova las use como contexto. location/
+      // profile/behavior aún no están — la respuesta será un poco menos
+      // contextualizada pero funciona.
+      memories: memories.slice(0, 100).map((m) => ({
+        category: m.category,
+        subject: m.subject,
+        content: m.content,
+        confidence: m.confidence,
+      })),
       clientNow: Date.now(),
       clientTimezone: getTimezone(),
       novaPersonality,

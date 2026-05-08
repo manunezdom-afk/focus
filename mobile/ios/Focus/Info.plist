@@ -40,6 +40,10 @@
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>Focus usa la cámara para que Nova analice fotos de tu agenda y detecte eventos automáticamente.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Focus accede a tu galería para que Nova analice fotos de agendas y detecte eventos.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
       <key>NSAllowsArbitraryLoads</key>

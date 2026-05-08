@@ -31,6 +31,8 @@ const MAPPING = {
   'pencil': 'edit',
   'square.and.arrow.down': 'file-download',
   'sun.max': 'wb-sunny',
+  'camera': 'photo-camera',
+  'camera.fill': 'photo-camera',
 } as IconMapping;
 
 export function IconSymbol({

@@ -1,7 +1,10 @@
 import * as Haptics from 'expo-haptics';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   FlatList,
@@ -30,11 +33,14 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/src/auth/AuthProvider';
 import type { CreateEventInput, EventPatch } from '@/src/data/events';
 import { newClientId } from '@/src/data/ids';
+import type { CreateMemoryInput } from '@/src/data/memories';
 import { sendNovaMessage, type ChatMessage } from '@/src/data/nova';
+import { analyzePhoto } from '@/src/data/photo';
 import { loadNovaHistory, saveNovaHistory } from '@/src/data/novaPersist';
 import { consumeNovaSeed } from '@/src/data/novaSeedStore';
 import type { CreateTaskInput } from '@/src/data/tasks';
 import { useEvents } from '@/src/data/useEvents';
+import { useMemories } from '@/src/data/useMemories';
 import { useTasks } from '@/src/data/useTasks';
 import { expandRecurrence } from '@/src/utils/expandRecurrence';
 
@@ -83,6 +89,18 @@ function tryTaskFromAction(a: any): CreateTaskInput | null {
     label: t.label,
     priority: t.priority,
     category: typeof t.category === 'string' ? t.category : 'hoy',
+  };
+}
+
+function tryMemoryFromAction(a: any): CreateMemoryInput | null {
+  const m = a?.memory ?? a?.payload?.memory ?? a?.data?.memory;
+  if (!m || typeof m.content !== 'string' || !m.content.trim()) return null;
+  return {
+    category: typeof m.category === 'string' ? m.category : 'context',
+    subject: typeof m.subject === 'string' ? m.subject : null,
+    content: m.content,
+    confidence: typeof m.confidence === 'string' ? m.confidence : 'medium',
+    source: 'nova',
   };
 }
 
@@ -180,11 +198,13 @@ export default function NovaScreen() {
 
   const events = useEvents('all');
   const tasks = useTasks();
+  const memoriesHook = useMemories();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
 
   // Cargar historial persistido al montar (una vez por userId). Si falla,
   // dejamos messages vacío — el usuario no ve nada raro.
@@ -297,13 +317,215 @@ export default function NovaScreen() {
             if (d) applied.push(d);
           }
         }
-        // 'remember' aún no soportado en mobile (requiere endpoint o
-        // tabla user_memories — ver mobile/docs/NOVA_TASKS_PENDING.md).
+        else if (a.type === 'remember') {
+          const input = tryMemoryFromAction(a);
+          if (input) {
+            // Transparente: no agregamos chip de "guardado" para no
+            // interrumpir; solo persiste para próximas conversaciones.
+            await memoriesHook.addMemory(input);
+          }
+        }
       }
       return applied;
     },
-    [events, tasks],
+    [events, tasks, memoriesHook],
   );
+
+  // Procesa una foto: analiza con backend, muestra los eventos detectados
+  // como bubble del assistant y pide confirmación al usuario antes de
+  // crearlos en su calendario.
+  const processPhoto = useCallback(
+    async (uri: string) => {
+      if (analyzingPhoto) return;
+      setAnalyzingPhoto(true);
+
+      // Insertar bubbles "Foto enviada" + placeholder de Nova mientras analiza.
+      const userMsg: ChatMessage = {
+        id: newClientId(),
+        role: 'user',
+        content: '📸 Foto de agenda enviada',
+        createdAt: Date.now(),
+        status: 'sent',
+      };
+      const placeholder: ChatMessage = {
+        id: newClientId(),
+        role: 'assistant',
+        content: '',
+        createdAt: Date.now(),
+        status: 'sending',
+      };
+      setMessages((prev) => [...prev, userMsg, placeholder]);
+      if (Platform.OS === 'ios') {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+
+      try {
+        // Comprimir antes de enviar — fotos de iPhone son 4-8 MB en raw,
+        // base64 multiplica ~33% el tamaño. Comprimimos a max 1280px y
+        // calidad 0.7 → ~200-400KB, suficiente para que el modelo lea.
+        const compressed = await ImageManipulator.manipulateAsync(
+          uri,
+          [{ resize: { width: 1280 } }],
+          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+        );
+        const base64 = compressed.base64 ?? '';
+        if (!base64) throw new Error('No pude leer la imagen.');
+
+        const detected = await analyzePhoto({ base64, mediaType: 'image/jpeg' });
+
+        if (detected.length === 0) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === placeholder.id
+                ? {
+                    ...m,
+                    content: 'No detecté ningún evento en esa foto. Probá con otra más clara.',
+                    status: 'sent' as const,
+                  }
+                : m,
+            ),
+          );
+          return;
+        }
+
+        const summary = detected
+          .map(
+            (e, i) =>
+              `${i + 1}. ${e.title}${e.time ? ` · ${e.time}` : ''}${e.date ? ` · ${e.date}` : ''}`,
+          )
+          .join('\n');
+        const human =
+          detected.length === 1
+            ? `Encontré 1 evento en la foto:\n${summary}\n\n¿Lo agrego al calendario?`
+            : `Encontré ${detected.length} eventos en la foto:\n${summary}\n\n¿Los agrego al calendario?`;
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === placeholder.id
+              ? { ...m, content: human, status: 'sent' as const }
+              : m,
+          ),
+        );
+
+        Alert.alert(
+          '¿Agregar al calendario?',
+          detected.length === 1
+            ? `Voy a agregar "${detected[0].title}".`
+            : `Voy a agregar ${detected.length} eventos detectados en la foto.`,
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            {
+              text: 'Agregar',
+              onPress: () => {
+                void (async () => {
+                  const applied: string[] = [];
+                  for (const ev of detected) {
+                    const created = await events.addEvent({
+                      title: ev.title,
+                      date: ev.date ?? null,
+                      time: ev.time ?? null,
+                      description: ev.description ?? undefined,
+                    });
+                    if (created) applied.push(`Agregado: ${ev.title}`);
+                  }
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === placeholder.id
+                        ? { ...m, appliedActions: applied.length > 0 ? applied : undefined }
+                        : m,
+                    ),
+                  );
+                })();
+              },
+            },
+          ],
+        );
+      } catch (err: any) {
+        const msg: string = err?.message || 'No pude analizar la foto.';
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === placeholder.id
+              ? { ...m, content: msg, status: 'error' as const, errorCode: err?.code }
+              : m,
+          ),
+        );
+        if (Platform.OS === 'ios') {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        }
+      } finally {
+        setAnalyzingPhoto(false);
+      }
+    },
+    [analyzingPhoto, events],
+  );
+
+  // Pide permisos y abre cámara o galería.
+  const launchPicker = useCallback(
+    async (source: 'camera' | 'library') => {
+      try {
+        if (source === 'camera') {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert(
+              'Permiso de cámara requerido',
+              'Activa el acceso a la cámara en Ajustes para que Nova analice fotos de tu agenda.',
+            );
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            allowsEditing: false,
+            quality: 1,
+          });
+          if (!result.canceled && result.assets[0]?.uri) {
+            void processPhoto(result.assets[0].uri);
+          }
+        } else {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert(
+              'Permiso de galería requerido',
+              'Activa el acceso a Fotos en Ajustes para que Nova analice fotos de tu agenda.',
+            );
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            allowsEditing: false,
+            quality: 1,
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          });
+          if (!result.canceled && result.assets[0]?.uri) {
+            void processPhoto(result.assets[0].uri);
+          }
+        }
+      } catch (err: any) {
+        Alert.alert('Error', err?.message || 'No pude abrir el selector de imagen.');
+      }
+    },
+    [processPhoto],
+  );
+
+  const openPhotoSource = useCallback(() => {
+    if (analyzingPhoto || sending) return;
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancelar', 'Tomar foto', 'Elegir de galería'],
+          cancelButtonIndex: 0,
+        },
+        (idx) => {
+          if (idx === 1) void launchPicker('camera');
+          else if (idx === 2) void launchPicker('library');
+        },
+      );
+    } else {
+      // Android: Alert con dos opciones.
+      Alert.alert('Foto de agenda', '¿De dónde tomamos la foto?', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Cámara', onPress: () => void launchPicker('camera') },
+        { text: 'Galería', onPress: () => void launchPicker('library') },
+      ]);
+    }
+  }, [analyzingPhoto, sending, launchPicker]);
 
   const handleSend = useCallback(
     async (overrideText?: string) => {
@@ -338,6 +560,7 @@ export default function NovaScreen() {
           message: text,
           events: events.events,
           tasks: tasks.tasks,
+          memories: memoriesHook.memories,
           history,
         });
 
@@ -582,9 +805,25 @@ export default function NovaScreen() {
             animatedComposerStyle,
           ]}
         >
-          <View style={[styles.leftIndicator, { backgroundColor: c.surfaceTint }]}>
-            <IconSymbol name="sparkles" size={14} color={c.primary} />
-          </View>
+          <Pressable
+            onPress={openPhotoSource}
+            disabled={analyzingPhoto || sending}
+            style={({ pressed }) => [
+              styles.leftIndicator,
+              {
+                backgroundColor: c.surfaceTint,
+                opacity: analyzingPhoto || sending ? 0.5 : pressed ? 0.7 : 1,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Analizar foto de agenda"
+          >
+            {analyzingPhoto ? (
+              <ActivityIndicator color={c.primary} size="small" />
+            ) : (
+              <IconSymbol name="camera" size={16} color={c.primary} />
+            )}
+          </Pressable>
           <TextInput
             ref={inputRef}
             value={draft}
