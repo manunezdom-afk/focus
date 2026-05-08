@@ -18,7 +18,8 @@
         "UIBackgroundModes": [],
         "NSCameraUsageDescription": "Focus usa la cámara para que Nova lea tu agenda o notas escritas y las convierta en eventos automáticamente.",
         "NSPhotoLibraryUsageDescription": "Focus accede a tus fotos para que Nova analice imágenes de agenda y las transforme en eventos.",
-        "NSMicrophoneUsageDescription": "Focus usa el micrófono para que puedas dictarle a Nova en lugar de escribir."
+        "NSMicrophoneUsageDescription": "Focus usa el micrófono para que puedas dictarle a Nova en lugar de escribir.",
+        "NSSpeechRecognitionUsageDescription": "Focus usa el reconocimiento de voz de iOS para convertir lo que dictas en texto y enviárselo a Nova."
       }
     },
     "android": {
@@ -55,6 +56,13 @@
         {
           "icon": "./assets/images/icon.png",
           "color": "#3b82f6"
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Focus usa el micrófono para que puedas dictarle a Nova en lugar de escribir.",
+          "speechRecognitionPermission": "Focus usa el reconocimiento de voz de iOS para convertir lo que dictas en texto y enviárselo a Nova."
         }
       ]
     ],

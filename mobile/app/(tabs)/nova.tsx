@@ -4,6 +4,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDictation } from '@/src/lib/useDictation';
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -263,6 +264,51 @@ export default function NovaScreen() {
   const [sending, setSending] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
+
+  // Dictado real on-device (iOS Speech). Final → append al draft.
+  const dictation = useDictation({
+    onFinal: (text) => {
+      if (Platform.OS === 'ios') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+      setDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+    },
+  });
+
+  function handleMicPress() {
+    if (!dictation.available) {
+      Alert.alert(
+        'Dictado no disponible',
+        'Reinstala la app desde Xcode (mobile/ios/Focus.xcworkspace) para activar el módulo de voz.',
+      );
+      return;
+    }
+    if (dictation.state === 'denied') {
+      Alert.alert(
+        'Activa el micrófono en Ajustes para dictarle a Nova',
+        'iOS recuerda tu rechazo previo. Abre Ajustes del sistema para permitir micrófono y reconocimiento de voz.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Abrir Ajustes', onPress: dictation.openSystemSettings },
+        ],
+      );
+      return;
+    }
+    if (dictation.state === 'listening') {
+      dictation.stop();
+      return;
+    }
+    if (Platform.OS === 'ios') {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    void dictation.start();
+  }
+
+  useEffect(() => {
+    if (dictation.state === 'error' && dictation.errorMessage) {
+      Alert.alert('No pude acceder al micrófono', dictation.errorMessage);
+    }
+  }, [dictation.state, dictation.errorMessage]);
 
   // Cargar historial persistido al montar (una vez por userId). Si falla,
   // dejamos messages vacío — el usuario no ve nada raro.
@@ -837,20 +883,17 @@ export default function NovaScreen() {
             </Animated.View>
 
             {/*
-              Dictation hint (iOS only): el teclado nativo ya trae botón de
-              micrófono cuando Dictation está activado en Ajustes. No es un
-              botón propio — solo le decimos al usuario que existe esa opción.
-              No fingimos grabación ni manejamos audio: el dictado lo hace el
-              teclado y el texto cae directo en el TextInput.
+              Dictation hint (iOS only): apunta al botón mic real del
+              composer. Se mantiene en empty state para descubrimiento.
             */}
-            {Platform.OS === 'ios' ? (
+            {Platform.OS === 'ios' && dictation.available ? (
               <Animated.View
                 entering={FadeInDown.delay(360).duration(380)}
                 style={styles.dictationHint}
                 accessibilityRole="text"
               >
                 <Text style={[styles.dictationHintText, { color: c.textSubtle }]}>
-                  Toca el micrófono del teclado para dictarle a Nova.
+                  Toca el micrófono para dictar a Nova.
                 </Text>
               </Animated.View>
             ) : null}
@@ -925,7 +968,7 @@ export default function NovaScreen() {
             value={draft}
             onChangeText={setDraft}
             onSubmitEditing={() => void handleSend()}
-            placeholder="Dime qué necesitas…"
+            placeholder="Dile a Nova qué necesitas…"
             placeholderTextColor={c.textSubtle}
             style={[styles.input, { color: c.text }]}
             multiline
@@ -959,6 +1002,34 @@ export default function NovaScreen() {
               <ActivityIndicator color={c.primary} size="small" />
             ) : (
               <IconSymbol name="camera" size={15} color={c.textSubtle} />
+            )}
+          </Pressable>
+
+          {/* Micrófono — dictado on-device (iOS Speech). Idle: gris.
+              Listening: rojo con tap para detener. Requesting: spinner. */}
+          <Pressable
+            onPress={handleMicPress}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.micBtn,
+              {
+                backgroundColor: dictation.state === 'listening' ? '#dc2626' : 'transparent',
+                opacity: pressed ? 0.6 : 1,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={
+              dictation.state === 'listening' ? 'Detener dictado' : 'Dictar a Nova'
+            }
+          >
+            {dictation.state === 'requesting' ? (
+              <ActivityIndicator color={c.primary} size="small" />
+            ) : (
+              <IconSymbol
+                name="mic.fill"
+                size={16}
+                color={dictation.state === 'listening' ? '#ffffff' : c.textSubtle}
+              />
             )}
           </Pressable>
 
@@ -1143,6 +1214,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 2,
+  },
+  micBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sendBtn: {
     width: 38,

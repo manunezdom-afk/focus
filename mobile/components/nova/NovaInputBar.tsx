@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -20,6 +21,7 @@ import Animated, {
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useDictation } from '@/src/lib/useDictation';
 import type { CreateEventInput } from '@/src/data/events';
 import { sendNovaMessage, type NovaActionShape } from '@/src/data/nova';
 import { setNovaSeed } from '@/src/data/novaSeedStore';
@@ -60,14 +62,14 @@ type ReplyState = {
 function placeholderFor(ctx: NovaInputContext): string {
   switch (ctx.type) {
     case 'tasks':
-      return 'Añade una tarea, prioriza, organiza...';
+      return 'Añade una tarea, prioriza, organiza…';
     case 'calendar':
-      return 'Agenda un evento, mueve, libera tiempo...';
+      return 'Agenda un evento, mueve, libera tiempo…';
     case 'day':
-      return 'Pídele a Nova: agenda, mueve, prioriza...';
+      return 'Pídele a Nova que organice tu día…';
     case 'free':
     default:
-      return 'Escribe a Nova…';
+      return 'Dile a Nova qué necesitas…';
   }
 }
 
@@ -150,6 +152,56 @@ export function NovaInputBar({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [reply, setReply] = useState<ReplyState | null>(null);
+
+  // Dictado real on-device via expo-speech-recognition (iOS Speech).
+  // El texto final se appendea al draft (con espacio si ya hay algo).
+  // Si el módulo nativo no está linkeado o el permiso fue denegado,
+  // mostramos un Alert con instrucciones — no fingimos grabación.
+  const dictation = useDictation({
+    onPartial: () => {
+      // No mostramos partials en el mini bar para no parpadear el placeholder.
+      // El texto final reemplaza/extiende el draft cuando llega.
+    },
+    onFinal: (text) => {
+      if (Platform.OS === 'ios') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+    },
+  });
+
+  function handleMicPress() {
+    if (!dictation.available) {
+      Alert.alert(
+        'Dictado no disponible',
+        'Reinstala la app desde Xcode (mobile/ios/Focus.xcworkspace) para activar el módulo de voz.',
+        [{ text: 'Entendido', style: 'default' }],
+      );
+      return;
+    }
+    if (dictation.state === 'denied') {
+      Alert.alert(
+        'Activa el micrófono en Ajustes para dictarle a Nova',
+        'iOS recuerda tu rechazo previo. Abre Ajustes del sistema para permitir el micrófono y el reconocimiento de voz.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Abrir Ajustes', onPress: dictation.openSystemSettings },
+        ],
+      );
+      return;
+    }
+    if (dictation.state === 'listening') {
+      dictation.stop();
+      return;
+    }
+    if (Platform.OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    void dictation.start();
+  }
+
+  // Mostrar Alert si hay error transitorio del motor de voz.
+  useEffect(() => {
+    if (dictation.state === 'error' && dictation.errorMessage) {
+      Alert.alert('No pude acceder al micrófono', dictation.errorMessage);
+    }
+  }, [dictation.state, dictation.errorMessage]);
 
   // Seed cross-tab (consume del store global) + seed via prop (chip del
   // empty state) ambos pre-llenan el input.
@@ -332,6 +384,31 @@ export function NovaInputBar({
           }}
         />
         <Pressable
+          onPress={handleMicPress}
+          hitSlop={6}
+          style={({ pressed }) => [
+            styles.micBtn,
+            {
+              backgroundColor: dictation.state === 'listening' ? '#dc2626' : 'transparent',
+              opacity: pressed ? 0.6 : 1,
+            },
+          ]}
+          accessibilityLabel={
+            dictation.state === 'listening' ? 'Detener dictado' : 'Dictar a Nova'
+          }
+          accessibilityRole="button"
+        >
+          {dictation.state === 'requesting' ? (
+            <ActivityIndicator color={c.primary} size="small" />
+          ) : (
+            <IconSymbol
+              name="mic.fill"
+              size={16}
+              color={dictation.state === 'listening' ? '#ffffff' : c.textSubtle}
+            />
+          )}
+        </Pressable>
+        <Pressable
           onPress={send}
           disabled={!canSend}
           style={({ pressed }) => [
@@ -444,6 +521,13 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   sendBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micBtn: {
     width: 34,
     height: 34,
     borderRadius: 17,
