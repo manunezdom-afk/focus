@@ -15,9 +15,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
+import { NovaInputBar, type NovaInputSeed } from '@/components/nova/NovaInputBar';
 import { EmptyDayState } from '@/components/planner/EmptyDayState';
 import { NextBlockCard } from '@/components/planner/NextBlockCard';
-import { PlannerNovaInput, type PlannerNovaSeed } from '@/components/planner/PlannerNovaInput';
 import { TimelineEventBlock } from '@/components/planner/TimelineEventBlock';
 import { TimelineTaskBlock } from '@/components/planner/TimelineTaskBlock';
 import { Colors, Spacing } from '@/constants/theme';
@@ -63,7 +63,7 @@ export default function MiDiaScreen() {
   }, []);
 
   // Seed para el FocusBar — cada chip del empty state incrementa `n`.
-  const [novaSeed, setNovaSeed] = useState<PlannerNovaSeed>({ text: '', n: 0 });
+  const [novaSeed, setNovaSeed] = useState<NovaInputSeed>({ text: '', n: 0 });
   const seedNova = useCallback((text: string) => {
     setNovaSeed((s) => ({ text, n: s.n + 1 }));
   }, []);
@@ -178,18 +178,6 @@ export default function MiDiaScreen() {
             </Text>
           </Animated.View>
 
-          {/* FocusBar — entra después del header (delay 60ms) */}
-          <Animated.View entering={FadeInDown.delay(60).duration(360)}>
-            <PlannerNovaInput
-              events={events.events}
-              tasks={tasks.tasks}
-              onAddEvent={events.addEvent}
-              onAddTask={tasks.addTask}
-              onRefresh={handleRefresh}
-              seed={novaSeed}
-            />
-          </Animated.View>
-
           {error ? (
             <View style={styles.bannerWrap}>
               <ErrorBanner
@@ -238,6 +226,18 @@ export default function MiDiaScreen() {
             </>
           )}
         </ScrollView>
+
+        {/* Input Nova persistente, anclado abajo. Compartido con Calendario y
+            Tareas: misma barra, contexto distinto. */}
+        <NovaInputBar
+          context={{ type: 'day' }}
+          events={events.events}
+          tasks={tasks.tasks}
+          onAddEvent={events.addEvent}
+          onAddTask={tasks.addTask}
+          onRefresh={handleRefresh}
+          seed={novaSeed}
+        />
       </KeyboardAvoidingView>
       </SwipeNavigator>
     </SafeAreaView>
@@ -250,9 +250,11 @@ const styles = StyleSheet.create({
   // 48px asegura que el último bloque del timeline no quede oculto detrás
   // del CustomTabBar (que tiene su propia safe area). Sin este margen, el
   // botón "HECHO ✓" del último item podía quedar parcialmente cubierto.
-  scrollContent: { paddingBottom: 48 },
+  // Más paddingBottom: ahora el NovaInputBar vive sobre el ScrollView,
+  // así que el último item del timeline no debe quedar oculto detrás de él.
+  scrollContent: { paddingBottom: 16 },
   scrollContentEmpty: { flexGrow: 1 },
-  emptyFill: { flex: 1, justifyContent: 'center', paddingBottom: 48 },
+  emptyFill: { flex: 1, justifyContent: 'center', paddingBottom: 16 },
 
   // Hero halo: dos "blobs" tinted indigo apilados en absoluto detrás del
   // header. Sin gradient deps. Crea profundidad ambiente estilo IA sin

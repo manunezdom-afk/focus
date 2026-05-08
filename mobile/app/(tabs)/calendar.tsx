@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   RefreshControl,
@@ -22,13 +23,14 @@ import { DayPicker } from '@/components/calendar/DayPicker';
 import { DayTimeline } from '@/components/calendar/DayTimeline';
 import { MonthView } from '@/components/calendar/MonthView';
 import { WeekView } from '@/components/calendar/WeekView';
-import { NovaFab } from '@/components/nova/NovaFab';
+import { NovaInputBar } from '@/components/nova/NovaInputBar';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { setNovaSeed } from '@/src/data/novaSeedStore';
 import { addDaysISO, isToday, todayISO } from '@/src/data/today';
 import { useEvents } from '@/src/data/useEvents';
+import { useTasks } from '@/src/data/useTasks';
 
 const MONTH_NAMES_ES = [
   'enero','febrero','marzo','abril','mayo','junio',
@@ -50,6 +52,7 @@ export default function CalendarScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const events = useEvents('all');
+  const tasks = useTasks();
   const [selectedDate, setSelectedDate] = useState<string>(todayISO());
   const [activeView, setActiveView] = useState<CalView>('Día');
   const [showSheet, setShowSheet] = useState(false);
@@ -129,6 +132,11 @@ export default function CalendarScreen() {
         <LoadingState />
       ) : (
         <SwipeNavigator currentTab="calendar">
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
+        >
           <ScrollView
             contentContainerStyle={styles.scrollContent}
             refreshControl={
@@ -255,7 +263,18 @@ export default function CalendarScreen() {
             ) : null}
           </ScrollView>
 
-          <NovaFab onPress={goToNova} />
+          <NovaInputBar
+            context={{ type: 'calendar', selectedDate }}
+            events={events.events}
+            tasks={tasks.tasks}
+            onAddEvent={events.addEvent}
+            onAddTask={tasks.addTask}
+            onRefresh={() => {
+              void events.refresh();
+              void tasks.refresh();
+            }}
+          />
+        </KeyboardAvoidingView>
         </SwipeNavigator>
       )}
 
@@ -288,10 +307,16 @@ function EmptyAgendaState({
 
   const isCurrentDay = isToday(selectedDate);
   const isTomorrow = selectedDate === addDaysISO(todayISO(), 1);
-  const title = isCurrentDay || isTomorrow ? 'Día libre. Todo tuyo.' : 'Sin eventos este día.';
-  const desc = isCurrentDay || isTomorrow
-    ? 'Bloquea tu atención, agenda algo o trae tu agenda externa.'
-    : 'Puedes añadir un evento o pedirle a Nova que te ayude a planificar.';
+  const title = isCurrentDay
+    ? 'Día libre. Todo tuyo.'
+    : isTomorrow
+      ? 'Mañana sin compromisos.'
+      : 'Espacio en blanco.';
+  const desc = isCurrentDay
+    ? 'Bloquea tu atención, agenda algo o describe abajo qué quieres hacer.'
+    : isTomorrow
+      ? 'Aprovecha para reservar bloques enfocados antes de que se llene.'
+      : 'Sin eventos este día. Pídele a Nova que arme un bloque o agéndalo manual.';
 
   return (
     <View style={[styles.emptyCard, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -356,9 +381,10 @@ function EmptyAgendaState({
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  flex: { flex: 1 },
 
   scrollContent: {
-    paddingBottom: 120,
+    paddingBottom: 16,
     gap: Spacing.lg,
   },
 

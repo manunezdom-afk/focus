@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
-import { NovaFab } from '@/components/nova/NovaFab';
+import { NovaInputBar } from '@/components/nova/NovaInputBar';
 import { TaskRow } from '@/components/TaskRow';
 import { TaskDetailSheet } from '@/components/tasks/TaskDetailSheet';
 import { WeeklyStatsCard } from '@/components/tasks/WeeklyStatsCard';
@@ -29,6 +29,7 @@ import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { setNovaSeed } from '@/src/data/novaSeedStore';
 import type { Task, TaskPriority } from '@/src/data/types';
+import { useEvents } from '@/src/data/useEvents';
 import { useTasks } from '@/src/data/useTasks';
 
 const CATEGORIES = ['hoy', 'semana', 'algún día'] as const;
@@ -96,6 +97,7 @@ export default function TasksScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const tasks = useTasks();
+  const events = useEvents('all');
   const inputRef = useRef<TextInput>(null);
   const [showInput, setShowInput] = useState(false);
   const [addCategory, setAddCategory] = useState<Category>('hoy');
@@ -467,8 +469,19 @@ export default function TasksScreen() {
             </>
           ) : null}
         </ScrollView>
+
+        <NovaInputBar
+          context={{ type: 'tasks' }}
+          events={events.events}
+          tasks={tasks.tasks}
+          onAddEvent={events.addEvent}
+          onAddTask={tasks.addTask}
+          onRefresh={() => {
+            void tasks.refresh();
+            void events.refresh();
+          }}
+        />
       </KeyboardAvoidingView>
-      <NovaFab />
 
       {/* Flash chip: aparece tras crear varias tareas seguidas (≤4s). */}
       {showFlashChip ? (
@@ -495,9 +508,9 @@ export default function TasksScreen() {
   );
 }
 
-// Empty state hero cuando no hay NINGUNA tarea. Mismo lenguaje visual que
-// el empty state del Calendario: ícono soft circular, título compacto,
-// dos CTAs y un terciario. Sin orb grande para no saturar.
+// Empty state hero cuando no hay NINGUNA tarea. Copy diferenciado del
+// Calendario: aquí hablamos de pila de pendientes, no de día libre.
+// Botón secundario removido — el NovaInputBar abajo ya cubre ese flow.
 function FullyEmptyState({
   onCreate,
   onAskNova,
@@ -517,9 +530,9 @@ function FullyEmptyState({
         <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryContainer }]}>
           <IconSymbol name="checklist" size={24} color={c.primary} />
         </View>
-        <Text style={[styles.emptyTitle, { color: c.text }]}>Sin pendientes.</Text>
+        <Text style={[styles.emptyTitle, { color: c.text }]}>Tu lista está limpia.</Text>
         <Text style={[styles.emptyDesc, { color: c.textMuted }]}>
-          Crea una tarea o pídele a Nova que organice tus pendientes.
+          Crea tu próxima tarea o describe lo que tienes en mente abajo y Nova lo añade por ti.
         </Text>
         <Pressable
           onPress={onCreate}
@@ -540,10 +553,10 @@ function FullyEmptyState({
             { borderColor: c.border, backgroundColor: pressed ? c.surfaceMuted : 'transparent' },
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Crear con Nova"
+          accessibilityLabel="Pedirle a Nova que organice"
         >
           <IconSymbol name="sparkles" size={16} color={c.primary} />
-          <Text style={[styles.secondaryBtnText, { color: c.primary }]}>Crear con Nova</Text>
+          <Text style={[styles.secondaryBtnText, { color: c.primary }]}>Organizar con Nova</Text>
         </Pressable>
       </View>
     </Animated.View>
