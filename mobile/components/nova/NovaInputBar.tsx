@@ -25,7 +25,7 @@ import { NovaOrb } from '@/components/nova/NovaOrb';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useDictation } from '@/src/lib/useDictation';
+import { useWhisperDictation } from '@/src/lib/useWhisperDictation';
 import type { CreateEventInput } from '@/src/data/events';
 import { sendNovaMessage, type NovaActionShape } from '@/src/data/nova';
 import { analyzePhoto } from '@/src/data/photo';
@@ -171,15 +171,9 @@ export function NovaInputBar({
   const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
 
-  // Dictado real on-device via expo-speech-recognition (iOS Speech).
-  // El texto final se appendea al draft (con espacio si ya hay algo).
-  // Si el módulo nativo no está linkeado o el permiso fue denegado,
-  // mostramos un Alert con instrucciones — no fingimos grabación.
-  const dictation = useDictation({
-    onPartial: () => {
-      // No mostramos partials en el mini bar para no parpadear el placeholder.
-      // El texto final reemplaza/extiende el draft cuando llega.
-    },
+  // Dictado con OpenAI Whisper (mismo motor que ChatGPT Voice).
+  // Graba audio con expo-av → sube a /api/transcribe → Whisper → texto.
+  const dictation = useWhisperDictation({
     onFinal: (text) => {
       if (Platform.OS === 'ios') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
@@ -188,37 +182,20 @@ export function NovaInputBar({
   });
 
   function handleMicPress() {
-    if (!dictation.available) {
-      Alert.alert(
-        'Dictado no disponible',
-        'Reinstala la app desde Xcode (mobile/ios/Focus.xcworkspace) para activar el módulo de voz.',
-        [{ text: 'Entendido', style: 'default' }],
-      );
-      return;
-    }
-    if (dictation.state === 'denied') {
-      Alert.alert(
-        'Activa el micrófono en Ajustes para dictarle a Nova',
-        'iOS recuerda tu rechazo previo. Abre Ajustes del sistema para permitir el micrófono y el reconocimiento de voz.',
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Abrir Ajustes', onPress: dictation.openSystemSettings },
-        ],
-      );
-      return;
-    }
-    if (dictation.state === 'listening') {
+    if (dictation.state === 'recording') {
       dictation.stop();
       return;
     }
+    if (dictation.state === 'processing' || dictation.state === 'requesting') return;
     if (Platform.OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     void dictation.start();
   }
 
-  // Mostrar Alert si hay error transitorio del motor de voz.
+  // Mostrar Alert solo si el error es de permisos (no de red/Whisper que
+  // son transitorios y se muestran en el propio botón).
   useEffect(() => {
-    if (dictation.state === 'error' && dictation.errorMessage) {
-      Alert.alert('No pude acceder al micrófono', dictation.errorMessage);
+    if (dictation.state === 'error' && dictation.errorMessage?.includes('Ajustes')) {
+      Alert.alert('Micrófono desactivado', dictation.errorMessage);
     }
   }, [dictation.state, dictation.errorMessage]);
 
@@ -495,7 +472,7 @@ export function NovaInputBar({
             tamaño 26 para que entre cómodo en la barra. Los spots de color
             siguen orbitando aunque la barra esté en reposo (breathing). */}
         <View style={styles.leftIndicator}>
-          <NovaOrb size={26} ambient={false} breathing active={dictation.state === 'listening'} />
+          <NovaOrb size={26} ambient={false} breathing active={dictation.state === 'recording'} />
         </View>
         <TextInput
           value={draft}
@@ -541,22 +518,30 @@ export function NovaInputBar({
           onPress={handleMicPress}
           hitSlop={6}
           style={({ pressed }) => [
-            dictation.state === 'listening' ? styles.micBtnListening : styles.micBtn,
+            dictation.state === 'recording' || dictation.state === 'processing'
+              ? styles.micBtnListening
+              : styles.micBtn,
             {
-              backgroundColor: dictation.state === 'listening' ? '#dc2626' : 'transparent',
+              backgroundColor: dictation.state === 'recording'
+                ? '#dc2626'
+                : dictation.state === 'processing'
+                ? c.primary
+                : 'transparent',
               opacity: pressed ? 0.6 : 1,
               transform: [{ scale: pressed ? 0.94 : 1 }],
             },
           ]}
           accessibilityLabel={
-            dictation.state === 'listening' ? 'Detener dictado' : 'Dictar a Nova'
+            dictation.state === 'recording' ? 'Detener dictado' : 'Dictar a Nova'
           }
           accessibilityRole="button"
         >
           {dictation.state === 'requesting' ? (
             <ActivityIndicator color={c.primary} size="small" />
-          ) : dictation.state === 'listening' ? (
+          ) : dictation.state === 'recording' ? (
             <MicWaveform level={micLevel} active color="#ffffff" />
+          ) : dictation.state === 'processing' ? (
+            <ActivityIndicator color="#ffffff" size="small" />
           ) : (
             <IconSymbol name="mic.fill" size={16} color={c.textSubtle} />
           )}
