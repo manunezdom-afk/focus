@@ -21,10 +21,13 @@ export async function fetchTodayContext(opts: { location?: LocationCoords | null
   try {
     const today = todayISO();
     const tomorrow = addDaysISO(today, 1);
-    const res = await apiFetch('/api/today-context', {
+    // Reusamos /api/focus-assistant con mode='today-context' para no exceder
+    // el límite de 12 serverless functions del plan Hobby de Vercel.
+    const res = await apiFetch('/api/focus-assistant', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        mode: 'today-context',
         todayISO: today,
         tomorrowISO: tomorrow,
         location: opts.location ?? null,
