@@ -30,6 +30,7 @@ import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { todayLabelLong } from '@/src/data/today';
 import { useEvents } from '@/src/data/useEvents';
+import { useSuggestions } from '@/src/data/useSuggestions';
 import { useTasks } from '@/src/data/useTasks';
 
 // "HH:MM" o "HH:MM-HH:MM" → decimal (14.5 = 14:30). Sin hora → Infinity
@@ -47,6 +48,10 @@ export default function MiDiaScreen() {
   const events = useEvents('today');
   const tasks = useTasks();
   const todayCtx = useTodayContext();
+  // Bandeja de Nova: solo leemos pendingCount para el badge del icono.
+  // El fetch real lo hace el hook con cache module-level (30s TTL) — varias
+  // pantallas pueden compartir el mismo dato sin doble request.
+  const inbox = useSuggestions();
 
   const dateLabel = useMemo(() => todayLabelLong(), []);
   const greeting = useMemo(() => {
@@ -199,16 +204,27 @@ export default function MiDiaScreen() {
               <IconSymbol name="square.and.arrow.up" size={22} color={c.text} />
             </Pressable>
             <Pressable
-              onPress={() => router.push('/(tabs)/nova')}
+              onPress={() => router.push('/inbox')}
               hitSlop={6}
               style={({ pressed }) => [
                 styles.iconBtn,
                 { opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] },
               ]}
-              accessibilityLabel="Bandeja de Nova"
+              accessibilityLabel={
+                inbox.pendingCount > 0
+                  ? `Bandeja de Nova, ${inbox.pendingCount} ${inbox.pendingCount === 1 ? 'sugerencia pendiente' : 'sugerencias pendientes'}`
+                  : 'Bandeja de Nova'
+              }
               accessibilityRole="button"
             >
               <IconSymbol name="tray.fill" size={22} color={c.text} />
+              {inbox.pendingCount > 0 ? (
+                <View style={[styles.inboxBadge, { borderColor: c.background }]}>
+                  <Text style={styles.inboxBadgeText} numberOfLines={1}>
+                    {inbox.pendingCount > 9 ? '9+' : String(inbox.pendingCount)}
+                  </Text>
+                </View>
+              ) : null}
             </Pressable>
             <Pressable
               onPress={() => router.push('/(tabs)/settings')}
@@ -346,6 +362,30 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  // Badge de pending count para el icono tray.fill (Bandeja de Nova).
+  // Posicionado top-right del Pressable. Borde del color del background
+  // del header para que se "recorte" del icono y se vea como pegatina.
+  inboxBadge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: '#dc2626',
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inboxBadgeText: {
+    color: '#ffffff',
+    fontSize: 9.5,
+    fontWeight: '800',
+    lineHeight: 12,
+    letterSpacing: 0.1,
   },
 
   // Header tighter — antes paddingBottom Spacing['2xl']+xs (28px) creaba

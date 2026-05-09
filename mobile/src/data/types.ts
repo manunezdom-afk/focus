@@ -45,3 +45,54 @@ export type EventItem = {
   featured: boolean;
   createdAt: string | null;
 };
+
+// Bandeja de Nova — sugerencias propuestas que el usuario aprueba/rechaza.
+// Backend: tabla `suggestions` (schema.sql + migración 018_nova_inbox.sql).
+// Endpoints: GET /api/nova/inbox · PATCH /api/nova/inbox/:id.
+export type SuggestionKind =
+  // Acciones directas (heredadas del modo propuesta de Nova chat)
+  | 'add_event'
+  | 'edit_event'
+  | 'delete_event'
+  | 'mark_task_done'
+  | 'add_task'
+  // Reglas determinísticas server-side (V1)
+  | 'overdue_batch'
+  | 'overload_warning'
+  // Futuras (placeholders — el cliente debe degradar limpio si llegan)
+  | 'focus_block_suggestion'
+  | 'conflict_detected'
+  | 'prep_time_missing'
+  | 'ambiguous_task'
+  | 'routine_proposal'
+  | 'daily_brief'
+  | 'weekly_review'
+  | 'multi_step_plan'
+  | 'day_close_review'
+  | 'break_suggestion';
+
+export type SuggestionStatus = 'pending' | 'approved' | 'rejected' | 'snoozed' | 'expired';
+
+export type SuggestionSource = 'nova' | 'kairos' | 'rule' | 'user';
+
+export type Suggestion = {
+  id: string;
+  kind: SuggestionKind | string; // string para tolerar kinds nuevos del backend sin romper el cliente
+  payload: Record<string, unknown>;
+  preview_title: string;
+  preview_body: string;
+  preview_icon: string;
+  reason: string | null;
+  status: SuggestionStatus;
+  batch_id: string | null;
+  // Score 0..1. Mayor = más prioritaria. La UI ordena DESC.
+  relevance_score: number;
+  source: SuggestionSource | string;
+  // ISO timestamps. Si están en el futuro, la card no debe aparecer (snooze
+  // activo) o ya pasó (expired). El backend filtra por defecto, pero el
+  // cliente también debe respetarlos para evitar parpadeos en cache stale.
+  snoozed_until: string | null;
+  expires_at: string | null;
+  created_at: string;
+  resolved_at: string | null;
+};

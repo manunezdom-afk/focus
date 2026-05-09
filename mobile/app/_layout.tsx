@@ -135,6 +135,7 @@ function Shell() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(dev)" options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="inbox" options={{ presentation: 'card', headerShown: false, animation: 'slide_from_right' }} />
       </Stack>
       <StatusBar style={showBoot ? 'light' : colorScheme === 'dark' ? 'light' : 'dark'} />
       {showBoot && <BootScreen onReady={handleBootLayout} />}

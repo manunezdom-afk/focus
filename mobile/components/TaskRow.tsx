@@ -1,5 +1,14 @@
 import * as Haptics from 'expo-haptics';
+import { useEffect } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  interpolate,
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { Colors, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -100,22 +109,40 @@ export function TaskRow({
   // El "checkbox" del row tiene 2 modos visuales:
   //   - selectionMode=true → cuadrado relleno con tick si selected, vacío si no
   //   - selectionMode=false → círculo (chequeo de done) — comportamiento legacy
-  const checkboxBorderColor = selectionMode
-    ? selected
-      ? c.primary
-      : c.borderStrong
-    : task.done
-      ? c.primary
-      : c.borderStrong;
-  const checkboxBg = selectionMode
-    ? selected
-      ? c.primary
-      : 'transparent'
-    : task.done
-      ? c.primary
-      : 'transparent';
   const checkboxBorderRadius = selectionMode ? 6 : 11;
   const showTick = selectionMode ? selected : task.done;
+
+  // Animación spring del check: 0 = vacío, 1 = filled.
+  // Hace el "satisfaction moment" tipo Things 3 — el check se "infla" un
+  // 18% en el medio del transit y vuelve a 1.0 con spring suave. El color
+  // del fondo y borde se interpolan entre transparent/borderStrong y
+  // primary/primary. El tick interno aparece con su propia escala spring
+  // (0 → 1.1 → 1) para que se "dispare" desde el centro del círculo.
+  const progress = useSharedValue(showTick ? 1 : 0);
+  useEffect(() => {
+    progress.value = withSpring(showTick ? 1 : 0, {
+      stiffness: 360,
+      damping: 22,
+      mass: 0.6,
+    });
+  }, [showTick, progress]);
+
+  const animatedCheckStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(progress.value, [0, 1], ['rgba(0,0,0,0)', c.primary]),
+    borderColor: interpolateColor(progress.value, [0, 1], [c.borderStrong, c.primary]),
+    transform: [
+      { scale: interpolate(progress.value, [0, 0.6, 1], [1, 1.18, 1.0]) },
+    ],
+  }));
+
+  // El tick aparece con un pop más rápido que el círculo. Threshold 0.4
+  // hace que primero veas el background tintarse y luego el "✓" entra.
+  const animatedTickStyle = useAnimatedStyle(() => ({
+    opacity: withTiming(showTick ? 1 : 0, { duration: 90 }),
+    transform: [
+      { scale: interpolate(progress.value, [0, 0.4, 0.85, 1], [0.5, 0.5, 1.12, 1.0]) },
+    ],
+  }));
 
   return (
     <Pressable
@@ -141,18 +168,15 @@ export function TaskRow({
           : 'Toca para alternar completado. Mantén presionado para más opciones.'
       }
     >
-      <View
+      <Animated.View
         style={[
           styles.check,
-          {
-            borderColor: checkboxBorderColor,
-            backgroundColor: checkboxBg,
-            borderRadius: checkboxBorderRadius,
-          },
+          { borderRadius: checkboxBorderRadius },
+          animatedCheckStyle,
         ]}
       >
-        {showTick ? <Text style={styles.checkMark}>✓</Text> : null}
-      </View>
+        <Animated.Text style={[styles.checkMark, animatedTickStyle]}>✓</Animated.Text>
+      </Animated.View>
       <View style={styles.body}>
         <Text
           style={[
