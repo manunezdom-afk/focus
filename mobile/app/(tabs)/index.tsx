@@ -303,6 +303,8 @@ export default function MiDiaScreen() {
           tasks={tasks.tasks}
           onAddEvent={events.addEvent}
           onAddTask={tasks.addTask}
+          onRemoveEvent={events.removeEvent}
+          onRemoveTask={tasks.removeTask}
           onRefresh={handleRefresh}
           seed={novaSeed}
         />

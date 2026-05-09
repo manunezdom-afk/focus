@@ -1,4 +1,3 @@
-import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -76,8 +75,9 @@ function timeContext(): { headline: string; insight: string; suggestions: Sugges
 }
 
 // Empty state proactivo — Resumen ejecutivo + 3 sugerencias por hora.
-// Glassmorphism real con expo-blur en la card de Resumen para que se sienta
-// como una capa orgánica sobre el sistema, no como un panel plano.
+// Glass-look con backgrounds translúcidos + LinearGradient overlay (sin
+// expo-blur — el módulo nativo da issues intermitentes en Release builds
+// y el resultado visual es prácticamente igual al ojo humano).
 export function EmptyDayState({ onPickPrompt, summaryOverride, weatherTip }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
@@ -87,19 +87,21 @@ export function EmptyDayState({ onPickPrompt, summaryOverride, weatherTip }: Pro
 
   return (
     <View style={styles.wrap}>
-      {/* Resumen ejecutivo: BlurView con tinte sistema → translúcido sobre
-          el ambient gradient de la pantalla. Si el OS no soporta blur, cae
-          a backgroundColor sólido del estilo absoluto. */}
+      {/* Resumen ejecutivo: card translúcida con gradient violeta→azul→cyan. */}
       <View style={styles.summaryShadow}>
-        <BlurView
-          intensity={isDark ? 35 : 50}
-          tint={isDark ? 'dark' : 'light'}
-          style={styles.summaryCard}
+        <View
+          style={[
+            styles.summaryCard,
+            {
+              backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.65)',
+              borderColor: c.border,
+            },
+          ]}
         >
           <LinearGradient
             colors={
               isDark
-                ? ['rgba(139,92,246,0.18)', 'rgba(59,130,246,0.08)', 'rgba(34,211,238,0.03)']
+                ? ['rgba(139,92,246,0.20)', 'rgba(59,130,246,0.08)', 'rgba(34,211,238,0.03)']
                 : ['rgba(139,92,246,0.10)', 'rgba(59,130,246,0.04)', 'rgba(34,211,238,0.01)']
             }
             start={{ x: 0, y: 0 }}
@@ -107,7 +109,6 @@ export function EmptyDayState({ onPickPrompt, summaryOverride, weatherTip }: Pro
             style={StyleSheet.absoluteFillObject}
             pointerEvents="none"
           />
-          <View style={[styles.summaryBorder, { borderColor: c.border }]} pointerEvents="none" />
           <View style={styles.summaryHeader}>
             <View style={[styles.summaryDot, { backgroundColor: '#8b5cf6' }]} />
             <Text style={[styles.summaryLabel, { color: c.textMuted }]}>RESUMEN</Text>
@@ -122,11 +123,11 @@ export function EmptyDayState({ onPickPrompt, summaryOverride, weatherTip }: Pro
               </Text>
             </View>
           ) : null}
-        </BlurView>
+        </View>
       </View>
 
       {/* Sugerencias proactivas — primera con gradiente Gemini, las otras
-          glass neutro. Borde fino tipo glass. */}
+          translúcidas. Borde fino tipo glass. */}
       <View style={styles.suggestionsCol}>
         {ctx.suggestions.map((s, i) => (
           <Pressable
@@ -142,12 +143,15 @@ export function EmptyDayState({ onPickPrompt, summaryOverride, weatherTip }: Pro
             accessibilityRole="button"
             accessibilityLabel={s.title}
           >
-            <BlurView
-              intensity={isDark ? 25 : 40}
-              tint={isDark ? 'dark' : 'light'}
-              style={styles.suggestion}
+            <View
+              style={[
+                styles.suggestion,
+                {
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.6)',
+                  borderColor: c.border,
+                },
+              ]}
             >
-              <View style={[styles.suggestionBorder, { borderColor: c.border }]} pointerEvents="none" />
               {i === 0 ? (
                 <LinearGradient
                   colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
@@ -166,7 +170,7 @@ export function EmptyDayState({ onPickPrompt, summaryOverride, weatherTip }: Pro
                 {s.title}
               </Text>
               <IconSymbol name="chevron.right" size={13} color={c.textSubtle} />
-            </BlurView>
+            </View>
           </Pressable>
         ))}
       </View>
@@ -191,14 +195,10 @@ const styles = StyleSheet.create({
   summaryCard: {
     overflow: 'hidden',
     borderRadius: 18,
+    borderWidth: 0.5,
     paddingHorizontal: Spacing.md + 2,
     paddingVertical: 14,
     gap: 4,
-  },
-  summaryBorder: {
-    ...StyleSheet.absoluteFillObject,
-    borderWidth: 0.5,
-    borderRadius: 18,
   },
   summaryHeader: {
     flexDirection: 'row',
@@ -262,13 +262,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 11,
     borderRadius: 14,
+    borderWidth: 0.5,
     paddingHorizontal: 12,
     paddingVertical: 11,
-  },
-  suggestionBorder: {
-    ...StyleSheet.absoluteFillObject,
-    borderWidth: 0.5,
-    borderRadius: 14,
   },
   suggestionIcon: {
     width: 28,

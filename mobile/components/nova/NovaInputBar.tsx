@@ -55,6 +55,12 @@ type Props = {
   tasks: Task[];
   onAddEvent: (input: CreateEventInput) => Promise<EventItem | null>;
   onAddTask: (input: CreateTaskInput) => Promise<Task | null>;
+  // Acciones destructivas: si el padre las pasa, NovaInputBar las ejecuta
+  // cuando Nova devuelve delete_event/delete_task. Sin esto, "borra el
+  // recordatorio" desde Mi Día se ignora silenciosamente — bug visible
+  // al usuario que dice "Nova no hizo nada".
+  onRemoveEvent?: (id: string) => Promise<void>;
+  onRemoveTask?: (id: string) => Promise<void>;
   onRefresh: () => void;
   context: NovaInputContext;
   seed?: NovaInputSeed;
@@ -155,6 +161,8 @@ export function NovaInputBar({
   tasks,
   onAddEvent,
   onAddTask,
+  onRemoveEvent,
+  onRemoveTask,
   onRefresh,
   context,
   seed,
@@ -359,6 +367,31 @@ export function NovaInputBar({
               if (desc) applied.push(desc);
             } else if (desc) {
               failed.push(desc.replace(/^Tarea agregada: /, ''));
+            }
+          }
+        } else if (a.type === 'delete_event' && onRemoveEvent) {
+          const any = a as any;
+          const id = String(any.id ?? any.payload?.id ?? any.event?.id ?? '');
+          if (id) {
+            try {
+              await onRemoveEvent(id);
+              // Buscar título para el chip; si no encontramos, usamos genérico
+              const ev = events.find((e) => e.id === id);
+              applied.push(ev?.title ? `Eliminado: ${ev.title}` : 'Evento eliminado');
+            } catch {
+              failed.push('No pude eliminar el evento');
+            }
+          }
+        } else if (a.type === 'delete_task' && onRemoveTask) {
+          const any = a as any;
+          const id = String(any.id ?? any.payload?.id ?? any.task?.id ?? '');
+          if (id) {
+            try {
+              await onRemoveTask(id);
+              const t = tasks.find((tk) => tk.id === id);
+              applied.push(t?.label ? `Eliminada: ${t.label}` : 'Tarea eliminada');
+            } catch {
+              failed.push('No pude eliminar la tarea');
             }
           }
         }

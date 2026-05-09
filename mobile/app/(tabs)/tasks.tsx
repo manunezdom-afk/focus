@@ -1,5 +1,4 @@
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -27,7 +26,6 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProgressCard } from '@/components/ui/ProgressCard';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { setNovaSeed } from '@/src/data/novaSeedStore';
 import type { Task, TaskPriority } from '@/src/data/types';
 import { useEvents } from '@/src/data/useEvents';
 import { useTasks } from '@/src/data/useTasks';
@@ -265,19 +263,6 @@ export default function TasksScreen() {
     [tasks],
   );
 
-  function goToNova() {
-    if (Platform.OS === 'ios') {
-      void Haptics.selectionAsync();
-    }
-    router.push('/(tabs)/nova');
-  }
-
-  // CTA "Crear con Nova" del empty state → abre Nova con prompt para que
-  // pida ayuda planificando los pendientes del día.
-  function goToNovaForTasksSeed() {
-    setNovaSeed('Ayúdame a planificar mis tareas para hoy.');
-    goToNova();
-  }
 
   const showLoadingState = tasks.loading && tasks.tasks.length === 0;
   const totalTasks = tasks.tasks.length;
@@ -378,7 +363,13 @@ export default function TasksScreen() {
 
           {isFullyEmpty ? (
             <View style={styles.emptyFill}>
-              <FullyEmptyState onCreate={() => openAddFor('hoy')} onAskNova={goToNovaForTasksSeed} />
+              <FullyEmptyState
+                onCreate={() => openAddFor('hoy')}
+                onQuickAdd={async (label) => {
+                  if (Platform.OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  await tasks.addTask({ label, priority: 'Media', category: 'hoy' });
+                }}
+              />
             </View>
           ) : null}
 
@@ -616,6 +607,8 @@ export default function TasksScreen() {
           tasks={tasks.tasks}
           onAddEvent={events.addEvent}
           onAddTask={tasks.addTask}
+          onRemoveEvent={events.removeEvent}
+          onRemoveTask={tasks.removeTask}
           onRefresh={() => {
             void tasks.refresh();
             void events.refresh();
@@ -687,31 +680,62 @@ export default function TasksScreen() {
   );
 }
 
+// Plantillas rápidas — Nova ofrece tareas comunes con 1 tap (no abre chat).
+// Eliminamos "Organizar con Nova" porque mandaba al usuario a la misma
+// pantalla de Nova y eso era absurdo. Esto SÍ resuelve algo.
+const QUICK_TEMPLATES: { label: string }[] = [
+  { label: 'Estudiar 1 hora' },
+  { label: 'Hacer ejercicio' },
+  { label: 'Llamar a alguien' },
+  { label: 'Revisar correos' },
+  { label: 'Pagar facturas' },
+];
+
 // Empty state hero cuando no hay NINGUNA tarea. Copy diferenciado del
 // Calendario: aquí hablamos de pila de pendientes, no de día libre.
-// Botón secundario removido — el NovaInputBar abajo ya cubre ese flow.
 function FullyEmptyState({
   onCreate,
-  onAskNova,
+  onQuickAdd,
 }: {
   onCreate: () => void;
-  onAskNova: () => void;
+  onQuickAdd: (label: string) => Promise<void> | void;
 }) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
   return (
-    <Animated.View
-      style={styles.emptyWrap}
-    >
+    <Animated.View style={styles.emptyWrap}>
       <View style={[styles.emptyCard, { backgroundColor: c.surface, borderColor: c.border }]}>
         <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryContainer }]}>
           <IconSymbol name="checklist" size={24} color={c.primary} />
         </View>
         <Text style={[styles.emptyTitle, { color: c.text }]}>Tu lista está limpia.</Text>
         <Text style={[styles.emptyDesc, { color: c.textMuted }]}>
-          Crea tu próxima tarea o describe lo que tienes en mente abajo y Nova lo añade por ti.
+          Toca una plantilla para añadirla al instante o crea tu propia tarea.
         </Text>
+        <View style={styles.quickChipsRow}>
+          {QUICK_TEMPLATES.map((tpl) => (
+            <Pressable
+              key={tpl.label}
+              onPress={() => void onQuickAdd(tpl.label)}
+              style={({ pressed }) => [
+                styles.quickChip,
+                {
+                  borderColor: c.border,
+                  backgroundColor: pressed ? c.primaryContainer : 'transparent',
+                  transform: [{ scale: pressed ? 0.97 : 1 }],
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`Agregar plantilla: ${tpl.label}`}
+            >
+              <IconSymbol name="plus" size={11} color={c.primary} />
+              <Text style={[styles.quickChipText, { color: c.text }]} numberOfLines={1}>
+                {tpl.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
         <Pressable
           onPress={onCreate}
           style={({ pressed }) => [
@@ -725,23 +749,7 @@ function FullyEmptyState({
           accessibilityLabel="Crear nueva tarea"
         >
           <IconSymbol name="plus" size={16} color={c.onPrimary} />
-          <Text style={[styles.primaryBtnText, { color: c.onPrimary }]}>Nueva tarea</Text>
-        </Pressable>
-        <Pressable
-          onPress={onAskNova}
-          style={({ pressed }) => [
-            styles.secondaryBtn,
-            {
-              borderColor: c.border,
-              backgroundColor: pressed ? c.surfaceMuted : 'transparent',
-              transform: [{ scale: pressed ? 0.985 : 1 }],
-            },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Pedirle a Nova que organice"
-        >
-          <IconSymbol name="sparkles" size={16} color={c.primary} />
-          <Text style={[styles.secondaryBtnText, { color: c.primary }]}>Organizar con Nova</Text>
+          <Text style={[styles.primaryBtnText, { color: c.onPrimary }]}>Nueva tarea propia</Text>
         </Pressable>
       </View>
 
@@ -963,20 +971,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.1,
   },
-  secondaryBtn: {
+  quickChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    marginVertical: 4,
+  },
+  quickChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 46,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
     borderRadius: Radius.full,
     borderWidth: StyleSheet.hairlineWidth,
-    alignSelf: 'stretch',
   },
-  secondaryBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    letterSpacing: 0.1,
+  quickChipText: {
+    fontSize: 12.5,
+    fontWeight: '500',
   },
 
   categoryWrap: {
