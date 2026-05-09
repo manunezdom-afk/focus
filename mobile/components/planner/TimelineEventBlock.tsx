@@ -1,5 +1,4 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Swipeable } from 'react-native-gesture-handler';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -41,8 +40,6 @@ export function TimelineEventBlock({
   const c = Colors[scheme];
   const timeLabel = startTimeStr(event.time) || '—';
 
-  const enterDelay = Math.min(30 + enterIndex * 18, 110);
-
   const hasDescription =
     !!event.description &&
     !/^\d{4}-\d{2}-\d{2}$/.test(event.description.trim());
@@ -70,10 +67,7 @@ export function TimelineEventBlock({
   );
 
   const card = (
-    <Animated.View
-      entering={FadeInDown.delay(enterDelay).duration(180)}
-      style={styles.row}
-    >
+    <View style={styles.row}>
       <View style={styles.timeCol}>
         <Text style={[styles.timeText, { color: c.textMuted }]}>{timeLabel}</Text>
       </View>
@@ -165,7 +159,7 @@ export function TimelineEventBlock({
           ) : null}
         </View>
       </View>
-    </Animated.View>
+    </View>
   );
 
   if (!onSwipeDelete && !onDeletePress) return card;

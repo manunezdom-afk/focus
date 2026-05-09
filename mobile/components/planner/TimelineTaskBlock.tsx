@@ -1,5 +1,4 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Swipeable } from 'react-native-gesture-handler';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -27,7 +26,6 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, onSwipeDelete
 
   const taskColors = getBlockColors('task', scheme);
   const accent = taskColors.accent;
-  const enterDelay = Math.min(30 + enterIndex * 18, 110);
 
   const renderRightActions = () => (
     <Pressable
@@ -45,10 +43,7 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, onSwipeDelete
   );
 
   const card = (
-    <Animated.View
-      entering={FadeInDown.delay(enterDelay).duration(180)}
-      style={styles.row}
-    >
+    <View style={styles.row}>
       <View style={styles.timeCol}>
         <IconSymbol name="checklist" size={18} color={c.textSubtle} />
       </View>
@@ -120,7 +115,7 @@ export function TimelineTaskBlock({ task, onToggle, onDeletePress, onSwipeDelete
           </View>
         </View>
       </View>
-    </Animated.View>
+    </View>
   );
 
   if (!onSwipeDelete && !onDeletePress) return card;

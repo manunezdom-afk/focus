@@ -12,7 +12,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CreateEventSheet } from '@/components/CreateEventSheet';
@@ -152,16 +151,13 @@ export default function CalendarScreen() {
             }
           >
             {/* ── Header: eyebrow mes + título ─────────────────────────── */}
-            <Animated.View entering={FadeInDown.duration(200)} style={styles.header}>
+            <View style={styles.header}>
               <Text style={[styles.eyebrow, { color: c.primary }]}>{monthLabel}</Text>
               <Text style={[styles.title, { color: c.text }]}>Calendario</Text>
-            </Animated.View>
+            </View>
 
             {/* ── Toggle Día / Semana / Mes + botón añadir ─────────────── */}
-            <Animated.View
-              entering={FadeInDown.delay(30).duration(200)}
-              style={styles.toggleRow}
-            >
+            <View style={styles.toggleRow}>
               <View style={[styles.togglePills, { backgroundColor: c.surfaceMuted }]}>
                 {VIEWS.map((v) => {
                   const isActive = v === activeView;
@@ -210,7 +206,7 @@ export default function CalendarScreen() {
               >
                 <IconSymbol name="plus" size={16} color={c.onPrimary} weight="semibold" />
               </Pressable>
-            </Animated.View>
+            </View>
 
             {events.error ? (
               <View style={styles.bannerWrap}>
@@ -221,13 +217,11 @@ export default function CalendarScreen() {
             {/* ── Vista Día: selector semanal + timeline / empty ─────────── */}
             {activeView === 'Día' ? (
               <>
-                <Animated.View entering={FadeInDown.delay(50).duration(200)}>
-                  <DayPicker
-                    selectedDate={selectedDate}
-                    onSelect={selectDay}
-                    eventCounts={eventCounts}
-                  />
-                </Animated.View>
+                <DayPicker
+                  selectedDate={selectedDate}
+                  onSelect={selectDay}
+                  eventCounts={eventCounts}
+                />
 
                 {hasEvents ? (
                   <DayTimeline
@@ -236,20 +230,13 @@ export default function CalendarScreen() {
                     onDeleteEvent={handleDeleteEvent}
                   />
                 ) : events.error ? null : (
-                  // Cuando hay error de fetch + 0 eventos del día, el
-                  // ErrorBanner de arriba ya cubre la señal. Mostrar
-                  // "Día libre. Todo tuyo." al mismo tiempo confundiría
-                  // al usuario sobre si la agenda está vacía o si falló.
-                  <Animated.View
-                    entering={FadeInDown.delay(70).duration(220)}
-                    style={styles.emptyWrap}
-                  >
+                  <View style={styles.emptyWrap}>
                     <EmptyAgendaState
                       selectedDate={selectedDate}
                       onCreateEvent={openCreate}
                       onFocusWork={goToNovaFocusSeed}
                     />
-                  </Animated.View>
+                  </View>
                 )}
               </>
             ) : null}

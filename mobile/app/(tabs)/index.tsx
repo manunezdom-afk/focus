@@ -12,7 +12,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LoadingState } from '@/components/LoadingState';
@@ -179,7 +178,7 @@ export default function MiDiaScreen() {
           }
         >
           {/* ── Top icon row (perfil, compartir, bandeja Nova, notificaciones) ── */}
-          <Animated.View entering={FadeInDown.duration(180)} style={styles.iconRow}>
+          <View style={styles.iconRow}>
             <Pressable
               onPress={() => router.push('/(tabs)/settings')}
               hitSlop={6}
@@ -228,16 +227,16 @@ export default function MiDiaScreen() {
             >
               <IconSymbol name="bell.fill" size={22} color={c.text} />
             </Pressable>
-          </Animated.View>
+          </View>
 
-          {/* ── Header AI-native con entrada animada ─────────────────── */}
-          <Animated.View entering={FadeInDown.duration(220)} style={styles.header}>
+          {/* ── Header AI-native ─────────────────── */}
+          <View style={styles.header}>
             <Text style={[styles.titleLine, { color: c.text }]}>Mi día</Text>
             <Text style={[styles.subLine, { color: c.primary }]} numberOfLines={1}>
               <Text style={styles.subLineStrong}>{greeting}</Text>
               <Text style={{ color: c.textMuted }}>{`  ·  ${dateLabel}`}</Text>
             </Text>
-          </Animated.View>
+          </View>
 
           {/* Error compacto — chip discreto en vez de banner gigante. No
               bloquea el empty state: el usuario sigue pudiendo pedirle a
@@ -265,9 +264,7 @@ export default function MiDiaScreen() {
             <LoadingState />
           ) : !hasAnyItem ? (
             <View style={styles.emptyFill}>
-              <Animated.View entering={FadeInDown.delay(60).duration(240)}>
-                <EmptyDayState onPickPrompt={seedNova} />
-              </Animated.View>
+              <EmptyDayState onPickPrompt={seedNova} />
             </View>
           ) : (
             <>
