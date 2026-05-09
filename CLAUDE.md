@@ -34,6 +34,23 @@ Si el push es rechazado por non-fast-forward: repetir paso 3 y reintentar. Nunca
 - Cuando cambien archivos en `public/icons/` (favicon, apple-touch-icon, icon-192/512): bumpar el query string `?v=N` en `index.html` y `public/manifest.json` para forzar cache-bust del browser HTTP.
 - iOS instalado en home screen NUNCA refresca su icono. El usuario debe desinstalar (long-press → eliminar) y reinstalar desde Safari → Compartir → Añadir a pantalla de inicio.
 
+## Mobile builds (Xcode/EAS)
+
+Builds locales con `npx expo run:ios --configuration Release` se hacen desde `~/Developer/focus-expo-xcode-test/mobile/`, NO desde el worktree (los worktrees no tienen `node_modules` ni `mobile/.env`).
+
+El binario iOS necesita estas env vars **embedidas en el bundle** (Metro las inlinea desde `mobile/.env`):
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `EXPO_PUBLIC_API_ORIGIN` (opcional, default `https://www.usefocus.me`)
+
+Si el archivo `mobile/.env` no existe al hacer el build, **el cliente de Supabase queda en `null`**, no se puede iniciar sesión, y Nova/los datos fallan con 401. Antes de cada build verificar:
+
+```bash
+test -f ~/Developer/focus-expo-xcode-test/mobile/.env && echo OK || echo MISSING
+```
+
+Para builds EAS (TestFlight): `eas.json` solo declara `EXPO_PUBLIC_API_ORIGIN`. Las keys de Supabase se inyectan via `eas secret:create EXPO_PUBLIC_SUPABASE_URL ...` antes del primer build de producción.
+
 ## Idioma de copy
 
 Toda copy visible al usuario va en **español neutral** (forma "tú"), nunca voseo argentino. Aplica a títulos, mensajes, empty states, errores, copy de Nova, notificaciones push y system prompts.

@@ -81,7 +81,7 @@ export function strippedEditMessage(stripped) {
   if (stripped.length === 0) return '';
   const types = new Set(stripped.map(a => a.type));
   if (types.has('delete_event')) {
-    return 'No borré el evento porque no me pediste explícitamente borrarlo. Si querés, decime "borra X" o "elimina X".';
+    return 'No borré el evento porque no me pediste explícitamente borrarlo. Si quieres, dime "borra X" o "elimina X".';
   }
-  return 'No moví ni edité el evento existente porque no me pediste hacerlo. Si querés que lo cambie, decime "mueve X a las Y" o "cambia X".';
+  return 'No moví ni edité el evento existente porque no me pediste hacerlo. Si quieres que lo cambie, dime "mueve X a las Y" o "cambia X".';
 }
