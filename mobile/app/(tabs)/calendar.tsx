@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LinearGradient } from 'expo-linear-gradient';
+
 import { CreateEventSheet } from '@/components/CreateEventSheet';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
@@ -24,8 +26,9 @@ import { MonthView } from '@/components/calendar/MonthView';
 import { WeekView } from '@/components/calendar/WeekView';
 import { AmbientNova } from '@/components/nova/AmbientNova';
 import { NovaInputBar } from '@/components/nova/NovaInputBar';
+import { GeminiSurface } from '@/components/ui/GeminiSurface';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
+import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { setNovaSeed } from '@/src/data/novaSeedStore';
 import { addDaysISO, isToday, todayISO } from '@/src/data/today';
@@ -321,69 +324,127 @@ function EmptyAgendaState({
       ? 'Aprovecha para reservar bloques enfocados antes de que se llene.'
       : 'Sin eventos este día. Pídele a Nova que arme un bloque o agéndalo manual.';
 
+  // Mismo lenguaje visual que EmptyDayState (Mi Día): card translúcida con
+  // gradient brand violeta→azul→cyan y suggestion rows con icono gradient en
+  // la acción primaria. Ahora todas las pantallas vacías cuentan la misma
+  // historia visual.
   return (
-    <View style={[styles.emptyCard, { backgroundColor: c.surface, borderColor: c.border }]}>
-      {/* Icono */}
-      <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryContainer }]}>
-        <IconSymbol name="sun.max.fill" size={26} color={c.primary} />
+    <View style={styles.emptyWrapInner}>
+      {/* Resumen ejecutivo glass + gradient brand */}
+      <GeminiSurface>
+        <View style={styles.summaryPad}>
+          <View style={styles.summaryHeader}>
+            <View style={styles.summaryDot} />
+            <Text style={[styles.summaryLabel, { color: c.textMuted }]}>AGENDA</Text>
+          </View>
+          <Text style={[styles.summaryTitle, { color: c.text }]}>{title}</Text>
+          <Text style={[styles.summaryInsight, { color: c.textMuted }]}>{desc}</Text>
+        </View>
+      </GeminiSurface>
+
+      {/* Sugerencias proactivas — primer chip con icon gradient brand,
+          el resto translúcidos (mismo patrón que EmptyDayState). */}
+      <View style={styles.suggestionsCol}>
+        <Pressable
+          onPress={onCreateEvent}
+          style={({ pressed }) => [
+            styles.suggestionShadow,
+            {
+              opacity: pressed ? 0.85 : 1,
+              transform: [{ scale: pressed ? 0.985 : 1 }],
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Añadir evento"
+        >
+          <View
+            style={[
+              styles.suggestion,
+              {
+                backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.6)',
+                borderColor: c.border,
+              },
+            ]}
+          >
+            <LinearGradient
+              colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.suggestionIcon}
+            >
+              <IconSymbol name="plus" size={14} color="#ffffff" />
+            </LinearGradient>
+            <Text style={[styles.suggestionTitle, { color: c.text }]} numberOfLines={1}>
+              Añadir evento
+            </Text>
+            <IconSymbol name="chevron.right" size={13} color={c.textSubtle} />
+          </View>
+        </Pressable>
+
+        <Pressable
+          onPress={onFocusWork}
+          style={({ pressed }) => [
+            styles.suggestionShadow,
+            {
+              opacity: pressed ? 0.85 : 1,
+              transform: [{ scale: pressed ? 0.985 : 1 }],
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Trabajar enfocado"
+        >
+          <View
+            style={[
+              styles.suggestion,
+              {
+                backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.6)',
+                borderColor: c.border,
+              },
+            ]}
+          >
+            <View style={[styles.suggestionIconMuted, { backgroundColor: c.primaryContainer }]}>
+              <IconSymbol name="scope" size={14} color={c.primary} />
+            </View>
+            <Text style={[styles.suggestionTitle, { color: c.text }]} numberOfLines={1}>
+              Trabajar enfocado
+            </Text>
+            <IconSymbol name="chevron.right" size={13} color={c.textSubtle} />
+          </View>
+        </Pressable>
+
+        <Pressable
+          onPress={() =>
+            Alert.alert('Próximamente', 'La importación de agendas externas estará disponible pronto.')
+          }
+          style={({ pressed }) => [
+            styles.suggestionShadow,
+            {
+              opacity: pressed ? 0.85 : 1,
+              transform: [{ scale: pressed ? 0.985 : 1 }],
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Importar agenda"
+        >
+          <View
+            style={[
+              styles.suggestion,
+              {
+                backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.6)',
+                borderColor: c.border,
+              },
+            ]}
+          >
+            <View style={[styles.suggestionIconMuted, { backgroundColor: c.primaryContainer }]}>
+              <IconSymbol name="square.and.arrow.down" size={14} color={c.primary} />
+            </View>
+            <Text style={[styles.suggestionTitle, { color: c.text }]} numberOfLines={1}>
+              Importar agenda
+            </Text>
+            <IconSymbol name="chevron.right" size={13} color={c.textSubtle} />
+          </View>
+        </Pressable>
       </View>
-
-      {/* Copy */}
-      <Text style={[styles.emptyTitle, { color: c.text }]}>{title}</Text>
-      <Text style={[styles.emptyDesc, { color: c.textMuted }]}>{desc}</Text>
-
-      {/* Acciones */}
-      <Pressable
-        onPress={onCreateEvent}
-        style={({ pressed }) => [
-          styles.primaryBtn,
-          {
-            backgroundColor: pressed ? c.primaryPressed : c.primary,
-            transform: [{ scale: pressed ? 0.985 : 1 }],
-          },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="Añadir evento"
-      >
-        <IconSymbol name="plus" size={16} color={c.onPrimary} />
-        <Text style={[styles.primaryBtnText, { color: c.onPrimary }]}>Añadir evento</Text>
-      </Pressable>
-
-      <Pressable
-        onPress={onFocusWork}
-        style={({ pressed }) => [
-          styles.secondaryBtn,
-          {
-            borderColor: c.border,
-            backgroundColor: pressed ? c.surfaceMuted : 'transparent',
-            transform: [{ scale: pressed ? 0.985 : 1 }],
-          },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="Trabajar enfocado"
-      >
-        <IconSymbol name="scope" size={16} color={c.primary} />
-        <Text style={[styles.secondaryBtnText, { color: c.primary }]}>Trabajar enfocado</Text>
-      </Pressable>
-
-      <Pressable
-        onPress={() =>
-          Alert.alert('Próximamente', 'La importación de agendas externas estará disponible pronto.')
-        }
-        style={({ pressed }) => [
-          styles.tertiaryBtn,
-          {
-            borderColor: c.border,
-            opacity: pressed ? 0.7 : 1,
-            transform: [{ scale: pressed ? 0.985 : 1 }],
-          },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="Importar agenda"
-      >
-        <IconSymbol name="square.and.arrow.down" size={14} color={c.textMuted} />
-        <Text style={[styles.tertiaryBtnText, { color: c.textMuted }]}>Importar agenda</Text>
-      </Pressable>
     </View>
   );
 }
@@ -457,75 +518,91 @@ const styles = StyleSheet.create({
   emptyWrap: {
     paddingHorizontal: Spacing.lg,
   },
-  emptyCard: {
-    borderRadius: Radius['2xl'],
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing['2xl'],
-    paddingHorizontal: Spacing.lg,
-    alignItems: 'center',
-    gap: Spacing.md,
+
+  // Wrapper interno del empty state nuevo: stack vertical de
+  // GeminiSurface (resumen) + 3 suggestion rows con misma anchura.
+  emptyWrapInner: {
+    gap: Spacing.lg,
   },
-  emptyIconWrap: {
-    width: 60,
-    height: 60,
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.xs,
+  // Padding interno cuando un GeminiSurface envuelve el "resumen".
+  // No se aplica al GeminiSurface en sí porque el componente es agnóstico
+  // del padding (ver doc en GeminiSurface.tsx).
+  summaryPad: {
+    paddingHorizontal: Spacing.md + 2,
+    paddingVertical: 14,
+    gap: 4,
   },
-  emptyTitle: {
-    ...Typography.title2,
-    fontSize: 20,
-    textAlign: 'center',
-    letterSpacing: -0.2,
-  },
-  emptyDesc: {
-    ...Typography.body,
-    textAlign: 'center',
-    maxWidth: 280,
-    marginBottom: Spacing.sm,
-  },
-  primaryBtn: {
+  summaryHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 48,
-    borderRadius: Radius.full,
-    alignSelf: 'stretch',
-  },
-  primaryBtnText: {
-    ...Typography.bodyStrong,
-    fontSize: 15,
-  },
-  secondaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 46,
-    borderRadius: Radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignSelf: 'stretch',
-  },
-  secondaryBtnText: {
-    ...Typography.bodyStrong,
-    fontSize: 15,
-  },
-  tertiaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
-    height: 38,
-    borderRadius: Radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignSelf: 'stretch',
+    marginBottom: 4,
   },
-  tertiaryBtnText: {
-    fontSize: 13,
-    fontWeight: '500',
-    lineHeight: 17,
+  summaryDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#8b5cf6',
+  },
+  summaryLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+  },
+  summaryTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+    lineHeight: 28,
+  },
+  summaryInsight: {
+    fontSize: 13.5,
+    lineHeight: 19,
+    fontWeight: '400',
+    marginTop: 2,
   },
 
+  // Suggestions — mismo patrón que EmptyDayState. Primer chip se diferencia
+  // por el icon en LinearGradient brand; los demás van con icon muted.
+  suggestionsCol: {
+    gap: 8,
+  },
+  suggestionShadow: {
+    borderRadius: 14,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  suggestion: {
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    borderRadius: 14,
+    borderWidth: 0.5,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  suggestionIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestionIconMuted: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestionTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 19,
+    flex: 1,
+  },
 });

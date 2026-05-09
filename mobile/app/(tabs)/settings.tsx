@@ -14,6 +14,8 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LinearGradient } from 'expo-linear-gradient';
+
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
 import { AmbientNova } from '@/components/nova/AmbientNova';
 import { AppearanceSheet } from '@/components/settings/AppearanceSheet';
@@ -21,6 +23,7 @@ import { DeleteAccountSheet } from '@/components/settings/DeleteAccountSheet';
 import { MemoriesSheet } from '@/components/settings/MemoriesSheet';
 import { PersonalitySheet } from '@/components/settings/PersonalitySheet';
 import { PlanCard } from '@/components/settings/PlanCard';
+import { GeminiSurface } from '@/components/ui/GeminiSurface';
 import { SettingsRow, SettingsSection } from '@/components/ui/SettingsList';
 import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -267,36 +270,40 @@ export default function SettingsScreen() {
         </Animated.View>
 
         <View style={styles.body}>
-          {/* AccountCard — avatar circular con inicial del email + status real */}
+          {/* AccountCard — Gemini-style: avatar con LinearGradient brand
+              + card glass con gradient violeta→azul→cyan (mismo lenguaje
+              que las tarjetas hero de Mi Día / Calendario / Tareas). */}
           <Animated.View>
-            <View
-              style={[
-                styles.accountCard,
-                { backgroundColor: c.surface, borderColor: c.border },
-              ]}
-            >
-              <View style={[styles.avatar, { backgroundColor: c.primary }]}>
-                <Text style={[styles.avatarText, { color: c.onPrimary }]}>{initial}</Text>
-              </View>
-              <View style={styles.accountText}>
-                <Text style={[styles.accountTitle, { color: c.text }]} numberOfLines={1}>
-                  {email ?? 'Sin sesión'}
-                </Text>
-                <View style={styles.accountStatusRow}>
-                  <View
-                    style={[
-                      styles.statusDot,
-                      { backgroundColor: isAuthenticated ? c.success : c.warning },
-                    ]}
-                  />
-                  <Text style={[styles.accountStatus, { color: c.textMuted }]}>
-                    {isAuthenticated
-                      ? 'Sesión activa · datos en la nube'
-                      : 'Sin cuenta — inicia sesión'}
+            <GeminiSurface radius={Radius.xl}>
+              <View style={styles.accountCardInner}>
+                <LinearGradient
+                  colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.avatar}
+                >
+                  <Text style={[styles.avatarText, { color: '#ffffff' }]}>{initial}</Text>
+                </LinearGradient>
+                <View style={styles.accountText}>
+                  <Text style={[styles.accountTitle, { color: c.text }]} numberOfLines={1}>
+                    {email ?? 'Sin sesión'}
                   </Text>
+                  <View style={styles.accountStatusRow}>
+                    <View
+                      style={[
+                        styles.statusDot,
+                        { backgroundColor: isAuthenticated ? c.success : c.warning },
+                      ]}
+                    />
+                    <Text style={[styles.accountStatus, { color: c.textMuted }]}>
+                      {isAuthenticated
+                        ? 'Sesión activa · datos en la nube'
+                        : 'Sin cuenta — inicia sesión'}
+                    </Text>
+                  </View>
                 </View>
               </View>
-            </View>
+            </GeminiSurface>
           </Animated.View>
 
           {/* ── Plan ─────────────────────────────────────────────────────
@@ -582,14 +589,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
   },
 
-  // AccountCard
-  accountCard: {
+  // AccountCard — el background glass + gradient brand del card lo aporta
+  // GeminiSurface (que envuelve este View). Solo definimos disposición y
+  // padding interno acá.
+  accountCardInner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.md,
     padding: Spacing.md,
-    borderRadius: Radius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
   },
   avatar: {
     width: 52,

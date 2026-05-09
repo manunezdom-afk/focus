@@ -869,7 +869,18 @@ export default function NovaScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={`Enviar a Nova: ${s.label}`}
                   >
-                    <IconSymbol name={s.icon} size={13} color={c.primary} />
+                    {idx === 0 ? (
+                      <LinearGradient
+                        colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.pillIconBrand}
+                      >
+                        <IconSymbol name={s.icon} size={11} color="#ffffff" />
+                      </LinearGradient>
+                    ) : (
+                      <IconSymbol name={s.icon} size={13} color={c.primary} />
+                    )}
                     <Text style={[styles.pillText, { color: c.text }]} numberOfLines={1}>
                       {s.label}
                     </Text>
@@ -1148,6 +1159,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 1,
+  },
+  // Icon gradient brand del primer pill (mismo lenguaje visual que la
+  // primera suggestion de Mi Día / Calendario / Tareas).
+  pillIconBrand: {
+    width: 20,
+    height: 20,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pillText: {
     fontSize: 14,

@@ -14,6 +14,8 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LinearGradient } from 'expo-linear-gradient';
+
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
@@ -23,6 +25,7 @@ import { TaskRow } from '@/components/TaskRow';
 import { TaskDetailSheet } from '@/components/tasks/TaskDetailSheet';
 import { WeeklyStatsCard } from '@/components/tasks/WeeklyStatsCard';
 import { Card } from '@/components/ui/Card';
+import { GeminiSurface } from '@/components/ui/GeminiSurface';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProgressCard } from '@/components/ui/ProgressCard';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -307,29 +310,32 @@ export default function TasksScreen() {
             <Text style={[styles.titleLine, { color: c.text }]}>Tareas</Text>
           </Animated.View>
 
-          {/* Smart summary card — copy desde datos reales, sin orb */}
+          {/* Smart summary card — Gemini-style (glass + gradient brand
+              violeta→azul→cyan), mismo lenguaje que el "RESUMEN" de Mi Día.
+              El icon ahora va en LinearGradient brand para reforzar el
+              acento de IA. */}
           {!showLoadingState && totalTasks > 0 ? (
-            <Animated.View
-              style={styles.summaryWrap}
-            >
-              <View
-                style={[
-                  styles.summaryCard,
-                  { backgroundColor: c.surfaceTint, borderColor: c.border },
-                ]}
-              >
-                <View style={[styles.summaryIcon, { backgroundColor: c.primaryContainer }]}>
-                  <IconSymbol name="sparkles" size={14} color={c.primary} />
+            <Animated.View style={styles.summaryWrap}>
+              <GeminiSurface>
+                <View style={styles.summaryCardInner}>
+                  <LinearGradient
+                    colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.summaryIcon}
+                  >
+                    <IconSymbol name="sparkles" size={14} color="#ffffff" />
+                  </LinearGradient>
+                  <View style={styles.summaryText}>
+                    <Text style={[styles.summaryTitle, { color: c.text }]} numberOfLines={2}>
+                      {summary.cardTitle}
+                    </Text>
+                    <Text style={[styles.summaryDesc, { color: c.textMuted }]} numberOfLines={2}>
+                      {summary.cardDesc}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.summaryText}>
-                  <Text style={[styles.summaryTitle, { color: c.text }]} numberOfLines={2}>
-                    {summary.cardTitle}
-                  </Text>
-                  <Text style={[styles.summaryDesc, { color: c.textMuted }]} numberOfLines={2}>
-                    {summary.cardDesc}
-                  </Text>
-                </View>
-              </View>
+              </GeminiSurface>
             </Animated.View>
           ) : null}
 
@@ -707,10 +713,16 @@ function FullyEmptyState({
 
   return (
     <Animated.View style={styles.emptyWrap}>
-      <View style={[styles.emptyCard, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <View style={[styles.emptyIconWrap, { backgroundColor: c.primaryContainer }]}>
-          <IconSymbol name="checklist" size={24} color={c.primary} />
-        </View>
+      <GeminiSurface radius={Radius['2xl']}>
+        <View style={styles.emptyCardInner}>
+          <LinearGradient
+            colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.emptyIconWrap}
+          >
+            <IconSymbol name="checklist" size={24} color="#ffffff" />
+          </LinearGradient>
         <Text style={[styles.emptyTitle, { color: c.text }]}>Tu lista está limpia.</Text>
         <Text style={[styles.emptyDesc, { color: c.textMuted }]}>
           Toca una plantilla para añadirla al instante o crea tu propia tarea.
@@ -753,7 +765,8 @@ function FullyEmptyState({
           <IconSymbol name="plus" size={16} color={c.onPrimary} />
           <Text style={[styles.primaryBtnText, { color: c.onPrimary }]}>Nueva tarea propia</Text>
         </Pressable>
-      </View>
+        </View>
+      </GeminiSurface>
 
       {/* Ejemplos fantasma — desaparecen cuando aparece la primera tarea
           real (porque isFullyEmpty pasa a false y este bloque entero no se
@@ -837,19 +850,18 @@ const styles = StyleSheet.create({
     letterSpacing: -0.7,
   },
 
-  // Smart summary card
+  // Smart summary card — el background glass + gradient lo aporta GeminiSurface.
+  // Acá solo definimos la disposición interna (icon + textos en row).
   summaryWrap: {
     paddingHorizontal: Spacing.lg,
     marginBottom: Spacing.md,
   },
-  summaryCard: {
+  summaryCardInner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
   },
   summaryIcon: {
     width: 32,
@@ -928,14 +940,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.4,
   },
-  emptyCard: {
-    borderRadius: Radius['2xl'],
-    borderWidth: StyleSheet.hairlineWidth,
+  // El background glass + gradient brand del card lo aporta GeminiSurface
+  // (que envuelve este View). Acá solo definimos el padding interno y la
+  // alineación vertical de los hijos (icon + textos + chips + botón).
+  emptyCardInner: {
     paddingVertical: Spacing['2xl'],
     paddingHorizontal: Spacing.lg,
     alignItems: 'center',
     gap: Spacing.md,
   },
+  // emptyIconWrap ahora actúa como contenedor del LinearGradient brand
+  // — el gradient se aplica directamente con as={LinearGradient} y este
+  // estilo controla forma + tamaño.
   emptyIconWrap: {
     width: 60,
     height: 60,
