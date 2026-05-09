@@ -277,6 +277,13 @@ export default function NovaScreen() {
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
 
+  // Composer multilínea — el TextInput crece hasta MAX y a partir de ahí
+  // scrollea internamente, en lugar de empujar la barra contra el teclado
+  // o cortar texto a la derecha. Mismo patrón que NovaInputBar.
+  const COMPOSER_MIN_HEIGHT = 24;
+  const COMPOSER_MAX_HEIGHT = 160; // ~7 líneas a lineHeight 22
+  const [inputHeight, setInputHeight] = useState(COMPOSER_MIN_HEIGHT);
+
   // Dictado con OpenAI Whisper (mismo motor que ChatGPT Voice).
   const dictation = useWhisperDictation({
     onFinal: (text) => {
@@ -663,6 +670,9 @@ export default function NovaScreen() {
 
       setMessages((prev) => [...prev, userMsg, placeholder]);
       setDraft('');
+      // Forzar el reset del alto del composer — onContentSizeChange tarda
+      // un frame en ver el draft vacío, y se notaría como "salto" visual.
+      setInputHeight(COMPOSER_MIN_HEIGHT);
       setSending(true);
       if (Platform.OS === 'ios') {
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -952,12 +962,36 @@ export default function NovaScreen() {
           <TextInput
             ref={inputRef}
             value={draft}
-            onChangeText={setDraft}
+            onChangeText={(t) => {
+              setDraft(t);
+              if (!t) setInputHeight(COMPOSER_MIN_HEIGHT);
+            }}
             onSubmitEditing={() => void handleSend()}
             placeholder="Dile a Nova qué necesitas…"
             placeholderTextColor={c.textSubtle}
-            style={[styles.input, { color: c.text }]}
+            style={[
+              styles.input,
+              {
+                color: c.text,
+                height: inputHeight,
+              },
+            ]}
             multiline
+            // Solo activamos scroll interno cuando el contenido excedió el
+            // alto máximo. De otra forma, RN deja scrollear "vacío" en una
+            // barra de una línea y se siente roto.
+            scrollEnabled={inputHeight >= COMPOSER_MAX_HEIGHT}
+            textAlignVertical="top"
+            onContentSizeChange={(e) => {
+              const next = e.nativeEvent.contentSize.height;
+              const clamped = Math.max(
+                COMPOSER_MIN_HEIGHT,
+                Math.min(COMPOSER_MAX_HEIGHT, next),
+              );
+              setInputHeight((prev) =>
+                Math.abs(prev - clamped) < 0.5 ? prev : clamped,
+              );
+            }}
             autoCorrect
             autoCapitalize="sentences"
             returnKeyType="send"
@@ -1154,10 +1188,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
 
-  // Composer — mismo lenguaje visual que PlannerNovaInput
+  // Composer — mismo lenguaje visual que PlannerNovaInput.
+  // alignItems: 'flex-end' para que con texto multilínea los botones
+  // queden anclados abajo y la zona de texto crezca hacia arriba en lugar
+  // de empujarlos.
   composer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     gap: 10,
     marginHorizontal: Spacing.lg,
     marginBottom: Spacing.md,
@@ -1171,14 +1208,14 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   orbBtn: {
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
     paddingLeft: 2,
   },
   input: {
     flex: 1,
-    minHeight: 36,
-    maxHeight: 120,
     paddingVertical: 6,
     paddingHorizontal: 6,
     fontSize: 16,
@@ -1186,6 +1223,8 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   cameraBtn: {
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 2,

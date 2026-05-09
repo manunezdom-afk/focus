@@ -180,6 +180,14 @@ export function NovaInputBar({
   const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
 
+  // Composer multilínea inteligente — el TextInput crece con el contenido
+  // hasta MAX_INPUT_HEIGHT y a partir de ahí scrollea internamente. Sin
+  // esto, frases largas (típicas en dictado) se cortaban a la derecha en
+  // la barra "lineal" anterior.
+  const MIN_INPUT_HEIGHT = 22;
+  const MAX_INPUT_HEIGHT = 132; // ~6 líneas a lineHeight 22
+  const [inputHeight, setInputHeight] = useState(MIN_INPUT_HEIGHT);
+
   // Dictado con OpenAI Whisper (mismo motor que ChatGPT Voice).
   // Graba audio con expo-av → sube a /api/transcribe → Whisper → texto.
   const dictation = useWhisperDictation({
@@ -410,6 +418,10 @@ export function NovaInputBar({
         isError: failed.length > 0 && applied.length === 0,
       });
       setDraft('');
+      // Tras enviar, la barra vuelve a 1 línea — onContentSizeChange tarda
+      // un frame en reportar el contenido vacío y se vería un "salto" de
+      // alto si no lo forzamos acá.
+      setInputHeight(MIN_INPUT_HEIGHT);
     } catch (err: any) {
       setReply({
         text: err?.message ?? 'No pude responder. Intenta de nuevo.',
@@ -513,11 +525,35 @@ export function NovaInputBar({
         </View>
         <TextInput
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={(t) => {
+            setDraft(t);
+            // Si el usuario borró todo el texto, devolvemos la barra a su
+            // alto mínimo. onContentSizeChange tarda un frame en reportar
+            // contenido vacío y se notaría como "barra grande con un solo
+            // caret".
+            if (!t) setInputHeight(MIN_INPUT_HEIGHT);
+          }}
           placeholder={placeholderFor(context)}
           placeholderTextColor={c.textSubtle}
-          style={[styles.input, { color: c.text }]}
+          style={[
+            styles.input,
+            {
+              color: c.text,
+              height: inputHeight,
+            },
+          ]}
           multiline
+          // Solo permite scroll interno cuando el contenido excedió el alto
+          // máximo. Sin esto, RN deja scrollear "vacío" y la UX se siente
+          // rota cuando hay solo una línea.
+          scrollEnabled={inputHeight >= MAX_INPUT_HEIGHT}
+          textAlignVertical="top"
+          onContentSizeChange={(e) => {
+            const next = e.nativeEvent.contentSize.height;
+            const clamped = Math.max(MIN_INPUT_HEIGHT, Math.min(MAX_INPUT_HEIGHT, next));
+            // Evita re-renders en cada keystroke si el alto no cambió.
+            setInputHeight((prev) => (Math.abs(prev - clamped) < 0.5 ? prev : clamped));
+          }}
           autoCorrect
           autoCapitalize="sentences"
           maxLength={2000}
@@ -679,15 +715,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
 
-  // Input bar — mismo lenguaje que PlannerNovaInput pero compacto para anclaje.
+  // Input bar — mismo lenguaje que PlannerNovaInput pero compacto para
+  // anclaje. alignItems: 'flex-end' para que con texto multilínea los
+  // botones queden anclados abajo y la zona de texto crezca hacia arriba.
   inputBar: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     gap: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 22,
     paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingVertical: 6,
     minHeight: 48,
     shadowColor: '#2563eb',
     shadowOffset: { width: 0, height: 4 },
@@ -703,12 +741,10 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    minHeight: 28,
-    maxHeight: 100,
-    paddingVertical: 4,
+    paddingVertical: 6,
     paddingHorizontal: 4,
     fontSize: 15,
-    lineHeight: 20,
+    lineHeight: 22,
     fontWeight: '400',
   },
   sendBtn: {

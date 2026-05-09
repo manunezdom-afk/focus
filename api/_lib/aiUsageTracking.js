@@ -95,6 +95,9 @@ const ALLOWED_METADATA_KEYS = new Set([
   'had_actions',
   'limit_status',
   'retry_attempt',
+  // Voice AI / Whisper: duración del audio transcrito en segundos. No
+  // identifica al usuario; solo permite reportes de costo por minuto.
+  'audio_seconds',
 ])
 
 function sanitizeMetadata(input) {
@@ -134,16 +137,25 @@ export async function trackAIUsageEvent({
   success = true,
   error_type = null,
   duration_ms = null,
+  // Override del costo en USD para modelos que NO cobran por tokens
+  // (Whisper cobra por minuto). Si se pasa, salta calculateAICost().
+  cost_override_usd = null,
 }) {
   try {
     if (!admin || !userId || !action_type) return
 
     const extracted = usage || extractAnthropicUsage(anthropicResponse)
-    const cost = calculateAICost({
-      model,
-      input_tokens: extracted.input_tokens,
-      output_tokens: extracted.output_tokens,
-    })
+    const cost = (cost_override_usd != null && Number.isFinite(Number(cost_override_usd)))
+      ? {
+          cost_usd: Number(Number(cost_override_usd).toFixed(6)),
+          pricing_source: 'configured',
+          pricing_model: normalizeModelName(model) || model || 'unknown',
+        }
+      : calculateAICost({
+          model,
+          input_tokens: extracted.input_tokens,
+          output_tokens: extracted.output_tokens,
+        })
 
     const meta = sanitizeMetadata({
       endpoint,
