@@ -28,13 +28,10 @@ export function EmptyDayState({ onPickPrompt }: Props) {
     <View style={styles.wrap}>
       <View style={styles.intro}>
         <View style={styles.orbWrap}>
-          <NovaOrb size={72} ambient breathing />
+          <NovaOrb size={56} ambient breathing />
         </View>
         <Text style={[styles.title, { color: c.text }]}>
-          Hola, soy Nova
-        </Text>
-        <Text style={[styles.subtitle, { color: c.textMuted }]}>
-          Tu asistente para organizar el día.{'\n'}Empieza con un ejemplo o pídeme algo.
+          ¿Qué planeamos hoy?
         </Text>
       </View>
 
@@ -91,24 +88,17 @@ const styles = StyleSheet.create({
   },
   intro: {
     alignItems: 'center',
-    gap: 10,
+    gap: 14,
   },
   orbWrap: {
-    marginBottom: 4,
+    marginBottom: 2,
   },
   title: {
-    fontSize: 24,
-    fontWeight: '700',
-    lineHeight: 30,
+    fontSize: 22,
+    fontWeight: '600',
+    lineHeight: 28,
     textAlign: 'center',
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 14,
-    fontWeight: '400',
-    lineHeight: 20,
-    textAlign: 'center',
-    maxWidth: 300,
+    letterSpacing: -0.4,
   },
   chipsCol: {
     gap: 10,

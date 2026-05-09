@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -12,20 +13,23 @@ type Props = {
   action?: ReactNode;
 };
 
-// Empty state premium — círculo tinted con icon, título y descripción
-// centrados. Si se pasa `action`, se renderiza debajo del texto.
+// Empty state Gemini-style — círculo con gradiente cyan→azul→violeta,
+// halo suave, título y descripción centrados.
 export function EmptyState({ title, description, icon = 'sparkles', action }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   return (
     <View style={styles.box}>
-      <View
-        style={[
-          styles.iconCircle,
-          { backgroundColor: c.surfaceTint, borderColor: c.border },
-        ]}
-      >
-        <IconSymbol name={icon} size={24} color={c.primary} />
+      <View style={styles.iconWrap}>
+        <View style={[styles.halo, { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.4 : 0.55 }]} />
+        <LinearGradient
+          colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.iconCircle}
+        >
+          <IconSymbol name={icon} size={22} color="#ffffff" />
+        </LinearGradient>
       </View>
       <Text style={[styles.title, { color: c.text }]}>{title}</Text>
       {description ? (
@@ -43,14 +47,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
   },
+  iconWrap: {
+    width: 72,
+    height: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.xs,
+  },
+  halo: {
+    position: 'absolute',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+  },
   iconCircle: {
-    width: 56,
-    height: 56,
+    width: 52,
+    height: 52,
     borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: Spacing.xs,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 14,
+    elevation: 4,
   },
   title: { ...Typography.title3, textAlign: 'center' },
   body: { ...Typography.body, textAlign: 'center', maxWidth: 320 },

@@ -7,6 +7,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { NovaOrb } from '@/components/nova/NovaOrb';
 
 // Tab bar custom con paridad legacy:
 // - bg-slate-50/70 backdrop-blur-2xl border-t (semi-transparente con blur via
@@ -72,12 +73,16 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             accessibilityLabel={cfg.label}
             accessibilityState={{ selected: focused }}
           >
-            <TabIcon
-              name={focused ? cfg.iconActive : cfg.iconInactive}
-              focused={focused}
-              activeColor={c.primary}
-              inactiveColor={c.tabIconDefault}
-            />
+            {route.name === 'nova' ? (
+              <NovaTabIcon focused={focused} inactiveColor={c.tabIconDefault} />
+            ) : (
+              <TabIcon
+                name={focused ? cfg.iconActive : cfg.iconInactive}
+                focused={focused}
+                activeColor={c.primary}
+                inactiveColor={c.tabIconDefault}
+              />
+            )}
             <Text
               style={[
                 styles.label,
@@ -174,6 +179,23 @@ function TabIcon({
   return (
     <Animated.View style={style}>
       <IconSymbol name={name} size={26} color={focused ? activeColor : inactiveColor} />
+    </Animated.View>
+  );
+}
+
+// Tab Nova: cuando está activo, muestra el orbe vivo en lugar del ícono.
+// Cuando inactivo, mantiene el sparkles para no romper el ritmo visual.
+function NovaTabIcon({ focused, inactiveColor }: { focused: boolean; inactiveColor: string }) {
+  const style = useAnimatedStyle(() => ({
+    transform: [{ scale: withTiming(focused ? 1.04 : 1, { duration: 140 }) }],
+  }));
+  return (
+    <Animated.View style={style}>
+      {focused ? (
+        <NovaOrb size={26} ambient={false} breathing={false} />
+      ) : (
+        <IconSymbol name="sparkles" size={26} color={inactiveColor} />
+      )}
     </Animated.View>
   );
 }
