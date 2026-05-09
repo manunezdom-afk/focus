@@ -852,7 +852,7 @@ export default function NovaScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       >
         {/* Barra de contexto mínima — fecha + estado del día */}
-        <Animated.View entering={FadeInDown.duration(180)} style={styles.contextBar}>
+        <Animated.View style={styles.contextBar}>
           <Text style={[styles.contextDate, { color: c.text }]}>{contextDate}</Text>
           <Text style={[styles.contextSub, { color: c.textMuted }]}>
             {pendingTodayCount > 0
@@ -866,13 +866,11 @@ export default function NovaScreen() {
           // los Pressables hijos (pills) consumen sus propios taps.
           <Pressable style={styles.emptyArea} onPress={Keyboard.dismiss}>
             <Animated.View
-              entering={FadeInDown.delay(60).duration(220)}
               style={styles.pillsWrap}
             >
               {suggestedPrompts.map((s, idx) => (
                 <Animated.View
                   key={s.label}
-                  entering={FadeInDown.delay(90 + idx * 30).duration(200)}
                 >
                   <Pressable
                     onPress={() => void handleSend(s.label)}
@@ -903,7 +901,6 @@ export default function NovaScreen() {
             */}
             {Platform.OS === 'ios' && dictation.available ? (
               <Animated.View
-                entering={FadeInDown.delay(160).duration(220)}
                 style={styles.dictationHint}
                 accessibilityRole="text"
               >

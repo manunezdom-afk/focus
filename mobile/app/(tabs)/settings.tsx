@@ -266,7 +266,7 @@ export default function SettingsScreen() {
         scrollEventThrottle={16}
       >
         {/* Header premium — título 40px + subtítulo humano */}
-        <Animated.View entering={FadeInDown.duration(200)} style={styles.header}>
+        <Animated.View style={styles.header}>
           <Text style={[styles.titleLine, { color: c.text }]}>Ajustes</Text>
           <Text style={[styles.subLine, { color: c.textMuted }]} numberOfLines={1}>
             Administra tu cuenta y preferencias.
@@ -275,7 +275,7 @@ export default function SettingsScreen() {
 
         <View style={styles.body}>
           {/* AccountCard — avatar circular con inicial del email + status real */}
-          <Animated.View entering={FadeInDown.delay(30).duration(200)}>
+          <Animated.View>
             <View
               style={[
                 styles.accountCard,
@@ -314,14 +314,14 @@ export default function SettingsScreen() {
               wrapper para no anidar card-en-card; usamos un title propio
               para que la jerarquía visual coincida con el resto de secciones. */}
           {isAuthenticated ? (
-            <Animated.View entering={FadeInDown.delay(45).duration(200)} style={styles.planSection}>
+            <Animated.View style={styles.planSection}>
               <Text style={[styles.planSectionTitle, { color: c.textSubtle }]}>PLAN</Text>
               <PlanCard data={userPlan.data} loading={userPlan.loading} />
             </Animated.View>
           ) : null}
 
           {/* ── Cuenta ───────────────────────────────────────────────── */}
-          <Animated.View entering={FadeInDown.delay(60).duration(200)}>
+          <Animated.View>
             <SettingsSection title="Cuenta">
               <SettingsRow
                 isFirst
@@ -347,7 +347,7 @@ export default function SettingsScreen() {
           </Animated.View>
 
           {/* ── Nova ─────────────────────────────────────────────────── */}
-          <Animated.View entering={FadeInDown.delay(80).duration(200)}>
+          <Animated.View>
             <SettingsSection title="Nova">
               <SettingsRow
                 isFirst
@@ -376,7 +376,7 @@ export default function SettingsScreen() {
               expo-notifications no está linkeado en este binario (caso
               típico antes del primer rebuild después de agregar la dep),
               mostramos copy honesta y un Alert con instrucciones. */}
-          <Animated.View entering={FadeInDown.delay(100).duration(200)}>
+          <Animated.View>
             <SettingsSection title="Notificaciones">
               <SettingsRow
                 isFirst
@@ -403,7 +403,7 @@ export default function SettingsScreen() {
           </Animated.View>
 
           {/* ── Preferencias ─────────────────────────────────────────── */}
-          <Animated.View entering={FadeInDown.delay(120).duration(200)}>
+          <Animated.View>
             <SettingsSection title="Preferencias">
               <SettingsRow
                 isFirst
@@ -424,7 +424,7 @@ export default function SettingsScreen() {
           </Animated.View>
 
           {/* ── Privacidad y datos ───────────────────────────────────── */}
-          <Animated.View entering={FadeInDown.delay(140).duration(200)}>
+          <Animated.View>
             <SettingsSection title="Privacidad y datos">
               <SettingsRow
                 isFirst
@@ -448,7 +448,7 @@ export default function SettingsScreen() {
 
           {/* ── Desarrollo (solo __DEV__) ────────────────────────────── */}
           {__DEV__ ? (
-            <Animated.View entering={FadeInDown.delay(160).duration(200)}>
+            <Animated.View>
               <SettingsSection title="Desarrollo">
                 <SettingsRow
                   isFirst
@@ -462,7 +462,7 @@ export default function SettingsScreen() {
           ) : null}
 
           {/* ── Aplicación ───────────────────────────────────────────── */}
-          <Animated.View entering={FadeInDown.delay(__DEV__ ? 180 : 160).duration(200)}>
+          <Animated.View>
             <SettingsSection title="Aplicación">
               <SettingsRow
                 isFirst
@@ -475,7 +475,6 @@ export default function SettingsScreen() {
 
           {/* Footer pequeño con marca calmada */}
           <Animated.View
-            entering={FadeInDown.delay(200).duration(220)}
             style={styles.footer}
           >
             <Text style={[styles.footerText, { color: c.textSubtle }]}>

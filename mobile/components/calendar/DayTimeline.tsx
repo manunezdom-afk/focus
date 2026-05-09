@@ -143,7 +143,6 @@ function TimelineRow({
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(enterDelay).duration(190)}
       style={[styles.row, isPast ? styles.rowPast : null]}
     >
       <View style={styles.timeCol}>

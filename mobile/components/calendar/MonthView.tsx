@@ -88,7 +88,7 @@ export function MonthView({ selectedDate, eventCounts, onSelectDay, onChangeMont
   }
 
   return (
-    <Animated.View entering={FadeInDown.duration(190)} style={styles.container}>
+    <Animated.View style={styles.container}>
       {/* Header del mes con chevrons */}
       <View style={styles.navRow}>
         <Pressable

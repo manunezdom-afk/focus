@@ -81,6 +81,9 @@ export type VoiceListener = {
   onFinal: (text: string) => void;
   onError: (code: string, message: string) => void;
   onEnd?: () => void;
+  // Volumen del input audio en cada frame — para visualizador de barras.
+  // value es float entre -2 (silencio) y 10 (alto). Normalizamos en el caller.
+  onVolume?: (value: number) => void;
 };
 
 /**
@@ -148,6 +151,14 @@ export function startListening(listener: VoiceListener, options?: {
         cleanup();
       }),
     );
+    if (listener.onVolume) {
+      subs.push(
+        ExpoSpeechRecognitionModule.addListener('volumechange', (event: any) => {
+          const v = typeof event?.value === 'number' ? event.value : 0;
+          listener.onVolume?.(v);
+        }),
+      );
+    }
 
     ExpoSpeechRecognitionModule.start({
       lang: options?.locale ?? 'es-MX',
@@ -156,6 +167,10 @@ export function startListening(listener: VoiceListener, options?: {
       // En iOS por default ya usa device si está disponible (offline).
       // En cellular se usa server-side de Apple — privado, no nuestro server.
       requiresOnDeviceRecognition: false,
+      // Habilita volumechange events cada 80ms para visualizador fluido.
+      volumeChangeEventOptions: listener.onVolume
+        ? { enabled: true, intervalMillis: 80 }
+        : undefined,
     });
   } catch (err: any) {
     cleanup();

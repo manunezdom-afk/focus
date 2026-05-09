@@ -94,7 +94,6 @@ export function NextBlockCard({ events }: Props) {
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(120).duration(220)}
       style={[
         styles.wrap,
         {

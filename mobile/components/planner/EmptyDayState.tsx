@@ -35,13 +35,11 @@ export function EmptyDayState({ onPickPrompt }: Props) {
           <IconSymbol name="sparkles" size={22} color={c.primary} />
         </View>
         <Animated.Text
-          entering={FadeInDown.delay(40).duration(220)}
           style={[styles.title, { color: c.text }]}
         >
           Hoy está libre.
         </Animated.Text>
         <Animated.Text
-          entering={FadeInDown.delay(70).duration(220)}
           style={[styles.desc, { color: c.textMuted }]}
         >
           ¿Por dónde empezamos? Toca un ejemplo o escríbele a Nova.
@@ -53,7 +51,6 @@ export function EmptyDayState({ onPickPrompt }: Props) {
         {PROMPTS.map((p, idx) => (
           <Animated.View
             key={p.label}
-            entering={FadeInDown.delay(110 + idx * 35).duration(220)}
           >
             <Pressable
               onPress={() => onPickPrompt(p.label)}

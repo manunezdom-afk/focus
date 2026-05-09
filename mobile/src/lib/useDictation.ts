@@ -24,6 +24,9 @@ type Options = {
   // Callback opcional para texto parcial mientras escucha — útil para
   // mostrar lo que el usuario va dictando en tiempo real.
   onPartial?: (text: string) => void;
+  // Callback opcional para volumen del input (0..1 normalizado) — para
+  // visualizador de barras estilo ChatGPT/Siri.
+  onVolume?: (level01: number) => void;
 };
 
 /**
@@ -41,7 +44,7 @@ type Options = {
  * `available` queda false y `state` se queda en 'unavailable'. La UI
  * decide si mostrar un Alert con instrucciones o esconder el botón.
  */
-export function useDictation({ onFinal, onPartial }: Options) {
+export function useDictation({ onFinal, onPartial, onVolume }: Options) {
   const available = isVoiceAvailable();
   const [state, setState] = useState<DictationState>(available ? 'idle' : 'unavailable');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -109,9 +112,19 @@ export function useDictation({ onFinal, onPartial }: Options) {
         // en listening (no movido a idle por onFinal), volvemos a idle.
         setState((prev) => (prev === 'listening' ? 'idle' : prev));
       },
+      onVolume: onVolume
+        ? (raw) => {
+            // expo-speech-recognition emite -2..10. Normalizamos a 0..1
+            // con una curva sensible: -2..2 ≈ silencio (0..0.1),
+            // 2..6 ≈ habla normal (0.1..0.7), 6..10 ≈ alto (0.7..1).
+            const clamped = Math.max(-2, Math.min(10, raw));
+            const norm = (clamped + 2) / 12;
+            onVolume(norm);
+          }
+        : undefined,
     });
     stopFnRef.current = stopFn;
-  }, [available, state, onFinal, onPartial]);
+  }, [available, state, onFinal, onPartial, onVolume]);
 
   const stop = useCallback(() => {
     if (stopFnRef.current) {

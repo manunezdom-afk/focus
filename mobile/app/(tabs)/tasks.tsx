@@ -313,7 +313,7 @@ export default function TasksScreen() {
           }
         >
           {/* ── Header — eyebrow + título compacto, mismo lenguaje que Calendario ── */}
-          <Animated.View entering={FadeInDown.duration(200)} style={styles.header}>
+          <Animated.View style={styles.header}>
             <Text style={[styles.eyebrow, { color: c.primary }]} numberOfLines={1}>
               {summary.headerSubtitle}
             </Text>
@@ -323,7 +323,6 @@ export default function TasksScreen() {
           {/* Smart summary card — copy desde datos reales, sin orb */}
           {!showLoadingState && totalTasks > 0 ? (
             <Animated.View
-              entering={FadeInDown.delay(35).duration(220)}
               style={styles.summaryWrap}
             >
               <View
@@ -350,7 +349,6 @@ export default function TasksScreen() {
           {/* Card de progreso de hoy (cuando hay tareas hoy) */}
           {todayTasks.length > 0 ? (
             <Animated.View
-              entering={FadeInDown.delay(55).duration(220)}
               style={styles.progressWrap}
             >
               <ProgressCard done={todayDone} total={todayTasks.length} />
@@ -361,7 +359,6 @@ export default function TasksScreen() {
               que mostrar (no inventamos métricas con un dataset vacío). */}
           {!showLoadingState && totalTasks > 0 ? (
             <Animated.View
-              entering={FadeInDown.delay(75).duration(220)}
               style={styles.weeklyWrap}
             >
               <WeeklyStatsCard tasks={tasks.tasks} />
@@ -442,7 +439,6 @@ export default function TasksScreen() {
                 return (
                   <Animated.View
                     key={bucket}
-                    entering={FadeInDown.delay(80 + idx * 35).duration(220)}
                     style={styles.categoryWrap}
                   >
                     <View style={styles.catHeader}>
@@ -633,7 +629,6 @@ export default function TasksScreen() {
           Algún día solo cambia category). */}
       {selectionMode && selectedIds.size > 0 ? (
         <Animated.View
-          entering={FadeInDown.duration(220)}
           style={[
             styles.bulkBar,
             { backgroundColor: c.surface, borderColor: c.border, shadowColor: c.text },
@@ -671,7 +666,6 @@ export default function TasksScreen() {
       {/* Flash chip: aparece tras crear varias tareas seguidas (≤4s). */}
       {showFlashChip ? (
         <Animated.View
-          entering={FadeInDown.duration(200)}
           style={[styles.flashChip, { backgroundColor: c.primary, shadowColor: c.primary }]}
         >
           <IconSymbol name="checkmark" size={12} color={c.onPrimary} weight="semibold" />
@@ -708,7 +702,6 @@ function FullyEmptyState({
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(60).duration(220)}
       style={styles.emptyWrap}
     >
       <View style={[styles.emptyCard, { backgroundColor: c.surface, borderColor: c.border }]}>

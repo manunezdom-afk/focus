@@ -15,12 +15,13 @@ import {
   View,
 } from 'react-native';
 import Animated, {
-  FadeIn,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
 
+import { MicWaveform } from '@/components/nova/MicWaveform';
+import { NovaOrb } from '@/components/nova/NovaOrb';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -168,6 +169,7 @@ export function NovaInputBar({
   const [sending, setSending] = useState(false);
   const [reply, setReply] = useState<ReplyState | null>(null);
   const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
 
   // Dictado real on-device via expo-speech-recognition (iOS Speech).
   // El texto final se appendea al draft (con espacio si ya hay algo).
@@ -182,6 +184,7 @@ export function NovaInputBar({
       if (Platform.OS === 'ios') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
     },
+    onVolume: (level) => setMicLevel(level),
   });
 
   function handleMicPress() {
@@ -316,23 +319,18 @@ export function NovaInputBar({
     }
   }, [processPhoto]);
 
+  // Tap = abrir cámara directo (estilo WhatsApp/ChatGPT). El menú raro
+  // "Tomar foto / Elegir de galería" lo elimino — para galería el usuario
+  // puede usar el share sheet de Fotos hacia Focus en el futuro.
   const openPhotoSource = useCallback(() => {
     if (analyzingPhoto || sending) return;
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options: ['Cancelar', 'Tomar foto', 'Elegir de galería'], cancelButtonIndex: 0 },
-        (idx) => {
-          if (idx === 1) void launchPhotoSource('camera');
-          else if (idx === 2) void launchPhotoSource('library');
-        },
-      );
-    } else {
-      Alert.alert('Foto para Nova', '¿Desde dónde?', [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Cámara', onPress: () => void launchPhotoSource('camera') },
-        { text: 'Galería', onPress: () => void launchPhotoSource('library') },
-      ]);
-    }
+    void launchPhotoSource('camera');
+  }, [analyzingPhoto, sending, launchPhotoSource]);
+
+  // Long-press = galería (alternativa avanzada).
+  const openLibrary = useCallback(() => {
+    if (analyzingPhoto || sending) return;
+    void launchPhotoSource('library');
   }, [analyzingPhoto, sending, launchPhotoSource]);
 
   const send = useCallback(async () => {
@@ -428,8 +426,7 @@ export function NovaInputBar({
   return (
     <View style={styles.wrap} pointerEvents="box-none">
       {reply ? (
-        <Animated.View
-          entering={FadeIn.duration(220)}
+        <View
           style={[
             styles.reply,
             {
@@ -483,7 +480,7 @@ export function NovaInputBar({
               Continuar en Nova →
             </Text>
           </Pressable>
-        </Animated.View>
+        </View>
       ) : null}
 
       <Animated.View
@@ -493,8 +490,12 @@ export function NovaInputBar({
           animatedBarStyle,
         ]}
       >
-        <View style={[styles.leftIndicator, { backgroundColor: c.surfaceTint }]}>
-          <IconSymbol name="sparkles" size={14} color={c.primary} />
+        {/* Identidad visual de Nova — orbe real con gradiente azul orbital,
+            no un ícono plano. Mismo componente que el hero del Nova screen,
+            tamaño 26 para que entre cómodo en la barra. Los spots de color
+            siguen orbitando aunque la barra esté en reposo (breathing). */}
+        <View style={styles.leftIndicator}>
+          <NovaOrb size={26} ambient={false} breathing active={dictation.state === 'listening'} />
         </View>
         <TextInput
           value={draft}
@@ -516,6 +517,8 @@ export function NovaInputBar({
         />
         <Pressable
           onPress={openPhotoSource}
+          onLongPress={openLibrary}
+          delayLongPress={350}
           hitSlop={6}
           disabled={analyzingPhoto || sending}
           style={({ pressed }) => [
@@ -525,7 +528,7 @@ export function NovaInputBar({
               transform: [{ scale: pressed && !analyzingPhoto && !sending ? 0.92 : 1 }],
             },
           ]}
-          accessibilityLabel="Enviar foto a Nova"
+          accessibilityLabel="Tomar foto (mantén presionado para galería)"
           accessibilityRole="button"
         >
           {analyzingPhoto ? (
@@ -538,11 +541,11 @@ export function NovaInputBar({
           onPress={handleMicPress}
           hitSlop={6}
           style={({ pressed }) => [
-            styles.micBtn,
+            dictation.state === 'listening' ? styles.micBtnListening : styles.micBtn,
             {
               backgroundColor: dictation.state === 'listening' ? '#dc2626' : 'transparent',
               opacity: pressed ? 0.6 : 1,
-              transform: [{ scale: pressed ? 0.92 : 1 }],
+              transform: [{ scale: pressed ? 0.94 : 1 }],
             },
           ]}
           accessibilityLabel={
@@ -552,12 +555,10 @@ export function NovaInputBar({
         >
           {dictation.state === 'requesting' ? (
             <ActivityIndicator color={c.primary} size="small" />
+          ) : dictation.state === 'listening' ? (
+            <MicWaveform level={micLevel} active color="#ffffff" />
           ) : (
-            <IconSymbol
-              name="mic.fill"
-              size={16}
-              color={dictation.state === 'listening' ? '#ffffff' : c.textSubtle}
-            />
+            <IconSymbol name="mic.fill" size={16} color={c.textSubtle} />
           )}
         </Pressable>
         <Pressable
@@ -663,7 +664,6 @@ const styles = StyleSheet.create({
   leftIndicator: {
     width: 32,
     height: 32,
-    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -694,6 +694,16 @@ const styles = StyleSheet.create({
   micBtn: {
     width: 34,
     height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Cuando dictation.state === 'listening' el botón se expande para mostrar
+  // el visualizador de barras estilo ChatGPT/Siri en su interior. Tap = stop.
+  micBtnListening: {
+    minWidth: 64,
+    height: 34,
+    paddingHorizontal: 12,
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',

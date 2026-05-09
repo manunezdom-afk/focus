@@ -82,7 +82,7 @@ export function WeekView({ selectedDate, events, onSelectDay, onChangeWeek }: Pr
   }
 
   return (
-    <Animated.View entering={FadeInDown.duration(190)} style={styles.container}>
+    <Animated.View style={styles.container}>
       {/* Header de la semana */}
       <View style={styles.navRow}>
         <Pressable
