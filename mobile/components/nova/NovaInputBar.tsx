@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -414,11 +415,14 @@ export function NovaInputBar({
           ]}
         >
           <View style={styles.replyHeader}>
-            <Text
-              style={[styles.replyTitle, { color: reply.isError ? c.danger : c.primary }]}
-            >
-              Nova
-            </Text>
+            <View style={styles.replyHeaderLeft}>
+              <NovaOrb size={16} ambient={false} breathing={false} />
+              <Text
+                style={[styles.replyTitle, { color: reply.isError ? c.danger : c.primary }]}
+              >
+                Nova
+              </Text>
+            </View>
             <Pressable
               onPress={() => setReply(null)}
               hitSlop={10}
@@ -559,12 +563,19 @@ export function NovaInputBar({
           accessibilityLabel="Enviar a Nova"
           accessibilityRole="button"
         >
-          <Animated.View style={[styles.sendBtn, { backgroundColor: c.primary }, sendBtnStyle]}>
-            {sending ? (
-              <ActivityIndicator color={c.onPrimary} size="small" />
-            ) : (
-              <IconSymbol name="arrow.up" size={16} color={c.onPrimary} />
-            )}
+          <Animated.View style={[sendBtnStyle]}>
+            <LinearGradient
+              colors={canSend ? ['#22d3ee', '#3b82f6', '#8b5cf6'] : [c.primary, c.primary, c.primary]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.sendBtn}
+            >
+              {sending ? (
+                <ActivityIndicator color="#ffffff" size="small" />
+              ) : (
+                <IconSymbol name="arrow.up" size={16} color="#ffffff" />
+              )}
+            </LinearGradient>
           </Animated.View>
         </Pressable>
       </Animated.View>
@@ -593,6 +604,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  replyHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   replyTitle: {
     ...Typography.micro,

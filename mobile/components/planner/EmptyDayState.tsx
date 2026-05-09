@@ -1,6 +1,7 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 
+import { NovaOrb } from '@/components/nova/NovaOrb';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -11,70 +12,71 @@ type Props = {
   onPickPrompt: (text: string) => void;
 };
 
-// Iconos de los chips. Solo usamos íconos del MAPPING actual de
-// icon-symbol.tsx para no introducir mappings nuevos.
 const PROMPTS: { label: string; icon: 'sparkles' | 'calendar' | 'checklist' }[] = [
   { label: 'Planifica mi día', icon: 'sparkles' },
   { label: 'Agenda gym mañana a las 7', icon: 'calendar' },
   { label: 'Reserva 2h enfocadas esta tarde', icon: 'checklist' },
 ];
 
+// Empty state hero estilo Gemini: orbe grande + saludo en degradado +
+// chips con borde sutil. Identidad fuerte de Nova como asistente de IA.
 export function EmptyDayState({ onPickPrompt }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
 
-  // Sin pulse infinito acá — corría en UI thread incluso cuando esta
-  // tab no estaba visible. Ícono estático, mismo look sin coste perf.
-
   return (
     <View style={styles.wrap}>
-      {/* Intro centrada — espejo del legacy mobile: ícono + título humilde
-          + descripción invitando a Nova. */}
       <View style={styles.intro}>
-        <View style={[styles.iconCircle, { backgroundColor: c.primaryContainer }]}>
-          <IconSymbol name="sparkles" size={22} color={c.primary} />
+        <View style={styles.orbWrap}>
+          <NovaOrb size={72} ambient breathing />
         </View>
-        <Animated.Text
-          style={[styles.title, { color: c.text }]}
-        >
-          Hoy está libre.
-        </Animated.Text>
-        <Animated.Text
-          style={[styles.desc, { color: c.textMuted }]}
-        >
-          ¿Por dónde empezamos? Toca un ejemplo o escríbele a Nova.
-        </Animated.Text>
+        <Text style={[styles.title, { color: c.text }]}>
+          Hola, soy Nova
+        </Text>
+        <Text style={[styles.subtitle, { color: c.textMuted }]}>
+          Tu asistente para organizar el día.{'\n'}Empieza con un ejemplo o pídeme algo.
+        </Text>
       </View>
 
-      {/* Chips con stagger: cada uno entra 60ms después del anterior */}
       <View style={styles.chipsCol}>
-        {PROMPTS.map((p, idx) => (
-          <Animated.View
+        {PROMPTS.map((p) => (
+          <Pressable
             key={p.label}
+            onPress={() => onPickPrompt(p.label)}
+            style={({ pressed }) => [
+              styles.chipShadow,
+              {
+                opacity: pressed ? 0.85 : 1,
+                transform: [{ scale: pressed ? 0.98 : 1 }],
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={p.label}
           >
-            <Pressable
-              onPress={() => onPickPrompt(p.label)}
-              style={({ pressed }) => [
-                styles.chip,
-                {
-                  backgroundColor: c.surface,
-                  borderColor: c.border,
-                  opacity: pressed ? 0.7 : 1,
-                  transform: [{ scale: pressed ? 0.98 : 1 }],
-                },
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel={p.label}
+            <LinearGradient
+              colors={
+                scheme === 'dark'
+                  ? ['rgba(59,130,246,0.10)', 'rgba(139,92,246,0.06)']
+                  : ['rgba(37,99,235,0.06)', 'rgba(139,92,246,0.04)']
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.chip, { borderColor: c.border, backgroundColor: c.surface }]}
             >
-              <View style={[styles.chipIcon, { backgroundColor: c.primaryContainer }]}>
-                <IconSymbol name={p.icon} size={16} color={c.primary} />
-              </View>
+              <LinearGradient
+                colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.chipIcon}
+              >
+                <IconSymbol name={p.icon} size={15} color="#ffffff" />
+              </LinearGradient>
               <Text style={[styles.chipText, { color: c.text }]} numberOfLines={1}>
                 {p.label}
               </Text>
               <IconSymbol name="chevron.right" size={14} color={c.textSubtle} />
-            </Pressable>
-          </Animated.View>
+            </LinearGradient>
+          </Pressable>
         ))}
       </View>
     </View>
@@ -84,42 +86,40 @@ export function EmptyDayState({ onPickPrompt }: Props) {
 const styles = StyleSheet.create({
   wrap: {
     paddingHorizontal: Spacing.lg,
-    gap: Spacing.md,
-    paddingTop: Spacing.sm,
+    gap: Spacing.lg,
+    paddingTop: Spacing.md,
   },
   intro: {
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
-  iconCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-    shadowColor: '#2563eb',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 2,
+  orbWrap: {
+    marginBottom: 4,
   },
   title: {
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: '700',
-    lineHeight: 23,
+    lineHeight: 30,
     textAlign: 'center',
-    letterSpacing: -0.2,
+    letterSpacing: -0.5,
   },
-  desc: {
-    fontSize: 13,
+  subtitle: {
+    fontSize: 14,
     fontWeight: '400',
-    lineHeight: 18,
+    lineHeight: 20,
     textAlign: 'center',
-    maxWidth: 280,
+    maxWidth: 300,
   },
   chipsCol: {
-    gap: 8,
+    gap: 10,
+  },
+  chipShadow: {
+    shadowColor: '#2563eb',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 2,
+    borderRadius: 16,
   },
   chip: {
     flexDirection: 'row',
@@ -128,12 +128,12 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 16,
     paddingHorizontal: Spacing.md,
-    paddingVertical: 10,
+    paddingVertical: 11,
   },
   chipIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 9,
+    width: 30,
+    height: 30,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -120,7 +120,7 @@ export function useEvents(mode: Mode = 'all') {
     async (input: CreateEventInput): Promise<EventItem | null> => {
       if (!userId || !cacheKey) return null;
       try {
-        const created = await createEvent(userId, input);
+        const created = await withAuthRetry(() => createEvent(userId, input), 'createEvent');
         // En mode='today' el fetch SQL filtra por `eq('date', todayISO())`,
         // pero un optimistic add ciego mete eventos futuros (ej: "agenda
         // gym mañana") en el state local de Mi Día hasta el próximo focus.
@@ -137,6 +137,9 @@ export function useEvents(mode: Mode = 'all') {
         _cache.delete(`${userId}:all`);
         return created;
       } catch (err: any) {
+        if (__DEV__) {
+          console.warn('[useEvents] createEvent failed:', err?.message, 'code:', err?.code, 'details:', err?.details);
+        }
         setState((s) => ({ ...s, error: err?.message ?? 'create_event_failed' }));
         return null;
       }

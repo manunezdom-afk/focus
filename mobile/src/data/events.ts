@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { newEventId } from './ids';
 import { todayISO } from './today';
 import type { EventItem } from './types';
 
@@ -77,11 +78,17 @@ export type CreateEventInput = {
 // Crear evento — INSERT directo a la tabla. RLS exige user_id = auth.uid()
 // así que también lo pasamos explícito (defensa en profundidad).
 //
+// IMPORTANTE: la columna `id` es TEXT PRIMARY KEY sin DEFAULT (mismo schema
+// que la web), así que SIEMPRE hay que generarlo client-side con newEventId().
+// Sin esto el INSERT falla con "null value in column id violates not-null
+// constraint" y addEvent devuelve null silenciosamente → chip "No pude guardar".
+//
 // Devolvemos el evento ya transformado a EventItem para que el caller pueda
 // hacer optimistic update sin re-fetch.
 export async function createEvent(userId: string, input: CreateEventInput): Promise<EventItem> {
   if (!supabase) throw new Error('supabase_not_configured');
   const insertRow = {
+    id: newEventId(),
     user_id: userId,
     title: input.title.trim(),
     date: input.date,
