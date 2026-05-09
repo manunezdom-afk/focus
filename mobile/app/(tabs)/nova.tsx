@@ -1063,31 +1063,6 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   flex: { flex: 1 },
 
-  // Fondo: dos halos de color grandes y suaves
-  bgLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  bgSpot1: {
-    position: 'absolute',
-    top: -80,
-    left: -100,
-    width: 340,
-    height: 340,
-    borderRadius: 170,
-  },
-  bgSpot2: {
-    position: 'absolute',
-    bottom: 60,
-    right: -80,
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-  },
-
   // Barra de contexto mínima — fecha + estado
   contextBar: {
     paddingHorizontal: Spacing.xl,
