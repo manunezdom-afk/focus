@@ -2,7 +2,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import * as SplashScreen from 'expo-splash-screen';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, Text } from 'react-native';
 import Animated, { FadeOut } from 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -30,9 +30,13 @@ const BOOT_FADE_MS = 380;
 
 // Pantalla de arranque: fondo oscuro + logo + wordmark.
 // Se superpone en absoluto sobre todo el Stack hasta que auth esté lista.
-function BootScreen() {
+// `onReady` se llama en el primer onLayout — es la señal de que React Native
+// ya pintó este overlay y es seguro esconder el splash nativo sin que se vea
+// un frame negro intermedio entre el LaunchScreen.storyboard y el JS.
+function BootScreen({ onReady }: { onReady: () => void }) {
   return (
     <Animated.View
+      onLayout={onReady}
       exiting={FadeOut.duration(BOOT_FADE_MS)}
       style={styles.boot}
       pointerEvents="none"
@@ -85,11 +89,29 @@ function Shell() {
   //   3. han pasado BOOT_MIN_MS desde el mount.
   const [showBoot, setShowBoot] = useState(true);
   const mountRef = useRef(Date.now());
+  const splashHiddenRef = useRef(false);
 
-  // Esconder el splash nativo en el primer frame JS pintado para que
-  // la transición nativo → JS sea invisible (ambos muestran lo mismo).
-  useEffect(() => {
+  // Esconder el splash nativo SOLO cuando el BootScreen JS ya haya pintado
+  // su primer frame (señal: onLayout). Si lo hacemos en useEffect inmediato,
+  // queda un instante donde iOS ya tapó el LaunchScreen storyboard pero el
+  // primer frame de RN todavía no se pintó — eso permite que iOS rellene con
+  // el snapshot stale de un launch anterior (de ahí el flash negro/grid).
+  const handleBootLayout = useCallback(() => {
+    if (splashHiddenRef.current) return;
+    splashHiddenRef.current = true;
     SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
+  // Watchdog: si por algún motivo onLayout nunca dispara (caso muy raro,
+  // ej. crash silencioso antes del primer render), forzamos hideAsync a
+  // los 4s para que el usuario no quede pegado en el splash nativo.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (splashHiddenRef.current) return;
+      splashHiddenRef.current = true;
+      SplashScreen.hideAsync().catch(() => {});
+    }, 4000);
+    return () => clearTimeout(t);
   }, []);
 
   // Cuando auth esté lista Y la ruta efectiva ya esté del lado correcto,
@@ -115,7 +137,7 @@ function Shell() {
         <Stack.Screen name="(dev)" options={{ presentation: 'modal', headerShown: false }} />
       </Stack>
       <StatusBar style={showBoot ? 'light' : colorScheme === 'dark' ? 'light' : 'dark'} />
-      {showBoot && <BootScreen />}
+      {showBoot && <BootScreen onReady={handleBootLayout} />}
     </ThemeProvider>
   );
 }
