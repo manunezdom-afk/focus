@@ -447,6 +447,12 @@ export default function NovaScreen() {
           }
         }
       }
+      // Feedback táctil cuando Nova efectivamente aplicó algo. Las acciones
+      // destructivas tienen su propio haptic en el flujo de confirmación; este
+      // cubre add_event/add_task/edit_task/toggle_task/remember.
+      if (applied.length > 0 && Platform.OS === 'ios') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
       return applied;
     },
     [events, tasks, memoriesHook],

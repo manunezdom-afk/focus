@@ -1,3 +1,4 @@
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -60,6 +61,9 @@ export default function MiDiaScreen() {
   // schema en Supabase para "block.type=done" se persiste.
   const [doneEventIds, setDoneEventIds] = useState<Set<string>>(() => new Set());
   const toggleEventDone = useCallback((id: string) => {
+    if (Platform.OS === 'ios') {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
     setDoneEventIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
