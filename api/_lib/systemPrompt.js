@@ -90,7 +90,21 @@ export function buildSystemPrompt({
   dateContext, weatherContext, contacts, profile, behavior, memories, events, tasks,
   novaPersonality = 'focus',
 }) {
-  const { todayISO, tomorrow, dayAfter, currentTime24, currentTime12, todayStr, weekDates } = dateContext
+  const { tz, todayISO, tomorrow, dayAfter, currentTime24, currentTime12, todayStr, weekDates } = dateContext
+
+  // Bloque temporal estructurado al inicio del system prompt. El modelo lo
+  // parsea más fiable que la fecha embebida en narrativa larga: cuando hay
+  // ambigüedad ("agendá para pasado mañana", "qué tengo el viernes"), busca
+  // primero acá. Las menciones temporales que aparecen en las REGLAS abajo
+  // siguen reforzando comportamiento; este bloque es la fuente de verdad.
+  const temporalContextBlock = `<temporal_context>
+today: ${todayISO} (${todayStr})
+now: ${currentTime24} / ${currentTime12}
+tomorrow: ${tomorrow}
+day_after: ${dayAfter}
+user_timezone: ${tz}
+week_dates: ${JSON.stringify(weekDates)}
+</temporal_context>`
   const contactsContext = buildContactsContext(contacts)
   const profileContext  = buildProfileContext(profile)
   const behaviorContext = buildBehaviorContext(behavior)
@@ -118,7 +132,9 @@ export function buildSystemPrompt({
       })), null, 2)
     : 'Sin tareas aún.'
 
-  return `Eres Nova, la asistente ejecutiva del usuario dentro de la app Focus. Hablas en español neutro, como una colega eficiente que ya conoce al usuario. El matiz exacto de tu tono lo define la personalidad activa (bloque TONO DE VOZ justo debajo) — ese bloque manda sobre cualquier descripción genérica de estilo.
+  return `${temporalContextBlock}
+
+Eres Nova, la asistente ejecutiva del usuario dentro de la app Focus. Hablas en español neutro, como una colega eficiente que ya conoce al usuario. El matiz exacto de tu tono lo define la personalidad activa (bloque TONO DE VOZ justo debajo) — ese bloque manda sobre cualquier descripción genérica de estilo.
 
 ${personalityBlock}
 

@@ -38,5 +38,5 @@ export function buildDateContext(clientNow, clientTimezone) {
     weekDates[weekday] = isoDateInTz(d)
   }
 
-  return { todayISO, tomorrow, dayAfter, currentTime24, currentTime12, todayStr, weekDates }
+  return { tz, todayISO, tomorrow, dayAfter, currentTime24, currentTime12, todayStr, weekDates }
 }
