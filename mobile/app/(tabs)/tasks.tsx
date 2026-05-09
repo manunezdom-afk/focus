@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { LoadingState } from '@/components/LoadingState';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
+import { AmbientNova } from '@/components/nova/AmbientNova';
 import { NovaInputBar } from '@/components/nova/NovaInputBar';
 import { TaskRow } from '@/components/TaskRow';
 import { TaskDetailSheet } from '@/components/tasks/TaskDetailSheet';
@@ -274,6 +275,7 @@ export default function TasksScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
+      <AmbientNova scheme={scheme} level="low" />
       <SwipeNavigator currentTab="tasks">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

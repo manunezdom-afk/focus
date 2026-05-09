@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -35,13 +36,18 @@ export function EventRow({ event }: Props) {
         { backgroundColor: c.surface, borderBottomColor: c.border },
       ]}
     >
-      {/* Indicador color a la izquierda — featured = primary, otro = muted. */}
-      <View
-        style={[
-          styles.bar,
-          { backgroundColor: event.featured ? c.primary : c.borderStrong },
-        ]}
-      />
+      {/* Indicador color a la izquierda — featured usa el gradiente Nova
+          (cyan→azul→violeta), no-featured queda neutro. */}
+      {event.featured ? (
+        <LinearGradient
+          colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={styles.bar}
+        />
+      ) : (
+        <View style={[styles.bar, { backgroundColor: c.borderStrong }]} />
+      )}
 
       <View style={styles.timeCol}>
         <Text style={[styles.startTime, { color: start ? c.text : c.textMuted }]}>

@@ -30,6 +30,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChatBubble } from '@/components/ChatBubble';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
+import { AmbientNova } from '@/components/nova/AmbientNova';
 import { NovaOrb } from '@/components/nova/NovaOrb';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing } from '@/constants/theme';
@@ -807,27 +808,9 @@ export default function NovaScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
-      {/* Fondo con dos halos de color suave — indigo arriba-izq, violeta abajo-der */}
-      <View style={styles.bgLayer} pointerEvents="none">
-        <View
-          style={[
-            styles.bgSpot1,
-            {
-              backgroundColor: c.primaryContainer,
-              opacity: scheme === 'dark' ? 0.5 : 0.6,
-            },
-          ]}
-        />
-        <View
-          style={[
-            styles.bgSpot2,
-            {
-              backgroundColor: scheme === 'dark' ? '#164e63' : '#cffafe',
-              opacity: scheme === 'dark' ? 0.5 : 0.65,
-            },
-          ]}
-        />
-      </View>
+      {/* Ambient Nova — gradiente violeta→azul→transparent en el borde
+          superior, mismo lenguaje que las demás tabs. */}
+      <AmbientNova scheme={scheme} level="low" />
 
       <SwipeNavigator currentTab="nova">
       <KeyboardAvoidingView

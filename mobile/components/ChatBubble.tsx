@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
@@ -21,50 +22,74 @@ export function ChatBubble({ message }: Props) {
   const isSending = message.status === 'sending';
   const isError = message.status === 'error';
 
-  const bg = isUser
-    ? c.primary
-    : isError
-      ? c.surfaceMuted
-      : c.surfaceTint;
-  const fg = isUser ? c.onPrimary : isError ? c.danger : c.text;
+  const fg = isUser ? '#ffffff' : isError ? c.danger : c.text;
   const hasActions = !!message.appliedActions && message.appliedActions.length > 0;
+
+  const bubbleContent = (
+    <>
+      {isSending && !message.content ? (
+        <View style={styles.thinkingRow}>
+          <ActivityIndicator size="small" color={fg} />
+          <Text style={[styles.thinkingText, { color: fg }]}>Nova está pensando...</Text>
+        </View>
+      ) : (
+        <Text style={[styles.text, { color: fg }]} selectable>
+          {message.content}
+        </Text>
+      )}
+
+      {hasActions ? (
+        <View style={styles.chipsRow}>
+          {message.appliedActions!.map((label, idx) => (
+            <View
+              key={`${label}-${idx}`}
+              style={[
+                styles.chip,
+                { backgroundColor: isUser ? 'rgba(255,255,255,0.18)' : c.primaryContainer },
+              ]}
+            >
+              <Text
+                style={[styles.chipText, { color: isUser ? '#ffffff' : c.primary }]}
+              >
+                {label}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </>
+  );
 
   return (
     <Animated.View
       entering={FadeInDown.duration(160)}
       style={[styles.row, isUser ? styles.rowUser : styles.rowAssistant]}
     >
-      <View
-        style={[
-          styles.bubble,
-          isUser ? styles.bubbleUser : styles.bubbleAssistant,
-          { backgroundColor: bg, borderColor: isUser ? c.primary : c.border },
-        ]}
-      >
-        {isSending && !message.content ? (
-          <View style={styles.thinkingRow}>
-            <ActivityIndicator size="small" color={fg} />
-            <Text style={[styles.thinkingText, { color: fg }]}>Nova está pensando...</Text>
-          </View>
-        ) : (
-          <Text style={[styles.text, { color: fg }]} selectable>
-            {message.content}
-          </Text>
-        )}
-
-        {hasActions ? (
-          <View style={styles.chipsRow}>
-            {message.appliedActions!.map((label, idx) => (
-              <View
-                key={`${label}-${idx}`}
-                style={[styles.chip, { backgroundColor: c.primaryContainer }]}
-              >
-                <Text style={[styles.chipText, { color: c.primary }]}>{label}</Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-      </View>
+      {isUser ? (
+        // Burbuja del usuario: gradiente cyan→azul→violeta (firma Nova).
+        <LinearGradient
+          colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.bubble, styles.bubbleUser]}
+        >
+          {bubbleContent}
+        </LinearGradient>
+      ) : (
+        <View
+          style={[
+            styles.bubble,
+            styles.bubbleAssistant,
+            {
+              backgroundColor: isError ? c.surfaceMuted : c.surfaceTint,
+              borderColor: c.border,
+              borderWidth: StyleSheet.hairlineWidth,
+            },
+          ]}
+        >
+          {bubbleContent}
+        </View>
+      )}
     </Animated.View>
   );
 }
@@ -82,10 +107,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     borderRadius: Radius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
   },
   bubbleUser: {
     borderBottomRightRadius: Radius.sm,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 3,
   },
   bubbleAssistant: {
     borderBottomLeftRadius: Radius.sm,

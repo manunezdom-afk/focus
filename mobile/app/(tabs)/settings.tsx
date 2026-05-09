@@ -15,6 +15,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
+import { AmbientNova } from '@/components/nova/AmbientNova';
 import { AppearanceSheet } from '@/components/settings/AppearanceSheet';
 import { DeleteAccountSheet } from '@/components/settings/DeleteAccountSheet';
 import { MemoriesSheet } from '@/components/settings/MemoriesSheet';
@@ -246,17 +247,9 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
-      {/* Hero halo — patrón compartido con Mi Día / Calendar / Nova / Tareas. */}
-      {/* Halo sutil — un solo blob, mismo patrón que Mi Día post-c220d66.
-          Antes eran dos círculos pesados. Ahora ambient sutil. */}
-      <View style={styles.heroHaloLayer} pointerEvents="none">
-        <View
-          style={[
-            styles.heroHaloCircle,
-            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.22 : 0.32 },
-          ]}
-        />
-      </View>
+      {/* Ambient Nova — gradiente violeta→azul→transparent en el borde
+          superior. Mismo patrón que Mi Día / Calendario / Tareas. */}
+      <AmbientNova scheme={scheme} level="low" />
 
       <SwipeNavigator currentTab="settings">
       <ScrollView

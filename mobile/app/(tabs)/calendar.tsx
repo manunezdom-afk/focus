@@ -22,6 +22,7 @@ import { DayPicker } from '@/components/calendar/DayPicker';
 import { DayTimeline } from '@/components/calendar/DayTimeline';
 import { MonthView } from '@/components/calendar/MonthView';
 import { WeekView } from '@/components/calendar/WeekView';
+import { AmbientNova } from '@/components/nova/AmbientNova';
 import { NovaInputBar } from '@/components/nova/NovaInputBar';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -127,6 +128,7 @@ export default function CalendarScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
+      <AmbientNova scheme={scheme} level="low" />
       {showLoading ? (
         <LoadingState />
       ) : (
