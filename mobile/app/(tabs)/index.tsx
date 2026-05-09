@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 
 import { LoadingState } from '@/components/LoadingState';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
@@ -141,20 +142,10 @@ export default function MiDiaScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
       {/* ── Ambient Nova ──────────────────────────────────────────────
-          Gradiente violeta→azul→transparent en el borde superior. Indica
-          presencia de Nova sin animaciones agresivas, estilo "luz ambiental
-          de IA" tipo Gemini. Más profesional que un blob sólido. */}
-      <LinearGradient
-        colors={
-          scheme === 'dark'
-            ? ['rgba(139,92,246,0.18)', 'rgba(59,130,246,0.06)', 'rgba(139,92,246,0)']
-            : ['rgba(139,92,246,0.10)', 'rgba(59,130,246,0.04)', 'rgba(139,92,246,0)']
-        }
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0.4, y: 1 }}
-        style={styles.ambientLayer}
-        pointerEvents="none"
-      />
+          Gradiente violeta→azul→transparent en el borde superior con
+          pulso lentísimo (5.5s) para señalar presencia sin distraer.
+          Estilo "luz ambiental de IA" — más profesional que un blob sólido. */}
+      <AmbientNova scheme={scheme} />
 
       <SwipeNavigator currentTab="index">
       <KeyboardAvoidingView
@@ -313,6 +304,36 @@ export default function MiDiaScreen() {
       </KeyboardAvoidingView>
       </SwipeNavigator>
     </SafeAreaView>
+  );
+}
+
+// AmbientNova — gradiente violeta→azul→transparent con pulso lentísimo.
+// Vive aislado para que el pulso no invalide el render del MiDiaScreen.
+function AmbientNova({ scheme }: { scheme: 'light' | 'dark' }) {
+  const opacity = useSharedValue(1);
+  useEffect(() => {
+    // Ciclo 5.5s — apenas perceptible. Si el usuario lo nota es porque
+    // está mirando fijo; en uso normal solo da "vida" al borde superior.
+    opacity.value = withRepeat(
+      withTiming(0.55, { duration: 5500, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      true,
+    );
+  }, [opacity]);
+  const animStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  return (
+    <Animated.View style={[styles.ambientLayer, animStyle]} pointerEvents="none">
+      <LinearGradient
+        colors={
+          scheme === 'dark'
+            ? ['rgba(139,92,246,0.18)', 'rgba(59,130,246,0.06)', 'rgba(139,92,246,0)']
+            : ['rgba(139,92,246,0.10)', 'rgba(59,130,246,0.04)', 'rgba(139,92,246,0)']
+        }
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0.4, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+    </Animated.View>
   );
 }
 

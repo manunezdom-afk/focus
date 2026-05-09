@@ -1,3 +1,4 @@
+import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -7,20 +8,36 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 
 type Props = {
   // Llamado al tocar una sugerencia; el padre debe sembrar el FocusBar con `text`.
-  // Hasta que el usuario toque enviar, NO se crean datos — son solo prompts.
   onPickPrompt: (text: string) => void;
 };
 
 type Suggestion = { icon: 'sparkles' | 'calendar' | 'checklist'; title: string; prompt: string };
 
-// Contexto por horario: Nova adapta lo que sugiere según la hora local.
-// Mañana = arrancar fuerte. Tarde = enfocar. Noche = preparar mañana.
+// Tiempo de calidad disponible — descontamos buffers para que la cifra sea
+// "horas de ejecución real", no tiempo picado. Si el usuario está despierto
+// hasta ~23:30, esto da un número honesto sobre cuánto puede aún producir.
+function freeHoursUntilEvening(): number {
+  const now = new Date();
+  const endOfDay = new Date(now);
+  endOfDay.setHours(23, 0, 0, 0); // corte de jornada útil
+  const ms = endOfDay.getTime() - now.getTime();
+  if (ms <= 0) return 0;
+  // Restamos 30min de "buffer mental" por hora — Deep Work ≠ tiempo bruto.
+  const rawHours = ms / (1000 * 60 * 60);
+  const qualityHours = Math.max(0, rawHours - 0.5);
+  return Math.round(qualityHours * 2) / 2; // medio en medio
+}
+
 function timeContext(): { headline: string; insight: string; suggestions: Suggestion[] } {
   const hour = new Date().getHours();
+  const free = freeHoursUntilEvening();
+
   if (hour < 12) {
     return {
       headline: 'Día limpio',
-      insight: 'Decide cómo invertirlo. Buen momento para empezar con algo importante.',
+      insight: free > 1
+        ? `Tienes ${free}h de margen útil. Buen momento para arrancar con algo importante.`
+        : 'Buen momento para empezar con algo importante.',
       suggestions: [
         { icon: 'sparkles', title: 'Planifica el día', prompt: 'Planifica mi día' },
         { icon: 'checklist', title: 'Reserva 2 horas enfocadas', prompt: 'Reserva 2h enfocadas esta mañana' },
@@ -31,7 +48,9 @@ function timeContext(): { headline: string; insight: string; suggestions: Sugges
   if (hour < 18) {
     return {
       headline: 'Tarde abierta',
-      insight: 'Sin actividades agendadas. Buen momento para enfocar o adelantar pendientes.',
+      insight: free > 1
+        ? `Quedan ${free}h útiles. Buen momento para enfocar o adelantar pendientes.`
+        : 'Buen momento para enfocar o adelantar pendientes.',
       suggestions: [
         { icon: 'checklist', title: 'Reserva 2 horas enfocadas', prompt: 'Reserva 2h enfocadas esta tarde' },
         { icon: 'sparkles', title: 'Organiza la próxima semana', prompt: 'Organiza la próxima semana' },
@@ -50,9 +69,9 @@ function timeContext(): { headline: string; insight: string; suggestions: Sugges
   };
 }
 
-// Empty state proactivo — sin orbes ni hero centrado. Llena el espacio con
-// valor real: un resumen del día y 3 sugerencias contextuales según hora.
-// La identidad de Nova vive en el input bar y la tab bar, no acá.
+// Empty state proactivo — Resumen ejecutivo + 3 sugerencias por hora.
+// Glassmorphism real con expo-blur en la card de Resumen para que se sienta
+// como una capa orgánica sobre el sistema, no como un panel plano.
 export function EmptyDayState({ onPickPrompt }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
@@ -61,40 +80,46 @@ export function EmptyDayState({ onPickPrompt }: Props) {
 
   return (
     <View style={styles.wrap}>
-      {/* Resumen ejecutivo: contexto del día sin animaciones agresivas.
-          Capa de gradiente sutil violeta→azul→cyan como ambiente Nova. */}
-      <View style={[styles.summaryCard, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <LinearGradient
-          colors={
-            isDark
-              ? ['rgba(139,92,246,0.10)', 'rgba(59,130,246,0.05)', 'rgba(34,211,238,0.02)']
-              : ['rgba(139,92,246,0.07)', 'rgba(59,130,246,0.03)', 'rgba(34,211,238,0.01)']
-          }
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-          pointerEvents="none"
-        />
-        <View style={styles.summaryHeader}>
-          <View style={[styles.summaryDot, { backgroundColor: '#8b5cf6' }]} />
-          <Text style={[styles.summaryLabel, { color: c.textMuted }]}>RESUMEN</Text>
-        </View>
-        <Text style={[styles.summaryTitle, { color: c.text }]}>{ctx.headline}</Text>
-        <Text style={[styles.summaryInsight, { color: c.textMuted }]}>{ctx.insight}</Text>
+      {/* Resumen ejecutivo: BlurView con tinte sistema → translúcido sobre
+          el ambient gradient de la pantalla. Si el OS no soporta blur, cae
+          a backgroundColor sólido del estilo absoluto. */}
+      <View style={styles.summaryShadow}>
+        <BlurView
+          intensity={isDark ? 35 : 50}
+          tint={isDark ? 'dark' : 'light'}
+          style={styles.summaryCard}
+        >
+          <LinearGradient
+            colors={
+              isDark
+                ? ['rgba(139,92,246,0.18)', 'rgba(59,130,246,0.08)', 'rgba(34,211,238,0.03)']
+                : ['rgba(139,92,246,0.10)', 'rgba(59,130,246,0.04)', 'rgba(34,211,238,0.01)']
+            }
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFillObject}
+            pointerEvents="none"
+          />
+          <View style={[styles.summaryBorder, { borderColor: c.border }]} pointerEvents="none" />
+          <View style={styles.summaryHeader}>
+            <View style={[styles.summaryDot, { backgroundColor: '#8b5cf6' }]} />
+            <Text style={[styles.summaryLabel, { color: c.textMuted }]}>RESUMEN</Text>
+          </View>
+          <Text style={[styles.summaryTitle, { color: c.text }]}>{ctx.headline}</Text>
+          <Text style={[styles.summaryInsight, { color: c.textMuted }]}>{ctx.insight}</Text>
+        </BlurView>
       </View>
 
-      {/* Sugerencias proactivas — primera con gradiente de marca, las otras
-          neutras para no competir entre sí. Borde fino tipo glass. */}
+      {/* Sugerencias proactivas — primera con gradiente Gemini, las otras
+          glass neutro. Borde fino tipo glass. */}
       <View style={styles.suggestionsCol}>
         {ctx.suggestions.map((s, i) => (
           <Pressable
             key={s.prompt}
             onPress={() => onPickPrompt(s.prompt)}
             style={({ pressed }) => [
-              styles.suggestion,
+              styles.suggestionShadow,
               {
-                backgroundColor: c.surface,
-                borderColor: c.border,
                 opacity: pressed ? 0.85 : 1,
                 transform: [{ scale: pressed ? 0.985 : 1 }],
               },
@@ -102,24 +127,31 @@ export function EmptyDayState({ onPickPrompt }: Props) {
             accessibilityRole="button"
             accessibilityLabel={s.title}
           >
-            {i === 0 ? (
-              <LinearGradient
-                colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.suggestionIcon}
-              >
-                <IconSymbol name={s.icon} size={14} color="#ffffff" />
-              </LinearGradient>
-            ) : (
-              <View style={[styles.suggestionIconMuted, { backgroundColor: c.primaryContainer }]}>
-                <IconSymbol name={s.icon} size={14} color={c.primary} />
-              </View>
-            )}
-            <Text style={[styles.suggestionTitle, { color: c.text }]} numberOfLines={1}>
-              {s.title}
-            </Text>
-            <IconSymbol name="chevron.right" size={13} color={c.textSubtle} />
+            <BlurView
+              intensity={isDark ? 25 : 40}
+              tint={isDark ? 'dark' : 'light'}
+              style={styles.suggestion}
+            >
+              <View style={[styles.suggestionBorder, { borderColor: c.border }]} pointerEvents="none" />
+              {i === 0 ? (
+                <LinearGradient
+                  colors={['#22d3ee', '#3b82f6', '#8b5cf6']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.suggestionIcon}
+                >
+                  <IconSymbol name={s.icon} size={14} color="#ffffff" />
+                </LinearGradient>
+              ) : (
+                <View style={[styles.suggestionIconMuted, { backgroundColor: c.primaryContainer }]}>
+                  <IconSymbol name={s.icon} size={14} color={c.primary} />
+                </View>
+              )}
+              <Text style={[styles.suggestionTitle, { color: c.text }]} numberOfLines={1}>
+                {s.title}
+              </Text>
+              <IconSymbol name="chevron.right" size={13} color={c.textSubtle} />
+            </BlurView>
           </Pressable>
         ))}
       </View>
@@ -133,13 +165,25 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
     paddingTop: Spacing.xs,
   },
+  summaryShadow: {
+    borderRadius: 18,
+    shadowColor: '#8b5cf6',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.10,
+    shadowRadius: 18,
+    elevation: 4,
+  },
   summaryCard: {
     overflow: 'hidden',
-    borderWidth: 0.5,
     borderRadius: 18,
     paddingHorizontal: Spacing.md + 2,
     paddingVertical: 14,
     gap: 4,
+  },
+  summaryBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: 0.5,
+    borderRadius: 18,
   },
   summaryHeader: {
     flexDirection: 'row',
@@ -172,14 +216,27 @@ const styles = StyleSheet.create({
   suggestionsCol: {
     gap: 8,
   },
+  suggestionShadow: {
+    borderRadius: 14,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
   suggestion: {
+    overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 11,
-    borderWidth: 0.5,
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 11,
+  },
+  suggestionBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: 0.5,
+    borderRadius: 14,
   },
   suggestionIcon: {
     width: 28,
