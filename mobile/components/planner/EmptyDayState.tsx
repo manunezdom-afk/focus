@@ -9,6 +9,12 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 type Props = {
   // Llamado al tocar una sugerencia; el padre debe sembrar el FocusBar con `text`.
   onPickPrompt: (text: string) => void;
+  // Insight humano calculado en backend (/api/today-context). Si está,
+  // reemplaza el insight estático local. Mejor data > heurística cliente.
+  summaryOverride?: string | null;
+  // Tip operativo del clima cruzado con calendario (ej. "Lluvia hoy 70%,
+  // adelanta tu salida"). Se renderiza como segunda línea pequeña.
+  weatherTip?: string | null;
 };
 
 type Suggestion = { icon: 'sparkles' | 'calendar' | 'checklist'; title: string; prompt: string };
@@ -72,11 +78,12 @@ function timeContext(): { headline: string; insight: string; suggestions: Sugges
 // Empty state proactivo — Resumen ejecutivo + 3 sugerencias por hora.
 // Glassmorphism real con expo-blur en la card de Resumen para que se sienta
 // como una capa orgánica sobre el sistema, no como un panel plano.
-export function EmptyDayState({ onPickPrompt }: Props) {
+export function EmptyDayState({ onPickPrompt, summaryOverride, weatherTip }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const ctx = timeContext();
   const isDark = scheme === 'dark';
+  const insight = summaryOverride ?? ctx.insight;
 
   return (
     <View style={styles.wrap}>
@@ -106,7 +113,15 @@ export function EmptyDayState({ onPickPrompt }: Props) {
             <Text style={[styles.summaryLabel, { color: c.textMuted }]}>RESUMEN</Text>
           </View>
           <Text style={[styles.summaryTitle, { color: c.text }]}>{ctx.headline}</Text>
-          <Text style={[styles.summaryInsight, { color: c.textMuted }]}>{ctx.insight}</Text>
+          <Text style={[styles.summaryInsight, { color: c.textMuted }]}>{insight}</Text>
+          {weatherTip ? (
+            <View style={styles.weatherRow}>
+              <View style={[styles.weatherDot, { backgroundColor: '#22d3ee' }]} />
+              <Text style={[styles.weatherText, { color: c.textMuted }]} numberOfLines={2}>
+                {weatherTip}
+              </Text>
+            </View>
+          ) : null}
         </BlurView>
       </View>
 
@@ -212,6 +227,23 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     fontWeight: '400',
     marginTop: 2,
+  },
+  weatherRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  weatherDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  weatherText: {
+    flex: 1,
+    fontSize: 12.5,
+    lineHeight: 17,
+    fontWeight: '500',
   },
   suggestionsCol: {
     gap: 8,

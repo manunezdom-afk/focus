@@ -1,6 +1,5 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -14,7 +13,9 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+
+import { AmbientNova } from '@/components/nova/AmbientNova';
+import { useTodayContext } from '@/src/data/useTodayContext';
 
 import { LoadingState } from '@/components/LoadingState';
 import { SwipeNavigator } from '@/components/navigation/SwipeNavigator';
@@ -44,6 +45,7 @@ export default function MiDiaScreen() {
 
   const events = useEvents('today');
   const tasks = useTasks();
+  const todayCtx = useTodayContext();
 
   const dateLabel = useMemo(() => todayLabelLong(), []);
   const greeting = useMemo(() => {
@@ -142,10 +144,9 @@ export default function MiDiaScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
       {/* ── Ambient Nova ──────────────────────────────────────────────
-          Gradiente violeta→azul→transparent en el borde superior con
-          pulso lentísimo (5.5s) para señalar presencia sin distraer.
-          Estilo "luz ambiental de IA" — más profesional que un blob sólido. */}
-      <AmbientNova scheme={scheme} />
+          Pulso modulado por /api/today-context: low/medium/high según
+          urgencia, calendario apretado, o insight actionable detectado. */}
+      <AmbientNova scheme={scheme} level={todayCtx.data?.ambient ?? 'low'} />
 
       <SwipeNavigator currentTab="index">
       <KeyboardAvoidingView
@@ -254,7 +255,11 @@ export default function MiDiaScreen() {
             <LoadingState />
           ) : !hasAnyItem ? (
             <View style={styles.emptyFill}>
-              <EmptyDayState onPickPrompt={seedNova} />
+              <EmptyDayState
+                onPickPrompt={seedNova}
+                summaryOverride={todayCtx.data?.summary ?? null}
+                weatherTip={todayCtx.data?.weather ?? null}
+              />
             </View>
           ) : (
             <>
@@ -307,36 +312,6 @@ export default function MiDiaScreen() {
   );
 }
 
-// AmbientNova — gradiente violeta→azul→transparent con pulso lentísimo.
-// Vive aislado para que el pulso no invalide el render del MiDiaScreen.
-function AmbientNova({ scheme }: { scheme: 'light' | 'dark' }) {
-  const opacity = useSharedValue(1);
-  useEffect(() => {
-    // Ciclo 5.5s — apenas perceptible. Si el usuario lo nota es porque
-    // está mirando fijo; en uso normal solo da "vida" al borde superior.
-    opacity.value = withRepeat(
-      withTiming(0.55, { duration: 5500, easing: Easing.inOut(Easing.quad) }),
-      -1,
-      true,
-    );
-  }, [opacity]);
-  const animStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  return (
-    <Animated.View style={[styles.ambientLayer, animStyle]} pointerEvents="none">
-      <LinearGradient
-        colors={
-          scheme === 'dark'
-            ? ['rgba(139,92,246,0.18)', 'rgba(59,130,246,0.06)', 'rgba(139,92,246,0)']
-            : ['rgba(139,92,246,0.10)', 'rgba(59,130,246,0.04)', 'rgba(139,92,246,0)']
-        }
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0.4, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
-      />
-    </Animated.View>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   flex: { flex: 1 },
@@ -349,15 +324,6 @@ const styles = StyleSheet.create({
   scrollContentEmpty: { flexGrow: 1 },
   emptyFill: { flex: 1, justifyContent: 'center', paddingBottom: 16 },
 
-  // Ambient Nova: gradiente violeta→azul que decae a transparent en el
-  // borde superior. Identidad de Nova sin orbes ni hero centrado.
-  ambientLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 220,
-  },
 
   // Fila de íconos top-right — perfil, compartir, bandeja Nova, notif.
   // alignSelf: flex-end agrupa todo a la derecha como en la versión web.
