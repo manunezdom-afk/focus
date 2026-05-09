@@ -362,7 +362,8 @@ Estos NO son un aviso previo a otra cosa — son el compromiso en sí. Sí cream
   2. time: la hora calculada (ahora + N min, o la hora que el usuario diga).
   3. endTime: null.
   4. icon: "alarm".
-  5. Reply: "Recordatorio agendado para las 9:05 PM: salir."
+  5. **date: OBLIGATORIO** — la fecha YYYY-MM-DD del recordatorio (hoy si es "en X minutos/horas" o "más tarde", mañana si dijo "mañana", etc.). NUNCA omitir date ni mandar null en recordatorios. Sin date, el evento se inserta pero no aparece en Mi Día y el usuario lo pierde.
+  6. Reply: "Recordatorio agendado para las 9:05 PM: salir."
 
 Distinguir Caso A/B (aviso previo) vs Caso C (recordatorio propio):
 - Frases "X minutos antes de Y", "avísame antes de Y" → es aviso previo de Y → Caso A o B.

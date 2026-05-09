@@ -30,6 +30,7 @@ import { sendNovaMessage, type NovaActionShape } from '@/src/data/nova';
 import { analyzePhoto } from '@/src/data/photo';
 import { setNovaSeed } from '@/src/data/novaSeedStore';
 import type { CreateTaskInput } from '@/src/data/tasks';
+import { todayISO } from '@/src/data/today';
 import type { EventItem, Task } from '@/src/data/types';
 import { useMemories } from '@/src/data/useMemories';
 import { useUserProfile } from '@/src/data/useUserProfile';
@@ -101,10 +102,18 @@ function buildContextualPrompt(ctx: NovaInputContext, message: string): string {
 function tryEventFromAction(a: any): CreateEventInput | null {
   const e = a?.event ?? a?.payload?.event ?? a?.data?.event;
   if (!e || typeof e.title !== 'string' || !e.title.trim()) return null;
+  const rawDate = typeof e.date === 'string' && e.date.trim() ? e.date : null;
+  const rawTime = typeof e.time === 'string' && e.time.trim() ? e.time : null;
+  // Si Nova omite date pero hay time o es un "Recordatorio:" → default hoy.
+  // Sin esto, el evento se inserta con date=null, fetchTodayEvents filtra
+  // por date=todayISO() y nunca aparece en Mi Día (chip dice "Agregado"
+  // pero el timeline está vacío — bug visible al usuario).
+  const isReminder = /^recordatorio[:\s]/i.test(e.title);
+  const date = rawDate ?? ((rawTime || isReminder) ? todayISO() : null);
   return {
     title: e.title,
-    date: typeof e.date === 'string' ? e.date : null,
-    time: typeof e.time === 'string' ? e.time : null,
+    date,
+    time: rawTime,
     description: typeof e.description === 'string' ? e.description : undefined,
     section: typeof e.section === 'string' ? e.section : undefined,
   };
@@ -348,31 +357,48 @@ export function NovaInputBar({
       });
 
       const applied: string[] = [];
+      const failed: string[] = [];
       const actions = Array.isArray(res.actions) ? res.actions : [];
       for (const a of actions) {
         if (a.type === 'add_event') {
           const input = tryEventFromAction(a);
           if (input) {
-            void onAddEvent(input);
+            // Await + check return: addEvent devuelve null si createEvent
+            // falló (RLS, network, validación). Así el chip "Agregado" solo
+            // aparece cuando el evento realmente quedó en Supabase.
+            const created = await onAddEvent(input);
             const desc = describeApplied(a);
-            if (desc) applied.push(desc);
+            if (created) {
+              if (desc) applied.push(desc);
+            } else if (desc) {
+              failed.push(desc.replace(/^Agregado: /, ''));
+            }
           }
         } else if (a.type === 'add_task') {
           const input = tryTaskFromAction(a);
           if (input) {
-            void onAddTask(input);
+            const created = await onAddTask(input);
             const desc = describeApplied(a);
-            if (desc) applied.push(desc);
+            if (created) {
+              if (desc) applied.push(desc);
+            } else if (desc) {
+              failed.push(desc.replace(/^Tarea agregada: /, ''));
+            }
           }
         }
       }
 
       onRefresh();
 
+      const baseText = res.message?.trim() || 'Listo.';
+      const failNote = failed.length > 0
+        ? `\n⚠ No pude guardar: ${failed.join(', ')}`
+        : '';
+
       setReply({
-        text: res.message?.trim() || 'Listo.',
+        text: baseText + failNote,
         appliedActions: applied,
-        isError: false,
+        isError: failed.length > 0 && applied.length === 0,
       });
       setDraft('');
     } catch (err: any) {

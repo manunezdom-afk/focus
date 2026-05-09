@@ -42,6 +42,7 @@ import { analyzePhoto } from '@/src/data/photo';
 import { loadNovaHistory, saveNovaHistory } from '@/src/data/novaPersist';
 import { consumeNovaSeed } from '@/src/data/novaSeedStore';
 import type { CreateTaskInput } from '@/src/data/tasks';
+import { todayISO } from '@/src/data/today';
 import { useEvents } from '@/src/data/useEvents';
 import { useMemories } from '@/src/data/useMemories';
 import { useTasks } from '@/src/data/useTasks';
@@ -128,10 +129,17 @@ function useContextualPrompts(
 function tryEventFromAction(a: any): CreateEventInput | null {
   const e = a?.event ?? a?.payload?.event ?? a?.data?.event;
   if (!e || typeof e.title !== 'string' || !e.title.trim()) return null;
+  const rawDate = typeof e.date === 'string' && e.date.trim() ? e.date : null;
+  const rawTime = typeof e.time === 'string' && e.time.trim() ? e.time : null;
+  // Si Nova omite date pero hay time o es un "Recordatorio:" → default hoy.
+  // Sin esto, el evento se inserta con date=null y nunca aparece en Mi Día
+  // (el filtro fetchTodayEvents pide date=todayISO() exacto).
+  const isReminder = /^recordatorio[:\s]/i.test(e.title);
+  const date = rawDate ?? ((rawTime || isReminder) ? todayISO() : null);
   return {
     title: e.title,
-    date: typeof e.date === 'string' ? e.date : null,
-    time: typeof e.time === 'string' ? e.time : null,
+    date,
+    time: rawTime,
     description: typeof e.description === 'string' ? e.description : undefined,
     section: typeof e.section === 'string' ? e.section : undefined,
   };
