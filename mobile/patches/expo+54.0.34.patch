@@ -1,0 +1,35 @@
+diff --git a/node_modules/expo/src/async-require/messageSocket.native.ts b/node_modules/expo/src/async-require/messageSocket.native.ts
+index 55b3c43..3f87495 100644
+--- a/node_modules/expo/src/async-require/messageSocket.native.ts
++++ b/node_modules/expo/src/async-require/messageSocket.native.ts
+@@ -6,18 +6,21 @@ declare namespace globalThis {
+ }
+ 
+ if (__DEV__) {
+-  const socket: WebSocket = (() => {
+-    const devServer = getDevServer();
+-    if (!devServer.bundleLoadedFromServer) {
+-      throw new Error('Cannot create devtools websocket connections in embedded environments.');
++  // PATCH (Focus): el binary Release embeded entra acá por un mismatch de bundling.
++  // En vez de tirar la app al inicializar, no-op silencioso cuando no hay dev server.
++  const socket: WebSocket | null = (() => {
++    try {
++      const devServer = getDevServer();
++      if (!devServer.bundleLoadedFromServer) return null;
++      const devServerUrl = new URL(devServer.url);
++      const serverScheme = devServerUrl.protocol === 'https:' ? 'wss' : 'ws';
++      return new WebSocket(`${serverScheme}://${devServerUrl.host}/message`);
++    } catch {
++      return null;
+     }
+-
+-    const devServerUrl = new URL(devServer.url);
+-    const serverScheme = devServerUrl.protocol === 'https:' ? 'wss' : 'ws';
+-    return new WebSocket(`${serverScheme}://${devServerUrl.host}/message`);
+   })();
+ 
+-  socket.onmessage = (message: { data: any }) => {
++  if (socket) socket.onmessage = (message: { data: any }) => {
+     const data = JSON.parse(String(message.data));
+     switch (data.method) {
+       case 'sendDevCommand':
