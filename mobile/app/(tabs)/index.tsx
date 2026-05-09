@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -139,23 +140,21 @@ export default function MiDiaScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]} edges={['top']}>
-      {/* ── Hero halo ─────────────────────────────────────────────────
-          Bloque tinted indigo posicionado en absoluto detrás del header,
-          con bordes redondos amplios y opacidad baja. Crea la sensación
-          de "ambient glow" estilo Gemini sin requerir un linear-gradient
-          (no se agrega dependencia native). pointerEvents none asegura
-          que no intercepta toques. */}
-      {/* Halo sutil — un único blob de tinte que da profundidad sin gritar.
-          Antes eran dos círculos apilados grandes que se veían pesados
-          encima del header. Ahora es un solo gradiente ambiental fino. */}
-      <View style={styles.heroHaloLayer} pointerEvents="none">
-        <View
-          style={[
-            styles.heroHaloCircle,
-            { backgroundColor: c.primaryContainer, opacity: scheme === 'dark' ? 0.22 : 0.32 },
-          ]}
-        />
-      </View>
+      {/* ── Ambient Nova ──────────────────────────────────────────────
+          Gradiente violeta→azul→transparent en el borde superior. Indica
+          presencia de Nova sin animaciones agresivas, estilo "luz ambiental
+          de IA" tipo Gemini. Más profesional que un blob sólido. */}
+      <LinearGradient
+        colors={
+          scheme === 'dark'
+            ? ['rgba(139,92,246,0.18)', 'rgba(59,130,246,0.06)', 'rgba(139,92,246,0)']
+            : ['rgba(139,92,246,0.10)', 'rgba(59,130,246,0.04)', 'rgba(139,92,246,0)']
+        }
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0.4, y: 1 }}
+        style={styles.ambientLayer}
+        pointerEvents="none"
+      />
 
       <SwipeNavigator currentTab="index">
       <KeyboardAvoidingView
@@ -329,25 +328,14 @@ const styles = StyleSheet.create({
   scrollContentEmpty: { flexGrow: 1 },
   emptyFill: { flex: 1, justifyContent: 'center', paddingBottom: 16 },
 
-  // Hero halo: dos "blobs" tinted indigo apilados en absoluto detrás del
-  // header. Sin gradient deps. Crea profundidad ambiente estilo IA sin
-  // saturar la pantalla.
-  heroHaloLayer: {
+  // Ambient Nova: gradiente violeta→azul que decae a transparent en el
+  // borde superior. Identidad de Nova sin orbes ni hero centrado.
+  ambientLayer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: 280,
-    overflow: 'hidden',
-  },
-  heroHaloCircle: {
-    position: 'absolute',
-    top: -160,
-    left: -80,
-    right: -80,
-    height: 280,
-    borderBottomLeftRadius: 200,
-    borderBottomRightRadius: 200,
+    height: 220,
   },
 
   // Fila de íconos top-right — perfil, compartir, bandeja Nova, notif.
