@@ -22,8 +22,10 @@ export const unstable_settings = {
 };
 
 // Tiempo mínimo que el boot screen es visible antes de empezar el fade.
-// Sumado a los 380ms del FadeOut = ~1.3s de splash visible mínimo.
-const BOOT_MIN_MS = 900;
+// Suficiente para que la transición nativo → JS no se sienta brusca cuando
+// auth resuelve instantáneamente desde AsyncStorage. Si auth tarda más, el
+// splash se queda hasta que el redirect a (tabs) o (auth) termine.
+const BOOT_MIN_MS = 250;
 const BOOT_FADE_MS = 380;
 
 // Pantalla de arranque: fondo oscuro + logo + wordmark.
@@ -68,14 +70,19 @@ function AuthGate() {
 
 function Shell() {
   const colorScheme = useColorScheme();
-  const { ready } = useAuth();
+  const { ready, session } = useAuth();
+  const segments = useSegments();
   const navTheme = colorScheme === 'dark' ? DarkTheme : DefaultTheme;
   const backgroundColor = Colors[colorScheme ?? 'light'].background;
 
   // showBoot controla si el BootScreen overlay está montado.
   // Empieza en true y pasa a false sólo cuando:
   //   1. ready === true (auth resuelta), Y
-  //   2. han pasado BOOT_MIN_MS desde el mount (splash mínimo garantizado).
+  //   2. el grupo de ruta actual coincide con el destino esperado según
+  //      la sesión: (tabs) si hay sesión, (auth) si no — esto evita que
+  //      el overlay se vaya antes de que AuthGate complete el redirect
+  //      y se vea un flash de Mi Día vacío camino al login (o al revés), Y
+  //   3. han pasado BOOT_MIN_MS desde el mount.
   const [showBoot, setShowBoot] = useState(true);
   const mountRef = useRef(Date.now());
 
@@ -85,14 +92,19 @@ function Shell() {
     SplashScreen.hideAsync().catch(() => {});
   }, []);
 
-  // Cuando auth esté lista, esperar el resto del mínimo y luego bajar el boot.
+  // Cuando auth esté lista Y la ruta efectiva ya esté del lado correcto,
+  // esperar el resto del mínimo y luego bajar el boot.
   useEffect(() => {
     if (!ready) return;
+    const inAuthGroup = segments[0] === '(auth)';
+    const inTabsGroup = segments[0] === '(tabs)';
+    const settled = (session && inTabsGroup) || (!session && inAuthGroup);
+    if (!settled) return;
     const elapsed = Date.now() - mountRef.current;
     const remaining = Math.max(0, BOOT_MIN_MS - elapsed);
     const t = setTimeout(() => setShowBoot(false), remaining);
     return () => clearTimeout(t);
-  }, [ready]);
+  }, [ready, session, segments]);
 
   return (
     <ThemeProvider value={navTheme}>

@@ -45,6 +45,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false;
 
+    // Watchdog: si getSession() no responde en 5s (AsyncStorage corrupto,
+    // red colgada en validación de token) marcamos ready de todos modos
+    // para que la UI llegue al login en vez de quedar en splash infinito.
+    // Si después responde, setSession actualiza la sesión y todo sigue.
+    const watchdog = setTimeout(() => {
+      if (cancelled || ready) return;
+      if (__DEV__) {
+        console.warn('[Focus mobile] getSession timeout 5s — assuming no session');
+      }
+      setLoading(false);
+      setReady(true);
+    }, 5000);
+
     supabase.auth
       .getSession()
       .then(({ data, error }) => {
@@ -56,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .finally(() => {
         if (cancelled) return;
+        clearTimeout(watchdog);
         setLoading(false);
         setReady(true);
       });
@@ -69,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
+      clearTimeout(watchdog);
       sub?.subscription.unsubscribe();
     };
   }, []);
