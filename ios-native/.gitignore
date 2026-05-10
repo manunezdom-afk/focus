@@ -1,0 +1,17 @@
+# Xcode build artifacts
+DerivedData/
+.build/
+*.xcuserstate
+xcuserdata/
+*.xcbkptlist
+
+# Signing
+*.mobileprovision
+*.p12
+
+# CocoaPods / SPM (no deps yet)
+Pods/
+.swiftpm/
+
+# macOS
+.DS_Store

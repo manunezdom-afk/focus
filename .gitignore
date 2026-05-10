@@ -7,16 +7,23 @@ node_modules
 *.log
 .claude/
 
-# iOS / Xcode build artifacts (the ios/ folder itself is committed)
-ios/App/build/
-ios/App/Pods/
-ios/App/Podfile.lock
-ios/App/output/
-ios/DerivedData/
-ios/.build/
-ios/App/.build/
+# Xcode build artifacts
 *.xcuserstate
 xcuserdata/
+DerivedData/
+
+# legacy-capacitor-ios build artifacts
+legacy-capacitor-ios/App/build/
+legacy-capacitor-ios/App/Pods/
+legacy-capacitor-ios/App/Podfile.lock
+legacy-capacitor-ios/App/output/
+legacy-capacitor-ios/DerivedData/
+legacy-capacitor-ios/.build/
+legacy-capacitor-ios/App/.build/
+
+# ios-native Xcode build artifacts
+ios-native/.build/
+ios-native/DerivedData/
 .env*.local
 
 # Playwright
