@@ -5,6 +5,9 @@ struct MiDiaView: View {
     @State private var focusBarText: String = ""
     @State private var showNova: Bool = false
     @State private var pendingNovaText: String? = nil
+    @State private var showAllEvents: Bool = false
+
+    private let visibleEventsLimit: Int = 4
 
     private var displayEvents: [FocusEvent] {
         if store.hasUserEvents {
@@ -47,9 +50,6 @@ struct MiDiaView: View {
                     header
                         .padding(.horizontal, Theme.Spacing.xl)
                         .padding(.top, Theme.Spacing.md)
-
-                    focusBrief
-                        .padding(.horizontal, Theme.Spacing.xl)
 
                     focusBar
                         .padding(.horizontal, Theme.Spacing.xl)
@@ -155,63 +155,6 @@ struct MiDiaView: View {
             .focusCardShadow()
     }
 
-    // MARK: - Focus Brief (resumen "cockpit" del día)
-
-    /// Stats horizontales: bloques · tareas · sugerencias Nova.
-    /// Da a Mi Día sensación de "centro de control" en lugar de lista de eventos.
-    private var focusBrief: some View {
-        HStack(spacing: 0) {
-            briefStat(
-                value: "\(displayEvents.count)",
-                label: "bloques",
-                tint: Theme.Colors.focusAccent
-            )
-            briefDivider
-            briefStat(
-                value: "\(store.pendingTodayTasks.count)",
-                label: "tareas",
-                tint: Theme.Colors.warning
-            )
-            briefDivider
-            briefStat(
-                value: "\(store.pendingSuggestions.count)",
-                label: "Nova",
-                tint: Theme.Colors.novaAccent
-            )
-        }
-        .padding(.vertical, Theme.Spacing.md)
-        .padding(.horizontal, Theme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                .fill(Theme.Colors.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                        .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                )
-                .focusCardShadow()
-        )
-    }
-
-    private func briefStat(value: String, label: String, tint: Color) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(tint)
-                .monospacedDigit()
-            Text(label.uppercased())
-                .font(Theme.Typography.caption)
-                .foregroundStyle(Theme.Colors.textTertiary)
-                .tracking(0.7)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var briefDivider: some View {
-        Rectangle()
-            .fill(Theme.Colors.border)
-            .frame(width: Theme.Stroke.hairline, height: 30)
-    }
-
     // MARK: - FocusBar (entry point omnipresente a Nova)
 
     private var focusBar: some View {
@@ -267,15 +210,43 @@ struct MiDiaView: View {
                 .frame(minHeight: 260)
                 .padding(.horizontal, Theme.Spacing.xl)
             } else {
+                let shown = showAllEvents
+                    ? displayEvents
+                    : Array(displayEvents.prefix(visibleEventsLimit))
+                let hiddenCount = displayEvents.count - shown.count
+
                 VStack(spacing: 0) {
-                    ForEach(Array(displayEvents.enumerated()), id: \.element.id) { idx, event in
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { idx, event in
                         TimelineEventRow(
                             event: event,
-                            isLast: idx == displayEvents.count - 1
+                            isLast: idx == shown.count - 1 && hiddenCount == 0
                         )
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
+
+                if hiddenCount > 0 {
+                    Button {
+                        HapticManager.shared.tick()
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showAllEvents = true
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("Ver \(hiddenCount) \(hiddenCount == 1 ? "bloque más" : "bloques más")")
+                                .font(Theme.Typography.subheadEmphasized)
+                                .foregroundStyle(Theme.Colors.focusAccent)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.focusAccent)
+                        }
+                        .padding(.vertical, Theme.Spacing.md - 2)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.top, Theme.Spacing.xs)
+                }
             }
         }
     }
@@ -512,38 +483,25 @@ private struct TimelineEventRow: View {
                 .fill(event.section.color)
                 .frame(width: 3)
 
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(event.title)
                     .font(Theme.Typography.bodyEmphasized)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
-                if let notes = event.notes, !notes.isEmpty {
-                    Text(notes)
-                        .font(Theme.Typography.subhead)
-                        .foregroundStyle(Theme.Colors.textSecondary)
-                        .lineLimit(2)
-                }
-                HStack(spacing: 6) {
-                    StatePill(label: event.section.displayName, tint: event.section.color, symbol: event.section.symbol)
-                    if let loc = event.location, !loc.isEmpty {
+
+                // Solo ubicación si hay. Notas/descripción quedan para detalle.
+                if let loc = event.location, !loc.isEmpty {
+                    HStack(spacing: 4) {
                         Image(systemName: "mappin")
-                            .font(.system(size: 9))
+                            .font(.system(size: 10))
                             .foregroundStyle(Theme.Colors.textTertiary)
                         Text(loc)
                             .font(Theme.Typography.caption)
                             .foregroundStyle(Theme.Colors.textTertiary)
                             .lineLimit(1)
                     }
-                    if let dur = event.durationLabel {
-                        Text("·")
-                            .foregroundStyle(Theme.Colors.textQuaternary)
-                        Text(dur)
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.textTertiary)
-                    }
                 }
-                .padding(.top, 2)
             }
             .padding(.vertical, Theme.Spacing.md)
             .padding(.horizontal, Theme.Spacing.md)

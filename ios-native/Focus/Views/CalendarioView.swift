@@ -283,23 +283,18 @@ private struct CalendarEventCard: View {
                 .frame(width: 3)
                 .clipShape(Capsule())
 
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(event.title)
                     .font(Theme.Typography.bodyEmphasized)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                if let notes = event.notes, !notes.isEmpty {
-                    Text(notes)
-                        .font(Theme.Typography.subhead)
-                        .foregroundStyle(Theme.Colors.textSecondary)
-                        .lineLimit(2)
-                }
-                HStack(spacing: 6) {
-                    StatePill(label: event.section.displayName, tint: event.section.color, symbol: event.section.symbol)
-                    if let loc = event.location, !loc.isEmpty {
+
+                // Solo ubicación si hay. Notes/descripción quedan para detalle.
+                if let loc = event.location, !loc.isEmpty {
+                    HStack(spacing: 4) {
                         Image(systemName: "mappin")
-                            .font(.system(size: 9))
+                            .font(.system(size: 10))
                             .foregroundStyle(Theme.Colors.textTertiary)
                         Text(loc)
                             .font(Theme.Typography.caption)
@@ -307,7 +302,6 @@ private struct CalendarEventCard: View {
                             .lineLimit(1)
                     }
                 }
-                .padding(.top, 2)
             }
 
             Spacer()

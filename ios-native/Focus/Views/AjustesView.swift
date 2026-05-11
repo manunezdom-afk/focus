@@ -21,7 +21,6 @@ struct AjustesView: View {
                             .padding(.top, Theme.Spacing.md)
 
                         cuentaSection
-                        planSection
                         novaSection
                         notificacionesSection
                         aparienciaSection
