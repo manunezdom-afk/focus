@@ -46,8 +46,9 @@ LINES_SWIFT=$(find ios-native -type f -name "*.swift" -exec wc -l {} + 2>/dev/nu
 ok "$COUNT_SWIFT archivos Swift · $LINES_SWIFT líneas"
 
 section "Búsqueda de marcadores internos en código Swift"
-TODOS=$(grep -rIn -E "TODO|FIXME|XXX|HACK" ios-native/Focus/ 2>/dev/null | wc -l | tr -d ' ')
-if [ "$TODOS" -eq 0 ]; then ok "0 TODO/FIXME/XXX/HACK"; else warn "$TODOS marcadores encontrados"; fi
+# Usamos word boundary (\b) para no matchear palabras españolas como "TODOS"
+MARKERS=$(grep -rIn -E '\b(TODO|FIXME|XXX|HACK)\b' ios-native/Focus/ 2>/dev/null | wc -l | tr -d ' ')
+if [ "$MARKERS" -eq 0 ]; then ok "0 TODO/FIXME/XXX/HACK"; else warn "$MARKERS marcadores encontrados"; fi
 
 FASES=$(grep -rIn -E '"[^"]*FASE[^"]*"|"[^"]*Pr.ximamente[^"]*"' ios-native/Focus/ 2>/dev/null | wc -l | tr -d ' ')
 if [ "$FASES" -eq 0 ]; then ok "0 strings visibles 'FASE' / 'Próximamente'"; else warn "$FASES strings visibles internos"; fi

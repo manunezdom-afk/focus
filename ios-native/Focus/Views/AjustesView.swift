@@ -3,6 +3,8 @@ import SwiftUI
 struct AjustesView: View {
     @EnvironmentObject private var store: FocusDataStore
     @State private var showPersonalitySheet = false
+    @State private var showResetConfirm = false
+    @State private var showClearConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -21,6 +23,7 @@ struct AjustesView: View {
                         notificacionesSection
                         aparienciaSection
                         privacidadSection
+                        datosLocalesSection
                         acercaSection
 
                         Spacer(minLength: Theme.Spacing.bottomBarSafety)
@@ -35,6 +38,30 @@ struct AjustesView: View {
                 }
                 .presentationDetents([.medium])
                 .presentationBackground(Theme.Colors.background)
+            }
+            .confirmationDialog(
+                "Restablecer datos demo",
+                isPresented: $showResetConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Restablecer", role: .destructive) {
+                    store.resetToDemoState()
+                }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Vuelves al estado inicial con datos de ejemplo. Tus tareas, eventos y conversación con Nova creados se borran de este iPhone.")
+            }
+            .confirmationDialog(
+                "Borrar datos locales",
+                isPresented: $showClearConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Borrar todo", role: .destructive) {
+                    store.clearAllLocalData()
+                }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Elimina TODOS los datos locales: tareas, eventos, sugerencias, conversación de Nova y ajustes. La próxima vez que abras la app, vuelven los datos de ejemplo.")
             }
         }
     }
@@ -280,6 +307,45 @@ struct AjustesView: View {
                     subtitle: "Borra todos tus datos de forma definitiva.",
                     trailing: .chevron
                 )
+            }
+            .focusCardContainer()
+        }
+    }
+
+    // MARK: - Datos locales
+
+    private var datosLocalesSection: some View {
+        settingsSection(title: "Datos locales") {
+            VStack(spacing: 0) {
+                Button {
+                    HapticManager.shared.tap()
+                    showResetConfirm = true
+                } label: {
+                    AjustesRow(
+                        symbol: "arrow.counterclockwise.circle",
+                        tint: Theme.Colors.focusAccent,
+                        title: "Restablecer datos demo",
+                        subtitle: "Vuelve al estado inicial con datos de ejemplo.",
+                        trailing: .chevron
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+
+                Button {
+                    HapticManager.shared.tap()
+                    showClearConfirm = true
+                } label: {
+                    AjustesRow(
+                        symbol: "trash",
+                        tint: Theme.Colors.danger,
+                        title: "Borrar datos locales",
+                        subtitle: "Elimina tareas, eventos y conversación de este iPhone.",
+                        trailing: .chevron
+                    )
+                }
+                .buttonStyle(.plain)
             }
             .focusCardContainer()
         }

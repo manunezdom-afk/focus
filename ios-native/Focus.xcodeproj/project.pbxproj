@@ -26,6 +26,7 @@
 		FA0000000000000000000081 /* FocusDataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000071 /* FocusDataStore.swift */; };
 		FA0000000000000000000082 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000072 /* SharedComponents.swift */; };
 		FA0000000000000000000083 /* NovaInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000073 /* NovaInboxView.swift */; };
+		FA0000000000000000000084 /* FocusLocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000074 /* FocusLocalStore.swift */; };
 		FA000000000000000000001A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000015 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -50,6 +51,7 @@
 		FA0000000000000000000071 /* FocusDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusDataStore.swift; sourceTree = "<group>"; };
 		FA0000000000000000000072 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
 		FA0000000000000000000073 /* NovaInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaInboxView.swift; sourceTree = "<group>"; };
+		FA0000000000000000000074 /* FocusLocalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusLocalStore.swift; sourceTree = "<group>"; };
 		FA0000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -143,6 +145,7 @@
 			isa = PBXGroup;
 			children = (
 				FA0000000000000000000071 /* FocusDataStore.swift */,
+				FA0000000000000000000074 /* FocusLocalStore.swift */,
 			);
 			path = State;
 			sourceTree = "<group>";
@@ -228,6 +231,7 @@
 				FA0000000000000000000080 /* AppSettings.swift in Sources */,
 				FA0000000000000000000045 /* DemoDataProvider.swift in Sources */,
 				FA0000000000000000000081 /* FocusDataStore.swift in Sources */,
+				FA0000000000000000000084 /* FocusLocalStore.swift in Sources */,
 				FA0000000000000000000018 /* BootView.swift in Sources */,
 				FA0000000000000000000046 /* MainTabView.swift in Sources */,
 				FA0000000000000000000047 /* MiDiaView.swift in Sources */,

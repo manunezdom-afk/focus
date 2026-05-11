@@ -98,26 +98,43 @@ enum NovaResponder {
     }
 }
 
-/// Store central de la app. Empieza vacío.
-/// Cuando los arrays están vacíos, las views muestran ejemplos.
+/// Store central de la app. Carga desde persistencia local con fallback a demo state.
+///
+/// Persistencia:
+/// - `events` / `tasks`: inician vacíos por diseño (la UI muestra ejemplos hasta que el
+///   usuario cree el primero). Si hay datos guardados, se cargan.
+/// - `suggestions` / `novaMessages`: fallback a DemoDataProvider si no hay datos guardados,
+///   para que la app tenga vida desde el primer launch.
+/// - `settings`: fallback a `.defaults`.
+///
+/// Guardado: solo en mutaciones explícitas (helpers `persist*()`). Nunca en computed
+/// properties ni en cada body render — evita loops de SwiftUI.
 @MainActor
 final class FocusDataStore: ObservableObject {
-    @Published var events: [FocusEvent] = []
-    @Published var tasks: [FocusTask] = []
+    @Published var events: [FocusEvent]
+    @Published var tasks: [FocusTask]
     @Published var suggestions: [NovaSuggestion]
     @Published var novaMessages: [NovaMessage]
     @Published var settings: AppSettings
 
     init() {
-        // Mi Día y Tareas inician VACÍOS — la UI muestra ejemplos hasta que
-        // el usuario cree su primer evento/tarea real.
-        self.events = []
-        self.tasks = []
-        // La Bandeja de Nova siempre tiene sugerencias (Nova está "leyendo" tu día).
-        self.suggestions = DemoDataProvider.shared.suggestions()
-        self.novaMessages = DemoDataProvider.shared.welcomeNovaMessages()
-        self.settings = .defaults
+        self.events = FocusLocalStore.load([FocusEvent].self, forKey: .events) ?? []
+        self.tasks = FocusLocalStore.load([FocusTask].self, forKey: .tasks) ?? []
+        self.suggestions = FocusLocalStore.load([NovaSuggestion].self, forKey: .suggestions)
+            ?? DemoDataProvider.shared.suggestions()
+        self.novaMessages = FocusLocalStore.load([NovaMessage].self, forKey: .novaMessages)
+            ?? DemoDataProvider.shared.welcomeNovaMessages()
+        self.settings = FocusLocalStore.load(AppSettings.self, forKey: .settings)
+            ?? .defaults
     }
+
+    // MARK: - Persistencia (privado)
+
+    private func persistEvents()       { FocusLocalStore.save(events, forKey: .events) }
+    private func persistTasks()        { FocusLocalStore.save(tasks, forKey: .tasks) }
+    private func persistSuggestions()  { FocusLocalStore.save(suggestions, forKey: .suggestions) }
+    private func persistNovaMessages() { FocusLocalStore.save(novaMessages, forKey: .novaMessages) }
+    private func persistSettings()     { FocusLocalStore.save(settings, forKey: .settings) }
 
     // MARK: - Estado: usuario ya creó algo?
 
@@ -156,11 +173,13 @@ final class FocusDataStore: ObservableObject {
     func addEvent(_ event: FocusEvent) {
         events.append(event)
         events.sort { $0.startTime < $1.startTime }
+        persistEvents()
         HapticManager.shared.success()
     }
 
     func deleteEvent(_ id: UUID) {
         events.removeAll { $0.id == id }
+        persistEvents()
     }
 
     // MARK: - Tareas
@@ -177,6 +196,7 @@ final class FocusDataStore: ObservableObject {
         guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
         tasks[idx].done.toggle()
         tasks[idx].doneAt = tasks[idx].done ? Date() : nil
+        persistTasks()
         if tasks[idx].done {
             HapticManager.shared.success()
         } else {
@@ -188,16 +208,19 @@ final class FocusDataStore: ObservableObject {
         guard let tIdx = tasks.firstIndex(where: { $0.id == taskId }) else { return }
         guard let sIdx = tasks[tIdx].subtasks.firstIndex(where: { $0.id == subtaskId }) else { return }
         tasks[tIdx].subtasks[sIdx].isCompleted.toggle()
+        persistTasks()
         HapticManager.shared.tick()
     }
 
     func addTask(_ task: FocusTask) {
         tasks.insert(task, at: 0)
+        persistTasks()
         HapticManager.shared.success()
     }
 
     func deleteTask(_ id: UUID) {
         tasks.removeAll { $0.id == id }
+        persistTasks()
         HapticManager.shared.tick()
     }
 
@@ -211,6 +234,7 @@ final class FocusDataStore: ObservableObject {
         guard let idx = suggestions.firstIndex(where: { $0.id == id }) else { return }
         suggestions[idx].status = status
         suggestions[idx].resolvedAt = Date()
+        persistSuggestions()
         if status == .approved {
             HapticManager.shared.success()
         } else {
@@ -224,26 +248,32 @@ final class FocusDataStore: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         novaMessages.append(NovaMessage(role: .user, content: trimmed))
+        persistNovaMessages()
         HapticManager.shared.tap()
 
         let reply = NovaResponder.reply(to: trimmed)
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 650_000_000)
             await MainActor.run {
-                self?.novaMessages.append(NovaMessage(role: .nova, content: reply))
+                guard let self else { return }
+                self.novaMessages.append(NovaMessage(role: .nova, content: reply))
+                self.persistNovaMessages()
             }
         }
     }
 
     func runQuickAction(_ action: NovaQuickAction) {
         novaMessages.append(NovaMessage(role: .user, content: action.userText))
+        persistNovaMessages()
         HapticManager.shared.tap()
 
         let reply = action.novaReply
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 600_000_000)
             await MainActor.run {
-                self?.novaMessages.append(NovaMessage(role: .nova, content: reply))
+                guard let self else { return }
+                self.novaMessages.append(NovaMessage(role: .nova, content: reply))
+                self.persistNovaMessages()
             }
         }
     }
@@ -254,6 +284,34 @@ final class FocusDataStore: ObservableObject {
         var copy = settings
         mutator(&copy)
         settings = copy
+        persistSettings()
         HapticManager.shared.tick()
+    }
+
+    // MARK: - Reset / borrar datos locales
+
+    /// Vuelve al estado inicial con datos de ejemplo (in-memory + disk).
+    /// Equivale a "como cuando instalaste la app por primera vez".
+    func resetToDemoState() {
+        FocusLocalStore.clearAll()
+        events = []
+        tasks = []
+        suggestions = DemoDataProvider.shared.suggestions()
+        novaMessages = DemoDataProvider.shared.welcomeNovaMessages()
+        settings = .defaults
+        HapticManager.shared.success()
+    }
+
+    /// Borra TODOS los datos locales (in-memory + disk). Más agresivo que reset:
+    /// no re-seedea sugerencias ni mensaje de bienvenida.
+    /// Pensado para futuro flujo "cerrar sesión / privacidad".
+    func clearAllLocalData() {
+        FocusLocalStore.clearAll()
+        events = []
+        tasks = []
+        suggestions = []
+        novaMessages = []
+        settings = .defaults
+        HapticManager.shared.success()
     }
 }

@@ -18,6 +18,7 @@ Documento central de auditoría continua del proyecto Focus.
 |---|---|---|---|
 | 1 | 2026-05-11 | Fase 1 read-only | Inventario de tools, audit de código Swift, schema Supabase desde repo, vercel.json, secrets básicos. Sin instalaciones. Sin cambios de código. |
 | 2 | 2026-05-11 | Audit completo + fixes Swift safe | Audit en 15 áreas. Aplicados 5 fixes seguros: Bundle.main version, lineLimit en cards de evento, DateFormatters cacheados, picker .dark deshabilitado, Nova onAppear simplificado. Sin tocar backend ni Supabase. |
+| 3 | 2026-05-11 | Resolver C1 — persistencia local V1 | Implementado `FocusLocalStore` (UserDefaults + JSON ISO-8601 + keys versionadas `focus.v1.*`). Carga al boot con fallback a demo, guarda en cada mutación. Sección "Datos locales" en Ajustes con confirmationDialogs para reset / clear. App ya recuerda datos entre sesiones. Fix de falso positivo en regex `audit-quick.sh` (word boundary). |
 
 ## Audit Pass 2 — Findings completos (2026-05-11)
 
@@ -27,7 +28,7 @@ Documento central de auditoría continua del proyecto Focus.
 
 | ID | Hallazgo | Evidencia | Impacto | Archivo | Solución | Status |
 |---|---|---|---|---|---|---|
-| C1 | Cero persistencia local | `FocusDataStore.init` deja arrays vacíos en memoria | Tareas/eventos creados por el usuario se PIERDEN al matar app | `State/FocusDataStore.swift` | Implementar `UserDefaults` (encode `[FocusTask]`/`[FocusEvent]` como JSON) o `SwiftData` | 🔜 (requiere sesión dedicada — arquitectura) |
+| C1 | Cero persistencia local | `FocusDataStore.init` deja arrays vacíos en memoria | Tareas/eventos creados por el usuario se PIERDEN al matar app | `State/FocusDataStore.swift` | Implementar `UserDefaults` (encode `[FocusTask]`/`[FocusEvent]` como JSON) o `SwiftData` | ✅ **Resuelto V1 audit pass 3** — `FocusLocalStore` con UserDefaults+JSON. Migración a Supabase queda pendiente para sync multi-device. |
 | C2 | AppIcon sin PNG | `Assets.xcassets/AppIcon.appiconset/Contents.json` declara 1024x1024 pero la carpeta no contiene PNG | TestFlight/App Store **rechazan** sin icon. Build Debug funciona pero archive fallaría | `ios-native/Focus/Assets.xcassets/AppIcon.appiconset/` | Agregar PNG 1024×1024 (diseño) + variantes vía `npm run build:ios-icons` (script ya existe en `scripts/`) | 🔜 (requiere asset de diseño) |
 | C3 | Nova desconectado del backend real | `NovaResponder` solo keyword matching local | No es Nova de verdad. Bloquea promesa de producto | `State/FocusDataStore.swift` → `NovaResponder` | Implementar `NovaService` con `URLSession` a `/api/focus-assistant` + JWT Supabase | 🔜 (requiere auth Supabase primero) |
 | C4 | Sin auth Supabase | No hay login flow ni sesión en la app nativa | Datos de usuario no se asocian a cuenta; Nova no puede personalizar | `ios-native/Focus/` | Agregar SPM `supabase-swift` + `AuthService` + `LoginView` con OTP | 🔜 (requiere sesión dedicada) |
@@ -94,6 +95,60 @@ Documento central de auditoría continua del proyecto Focus.
 5. **M2** ✅ `NovaView.swift`: simplificación de `onAppear` (sin Task wrapper innecesario).
 
 Build verificado en iPhone 16 físico. Cero warnings nuevos. App reinstalada y corriendo.
+
+---
+
+## Audit Pass 3 — C1 cerrado V1 (persistencia local)
+
+**Problema resuelto**: Tareas/eventos/sugerencias/mensajes de Nova se perdían al matar la app.
+
+### Implementación
+
+Nuevo archivo: `ios-native/Focus/State/FocusLocalStore.swift` (95 líneas).
+
+- API genérica: `save<T: Encodable>(_:forKey:)`, `load<T: Decodable>(_:forKey:)`, `clear(_:)`, `clearAll()`.
+- Backend: `UserDefaults.standard` con `JSONEncoder`/`Decoder` (estrategia `.iso8601`).
+- Keys versionadas: `focus.v1.tasks`, `focus.v1.events`, `focus.v1.suggestions`, `focus.v1.novaMessages`, `focus.v1.settings`.
+- Errores silenciosos: load → `nil`, save → log a consola. Boot nunca se rompe por decode malo.
+
+### Integración con FocusDataStore
+
+- `init()` carga desde `FocusLocalStore` con fallbacks: `events`/`tasks` → `[]`, `suggestions` → `DemoDataProvider.shared.suggestions()`, `novaMessages` → `DemoDataProvider.shared.welcomeNovaMessages()`, `settings` → `.defaults`.
+- 10 métodos de mutación guardan vía helpers privados (`persistEvents`, `persistTasks`, `persistSuggestions`, `persistNovaMessages`, `persistSettings`) — guardado solo en mutación, nunca en body re-render.
+- `resetToDemoState()` — limpia disco + vuelve a demo (sugerencias + welcome + vacío en tareas/eventos).
+- `clearAllLocalData()` — limpia disco e in-memory todo a `[]` / `.defaults`.
+
+### UI en Ajustes
+
+- Nueva sección "Datos locales" entre Privacidad y Acerca de.
+- Botón "Restablecer datos demo" → `confirmationDialog` destructivo → `store.resetToDemoState()`.
+- Botón "Borrar datos locales" → `confirmationDialog` destructivo más agresivo → `store.clearAllLocalData()`.
+
+### Lo que NO persiste (intencional)
+
+- Secrets / tokens / auth (no hay todavía; futuro va en Keychain).
+- Service role (no expuesto al cliente).
+- Datos remotos no cacheados (no hay Supabase aún).
+
+### Limitaciones conocidas (a resolver en próximas fases)
+
+- **No sincroniza entre dispositivos** — es solo local de este iPhone. Cuando se conecte Supabase, se va a migrar a sync remoto.
+- **No tiene migration entre versiones del schema** — si cambia `FocusTask`/`FocusEvent`, decode falla y vuelve a demo. Para V1 aceptable.
+- **No protege contra escrituras concurrentes** — `UserDefaults` es atómico pero si la app se cierra exactamente mientras se está guardando, podría haber inconsistencia. Probabilidad baja, scope V1.
+- **No encrypta** — `UserDefaults` no está cifrado. Por ahora aceptable porque no hay datos sensibles (sin auth, sin PII identificable). Antes de Auth Supabase migrar PII a Keychain.
+
+### Siguiente paso recomendado
+
+**Auth Supabase OTP** (C4). Una vez que el usuario tenga sesión, los datos locales se pueden sincronizar a `events` / `tasks` en Supabase, manteniendo `FocusLocalStore` como cache offline.
+
+### Audit findings al cierre
+
+```
+20 archivos Swift · 4696 líneas en ios-native/Focus/
+0 TODO/FIXME/HACK · 0 strings 'FASE' visibles · 0 force-unwraps
+0 patrones de secret · service_role solo server-side
+17 migraciones Supabase · RLS 15/15
+```
 
 ---
 
@@ -423,7 +478,7 @@ Build verificado en iPhone 16 físico. Cero warnings nuevos. App reinstalada y c
 
 > Bloquean cualquier release/beta.
 
-- [ ] **Persistencia local** de tareas/eventos creados (`UserDefaults` o `SwiftData`). Hoy se pierden al matar app.
+- [x] ~~**Persistencia local** de tareas/eventos creados~~ → resuelto en audit pass 3 con `FocusLocalStore` (UserDefaults+JSON). Migración a Supabase pendiente para sync multi-device.
 - [ ] **Auth real** (Supabase OTP) en la app nativa.
 - [ ] **Nova conectada** al backend real (no mock).
 - [ ] **Rate limit** server-side en `/api/focus-assistant` para abuse.
