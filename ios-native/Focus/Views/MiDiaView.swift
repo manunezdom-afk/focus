@@ -279,11 +279,7 @@ struct MiDiaView: View {
     // MARK: - Formato
 
     private var todayFormatted: String {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "es_ES")
-        fmt.dateFormat = "EEEE, d 'de' MMMM"
-        let raw = fmt.string(from: Date())
-        return raw.prefix(1).uppercased() + raw.dropFirst()
+        DateFormatters.capitalizeFirst(DateFormatters.weekdayDayMonth.string(from: Date()))
     }
 }
 
@@ -410,6 +406,7 @@ private struct TimelineEventRow: View {
                         .font(Theme.Typography.bodyEmphasized)
                         .foregroundStyle(Theme.Colors.textPrimary)
                         .multilineTextAlignment(.leading)
+                        .lineLimit(2)
                     if isExample {
                         ExampleBadge()
                     }
@@ -464,9 +461,7 @@ private struct TimelineEventRow: View {
     }
 
     private var timeLabel: String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "HH:mm"
-        return fmt.string(from: event.startTime)
+        DateFormatters.hourMinute.string(from: event.startTime)
     }
 }
 

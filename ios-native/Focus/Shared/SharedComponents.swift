@@ -1,6 +1,77 @@
 import SwiftUI
 import UIKit
 
+// MARK: - Date formatters (cached, locale es_ES)
+
+/// DateFormatters compartidos. Crear `DateFormatter` es caro (~1ms) y SwiftUI
+/// recomputa bodies con frecuencia — cacheamos como `static let`.
+enum DateFormatters {
+    static let hourMinute: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_ES")
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    /// "Lunes, 11 de mayo" (capitalizar primera letra al usar)
+    static let weekdayDayMonth: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_ES")
+        f.dateFormat = "EEEE, d 'de' MMMM"
+        return f
+    }()
+
+    /// "Mayo 2026" (capitalizar primera letra al usar)
+    static let monthYear: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_ES")
+        f.dateFormat = "MMMM yyyy"
+        return f
+    }()
+
+    /// "Lun" / "Mar" / "Mié" (uppercased al usar)
+    static let weekdayShort: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_ES")
+        f.dateFormat = "EEE"
+        return f
+    }()
+
+    /// "Lunes 12" / "Sábado 17" (capitalizar primera letra al usar)
+    static let weekdayDay: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_ES")
+        f.dateFormat = "EEEE d"
+        return f
+    }()
+
+    /// "11 may" / "23 dic"
+    static let shortDayMonth: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_ES")
+        f.dateFormat = "d MMM"
+        return f
+    }()
+
+    /// Capitaliza solo la primera letra de un string.
+    static func capitalizeFirst(_ s: String) -> String {
+        guard let first = s.first else { return s }
+        return first.uppercased() + s.dropFirst()
+    }
+}
+
+// MARK: - App version helper
+
+enum AppVersion {
+    /// "1.0 · build 1" leído del Info.plist de la app.
+    static var displayString: String {
+        let info = Bundle.main.infoDictionary
+        let marketing = (info?["CFBundleShortVersionString"] as? String) ?? "—"
+        let build = (info?["CFBundleVersion"] as? String) ?? "—"
+        return "\(marketing) · build \(build)"
+    }
+}
+
 // MARK: - Haptics
 
 final class HapticManager {

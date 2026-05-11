@@ -225,6 +225,8 @@ struct AjustesView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .disabled(pref == .dark)
+                    .opacity(pref == .dark ? 0.45 : 1)
                     if idx < AppearancePreference.allCases.count - 1 {
                         Divider().overlay(Theme.Colors.border).padding(.leading, 60)
                     }
@@ -292,7 +294,7 @@ struct AjustesView: View {
                     symbol: "info.circle",
                     tint: Theme.Colors.textSecondary,
                     title: "Versión",
-                    subtitle: "1.0 · build 1",
+                    subtitle: AppVersion.displayString,
                     trailing: .nothing
                 )
             }

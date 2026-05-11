@@ -115,15 +115,10 @@ struct FocusTask: Identifiable, Codable, Hashable {
         } else if isTomorrow {
             dayPart = "Mañana"
         } else {
-            let fmt = DateFormatter()
-            fmt.locale = Locale(identifier: "es_ES")
-            fmt.dateFormat = "d MMM"
-            dayPart = fmt.string(from: dueDate)
+            dayPart = DateFormatters.shortDayMonth.string(from: dueDate)
         }
         guard let dueTime else { return dayPart }
-        let tf = DateFormatter()
-        tf.dateFormat = "HH:mm"
-        return "\(dayPart) · \(tf.string(from: dueTime))"
+        return "\(dayPart) · \(DateFormatters.hourMinute.string(from: dueTime))"
     }
 
     var hasSubtasks: Bool { !subtasks.isEmpty }

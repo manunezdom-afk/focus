@@ -17,6 +17,83 @@ Documento central de auditoría continua del proyecto Focus.
 | # | Fecha | Tipo | Resumen |
 |---|---|---|---|
 | 1 | 2026-05-11 | Fase 1 read-only | Inventario de tools, audit de código Swift, schema Supabase desde repo, vercel.json, secrets básicos. Sin instalaciones. Sin cambios de código. |
+| 2 | 2026-05-11 | Audit completo + fixes Swift safe | Audit en 15 áreas. Aplicados 5 fixes seguros: Bundle.main version, lineLimit en cards de evento, DateFormatters cacheados, picker .dark deshabilitado, Nova onAppear simplificado. Sin tocar backend ni Supabase. |
+
+## Audit Pass 2 — Findings completos (2026-05-11)
+
+> Auditoría exhaustiva en 15 áreas, classificada por severidad. ✅ = fix aplicado en este pass · 🔜 = pendiente para futura sesión.
+
+### CRÍTICOS
+
+| ID | Hallazgo | Evidencia | Impacto | Archivo | Solución | Status |
+|---|---|---|---|---|---|---|
+| C1 | Cero persistencia local | `FocusDataStore.init` deja arrays vacíos en memoria | Tareas/eventos creados por el usuario se PIERDEN al matar app | `State/FocusDataStore.swift` | Implementar `UserDefaults` (encode `[FocusTask]`/`[FocusEvent]` como JSON) o `SwiftData` | 🔜 (requiere sesión dedicada — arquitectura) |
+| C2 | AppIcon sin PNG | `Assets.xcassets/AppIcon.appiconset/Contents.json` declara 1024x1024 pero la carpeta no contiene PNG | TestFlight/App Store **rechazan** sin icon. Build Debug funciona pero archive fallaría | `ios-native/Focus/Assets.xcassets/AppIcon.appiconset/` | Agregar PNG 1024×1024 (diseño) + variantes vía `npm run build:ios-icons` (script ya existe en `scripts/`) | 🔜 (requiere asset de diseño) |
+| C3 | Nova desconectado del backend real | `NovaResponder` solo keyword matching local | No es Nova de verdad. Bloquea promesa de producto | `State/FocusDataStore.swift` → `NovaResponder` | Implementar `NovaService` con `URLSession` a `/api/focus-assistant` + JWT Supabase | 🔜 (requiere auth Supabase primero) |
+| C4 | Sin auth Supabase | No hay login flow ni sesión en la app nativa | Datos de usuario no se asocian a cuenta; Nova no puede personalizar | `ios-native/Focus/` | Agregar SPM `supabase-swift` + `AuthService` + `LoginView` con OTP | 🔜 (requiere sesión dedicada) |
+
+### ALTOS
+
+| ID | Hallazgo | Evidencia | Impacto | Archivo | Solución | Status |
+|---|---|---|---|---|---|---|
+| A1 | Versión hardcoded "1.0 · build 1" | `AjustesView.swift:295` | Versión visible se vuelve obsoleta al subir builds | `Views/AjustesView.swift` | Leer de `Bundle.main.infoDictionary` con helper `AppVersion.displayString` | ✅ aplicado |
+| A2 | Títulos de evento sin `.lineLimit` | `MiDiaView.swift:409`, `CalendarioView.swift:295` | Títulos largos pueden romper layout / overflow vertical | Views | Agregar `.lineLimit(2)` + `.multilineTextAlignment(.leading)` | ✅ aplicado |
+| A3 | Picker apariencia permite `.dark` no funcional | `AjustesView.swift` ForEach allCases | Confunde al usuario — tap mueve check pero theme sigue light | `Views/AjustesView.swift` | `.disabled(pref == .dark)` + `.opacity(0.45)` mientras no esté implementado | ✅ aplicado |
+| A4 | gitleaks no corrido sobre historial | Tool no instalado | Posibles secrets antiguos sin detectar (aunque grep básico = 0 matches) | Repo | `brew install gitleaks` + `gitleaks detect --redact` | 🔜 (Fase B install) |
+| A5 | RLS policies sin auditar | Schema declara RLS pero no se revisaron las queries `CREATE POLICY` | Posible scope demasiado permisivo (`USING (true)` o sin `WITH CHECK`) | `supabase/migrations/012_security_rls_baseline.sql` etc | Audit con Supabase CLI: `supabase db dump --linked` + revisar policies | 🔜 (requiere CLI + autorización) |
+| A6 | gh CLI sin auth | `gh auth status` falla | Bloquea triage de PRs/issues desde Claude | Manual | `gh auth login` (Martin manual) | 🔜 |
+
+### MEDIOS
+
+| ID | Hallazgo | Evidencia | Impacto | Archivo | Solución | Status |
+|---|---|---|---|---|---|---|
+| M1 | DateFormatters creados en cada body render | 8 instancias `let fmt = DateFormatter()` en views/models | Perf: ~1ms por instancia × N events. Suma al scroll | varios | Cachear en `DateFormatters` enum static let | ✅ aplicado |
+| M2 | NovaView wraps llamada @MainActor innecesario | `NovaView.swift:80` `Task { @MainActor in store.sendNovaMessage }` | Cosmético — onAppear ya está en main thread | `Views/NovaView.swift` | Llamada directa | ✅ aplicado |
+| M3 | CSP usa `'unsafe-inline'` en `script-src` | `vercel.json` header CSP | Limitación de Vite. Aumenta XSS surface mínimo | `vercel.json` | Migrar a nonces (requiere config Vite) | 🔜 (no bloqueante) |
+| M4 | Tabla `ai_usage` declarada por migration 010 ausente de schema.sql | `supabase/migrations/010_ai_usage.sql` existe pero `schema.sql` solo tiene `ai_usage_events` | Posible drift schema local vs prod | `supabase/` | Confirmar con `supabase db dump --linked` si la tabla existe en prod | 🔜 (CLI) |
+| M5 | Sin Info.plist keys de Calendar/Photos | `pbxproj` solo tiene Camera + Microphone usage descriptions | Bloquea EventKit + photo-to-event futuros | `Focus.xcodeproj/project.pbxproj` | Agregar `NSCalendarsUsageDescription`, `NSPhotoLibraryUsageDescription` cuando se implementen features | 🔜 (no bloqueante hasta features) |
+| M6 | Sin background modes para push | `pbxproj` no declara `UIBackgroundModes` | APNs push notifications no funcionarán background | `Focus.xcodeproj/project.pbxproj` | Agregar capability "Push Notifications" + `remote-notification` mode | 🔜 (cuando se implemente push) |
+| M7 | UITabBar.appearance() global mutation | `MainTabView.init()` muta apariencia global de UITabBar | Si más adelante hay otras TabView, hereda este estilo | `Views/MainTabView.swift` | Migrar a `.toolbarBackground` por instancia (iOS 17+) | 🔜 (no urgente) |
+| M8 | Sin tests automatizados nativos | No hay target XCUITest ni snapshot tests | Cero regression coverage | `ios-native/Focus.xcodeproj` | Agregar target Tests con `SnapshotTesting` SPM + `XCUITest` smoke suite | 🔜 (Fase QA dedicada) |
+
+### BAJOS
+
+| ID | Hallazgo | Evidencia | Impacto | Archivo | Solución | Status |
+|---|---|---|---|---|---|---|
+| B1 | Default LaunchScreen (auto-generation) | `INFOPLIST_KEY_UILaunchScreen_Generation = YES` | Splash genérico iOS, no marca Focus al instalar | `pbxproj` | Crear `LaunchScreen.storyboard` con BootView estático | 🔜 (Fase polish) |
+| B2 | AccentColor no exactamente igual a Theme.Colors.focusAccent | AccentColor=`(0.231, 0.510, 0.992)` vs focusAccent=`(0.145, 0.388, 0.922)` | Sutil — afecta tint en algunos componentes nativos (alerts, etc.) | `Assets.xcassets/AccentColor.colorset/` | Sincronizar valores | 🔜 (cosmético) |
+| B3 | Sin SwiftLint ni linter config | Tool no instalado | Estilo enforced por humano (yo) | Repo | Fase 2 install + `.swiftlint.yml` | 🔜 |
+| B4 | Sin script de install Playwright browsers | Tests configurados pero browsers no instalados | `npx playwright test` falla en máquina nueva | Repo | Agregar `npx playwright install` a setup docs / npm postinstall | 🔜 |
+| B5 | `nuevoEventoSheet` permite endTime < startTime sin feedback | `CalendarioView.swift` NuevoEventoSheet `canSave` bloquea pero sin alerta | UX: usuario no sabe por qué Guardar está disabled | `Views/CalendarioView.swift` | Mostrar error inline cuando endTime <= startTime | 🔜 (UX polish) |
+
+### IDEAS FUTURAS
+
+| ID | Idea | Origen |
+|---|---|---|
+| F1 | Animación sparkle pulsante en FocusBar | Gemini-style polish |
+| F2 | "Nova está escribiendo" indicador (3 dots animados) | Chat UX estándar |
+| F3 | Skeleton loaders en lugar de empty states cuando se cargan datos remotos | Fase 3+ |
+| F4 | Onboarding mínimo de 1 pregunta post-login | Recomendación legacy |
+| F5 | Confirmación visual al crear primer evento (animación de ejemplos saliendo) | UX detail |
+| F6 | Sign in with Apple (Apple lo exige si hay otro OAuth) | App Store compliance |
+| F7 | Memorias de Nova editable desde Ajustes | Legacy web feature |
+| F8 | Voice input nativo (Speech framework) reemplazando placeholder de mic | Diferencial mobile |
+| F9 | Photo-to-event con Vision + Claude | Feature de legacy |
+| F10 | Modo focus con bloqueador de notificaciones del sistema | iOS Focus integration |
+
+---
+
+## Audit Pass 2 — Fixes aplicados (resumen)
+
+5 fixes safe aplicados en este pass:
+
+1. **A1** ✅ `AjustesView.swift`: versión leída de `Bundle.main` via `AppVersion.displayString` helper.
+2. **A2** ✅ `MiDiaView.swift` + `CalendarioView.swift`: `.lineLimit(2)` en `Text(event.title)` de timeline cards.
+3. **A3** ✅ `AjustesView.swift`: opción `.dark` deshabilitada + opacity reducida hasta que esté implementada.
+4. **M1** ✅ `SharedComponents.swift` + 5 archivos: `DateFormatters` enum con instancias cacheadas (`hourMinute`, `weekdayDayMonth`, `monthYear`, `weekdayShort`, `weekdayDay`, `shortDayMonth`).
+5. **M2** ✅ `NovaView.swift`: simplificación de `onAppear` (sin Task wrapper innecesario).
+
+Build verificado en iPhone 16 físico. Cero warnings nuevos. App reinstalada y corriendo.
 
 ---
 

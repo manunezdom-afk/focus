@@ -72,15 +72,14 @@ struct NovaView: View {
             }
         }
         .onAppear {
-            // Si llegamos con un prompt inicial, enviarlo automáticamente
-            if let prompt = initialPrompt,
-               !didAutoSubmit,
-               !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                didAutoSubmit = true
-                Task { @MainActor in
-                    store.sendNovaMessage(prompt)
-                }
-            }
+            // Si llegamos con un prompt inicial, enviarlo automáticamente.
+            // store es @MainActor y onAppear corre en main thread → llamada directa.
+            guard !didAutoSubmit,
+                  let prompt = initialPrompt,
+                  !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return }
+            didAutoSubmit = true
+            store.sendNovaMessage(prompt)
         }
     }
 
@@ -276,9 +275,6 @@ private struct NovaMessageBubble: View {
     }
 
     private var timestampLabel: String {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "es_ES")
-        fmt.dateFormat = "HH:mm"
-        return fmt.string(from: message.timestamp)
+        DateFormatters.hourMinute.string(from: message.timestamp)
     }
 }

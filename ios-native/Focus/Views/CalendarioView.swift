@@ -92,11 +92,7 @@ struct CalendarioView: View {
     }
 
     private var monthYearLabel: String {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "es_ES")
-        fmt.dateFormat = "MMMM yyyy"
-        let raw = fmt.string(from: selectedDate)
-        return raw.prefix(1).uppercased() + raw.dropFirst()
+        DateFormatters.capitalizeFirst(DateFormatters.monthYear.string(from: selectedDate))
     }
 
     // MARK: - Day detail
@@ -122,13 +118,9 @@ struct CalendarioView: View {
     }
 
     private var dayName: String {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "es_ES")
         if Calendar.current.isDateInToday(selectedDate) { return "Hoy" }
         if Calendar.current.isDateInTomorrow(selectedDate) { return "Mañana" }
-        fmt.dateFormat = "EEEE d"
-        let raw = fmt.string(from: selectedDate)
-        return raw.prefix(1).uppercased() + raw.dropFirst()
+        return DateFormatters.capitalizeFirst(DateFormatters.weekdayDay.string(from: selectedDate))
     }
 
     private var eventsCountLabel: String {
@@ -254,10 +246,7 @@ private struct DayPill: View {
     }
 
     private var weekdayShort: String {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "es_ES")
-        fmt.dateFormat = "EEE"
-        return fmt.string(from: date).uppercased()
+        DateFormatters.weekdayShort.string(from: date).uppercased()
     }
 
     private var dayNumber: Int {
@@ -295,6 +284,8 @@ private struct CalendarEventCard: View {
                     Text(event.title)
                         .font(Theme.Typography.bodyEmphasized)
                         .foregroundStyle(Theme.Colors.textPrimary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                     if isExample {
                         ExampleBadge()
                     }

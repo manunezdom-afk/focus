@@ -89,9 +89,7 @@ struct FocusEvent: Identifiable, Codable, Hashable {
     }
 
     var timeRangeLabel: String {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "es_ES")
-        fmt.dateFormat = "HH:mm"
+        let fmt = DateFormatters.hourMinute
         let start = fmt.string(from: startTime)
         if let endTime {
             return "\(start) – \(fmt.string(from: endTime))"
