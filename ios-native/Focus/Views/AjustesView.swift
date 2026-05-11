@@ -1,17 +1,502 @@
 import SwiftUI
 
 struct AjustesView: View {
+    @EnvironmentObject private var store: FocusDataStore
+    @State private var showPersonalitySheet = false
+
     var body: some View {
-        ComingSoonView(
-            icon: "gearshape",
-            title: "Ajustes",
-            subtitle: "Cuenta, plan, personalidad de Nova, notificaciones y privacidad.",
-            phaseLabel: "Fase 8"
-        )
+        NavigationStack {
+            ZStack {
+                Theme.Colors.background.ignoresSafeArea()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
+                        header
+                            .padding(.horizontal, Theme.Spacing.xl)
+                            .padding(.top, Theme.Spacing.lg)
+
+                        cuentaSection
+                        planSection
+                        novaSection
+                        notificacionesSection
+                        aparienciaSection
+                        privacidadSection
+                        acercaSection
+
+                        Spacer(minLength: Theme.Spacing.bottomBarSafety)
+                    }
+                }
+            }
+            .sheet(isPresented: $showPersonalitySheet) {
+                PersonalitySheet(
+                    selected: store.settings.novaPersonality
+                ) { personality in
+                    store.updateSettings { $0.novaPersonality = personality }
+                }
+                .presentationDetents([.medium])
+                .presentationBackground(Theme.Colors.background)
+            }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Ajustes")
+                .font(Theme.Typography.title)
+                .foregroundStyle(Theme.Colors.textPrimary)
+            Text("Tu cuenta, tu Nova, tus notificaciones.")
+                .font(Theme.Typography.body)
+                .foregroundStyle(Theme.Colors.textSecondary)
+        }
+    }
+
+    // MARK: - Cuenta
+
+    private var cuentaSection: some View {
+        settingsSection(title: "Cuenta") {
+            VStack(spacing: 0) {
+                AjustesRow(
+                    symbol: "person.crop.circle",
+                    tint: Theme.Colors.focusAccent,
+                    title: "manunezdom@gmail.com",
+                    subtitle: store.settings.demoMode ? "Modo demo · sin sesión" : "Sesión activa",
+                    trailing: .chevron
+                )
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                AjustesRow(
+                    symbol: "key",
+                    tint: Theme.Colors.warning,
+                    title: "Iniciar sesión",
+                    subtitle: "Guarda tus eventos y tareas en la nube.",
+                    trailing: .chevron
+                )
+            }
+            .focusCardContainer()
+        }
+    }
+
+    // MARK: - Plan
+
+    private var planSection: some View {
+        settingsSection(title: "Plan") {
+            VStack(spacing: 0) {
+                AjustesRow(
+                    symbol: "sparkles",
+                    tint: Theme.Colors.novaAccent,
+                    title: store.settings.plan.displayName,
+                    subtitle: "Nova ilimitada y prioridad en sugerencias.",
+                    trailing: .badge("Activo", Theme.Colors.success)
+                )
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                AjustesRow(
+                    symbol: "chart.bar.fill",
+                    tint: Theme.Colors.focusAccent,
+                    title: "Uso de Nova",
+                    subtitle: "12 mensajes hoy · sin límite",
+                    trailing: .chevron
+                )
+            }
+            .focusCardContainer()
+        }
+    }
+
+    // MARK: - Nova
+
+    private var novaSection: some View {
+        settingsSection(title: "Nova") {
+            VStack(spacing: 0) {
+                Button {
+                    HapticManager.shared.tap()
+                    showPersonalitySheet = true
+                } label: {
+                    AjustesRow(
+                        symbol: "bubble.left.and.bubble.right",
+                        tint: Theme.Colors.novaAccent,
+                        title: "Personalidad",
+                        subtitle: store.settings.novaPersonality.displayName,
+                        trailing: .chevron
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+
+                AjustesRow(
+                    symbol: "brain",
+                    tint: Theme.Colors.novaAccent,
+                    title: "Memoria",
+                    subtitle: "Nova recuerda tus preferencias.",
+                    trailing: .toggle(Binding(
+                        get: { store.settings.novaMemoryEnabled },
+                        set: { v in store.updateSettings { $0.novaMemoryEnabled = v } }
+                    ))
+                )
+
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+
+                AjustesRow(
+                    symbol: "mic",
+                    tint: Theme.Colors.novaAccent,
+                    title: "Voz",
+                    subtitle: "Habla con Nova en lugar de escribir.",
+                    trailing: .toggle(Binding(
+                        get: { store.settings.novaVoiceEnabled },
+                        set: { v in store.updateSettings { $0.novaVoiceEnabled = v } }
+                    ))
+                )
+
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+
+                NavigationLink {
+                    NovaInboxView()
+                } label: {
+                    AjustesRow(
+                        symbol: "tray.full",
+                        tint: Theme.Colors.novaAccent,
+                        title: "Bandeja de Nova",
+                        subtitle: "\(store.pendingSuggestions.count) sugerencias pendientes",
+                        trailing: .chevron
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .focusCardContainer()
+        }
+    }
+
+    // MARK: - Notificaciones
+
+    private var notificacionesSection: some View {
+        settingsSection(title: "Notificaciones") {
+            VStack(spacing: 0) {
+                AjustesRow(
+                    symbol: "bell.fill",
+                    tint: Theme.Colors.warning,
+                    title: "Recordatorios",
+                    subtitle: "10 minutos antes de cada evento.",
+                    trailing: .toggle(Binding(
+                        get: { store.settings.remindersEnabled },
+                        set: { v in store.updateSettings { $0.remindersEnabled = v } }
+                    ))
+                )
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                AjustesRow(
+                    symbol: "sun.max.fill",
+                    tint: Theme.Colors.warning,
+                    title: "Resumen diario",
+                    subtitle: "Cada mañana, tu día de un vistazo.",
+                    trailing: .toggle(Binding(
+                        get: { store.settings.dailySummaryEnabled },
+                        set: { v in store.updateSettings { $0.dailySummaryEnabled = v } }
+                    ))
+                )
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                AjustesRow(
+                    symbol: "sparkles",
+                    tint: Theme.Colors.novaAccent,
+                    title: "Sugerencias inteligentes",
+                    subtitle: "Nova te avisa cuando detecta algo útil.",
+                    trailing: .toggle(Binding(
+                        get: { store.settings.smartSuggestionsEnabled },
+                        set: { v in store.updateSettings { $0.smartSuggestionsEnabled = v } }
+                    ))
+                )
+            }
+            .focusCardContainer()
+        }
+    }
+
+    // MARK: - Apariencia
+
+    private var aparienciaSection: some View {
+        settingsSection(title: "Apariencia") {
+            VStack(spacing: 0) {
+                ForEach(Array(AppearancePreference.allCases.enumerated()), id: \.element) { idx, pref in
+                    Button {
+                        HapticManager.shared.tick()
+                        store.updateSettings { $0.appearance = pref }
+                    } label: {
+                        AjustesRow(
+                            symbol: appearanceSymbol(pref),
+                            tint: Theme.Colors.focusAccent,
+                            title: pref.displayName,
+                            subtitle: appearanceSubtitle(pref),
+                            trailing: store.settings.appearance == pref ? .check : .nothing
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    if idx < AppearancePreference.allCases.count - 1 {
+                        Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                    }
+                }
+            }
+            .focusCardContainer()
+        }
+    }
+
+    private func appearanceSymbol(_ pref: AppearancePreference) -> String {
+        switch pref {
+        case .system: return "circle.righthalf.filled"
+        case .dark: return "moon.fill"
+        case .light: return "sun.max"
+        }
+    }
+
+    private func appearanceSubtitle(_ pref: AppearancePreference) -> String {
+        switch pref {
+        case .system: return "Sigue lo que use tu iPhone."
+        case .dark: return "Modo oscuro siempre."
+        case .light: return "Próximamente disponible."
+        }
+    }
+
+    // MARK: - Privacidad
+
+    private var privacidadSection: some View {
+        settingsSection(title: "Privacidad") {
+            VStack(spacing: 0) {
+                AjustesRow(
+                    symbol: "lock.shield",
+                    tint: Theme.Colors.success,
+                    title: "Tus datos",
+                    subtitle: "Solo tú y Nova ven tu información.",
+                    trailing: .chevron
+                )
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                AjustesRow(
+                    symbol: "doc.text",
+                    tint: Theme.Colors.textSecondary,
+                    title: "Política de privacidad",
+                    subtitle: "Cómo manejamos tu información.",
+                    trailing: .chevron
+                )
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                AjustesRow(
+                    symbol: "trash",
+                    tint: Theme.Colors.danger,
+                    title: "Eliminar cuenta",
+                    subtitle: "Borra todos tus datos de forma definitiva.",
+                    trailing: .chevron
+                )
+            }
+            .focusCardContainer()
+        }
+    }
+
+    // MARK: - Acerca de
+
+    private var acercaSection: some View {
+        settingsSection(title: "Acerca de") {
+            VStack(spacing: 0) {
+                AjustesRow(
+                    symbol: "info.circle",
+                    tint: Theme.Colors.textSecondary,
+                    title: "Versión",
+                    subtitle: "1.0 · build 1",
+                    trailing: .nothing
+                )
+            }
+            .focusCardContainer()
+        }
+    }
+
+    // MARK: - Helper
+
+    private func settingsSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            Text(title.uppercased()).sectionLabelStyle()
+                .padding(.horizontal, Theme.Spacing.xl)
+            content()
+                .padding(.horizontal, Theme.Spacing.xl)
+        }
+    }
+}
+
+// MARK: - Modificador de card contenedora
+
+private extension View {
+    func focusCardContainer() -> some View {
+        self
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                    .fill(Theme.Colors.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous))
+    }
+}
+
+// MARK: - Fila de ajuste
+
+private enum AjustesTrailing {
+    case chevron
+    case nothing
+    case check
+    case badge(String, Color)
+    case toggle(Binding<Bool>)
+}
+
+private struct AjustesRow: View {
+    let symbol: String
+    let tint: Color
+    let title: String
+    let subtitle: String?
+    let trailing: AjustesTrailing
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            IconBadge(symbol: symbol, tint: tint, size: 34)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Theme.Typography.bodyEmphasized)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer()
+
+            trailingView
+        }
+        .padding(.horizontal, Theme.Spacing.lg)
+        .padding(.vertical, Theme.Spacing.md)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var trailingView: some View {
+        switch trailing {
+        case .chevron:
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.Colors.textTertiary)
+        case .check:
+            Image(systemName: "checkmark")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.Colors.novaAccent)
+        case .badge(let text, let color):
+            Text(text.uppercased())
+                .font(Theme.Typography.caption)
+                .tracking(0.6)
+                .foregroundStyle(color)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule()
+                        .fill(color.opacity(0.14))
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(color.opacity(0.35), lineWidth: Theme.Stroke.hairline)
+                        )
+                )
+        case .toggle(let binding):
+            Toggle("", isOn: binding)
+                .labelsHidden()
+                .tint(Theme.Colors.novaAccent)
+        case .nothing:
+            EmptyView()
+        }
+    }
+}
+
+// MARK: - Sheet de personalidad
+
+private struct PersonalitySheet: View {
+    let selected: NovaPersonality
+    let onSelect: (NovaPersonality) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var local: NovaPersonality
+
+    init(selected: NovaPersonality, onSelect: @escaping (NovaPersonality) -> Void) {
+        self.selected = selected
+        self.onSelect = onSelect
+        _local = State(initialValue: selected)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Theme.Colors.background.ignoresSafeArea()
+
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    Text("Elige cómo te habla Nova.")
+                        .font(Theme.Typography.body)
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                        .padding(.horizontal, Theme.Spacing.xl)
+                        .padding(.top, Theme.Spacing.md)
+
+                    VStack(spacing: Theme.Spacing.sm) {
+                        ForEach(NovaPersonality.allCases) { p in
+                            Button {
+                                HapticManager.shared.tick()
+                                local = p
+                                onSelect(p)
+                            } label: {
+                                HStack(spacing: Theme.Spacing.md) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(p.displayName)
+                                            .font(Theme.Typography.bodyEmphasized)
+                                            .foregroundStyle(Theme.Colors.textPrimary)
+                                        Text(p.description)
+                                            .font(Theme.Typography.subhead)
+                                            .foregroundStyle(Theme.Colors.textSecondary)
+                                    }
+                                    Spacer()
+                                    if local == p {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(Theme.Colors.novaAccent)
+                                    }
+                                }
+                                .padding(Theme.Spacing.lg)
+                                .background(
+                                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                                        .fill(Theme.Colors.surface)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                                                .strokeBorder(
+                                                    local == p ? Theme.Colors.novaAccent.opacity(0.50) : Theme.Colors.border,
+                                                    lineWidth: Theme.Stroke.hairline
+                                                )
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, Theme.Spacing.xl)
+
+                    Spacer()
+                }
+            }
+            .navigationTitle("Personalidad de Nova")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Theme.Colors.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Listo") { dismiss() }
+                        .foregroundStyle(Theme.Colors.novaAccent)
+                }
+            }
+        }
     }
 }
 
 #Preview {
     AjustesView()
+        .environmentObject(FocusDataStore())
         .preferredColorScheme(.dark)
 }

@@ -2,7 +2,7 @@ import Foundation
 
 enum NovaRole: String, Codable, Hashable {
     case user
-    case assistant
+    case nova
 }
 
 struct NovaMessage: Identifiable, Codable, Hashable {

@@ -11,54 +11,58 @@ struct MainTabView: View {
     }
 
     @State private var selection: Tab = .miDia
+    private let selectionFeedback = UISelectionFeedbackGenerator()
 
     init() {
         Self.configureTabBarAppearance()
     }
 
     var body: some View {
-        TabView(selection: $selection) {
+        TabView(selection: tabBinding) {
             MiDiaView()
                 .tag(Tab.miDia)
-                .tabItem {
-                    Label("Mi día", systemImage: "sun.max")
-                }
+                .tabItem { Label("Mi día", systemImage: "sun.max") }
 
             CalendarioView()
                 .tag(Tab.calendario)
-                .tabItem {
-                    Label("Calendario", systemImage: "calendar")
-                }
+                .tabItem { Label("Calendario", systemImage: "calendar") }
 
             NovaView()
                 .tag(Tab.nova)
-                .tabItem {
-                    Label("Nova", systemImage: "sparkles")
-                }
+                .tabItem { Label("Nova", systemImage: "sparkles") }
 
             TareasView()
                 .tag(Tab.tareas)
-                .tabItem {
-                    Label("Tareas", systemImage: "checklist")
-                }
+                .tabItem { Label("Tareas", systemImage: "checklist") }
 
             AjustesView()
                 .tag(Tab.ajustes)
-                .tabItem {
-                    Label("Ajustes", systemImage: "gearshape")
-                }
+                .tabItem { Label("Ajustes", systemImage: "gearshape") }
         }
         .tint(Theme.Colors.textPrimary)
+    }
+
+    private var tabBinding: Binding<Tab> {
+        Binding(
+            get: { selection },
+            set: { newValue in
+                if newValue != selection {
+                    HapticManager.shared.tick()
+                }
+                selection = newValue
+            }
+        )
     }
 
     private static func configureTabBarAppearance() {
         let appearance = UITabBarAppearance()
         appearance.configureWithOpaqueBackground()
+        // Fondo (#06080F)
         appearance.backgroundColor = UIColor(red: 0.024, green: 0.031, blue: 0.059, alpha: 1.0)
-        appearance.shadowColor = UIColor.white.withAlphaComponent(0.06)
+        appearance.shadowColor = UIColor.white.withAlphaComponent(0.08)
 
-        let selectedColor = UIColor.white
-        let unselectedColor = UIColor.white.withAlphaComponent(0.42)
+        let selectedColor = UIColor(red: 0.957, green: 0.965, blue: 0.980, alpha: 1.0)
+        let unselectedColor = UIColor.white.withAlphaComponent(0.40)
 
         appearance.stackedLayoutAppearance.selected.iconColor = selectedColor
         appearance.stackedLayoutAppearance.selected.titleTextAttributes = [
@@ -76,68 +80,8 @@ struct MainTabView: View {
     }
 }
 
-// Placeholder reutilizable para tabs todavía no implementadas (Fases 3-8).
-struct ComingSoonView: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-    let phaseLabel: String
-
-    var body: some View {
-        ZStack {
-            Theme.Colors.background.ignoresSafeArea()
-
-            VStack(spacing: Theme.Spacing.xl) {
-                Spacer()
-
-                Image(systemName: icon)
-                    .font(.system(size: 44, weight: .light))
-                    .foregroundStyle(Theme.Colors.accent.opacity(0.85))
-                    .padding(Theme.Spacing.xxl)
-                    .background(
-                        Circle()
-                            .fill(Theme.Colors.surfaceElevated)
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                            )
-                    )
-
-                VStack(spacing: Theme.Spacing.sm) {
-                    Text(title)
-                        .font(Theme.Typography.title)
-                        .foregroundStyle(Theme.Colors.textPrimary)
-                    Text(subtitle)
-                        .font(Theme.Typography.body)
-                        .foregroundStyle(Theme.Colors.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 280)
-                }
-
-                Text(phaseLabel.uppercased())
-                    .font(Theme.Typography.captionEmphasized)
-                    .foregroundStyle(Theme.Colors.accent)
-                    .tracking(1.2)
-                    .padding(.horizontal, Theme.Spacing.md)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(Theme.Colors.surface)
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(Theme.Colors.accent.opacity(0.35), lineWidth: Theme.Stroke.hairline)
-                            )
-                    )
-
-                Spacer()
-                Spacer()
-            }
-            .padding(Theme.Spacing.xl)
-        }
-    }
-}
-
 #Preview {
     MainTabView()
+        .environmentObject(FocusDataStore())
         .preferredColorScheme(.dark)
 }
