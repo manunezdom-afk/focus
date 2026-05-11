@@ -19,6 +19,7 @@ Documento central de auditoría continua del proyecto Focus.
 | 1 | 2026-05-11 | Fase 1 read-only | Inventario de tools, audit de código Swift, schema Supabase desde repo, vercel.json, secrets básicos. Sin instalaciones. Sin cambios de código. |
 | 2 | 2026-05-11 | Audit completo + fixes Swift safe | Audit en 15 áreas. Aplicados 5 fixes seguros: Bundle.main version, lineLimit en cards de evento, DateFormatters cacheados, picker .dark deshabilitado, Nova onAppear simplificado. Sin tocar backend ni Supabase. |
 | 3 | 2026-05-11 | Resolver C1 — persistencia local V1 | Implementado `FocusLocalStore` (UserDefaults + JSON ISO-8601 + keys versionadas `focus.v1.*`). Carga al boot con fallback a demo, guarda en cada mutación. Sección "Datos locales" en Ajustes con confirmationDialogs para reset / clear. App ya recuerda datos entre sesiones. Fix de falso positivo en regex `audit-quick.sh` (word boundary). |
+| 4 | 2026-05-11 | Resolver C2 — AppIcon V1 + iOS readiness mínimo | Generado AppIcon 1024×1024 RGB (sin alpha) programáticamente con Python+PIL. Script reutilizable `scripts/build-ios-appicon.py`. Diseño: gradiente vertical slate-900 → blue-900 → blue-500 + F blanca geométrica. Build sin warnings de AppIcon. Xcode auto-genera variantes 60×60@2x (iPhone) y 76×76@2x~ipad. Preview en `docs/assets/focus-app-icon-preview.png`. |
 
 ## Audit Pass 2 — Findings completos (2026-05-11)
 
@@ -29,7 +30,7 @@ Documento central de auditoría continua del proyecto Focus.
 | ID | Hallazgo | Evidencia | Impacto | Archivo | Solución | Status |
 |---|---|---|---|---|---|---|
 | C1 | Cero persistencia local | `FocusDataStore.init` deja arrays vacíos en memoria | Tareas/eventos creados por el usuario se PIERDEN al matar app | `State/FocusDataStore.swift` | Implementar `UserDefaults` (encode `[FocusTask]`/`[FocusEvent]` como JSON) o `SwiftData` | ✅ **Resuelto V1 audit pass 3** — `FocusLocalStore` con UserDefaults+JSON. Migración a Supabase queda pendiente para sync multi-device. |
-| C2 | AppIcon sin PNG | `Assets.xcassets/AppIcon.appiconset/Contents.json` declara 1024x1024 pero la carpeta no contiene PNG | TestFlight/App Store **rechazan** sin icon. Build Debug funciona pero archive fallaría | `ios-native/Focus/Assets.xcassets/AppIcon.appiconset/` | Agregar PNG 1024×1024 (diseño) + variantes vía `npm run build:ios-icons` (script ya existe en `scripts/`) | 🔜 (requiere asset de diseño) |
+| C2 | AppIcon sin PNG | `Assets.xcassets/AppIcon.appiconset/Contents.json` declara 1024x1024 pero la carpeta no contiene PNG | TestFlight/App Store **rechazan** sin icon. Build Debug funciona pero archive fallaría | `ios-native/Focus/Assets.xcassets/AppIcon.appiconset/` | Agregar PNG 1024×1024 (diseño) + variantes vía `npm run build:ios-icons` (script ya existe en `scripts/`) | ✅ **Resuelto V1 audit pass 4** — `scripts/build-ios-appicon.py` genera 1024×1024 RGB con gradiente slate→cobalt + F blanca. Diseño temporal V1, sustituible por diseño profesional antes de App Store público. |
 | C3 | Nova desconectado del backend real | `NovaResponder` solo keyword matching local | No es Nova de verdad. Bloquea promesa de producto | `State/FocusDataStore.swift` → `NovaResponder` | Implementar `NovaService` con `URLSession` a `/api/focus-assistant` + JWT Supabase | 🔜 (requiere auth Supabase primero) |
 | C4 | Sin auth Supabase | No hay login flow ni sesión en la app nativa | Datos de usuario no se asocian a cuenta; Nova no puede personalizar | `ios-native/Focus/` | Agregar SPM `supabase-swift` + `AuthService` + `LoginView` con OTP | 🔜 (requiere sesión dedicada) |
 
@@ -95,6 +96,70 @@ Documento central de auditoría continua del proyecto Focus.
 5. **M2** ✅ `NovaView.swift`: simplificación de `onAppear` (sin Task wrapper innecesario).
 
 Build verificado en iPhone 16 físico. Cero warnings nuevos. App reinstalada y corriendo.
+
+---
+
+## Audit Pass 4 — C2 cerrado V1 (AppIcon + iOS readiness)
+
+**Problema resuelto**: AppIcon.appiconset solo tenía Contents.json sin PNG real, TestFlight/Archive habrían fallado.
+
+### Implementación
+
+Nuevo script: `scripts/build-ios-appicon.py` (Python 3 + Pillow 11.3).
+- Genera 1024×1024 RGB **sin canal alpha** (regla iOS).
+- Gradiente vertical 3-stop: `#0F172A` (slate-900) → `#1E3A8A` (blue-900) → `#3B82F6` (blue-500).
+- "F" mayúscula blanca construida con 3 rectángulos redondeados (radius 10).
+- Reusable: `python3 scripts/build-ios-appicon.py` regenera en cualquier momento.
+
+Outputs:
+- `ios-native/Focus/Assets.xcassets/AppIcon.appiconset/AppIcon.png` (5KB)
+- `ios-native/Focus/Assets.xcassets/AppIcon.appiconset/Contents.json` actualizado con `filename`
+- `docs/assets/focus-app-icon-preview.png` (preview para review offline)
+
+### Verificación
+
+```
+✓ pixelWidth: 1024
+✓ pixelHeight: 1024
+✓ hasAlpha: no
+✓ format: png
+✓ BUILD SUCCEEDED sin warnings de AppIcon
+✓ CFBundleIcons registrado en Info.plist con CFBundleIconName=AppIcon
+✓ Xcode auto-genera AppIcon60x60@2x.png (iPhone) y AppIcon76x76@2x~ipad.png
+```
+
+### iOS readiness mínimo (chequeo completo)
+
+| Item | Estado |
+|---|---|
+| AppIcon 1024×1024 sin alpha | ✅ |
+| Bundle display name = "Focus" | ✅ |
+| Version 1.0 / build 1 (lee de Info.plist) | ✅ |
+| NSCameraUsageDescription (copy es) | ✅ (texto presente para uso futuro de Nova) |
+| NSMicrophoneUsageDescription (copy es) | ✅ (texto presente para uso futuro de Nova) |
+| Launch screen presente | ✅ (auto-generation `UILaunchScreen_Generation = YES`) |
+| Cero strings "FASE"/"Próximamente" visibles | ✅ |
+| Cero TODO/FIXME en código | ✅ |
+| Cero secrets en código | ✅ |
+
+### Limitaciones / pendientes documentados
+
+1. **Diseño V1 temporal**. La F geométrica funciona y pasa validación de Xcode/App Store, pero antes del lanzamiento público probablemente convenga un diseño profesional con marca refinada. Cuando llegue ese asset, simplemente reemplazar `AppIcon.png` (manteniendo 1024×1024 RGB sin alpha) — sin tocar pbxproj.
+2. **LaunchScreen genérico** (issue B1 pre-existente). Hoy iOS muestra una pantalla en blanco según `UILaunchScreen` auto-generation. Para una experiencia premium, crear `LaunchScreen.storyboard` con el logo de Focus (similar al BootView SwiftUI). Fase polish.
+3. **Permisos pendientes a agregar cuando se implementen features**:
+   - `NSPhotoLibraryUsageDescription` — al agregar photo-to-event de Nova.
+   - `NSCalendarsUsageDescription` — al integrar EventKit (calendario nativo iOS).
+   - `UIBackgroundModes: remote-notification` — al agregar push notifications APNs.
+4. **Privacy Nutrition Labels** (App Store Connect) — pendiente para sesión dedicada cuando subamos a TestFlight Beta (no requeridos para Internal Testing).
+5. **App Store screenshots** (6.7" + 6.1") — pendientes para sesión App Store.
+6. **AccentColor** del Asset Catalog 2 puntos off del Theme.Colors.focusAccent (`#3B82F6` vs `#2563EB`). Cosmético, no bloqueante.
+
+### Siguiente paso recomendado
+
+C4 — **Auth Supabase OTP** (la última crítica que falta para que la app sea "real"). Una vez que el usuario tenga sesión, podemos:
+- Sincronizar `events`/`tasks` locales a Supabase.
+- Conectar Nova al backend real (C3 depende de C4).
+- Migrar a TestFlight Beta con testers reales.
 
 ---
 
