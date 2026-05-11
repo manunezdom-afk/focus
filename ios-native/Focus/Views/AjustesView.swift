@@ -2,9 +2,11 @@ import SwiftUI
 
 struct AjustesView: View {
     @EnvironmentObject private var store: FocusDataStore
+    @EnvironmentObject private var auth: AuthStore
     @State private var showPersonalitySheet = false
     @State private var showResetConfirm = false
     @State private var showClearConfirm = false
+    @State private var showSignOutConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -63,6 +65,18 @@ struct AjustesView: View {
             } message: {
                 Text("Elimina TODOS los datos locales: tareas, eventos, sugerencias, conversación de Nova y ajustes. La próxima vez que abras la app, vuelven los datos de ejemplo.")
             }
+            .confirmationDialog(
+                "Cerrar sesión",
+                isPresented: $showSignOutConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Cerrar sesión", role: .destructive) {
+                    auth.signOut()
+                }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Vas a salir de tu cuenta. Tus datos locales en este iPhone no se borran.")
+            }
         }
     }
 
@@ -82,21 +96,51 @@ struct AjustesView: View {
     private var cuentaSection: some View {
         settingsSection(title: "Cuenta") {
             VStack(spacing: 0) {
-                AjustesRow(
-                    symbol: "person.crop.circle",
-                    tint: Theme.Colors.focusAccent,
-                    title: "manunezdom@gmail.com",
-                    subtitle: store.settings.demoMode ? "Modo demo · sin sesión" : "Sesión activa",
-                    trailing: .chevron
-                )
-                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
-                AjustesRow(
-                    symbol: "key",
-                    tint: Theme.Colors.warning,
-                    title: "Iniciar sesión",
-                    subtitle: "Guarda tus eventos y tareas en la nube.",
-                    trailing: .chevron
-                )
+                if auth.isLoggedIn {
+                    AjustesRow(
+                        symbol: "person.crop.circle.fill",
+                        tint: Theme.Colors.focusAccent,
+                        title: auth.currentEmail ?? "Sesión activa",
+                        subtitle: "Sesión iniciada",
+                        trailing: .badge("Activa", Theme.Colors.success)
+                    )
+                    Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                    Button {
+                        HapticManager.shared.tap()
+                        showSignOutConfirm = true
+                    } label: {
+                        AjustesRow(
+                            symbol: "rectangle.portrait.and.arrow.right",
+                            tint: Theme.Colors.danger,
+                            title: "Cerrar sesión",
+                            subtitle: "Tus datos locales no se borran.",
+                            trailing: .chevron
+                        )
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    AjustesRow(
+                        symbol: "person.crop.circle",
+                        tint: Theme.Colors.textSecondary,
+                        title: "Modo demo",
+                        subtitle: "Sin sesión. Tus datos viven solo en este iPhone.",
+                        trailing: .nothing
+                    )
+                    Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                    Button {
+                        HapticManager.shared.tap()
+                        auth.exitDemo()
+                    } label: {
+                        AjustesRow(
+                            symbol: "key.fill",
+                            tint: Theme.Colors.focusAccent,
+                            title: "Iniciar sesión",
+                            subtitle: "Guardá tus datos en la nube y sincronizá entre dispositivos.",
+                            trailing: .chevron
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .focusCardContainer()
         }

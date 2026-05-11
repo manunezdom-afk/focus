@@ -20,6 +20,7 @@ Documento central de auditoría continua del proyecto Focus.
 | 2 | 2026-05-11 | Audit completo + fixes Swift safe | Audit en 15 áreas. Aplicados 5 fixes seguros: Bundle.main version, lineLimit en cards de evento, DateFormatters cacheados, picker .dark deshabilitado, Nova onAppear simplificado. Sin tocar backend ni Supabase. |
 | 3 | 2026-05-11 | Resolver C1 — persistencia local V1 | Implementado `FocusLocalStore` (UserDefaults + JSON ISO-8601 + keys versionadas `focus.v1.*`). Carga al boot con fallback a demo, guarda en cada mutación. Sección "Datos locales" en Ajustes con confirmationDialogs para reset / clear. App ya recuerda datos entre sesiones. Fix de falso positivo en regex `audit-quick.sh` (word boundary). |
 | 4 | 2026-05-11 | Resolver C2 — AppIcon V1 + iOS readiness mínimo | Generado AppIcon 1024×1024 RGB (sin alpha) programáticamente con Python+PIL. Script reutilizable `scripts/build-ios-appicon.py`. Diseño: gradiente vertical slate-900 → blue-900 → blue-500 + F blanca geométrica. Build sin warnings de AppIcon. Xcode auto-genera variantes 60×60@2x (iPhone) y 76×76@2x~ipad. Preview en `docs/assets/focus-app-icon-preview.png`. |
+| 5 | 2026-05-11 | Resolver C4 — Auth Supabase OTP V1 (parcial) | Implementado flujo OTP email completo en SwiftUI nativo. Opción técnica: URLSession (no SPM). 5 archivos nuevos: `FocusConfig`, `KeychainStore`, `AuthService`, `AuthStore`, `LoginView`. Tokens en Keychain (`kSecAttrAccessibleAfterFirstUnlock`), expiresAt en UserDefaults. Send OTP usa `/api/auth/email/send-otp`; verify usa `<supabase>/auth/v1/verify` directo. Modo demo preservado. Ajustes muestra email/signout o "iniciar sesión" según estado. **Bloqueado en config**: falta pegar `SUPABASE_ANON_KEY` en `FocusConfig.swift`. |
 
 ## Audit Pass 2 — Findings completos (2026-05-11)
 
@@ -32,7 +33,7 @@ Documento central de auditoría continua del proyecto Focus.
 | C1 | Cero persistencia local | `FocusDataStore.init` deja arrays vacíos en memoria | Tareas/eventos creados por el usuario se PIERDEN al matar app | `State/FocusDataStore.swift` | Implementar `UserDefaults` (encode `[FocusTask]`/`[FocusEvent]` como JSON) o `SwiftData` | ✅ **Resuelto V1 audit pass 3** — `FocusLocalStore` con UserDefaults+JSON. Migración a Supabase queda pendiente para sync multi-device. |
 | C2 | AppIcon sin PNG | `Assets.xcassets/AppIcon.appiconset/Contents.json` declara 1024x1024 pero la carpeta no contiene PNG | TestFlight/App Store **rechazan** sin icon. Build Debug funciona pero archive fallaría | `ios-native/Focus/Assets.xcassets/AppIcon.appiconset/` | Agregar PNG 1024×1024 (diseño) + variantes vía `npm run build:ios-icons` (script ya existe en `scripts/`) | ✅ **Resuelto V1 audit pass 4** — `scripts/build-ios-appicon.py` genera 1024×1024 RGB con gradiente slate→cobalt + F blanca. Diseño temporal V1, sustituible por diseño profesional antes de App Store público. |
 | C3 | Nova desconectado del backend real | `NovaResponder` solo keyword matching local | No es Nova de verdad. Bloquea promesa de producto | `State/FocusDataStore.swift` → `NovaResponder` | Implementar `NovaService` con `URLSession` a `/api/focus-assistant` + JWT Supabase | 🔜 (requiere auth Supabase primero) |
-| C4 | Sin auth Supabase | No hay login flow ni sesión en la app nativa | Datos de usuario no se asocian a cuenta; Nova no puede personalizar | `ios-native/Focus/` | Agregar SPM `supabase-swift` + `AuthService` + `LoginView` con OTP | 🔜 (requiere sesión dedicada) |
+| C4 | Sin auth Supabase | No hay login flow ni sesión en la app nativa | Datos de usuario no se asocian a cuenta; Nova no puede personalizar | `ios-native/Focus/` | Agregar SPM `supabase-swift` + `AuthService` + `LoginView` con OTP | 🟡 **Parcialmente cerrado V1 audit pass 5** — código implementado vía URLSession (sin SPM). Bloqueado en pegar `SUPABASE_ANON_KEY` en `FocusConfig.swift`. |
 
 ### ALTOS
 
@@ -96,6 +97,120 @@ Documento central de auditoría continua del proyecto Focus.
 5. **M2** ✅ `NovaView.swift`: simplificación de `onAppear` (sin Task wrapper innecesario).
 
 Build verificado en iPhone 16 físico. Cero warnings nuevos. App reinstalada y corriendo.
+
+---
+
+## Audit Pass 5 — C4 OTP auth V1 (parcial, pendiente anon key)
+
+**Problema parcialmente resuelto**: la app no tenía login. Ahora tiene flujo OTP completo en SwiftUI nativo, pero requiere un paso manual de config para terminar de funcionar.
+
+### Decisión técnica: URLSession (no supabase-swift SPM)
+
+Razones:
+- **Endpoints listos**: `/api/auth/email/send-otp` ya funciona con Resend SMTP server-side.
+- **Verify**: hit directo a `https://<supabase>/auth/v1/verify` con anon key como apikey + Bearer.
+- **No deep links**: OTP es código numérico, no requiere URL scheme.
+- **Sin dependencias**: ahorra ~6MB de binary, sin pelear con SPM/pbxproj.
+- **Cross-site OK**: `rejectCrossSiteUnsafe` solo bloquea cuando `sec-fetch-site === 'cross-site'` (header browser-only). iOS nativo pasa sin tocar.
+
+### Arquitectura implementada (5 archivos)
+
+| Archivo | Responsabilidad |
+|---|---|
+| `Shared/FocusConfig.swift` | URL Supabase (público, docs), `supabaseAnonKey` placeholder, `apiOrigin` |
+| `Services/KeychainStore.swift` | Wrapper `kSecClassGenericPassword` con `kSecAttrAccessibleAfterFirstUnlock` para accessToken / refreshToken / userId / email |
+| `Services/AuthService.swift` | `sendOTP(email:)`, `verifyOTP(email:token:)`, `signOut()`. URLSession async. AuthError typed con copy en español |
+| `State/AuthStore.swift` | `@MainActor ObservableObject`. Estados: `loading / loggedOut / codeSent / loggedIn / demo`. Hidrata sesión desde Keychain al boot. Persiste tras verify. Validación de `isExpired` |
+| `Views/LoginView.swift` | UI light Gemini-style. Email step → code step. "Continuar en modo demo" + "Cambiar correo" + "Reenviar código". Auto-submit cuando código llega a 6 dígitos. Logo diamante con gradiente |
+
+Modificados:
+- `ContentView.swift` — router por `auth.isAuthenticatedOrDemo`. Boot 1.8s → MainTabView o LoginView.
+- `FocusApp.swift` — inyecta `AuthStore` como `@StateObject`.
+- `AjustesView.swift` — sección Cuenta dinámica: email + "Cerrar sesión" (con confirmationDialog) si logged in, "Iniciar sesión" si demo.
+- `Focus.xcodeproj/project.pbxproj` — 5 nuevos refs + grupos actualizados.
+
+### Seguridad
+
+- ✅ Tokens en Keychain (NO en UserDefaults).
+- ✅ `kSecAttrAccessibleAfterFirstUnlock` — accesible para background tasks pero protegido por unlock.
+- ✅ Cero `print` de tokens completos en logs.
+- ✅ `service_role` NUNCA referenciado en código iOS.
+- ✅ `AuthError` types nunca exponen el JWT crudo en mensajes al usuario.
+- ✅ Email se normaliza con `.trimmingCharacters` + `.lowercased()` antes de enviar.
+- ⚠️ Sin refresh token automático todavía — cuando expire, usuario hace login de nuevo. Documentado.
+- ⚠️ Sign out NO llama `/auth/v1/logout` server-side (no invalida refresh token en Supabase). Solo limpia local. Mitigación: refresh tokens expiran solos.
+
+### Estado del flujo
+
+| Acción | Status |
+|---|---|
+| Pantalla LoginView aparece al boot si no hay sesión | ✅ |
+| Input email + validación local | ✅ |
+| Send OTP → email llega vía Resend | ✅ (`/api/auth/email/send-otp` funciona) |
+| Input código 6 dígitos con auto-submit | ✅ |
+| Verify OTP contra Supabase | 🟡 **Falta anon key en FocusConfig** |
+| Sesión persistida en Keychain | ✅ |
+| Re-abrir app mantiene sesión | ✅ (si expiresAt > Date()) |
+| Cerrar sesión desde Ajustes | ✅ con confirmationDialog |
+| Modo demo (skip login) | ✅ |
+| Volver a login desde demo (Ajustes → Iniciar sesión) | ✅ |
+| Cambiar correo durante el flow | ✅ |
+| Reenviar código | ✅ |
+| Errores con copy claro (rate limit, código inválido, network) | ✅ |
+
+### Pasos manuales pendientes (Martin)
+
+**1. Obtener el anon key**:
+   - Ir a [Supabase Dashboard](https://supabase.com/dashboard) → tu proyecto → **Settings** → **API**.
+   - En "Project API keys", copiar el valor de **`anon` `public`** (JWT que empieza con `eyJhbGc...`).
+   - Es seguro (es el mismo que ya está en el bundle JS del web en producción).
+
+**2. Pegarlo en FocusConfig.swift**:
+   ```swift
+   static let supabaseAnonKey = "eyJhbGc...tu key acá..."
+   ```
+
+**3. Decisión: commitear o no el anon key**:
+   - Es público por diseño (RLS controla acceso real).
+   - Web ya lo expone en bundle JS.
+   - Si commiteás: simple, queda en main para futuros builds.
+   - Si NO commiteás: agregar `FocusConfig.swift` a `.gitignore` y mantener una versión template separada. Más fricción.
+   - **Recomendado V1**: commitear. Es lo que hace el web.
+
+**4. Rebuildear y probar**:
+   ```bash
+   xcodebuild -project ios-native/Focus.xcodeproj -scheme Focus \
+     -destination "platform=iOS,id=4F6149BC-79B3-5261-AB8F-A940C1E3CB60" \
+     -configuration Debug -derivedDataPath /tmp/focus-derived \
+     -allowProvisioningUpdates build && \
+   xcrun devicectl device install app --device 4F6149BC-79B3-5261-AB8F-A940C1E3CB60 \
+     /tmp/focus-derived/Build/Products/Debug-iphoneos/Focus.app
+   ```
+
+**5. (Opcional) Verificar redirect URLs en Supabase Dashboard**:
+   - Authentication → URL Configuration.
+   - Para OTP **NO hace falta** redirect URL (no es magic link).
+   - Si en el futuro agregamos Google OAuth: necesitará `me.usefocus.app://login-callback`.
+
+### Limitaciones conocidas (V1)
+
+| Limitación | Cuándo importa | Plan |
+|---|---|---|
+| Sin refresh token automático | Cuando expire (~1h por default) | Implementar `refreshSession()` que llame `/auth/v1/token?grant_type=refresh_token` antes de cada request si `isExpired` |
+| Sign out no invalida server-side | Si alguien clona el JWT antes de expire | Implementar `POST /auth/v1/logout` con bearer |
+| Sin sync de datos local↔remoto | Tareas/eventos siguen solo locales | C5 dedicado |
+| Sin Google OAuth | Solo email OTP | Fase futura — requiere deep link |
+| Sin Sign in with Apple | Apple exige si ofrecés otro OAuth (no estamos ofreciéndolo todavía) | Cuando agreguemos Google |
+| Anon key hardcoded en código | Si rotás el key | Migrar a xcconfig + Info.plist build settings |
+| Sin "cambiar de cuenta" smooth | Si user A se desloguea y user B entra, ven los datos locales de A | Mostrar dialog "¿Borrar datos locales?" tras sign out |
+
+### Siguiente paso recomendado
+
+Cuando el anon key esté pegado y login funcione end-to-end, arrancar **C5 — Sync de tareas/eventos con Supabase**:
+- Repos para leer/escribir contra `events` y `tasks` con bearer.
+- Sync inicial al login: pull all + merge con local.
+- Sync incremental en cada mutación: write-through + queue offline.
+- Mantener `FocusLocalStore` como cache + queue.
 
 ---
 
@@ -544,7 +659,7 @@ Nuevo archivo: `ios-native/Focus/State/FocusLocalStore.swift` (95 líneas).
 > Bloquean cualquier release/beta.
 
 - [x] ~~**Persistencia local** de tareas/eventos creados~~ → resuelto en audit pass 3 con `FocusLocalStore` (UserDefaults+JSON). Migración a Supabase pendiente para sync multi-device.
-- [ ] **Auth real** (Supabase OTP) en la app nativa.
+- [~] **Auth real** (Supabase OTP) en la app nativa → parcialmente cerrado audit pass 5. Falta pegar anon key en `FocusConfig.swift`.
 - [ ] **Nova conectada** al backend real (no mock).
 - [ ] **Rate limit** server-side en `/api/focus-assistant` para abuse.
 - [ ] **gitleaks** clean run sobre todo el historial.

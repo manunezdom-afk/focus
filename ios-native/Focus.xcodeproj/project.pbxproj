@@ -27,6 +27,11 @@
 		FA0000000000000000000082 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000072 /* SharedComponents.swift */; };
 		FA0000000000000000000083 /* NovaInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000073 /* NovaInboxView.swift */; };
 		FA0000000000000000000084 /* FocusLocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000074 /* FocusLocalStore.swift */; };
+		FA0000000000000000000085 /* FocusConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000075 /* FocusConfig.swift */; };
+		FA0000000000000000000086 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000076 /* KeychainStore.swift */; };
+		FA0000000000000000000087 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000077 /* AuthService.swift */; };
+		FA0000000000000000000088 /* AuthStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000078 /* AuthStore.swift */; };
+		FA0000000000000000000089 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000079 /* LoginView.swift */; };
 		FA000000000000000000001A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000015 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -52,6 +57,11 @@
 		FA0000000000000000000072 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
 		FA0000000000000000000073 /* NovaInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaInboxView.swift; sourceTree = "<group>"; };
 		FA0000000000000000000074 /* FocusLocalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusLocalStore.swift; sourceTree = "<group>"; };
+		FA0000000000000000000075 /* FocusConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusConfig.swift; sourceTree = "<group>"; };
+		FA0000000000000000000076 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		FA0000000000000000000077 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		FA0000000000000000000078 /* AuthStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStore.swift; sourceTree = "<group>"; };
+		FA0000000000000000000079 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		FA0000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -101,6 +111,7 @@
 			isa = PBXGroup;
 			children = (
 				FA0000000000000000000013 /* BootView.swift */,
+				FA0000000000000000000079 /* LoginView.swift */,
 				FA0000000000000000000056 /* MainTabView.swift */,
 				FA0000000000000000000057 /* MiDiaView.swift */,
 				FA0000000000000000000058 /* CalendarioView.swift */,
@@ -117,6 +128,7 @@
 			children = (
 				FA0000000000000000000050 /* Theme.swift */,
 				FA0000000000000000000072 /* SharedComponents.swift */,
+				FA0000000000000000000075 /* FocusConfig.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -137,6 +149,8 @@
 			isa = PBXGroup;
 			children = (
 				FA0000000000000000000055 /* DemoDataProvider.swift */,
+				FA0000000000000000000076 /* KeychainStore.swift */,
+				FA0000000000000000000077 /* AuthService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -146,6 +160,7 @@
 			children = (
 				FA0000000000000000000071 /* FocusDataStore.swift */,
 				FA0000000000000000000074 /* FocusLocalStore.swift */,
+				FA0000000000000000000078 /* AuthStore.swift */,
 			);
 			path = State;
 			sourceTree = "<group>";
@@ -224,15 +239,20 @@
 				FA0000000000000000000017 /* ContentView.swift in Sources */,
 				FA0000000000000000000040 /* Theme.swift in Sources */,
 				FA0000000000000000000082 /* SharedComponents.swift in Sources */,
+				FA0000000000000000000085 /* FocusConfig.swift in Sources */,
 				FA0000000000000000000041 /* FocusEvent.swift in Sources */,
 				FA0000000000000000000042 /* FocusTask.swift in Sources */,
 				FA0000000000000000000043 /* Suggestion.swift in Sources */,
 				FA0000000000000000000044 /* NovaMessage.swift in Sources */,
 				FA0000000000000000000080 /* AppSettings.swift in Sources */,
 				FA0000000000000000000045 /* DemoDataProvider.swift in Sources */,
+				FA0000000000000000000086 /* KeychainStore.swift in Sources */,
+				FA0000000000000000000087 /* AuthService.swift in Sources */,
 				FA0000000000000000000081 /* FocusDataStore.swift in Sources */,
 				FA0000000000000000000084 /* FocusLocalStore.swift in Sources */,
+				FA0000000000000000000088 /* AuthStore.swift in Sources */,
 				FA0000000000000000000018 /* BootView.swift in Sources */,
+				FA0000000000000000000089 /* LoginView.swift in Sources */,
 				FA0000000000000000000046 /* MainTabView.swift in Sources */,
 				FA0000000000000000000047 /* MiDiaView.swift in Sources */,
 				FA0000000000000000000048 /* CalendarioView.swift in Sources */,
