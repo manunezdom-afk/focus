@@ -7,6 +7,7 @@ struct LoginView: View {
     @EnvironmentObject private var auth: AuthStore
     @State private var email: String = ""
     @State private var code: String = ""
+    @State private var googleNotice: String? = nil
     @FocusState private var emailFocused: Bool
     @FocusState private var codeFocused: Bool
 
@@ -116,10 +117,104 @@ struct LoginView: View {
                 Task { await submitEmail() }
             }
 
+            orDivider
+
+            googleButton
+
+            if let notice = googleNotice {
+                noticeBanner(notice)
+            }
+
             if let err = auth.lastError {
                 errorBanner(err)
             }
         }
+    }
+
+    // MARK: - "o" divider entre métodos de login
+
+    private var orDivider: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            Rectangle()
+                .fill(Theme.Colors.border)
+                .frame(height: Theme.Stroke.hairline)
+            Text("o")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.textTertiary)
+                .tracking(0.5)
+            Rectangle()
+                .fill(Theme.Colors.border)
+                .frame(height: Theme.Stroke.hairline)
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+    }
+
+    // MARK: - Google sign-in (placeholder visual; OAuth real va en backlog)
+
+    private var googleButton: some View {
+        Button {
+            HapticManager.shared.tap()
+            showGoogleNotice()
+        } label: {
+            HStack(spacing: Theme.Spacing.md) {
+                GoogleGMark(size: 18)
+                Text("Continuar con Google")
+                    .font(Theme.Typography.bodyBold)
+                    .foregroundStyle(Color(red: 0.231, green: 0.247, blue: 0.275))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Theme.Spacing.md + 4)
+            .background(
+                Capsule()
+                    .fill(Color.white)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(
+                                Color(red: 0.85, green: 0.86, blue: 0.88),
+                                lineWidth: 1
+                            )
+                    )
+                    .shadow(
+                        color: Color.black.opacity(0.06),
+                        radius: 8,
+                        x: 0,
+                        y: 2
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func showGoogleNotice() {
+        googleNotice = "Próximamente disponible"
+        Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            await MainActor.run { googleNotice = nil }
+        }
+    }
+
+    private func noticeBanner(_ message: String) -> some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.Colors.focusAccent)
+            Text(message)
+                .font(Theme.Typography.subhead)
+                .foregroundStyle(Theme.Colors.textPrimary)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Theme.Spacing.md + 2)
+        .padding(.vertical, Theme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .fill(Theme.Colors.focusAccentSoft)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                        .strokeBorder(Theme.Colors.focusAccent.opacity(0.25), lineWidth: Theme.Stroke.hairline)
+                )
+        )
+        .transition(.opacity)
     }
 
     private func submitEmail() async {
@@ -308,6 +403,69 @@ struct LoginView: View {
                 )
         )
         .transition(.opacity)
+    }
+}
+
+// MARK: - Google G mark (4 colores oficiales + barra)
+
+/// Aproximación de la "G" multicolor de Google en SwiftUI puro.
+/// Ring de 4 cuadrantes (azul, rojo, amarillo, verde) + barra horizontal azul
+/// que sale del centro hacia la derecha (la barra clásica de la G).
+/// No es 1:1 con el logo oficial — es un placeholder limpio para el botón
+/// "Continuar con Google" hasta que se integre OAuth real.
+private struct GoogleGMark: View {
+    var size: CGFloat = 18
+
+    private static let blue   = Color(red: 66/255,  green: 133/255, blue: 244/255)
+    private static let red    = Color(red: 234/255, green: 67/255,  blue: 53/255)
+    private static let yellow = Color(red: 251/255, green: 188/255, blue: 4/255)
+    private static let green  = Color(red: 52/255,  green: 168/255, blue: 83/255)
+
+    var body: some View {
+        Canvas { ctx, sz in
+            let s = min(sz.width, sz.height)
+            let center = CGPoint(x: sz.width / 2, y: sz.height / 2)
+            let outerR = s * 0.48
+            let thickness = s * 0.21
+            let innerR = outerR - thickness
+
+            func arc(start: Double, end: Double, color: Color) {
+                var p = Path()
+                p.addArc(center: center, radius: outerR,
+                         startAngle: .degrees(start),
+                         endAngle: .degrees(end),
+                         clockwise: false)
+                p.addArc(center: center, radius: innerR,
+                         startAngle: .degrees(end),
+                         endAngle: .degrees(start),
+                         clockwise: true)
+                p.closeSubpath()
+                ctx.fill(p, with: .color(color))
+            }
+
+            // Ring: 4 cuadrantes con los colores de Google, en sentido horario
+            // empezando desde top-left (12 a 3, 3 a 6, etc).
+            arc(start: 180, end: 270, color: Self.blue)   // top-left
+            arc(start: 270, end: 360, color: Self.red)    // top-right
+            arc(start: 0,   end: 90,  color: Self.yellow) // bottom-right
+            arc(start: 90,  end: 180, color: Self.green)  // bottom-left
+
+            // Barra horizontal azul — el "crossbar" de la G, sale del centro
+            // hacia la derecha cubriendo el cuadrante rojo-amarillo.
+            let barWidth = outerR * 1.0
+            let barHeight = thickness
+            let barRect = CGRect(
+                x: center.x - barHeight * 0.05,
+                y: center.y - barHeight / 2,
+                width: barWidth,
+                height: barHeight
+            )
+            ctx.fill(
+                Path(roundedRect: barRect, cornerSize: CGSize(width: 1.5, height: 1.5)),
+                with: .color(Self.blue)
+            )
+        }
+        .frame(width: size, height: size)
     }
 }
 

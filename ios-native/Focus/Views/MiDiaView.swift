@@ -7,7 +7,7 @@ struct MiDiaView: View {
     @State private var pendingNovaText: String? = nil
     @State private var showAllEvents: Bool = false
 
-    private let visibleEventsLimit: Int = 4
+    private let visibleEventsLimit: Int = 3
 
     private var displayEvents: [FocusEvent] {
         if store.hasUserEvents {
@@ -54,13 +54,10 @@ struct MiDiaView: View {
                     focusBar
                         .padding(.horizontal, Theme.Spacing.xl)
 
-                    if store.pendingSuggestions.count > 0 {
-                        NovaPulseCard(count: store.pendingSuggestions.count) {
-                            pendingNovaText = nil
-                            showNova = true
-                        }
-                        .padding(.horizontal, Theme.Spacing.xl)
-                    }
+                    // El banner "Nova tiene N sugerencias" se removió de Mi Día
+                    // para reducir ruido visual. El usuario sigue viendo el
+                    // contador en el ícono de bandeja del header, y puede
+                    // acceder a las sugerencias desde Nova → Bandeja.
 
                     if let next = nextBlock {
                         ProximoBloqueCard(event: next)
@@ -318,59 +315,6 @@ struct MiDiaView: View {
     }
 }
 
-// MARK: - Nova Pulse (banner sutil con sugerencias pendientes)
-
-private struct NovaPulseCard: View {
-    let count: Int
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: {
-            HapticManager.shared.tap()
-            action()
-        }) {
-            HStack(spacing: Theme.Spacing.md) {
-                ZStack {
-                    Circle()
-                        .fill(Theme.Colors.novaGradient)
-                        .frame(width: 36, height: 36)
-                    Image(systemName: "sparkle")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(count == 1
-                         ? "Nova tiene 1 sugerencia para ti"
-                         : "Nova tiene \(count) sugerencias para ti")
-                        .font(Theme.Typography.bodyBold)
-                        .foregroundStyle(Theme.Colors.textPrimary)
-                    Text("Revísalas en la Bandeja")
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.Colors.textSecondary)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.textTertiary)
-            }
-            .padding(Theme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                    .fill(Theme.Colors.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                            .strokeBorder(Theme.Colors.novaAccent.opacity(0.25), lineWidth: Theme.Stroke.hairline)
-                    )
-                    .focusCardShadow()
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - Próximo bloque
 
 private struct ProximoBloqueCard: View {
@@ -394,9 +338,15 @@ private struct ProximoBloqueCard: View {
                     .font(Theme.Typography.title2)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .lineLimit(2)
-                Text(countdownLabel)
-                    .font(Theme.Typography.subhead)
-                    .foregroundStyle(Theme.Colors.textSecondary)
+                // Contador en tiempo real — se refresca cada 30s así "Queda
+                // 1 h 36 min" decrece visiblemente sin esperar al boundary
+                // de minuto. .periodic con 30s es suficiente granularidad para
+                // texto al nivel de minuto.
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(countdownLabel(now: context.date))
+                        .font(Theme.Typography.subhead)
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                }
             }
 
             HStack(spacing: 6) {
@@ -426,21 +376,32 @@ private struct ProximoBloqueCard: View {
         .focusCardShadow()
     }
 
-    private var countdownLabel: String {
-        let now = Date()
+    /// Texto en español neutral mostrando cuánto falta para el evento o
+    /// cuánto queda dentro de él. Formato h + min para que el usuario lea
+    /// directamente la duración real (ej. "Queda 1 h 36 min" en vez de
+    /// "Termina en 96 min").
+    private func countdownLabel(now: Date) -> String {
         if let end = event.endTime, event.startTime <= now && end >= now {
-            let mins = Int(end.timeIntervalSince(now) / 60)
-            return mins > 0 ? "Termina en \(mins) min" : "Termina ahora"
+            let totalMinutes = max(0, Int(end.timeIntervalSince(now) / 60))
+            if totalMinutes == 0 { return "Termina ahora" }
+            return "Queda " + formatDuration(minutes: totalMinutes)
         }
-        let diff = event.startTime.timeIntervalSinceNow
-        if diff <= 0 { return "Empezó ya" }
-        let minutes = Int(diff / 60)
+        let diffSeconds = event.startTime.timeIntervalSince(now)
+        if diffSeconds <= 0 { return "Empezó ya" }
+        let totalMinutes = Int(diffSeconds / 60)
+        if totalMinutes == 0 { return "Empieza en menos de 1 min" }
+        return "Empieza en " + formatDuration(minutes: totalMinutes)
+    }
+
+    private func formatDuration(minutes: Int) -> String {
         if minutes < 60 {
-            return minutes <= 1 ? "Empieza en 1 min" : "Empieza en \(minutes) min"
+            return minutes == 1 ? "1 min" : "\(minutes) min"
         }
-        let hours = minutes / 60
-        let rem = minutes % 60
-        return rem == 0 ? "Empieza en \(hours)h" : "Empieza en \(hours)h \(rem)min"
+        let h = minutes / 60
+        let m = minutes % 60
+        let hLabel = h == 1 ? "1 h" : "\(h) h"
+        if m == 0 { return hLabel }
+        return "\(hLabel) \(m) min"
     }
 }
 

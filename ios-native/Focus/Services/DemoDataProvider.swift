@@ -23,12 +23,13 @@ final class DemoDataProvider {
     // MARK: - Eventos de EJEMPLO para Mi Día
 
     /// Eventos visibles en Mi Día cuando el usuario todavía no creó ninguno.
-    /// Tono: estudiante universitario que también trabaja.
+    /// Tono: estudiante universitario que también trabaja. 3 bloques basta para
+    /// mostrar la estructura sin saturar la pantalla.
     func exampleTodayEvents() -> [FocusEvent] {
         [
             FocusEvent(
                 title: "Clase de Cálculo II",
-                notes: "Aula 304. Tema: derivadas parciales.",
+                notes: "Tema: derivadas parciales.",
                 startTime: date(daysFromToday: 0, hour: 8),
                 endTime: date(daysFromToday: 0, hour: 9, minute: 30),
                 section: .estudio,
@@ -49,26 +50,6 @@ final class DemoDataProvider {
                 endTime: date(daysFromToday: 0, hour: 12, minute: 30),
                 section: .reunion,
                 location: "Meet"
-            ),
-            FocusEvent(
-                title: "Almuerzo con Sofía",
-                startTime: date(daysFromToday: 0, hour: 13),
-                endTime: date(daysFromToday: 0, hour: 14),
-                section: .personal,
-                location: "Café del campus"
-            ),
-            FocusEvent(
-                title: "Estudiar para parcial de Bases de Datos",
-                notes: "Repasar normalización y consultas SQL.",
-                startTime: date(daysFromToday: 0, hour: 15),
-                endTime: date(daysFromToday: 0, hour: 16, minute: 30),
-                section: .estudio
-            ),
-            FocusEvent(
-                title: "Gym",
-                startTime: date(daysFromToday: 0, hour: 18, minute: 30),
-                endTime: date(daysFromToday: 0, hour: 19, minute: 30),
-                section: .descanso
             )
         ]
     }
@@ -175,11 +156,6 @@ final class DemoDataProvider {
                 ]
             ),
             FocusTask(
-                title: "Responder mensaje del profe",
-                priority: .media,
-                category: .hoy
-            ),
-            FocusTask(
                 title: "Preparar presentación cliente Acme",
                 notes: "Slides + speech.",
                 priority: .alta,
@@ -191,8 +167,8 @@ final class DemoDataProvider {
                 ]
             ),
             FocusTask(
-                title: "Comprar materiales para la clase de mañana",
-                priority: .baja,
+                title: "Responder mensaje del profe",
+                priority: .media,
                 category: .hoy
             )
         ]

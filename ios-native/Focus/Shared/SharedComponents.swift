@@ -164,14 +164,12 @@ struct FocusBarInput: View {
 
     var body: some View {
         HStack(spacing: Theme.Spacing.md) {
-            // Sparkle con gradiente Nova
+            // Marca de Nova (rombo) sobre gradiente cobalto.
             ZStack {
                 Circle()
                     .fill(Theme.Colors.novaGradient)
                     .frame(width: 30, height: 30)
-                Image(systemName: "sparkle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                NovaSparkMark(size: 13)
             }
 
             TextField(placeholder, text: $text, axis: .horizontal)
@@ -303,9 +301,8 @@ struct StatePill: View {
 
 struct ExampleBadge: View {
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 9, weight: .semibold))
+        HStack(spacing: 5) {
+            NovaSparkMark(size: 8, fillColor: AnyShapeStyle(Theme.Colors.novaAccent))
             Text("EJEMPLO")
                 .font(Theme.Typography.caption)
                 .tracking(0.9)
@@ -336,9 +333,7 @@ struct ExampleBanner: View {
                 Circle()
                     .fill(Theme.Colors.novaAccentSoft)
                     .frame(width: 36, height: 36)
-                Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.novaAccent)
+                NovaSparkMark(size: 15, fillColor: AnyShapeStyle(Theme.Colors.novaAccent))
             }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -464,6 +459,40 @@ struct FocusLogoMark: View {
     }
 }
 
+// MARK: - Nova spark mark (logo propio de Nova, distinto del sparkle 4-point)
+
+/// Marca de Nova — rombo vertical compacto. Diseñado para diferenciarse del
+/// sparkle 4-point que usan Gemini/Copilot/etc. Lectura: chispa de claridad,
+/// nodo de pensamiento, asistente personal.
+///
+/// Proporción 0.62:1 (W:H) — el rombo es más alto que ancho, lo que aleja la
+/// lectura de "diamante de joya" y la lleva hacia "spark/punto vivo".
+struct NovaSparkMark: View {
+    var size: CGFloat = 16
+    var fillColor: AnyShapeStyle = AnyShapeStyle(Color.white)
+
+    var body: some View {
+        NovaSpark()
+            .fill(fillColor)
+            .frame(width: size * 0.62, height: size)
+    }
+}
+
+/// Rombo vertical (4 vértices). Pensado para usarse fill-rendered.
+struct NovaSpark: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let w = rect.width
+        let h = rect.height
+        path.move(to: CGPoint(x: w / 2, y: 0))
+        path.addLine(to: CGPoint(x: w, y: h / 2))
+        path.addLine(to: CGPoint(x: w / 2, y: h))
+        path.addLine(to: CGPoint(x: 0, y: h / 2))
+        path.closeSubpath()
+        return path
+    }
+}
+
 /// Wordmark "FOCUS" letter-spaced. Para BootView y headers de marca.
 struct FocusWordmark: View {
     var fontSize: CGFloat = 14
@@ -489,10 +518,8 @@ struct PromptChip: View {
             HapticManager.shared.tap()
             action()
         }) {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.novaAccent)
+            HStack(spacing: 8) {
+                NovaSparkMark(size: 11, fillColor: AnyShapeStyle(Theme.Colors.novaAccent))
                 Text(text)
                     .font(Theme.Typography.subheadEmphasized)
                     .foregroundStyle(Theme.Colors.textPrimary)

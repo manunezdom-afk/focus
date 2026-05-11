@@ -191,9 +191,7 @@ struct OnboardingView: View {
                     Circle()
                         .fill(Theme.Colors.novaGradient)
                         .frame(width: 32, height: 32)
-                    Image(systemName: "sparkle")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
+                    NovaSparkMark(size: 14)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Nova tiene 4 sugerencias")
