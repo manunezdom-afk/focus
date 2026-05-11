@@ -48,6 +48,9 @@ struct MiDiaView: View {
                         .padding(.horizontal, Theme.Spacing.xl)
                         .padding(.top, Theme.Spacing.md)
 
+                    focusBrief
+                        .padding(.horizontal, Theme.Spacing.xl)
+
                     focusBar
                         .padding(.horizontal, Theme.Spacing.xl)
 
@@ -150,6 +153,63 @@ struct MiDiaView: View {
                     .foregroundStyle(Theme.Colors.textSecondary)
             )
             .focusCardShadow()
+    }
+
+    // MARK: - Focus Brief (resumen "cockpit" del día)
+
+    /// Stats horizontales: bloques · tareas · sugerencias Nova.
+    /// Da a Mi Día sensación de "centro de control" en lugar de lista de eventos.
+    private var focusBrief: some View {
+        HStack(spacing: 0) {
+            briefStat(
+                value: "\(displayEvents.count)",
+                label: "bloques",
+                tint: Theme.Colors.focusAccent
+            )
+            briefDivider
+            briefStat(
+                value: "\(store.pendingTodayTasks.count)",
+                label: "tareas",
+                tint: Theme.Colors.warning
+            )
+            briefDivider
+            briefStat(
+                value: "\(store.pendingSuggestions.count)",
+                label: "Nova",
+                tint: Theme.Colors.novaAccent
+            )
+        }
+        .padding(.vertical, Theme.Spacing.md)
+        .padding(.horizontal, Theme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(Theme.Colors.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                        .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                )
+                .focusCardShadow()
+        )
+    }
+
+    private func briefStat(value: String, label: String, tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(tint)
+                .monospacedDigit()
+            Text(label.uppercased())
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.textTertiary)
+                .tracking(0.7)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var briefDivider: some View {
+        Rectangle()
+            .fill(Theme.Colors.border)
+            .frame(width: Theme.Stroke.hairline, height: 30)
     }
 
     // MARK: - FocusBar (entry point omnipresente a Nova)

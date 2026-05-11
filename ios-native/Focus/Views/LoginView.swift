@@ -53,9 +53,11 @@ struct LoginView: View {
                 .foregroundStyle(Theme.Colors.textPrimary)
                 .tracking(0.3)
 
-            Text("Organiza tu día con Nova.")
+            Text("Entra a tu sistema de organización personal.")
                 .font(Theme.Typography.body)
                 .foregroundStyle(Theme.Colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
         }
     }
 

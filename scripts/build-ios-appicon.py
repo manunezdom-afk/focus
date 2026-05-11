@@ -2,23 +2,25 @@
 """
 scripts/build-ios-appicon.py
 
-AppIcon V3 de Focus — sol/medalla blanca de 8 pétalos REDONDEADOS sobre
-gradiente azul vivo. Match más cercano al logo original del usuario.
+AppIcon V4 de Focus — F geométrica blanca + sparkle accent en cobalto.
+Filosofía: estructura, sistema, inteligencia. NO floral.
 
-V3 vs V2: pétalos como capsules rotadas (no polígono star puntiagudo).
-Más premium, menos "shuriken".
+V4 vs V3:
+- V3 era 8 pétalos redondeados → parecía margarita/flor (mal para Focus).
+- V4 es F geométrica + sparkle → brand letter + AI/Nova accent.
+  Tipografía bold custom, rectángulos redondeados, sparkle 4-point.
 
-Reglas iOS / App Store:
-- 1024×1024 px exacto · RGB sin canal alpha · sin transparencia.
+Identidad reflejada:
+- F → Focus (la marca, recognizable, premium).
+- Sparkle → Nova (asistente IA, integrado al símbolo).
+- Cobalt → familia de productividad (vs Kairos violet, Spark orange).
 
-Output:
-- ios-native/Focus/Assets.xcassets/AppIcon.appiconset/AppIcon.png
-- docs/assets/focus-app-icon-preview.png
+Reglas iOS: 1024×1024 RGB sin alpha · sin transparencia.
 
 Uso: python3 scripts/build-ios-appicon.py
 """
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 from pathlib import Path
 import json
 import math
@@ -31,12 +33,12 @@ OUT_CONTENTS = APPICON_DIR / "Contents.json"
 OUT_PREVIEW = REPO / "docs/assets/focus-app-icon-preview.png"
 
 SIZE = 1024
-SS = 4  # supersampling para antialiasing limpio
+SS = 4
 
-C_TOP = (46, 79, 232)       # #2E4FE8 azul vivo (top)
-C_BOTTOM = (30, 58, 138)    # #1E3A8A azul profundo (bottom)
+# Paleta cobalt — Focus identity (azul profundo + cobalto vivo).
+C_TOP = (46, 79, 232)        # #2E4FE8 cobalto vivo
+C_BOTTOM = (24, 47, 130)     # #182F82 azul profundo
 WHITE = (255, 255, 255)
-DOT = (46, 79, 232)         # mismo azul que el top — donut effect
 
 
 def lerp(a, b, t):
@@ -44,7 +46,6 @@ def lerp(a, b, t):
 
 
 def build_gradient(size: int) -> Image.Image:
-    """Gradiente vertical lineal C_TOP → C_BOTTOM."""
     img = Image.new("RGB", (size, size), C_TOP)
     draw = ImageDraw.Draw(img)
     for y in range(size):
@@ -53,56 +54,73 @@ def build_gradient(size: int) -> Image.Image:
     return img
 
 
-def build_petal_layer(size: int) -> Image.Image:
-    """Genera UN pétalo (capsule blanca redondeada) arriba del centro.
-    Después se rota 8× y se compone para formar el sol/medalla.
-    Proporciones: ancho relativamente grande, alto moderado (no flor larga).
+def draw_focus_F(draw: ImageDraw.ImageDraw, size: int) -> None:
+    """Dibuja una F geométrica blanca centrada, con esquinas redondeadas.
+    Construida con 3 rectángulos: stem vertical, top bar, middle bar.
     """
-    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
+    # Coordenadas relativas al canvas size (para mantenerse proporcional al SS).
+    # F bounding box: aprox 41% del canvas centrado (con leve shift left para
+    # dejar espacio al sparkle arriba-derecha).
+    stem_x = size * 0.275
+    stem_top = size * 0.205
+    stem_w = size * 0.125
+    stem_h = size * 0.59
+    radius = size * 0.012  # esquinas levemente redondeadas, no muy pill-shape
 
-    # Pétalo: más ancho que alto para look "rayo de sol" no "flor margarita".
-    petal_w = size * 0.16
-    petal_h = size * 0.22
-    cx = size / 2
-    # Centro del pétalo más cerca del centro del icono → ray se ve "saliendo" del disco.
-    offset_from_center = size * 0.21
-    petal_cy = size / 2 - offset_from_center
-    draw.ellipse([
-        cx - petal_w / 2,
-        petal_cy - petal_h / 2,
-        cx + petal_w / 2,
-        petal_cy + petal_h / 2,
-    ], fill=(*WHITE, 255))
-    return layer
+    # Stem vertical
+    draw.rounded_rectangle(
+        [stem_x, stem_top, stem_x + stem_w, stem_top + stem_h],
+        radius=radius,
+        fill=WHITE,
+    )
+
+    # Top horizontal bar
+    top_bar_w = size * 0.44
+    top_bar_h = size * 0.125
+    draw.rounded_rectangle(
+        [stem_x, stem_top, stem_x + top_bar_w, stem_top + top_bar_h],
+        radius=radius,
+        fill=WHITE,
+    )
+
+    # Middle horizontal bar (más corta que el top)
+    mid_bar_w = size * 0.35
+    mid_bar_h = size * 0.105
+    mid_top = stem_top + size * 0.235
+    draw.rounded_rectangle(
+        [stem_x, mid_top, stem_x + mid_bar_w, mid_top + mid_bar_h],
+        radius=radius,
+        fill=WHITE,
+    )
+
+
+def draw_sparkle(draw: ImageDraw.ImageDraw, size: int) -> None:
+    """Sparkle 4-point star blanco, posicionado arriba-derecha del F.
+    Representa Nova / IA integrada al símbolo de Focus.
+    """
+    cx = size * 0.78
+    cy = size * 0.20
+    outer_r = size * 0.075
+    inner_r = size * 0.024
+
+    # 8 vértices: alternando outer (4 cardinal) e inner (4 diagonal).
+    pts = []
+    for i in range(8):
+        angle = i * math.pi / 4 - math.pi / 2
+        r = outer_r if i % 2 == 0 else inner_r
+        pts.append((
+            cx + math.cos(angle) * r,
+            cy + math.sin(angle) * r,
+        ))
+    draw.polygon(pts, fill=WHITE)
 
 
 def main() -> int:
     big = SIZE * SS
-
-    # 1. Background con gradiente.
-    img = build_gradient(big).convert("RGBA")
-
-    # 2. Pétalos: dibujamos 1 pétalo, rotamos y componemos 8 veces.
-    base_petal = build_petal_layer(big)
-    for i in range(8):
-        angle_deg = i * 45.0
-        # PIL rotate: positive = counterclockwise. Usamos -angle para clockwise.
-        rotated = base_petal.rotate(-angle_deg, resample=Image.BICUBIC, expand=False)
-        img = Image.alpha_composite(img, rotated)
-
-    # 3. Disco central blanco más grande — los pétalos "salen" de él.
+    img = build_gradient(big)
     draw = ImageDraw.Draw(img)
-    cx, cy = big / 2, big / 2
-    disk_r = big * 0.19
-    draw.ellipse([cx - disk_r, cy - disk_r, cx + disk_r, cy + disk_r], fill=(*WHITE, 255))
-
-    # 4. Punto azul interior — donut effect.
-    dot_r = big * 0.085
-    draw.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], fill=(*DOT, 255))
-
-    # 5. Downscale a 1024×1024 con Lanczos para AA limpio. Flatten a RGB.
-    img = img.convert("RGB")
+    draw_focus_F(draw, big)
+    draw_sparkle(draw, big)
     img = img.resize((SIZE, SIZE), Image.LANCZOS)
 
     assert img.size == (SIZE, SIZE) and img.mode == "RGB"
@@ -112,7 +130,6 @@ def main() -> int:
     img.save(OUT_APPICON, "PNG", optimize=True)
     img.save(OUT_PREVIEW, "PNG", optimize=True)
 
-    # Update Contents.json (idempotente).
     contents = {
         "images": [{
             "filename": "AppIcon.png",
@@ -126,7 +143,7 @@ def main() -> int:
         json.dump(contents, f, indent=2)
         f.write("\n")
 
-    print(f"✓ AppIcon V3 (rounded petals): {OUT_APPICON.relative_to(REPO)}")
+    print(f"✓ AppIcon V4 (F + sparkle): {OUT_APPICON.relative_to(REPO)}")
     print(f"  {SIZE}×{SIZE} RGB · sin alpha · {OUT_APPICON.stat().st_size // 1024}KB")
     print(f"✓ Preview: {OUT_PREVIEW.relative_to(REPO)}")
     return 0
