@@ -2,13 +2,19 @@ import SwiftUI
 
 struct MiDiaView: View {
     @EnvironmentObject private var store: FocusDataStore
+    @EnvironmentObject private var nav: NavigationCoordinator
     @State private var focusBarText: String = ""
-    @State private var showNova: Bool = false
-    @State private var pendingNovaText: String? = nil
     @State private var showAllEvents: Bool = false
 
+    /// 3 bloques visibles por defecto — más allá de eso es ruido.
     private let visibleEventsLimit: Int = 3
 
+    /// 3 tareas pendientes visibles en Mi Día — el resto vive en Nova.
+    private let visiblePendingTasksLimit: Int = 3
+
+    // MARK: - Source of truth
+
+    /// Eventos visibles: del usuario si tiene, demo si no.
     private var displayEvents: [FocusEvent] {
         if store.hasUserEvents {
             return store.todayEvents()
@@ -16,8 +22,12 @@ struct MiDiaView: View {
         return DemoDataProvider.shared.exampleTodayEvents()
     }
 
-    private var showingExamples: Bool {
-        !store.hasUserEvents
+    /// Pendientes visibles: del usuario si tiene, demo si no.
+    private var displayPendingTasks: [FocusTask] {
+        if store.hasUserTasks {
+            return store.pendingTodayTasks
+        }
+        return DemoDataProvider.shared.exampleTodayTasks().filter { !$0.done }
     }
 
     private var nextBlock: FocusEvent? {
@@ -29,8 +39,7 @@ struct MiDiaView: View {
         ZStack {
             Theme.Colors.background.ignoresSafeArea()
 
-            // Hero zone: gradiente azul muy sutil detrás del header + FocusBar.
-            // Diferencia visualmente Mi Día de las otras tabs.
+            // Hero zone: gradiente sutil detrás del header — identidad de Mi Día.
             VStack(spacing: 0) {
                 LinearGradient(
                     colors: [
@@ -40,7 +49,7 @@ struct MiDiaView: View {
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: 280)
+                .frame(height: 300)
                 Spacer()
             }
             .ignoresSafeArea()
@@ -54,11 +63,6 @@ struct MiDiaView: View {
                     focusBar
                         .padding(.horizontal, Theme.Spacing.xl)
 
-                    // El banner "Nova tiene N sugerencias" se removió de Mi Día
-                    // para reducir ruido visual. El usuario sigue viendo el
-                    // contador en el ícono de bandeja del header, y puede
-                    // acceder a las sugerencias desde Nova → Bandeja.
-
                     if let next = nextBlock {
                         ProximoBloqueCard(event: next)
                             .padding(.horizontal, Theme.Spacing.xl)
@@ -66,51 +70,37 @@ struct MiDiaView: View {
 
                     timelineSection
 
-                    if showingExamples {
-                        emptyDayPromptsSection
-                    } else {
-                        pendingTasksSection
-                    }
+                    pendingTasksSection
 
                     Spacer(minLength: Theme.Spacing.bottomBarSafety)
                 }
                 .padding(.top, Theme.Spacing.sm)
             }
         }
-        .sheet(isPresented: $showNova) {
-            NovaView(initialPrompt: pendingNovaText)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-                .onDisappear { pendingNovaText = nil }
-        }
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(todayFormatted)
-                    .font(Theme.Typography.subhead)
-                    .foregroundStyle(Theme.Colors.textTertiary)
-                    .tracking(0.3)
-                Text("Mi Día")
-                    .font(Theme.Typography.title)
-                    .foregroundStyle(Theme.Colors.textPrimary)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center) {
+                FocusBrandRow()
+                Spacer()
+                HStack(spacing: Theme.Spacing.sm) {
+                    bandejaButton
+                    profileButton
+                }
             }
-            Spacer()
-            HStack(spacing: Theme.Spacing.sm) {
-                bandejaButton
-                profileButton
-            }
+            Text("Mi Día")
+                .font(Theme.Typography.title)
+                .foregroundStyle(Theme.Colors.textPrimary)
         }
     }
 
     private var bandejaButton: some View {
         Button {
             HapticManager.shared.tap()
-            pendingNovaText = nil
-            showNova = true
+            nav.openNova(segment: .bandeja)
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "tray.full")
@@ -135,6 +125,7 @@ struct MiDiaView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Bandeja de Nova")
     }
 
     private var profileButton: some View {
@@ -161,14 +152,11 @@ struct MiDiaView: View {
             onSubmit: {
                 let text = focusBarText
                 focusBarText = ""
-                pendingNovaText = text
-                showNova = true
+                nav.openNova(prompt: text)
             },
             onTap: {
-                // Tap simple sin texto = abre Nova vacío
                 if focusBarText.isEmpty {
-                    pendingNovaText = nil
-                    showNova = true
+                    nav.openNova(segment: .bandeja)
                 }
             },
             onMic: { HapticManager.shared.tap() }
@@ -199,10 +187,7 @@ struct MiDiaView: View {
                     title: "Tu día está libre",
                     message: "Agrega un bloque o pídele a Nova que lo organice.",
                     actionLabel: "Hablar con Nova",
-                    action: {
-                        pendingNovaText = nil
-                        showNova = true
-                    }
+                    action: { nav.openNova() }
                 )
                 .frame(minHeight: 260)
                 .padding(.horizontal, Theme.Spacing.xl)
@@ -248,42 +233,29 @@ struct MiDiaView: View {
         }
     }
 
-    // MARK: - Prompts cuando no hay datos del usuario
+    // MARK: - Pendientes de hoy (compacto)
 
-    private var emptyDayPromptsSection: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            SectionHeader(title: "Pídele a Nova")
-                .padding(.horizontal, Theme.Spacing.xl)
-
-            VStack(spacing: Theme.Spacing.sm) {
-                ForEach(DemoDataProvider.shared.emptyDayPrompts(), id: \.self) { prompt in
-                    PromptChip(text: prompt) {
-                        pendingNovaText = prompt
-                        showNova = true
-                    }
-                }
-            }
-            .padding(.horizontal, Theme.Spacing.xl)
-        }
-    }
-
-    // MARK: - Pendientes hoy (cuando el usuario tiene datos)
-
+    /// Sección compacta — máximo 3 pendientes. Si hay más o el usuario quiere
+    /// la lista completa, se delega a Nova → Acciones → Todas las tareas.
+    @ViewBuilder
     private var pendingTasksSection: some View {
-        let pending = store.pendingTodayTasks
-        return VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+        let pending = displayPendingTasks
+        let shown = Array(pending.prefix(visiblePendingTasksLimit))
+        let extra = pending.count - shown.count
+
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             HStack(alignment: .firstTextBaseline) {
-                Text("PARA HOY")
+                Text("PENDIENTES DE HOY")
                     .sectionLabelStyle()
                 Spacer()
-                Text(pending.isEmpty ? "Todo listo" : "\(pending.count) pendientes")
+                Text(pendingHeaderTrailing(count: pending.count))
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.textTertiary)
                     .tracking(0.3)
             }
             .padding(.horizontal, Theme.Spacing.xl)
 
-            if pending.isEmpty {
+            if shown.isEmpty {
                 HStack(spacing: Theme.Spacing.md) {
                     Image(systemName: "checkmark.seal.fill")
                         .font(.system(size: 18))
@@ -297,25 +269,48 @@ struct MiDiaView: View {
                 .padding(.horizontal, Theme.Spacing.xl)
             } else {
                 VStack(spacing: Theme.Spacing.sm) {
-                    ForEach(pending) { task in
+                    ForEach(shown) { task in
                         MiDiaTaskRow(task: task) {
                             store.toggleTask(task.id)
                         }
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
+
+                if extra > 0 {
+                    Button {
+                        HapticManager.shared.tap()
+                        nav.openNova(segment: .acciones)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(extra == 1
+                                 ? "Ver 1 más en Nova"
+                                 : "Ver \(extra) más en Nova")
+                                .font(Theme.Typography.subheadEmphasized)
+                                .foregroundStyle(Theme.Colors.focusAccent)
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.focusAccent)
+                        }
+                        .padding(.vertical, Theme.Spacing.md - 2)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.top, Theme.Spacing.xs)
+                }
             }
         }
     }
 
-    // MARK: - Formato
-
-    private var todayFormatted: String {
-        DateFormatters.capitalizeFirst(DateFormatters.weekdayDayMonth.string(from: Date()))
+    private func pendingHeaderTrailing(count: Int) -> String {
+        if count == 0 { return "Todo listo" }
+        if count == 1 { return "1 pendiente" }
+        return "\(count) pendientes"
     }
 }
 
-// MARK: - Próximo bloque
+// MARK: - Próximo bloque (con contador tiempo real azul)
 
 private struct ProximoBloqueCard: View {
     let event: FocusEvent
@@ -338,14 +333,15 @@ private struct ProximoBloqueCard: View {
                     .font(Theme.Typography.title2)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .lineLimit(2)
-                // Contador en tiempo real — se refresca cada 30s así "Queda
-                // 1 h 36 min" decrece visiblemente sin esperar al boundary
-                // de minuto. .periodic con 30s es suficiente granularidad para
-                // texto al nivel de minuto.
-                TimelineView(.periodic(from: .now, by: 30)) { context in
+                // Contador en tiempo real (segundo a segundo, en azul) —
+                // el usuario ve exactamente cuánto falta sin que parezca un
+                // texto estático.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(countdownLabel(now: context.date))
-                        .font(Theme.Typography.subhead)
-                        .foregroundStyle(Theme.Colors.textSecondary)
+                        .font(Theme.Typography.subheadEmphasized)
+                        .foregroundStyle(Theme.Colors.focusAccent)
+                        .monospacedDigit()
+                        .contentTransition(.numericText(countsDown: true))
                 }
             }
 
@@ -376,32 +372,28 @@ private struct ProximoBloqueCard: View {
         .focusCardShadow()
     }
 
-    /// Texto en español neutral mostrando cuánto falta para el evento o
-    /// cuánto queda dentro de él. Formato h + min para que el usuario lea
-    /// directamente la duración real (ej. "Queda 1 h 36 min" en vez de
-    /// "Termina en 96 min").
+    /// Texto del contador con h + min + s. Si hay >0 horas/minutos, los
+    /// muestra; los segundos siempre se muestran para reforzar el tick.
     private func countdownLabel(now: Date) -> String {
         if let end = event.endTime, event.startTime <= now && end >= now {
-            let totalMinutes = max(0, Int(end.timeIntervalSince(now) / 60))
-            if totalMinutes == 0 { return "Termina ahora" }
-            return "Queda " + formatDuration(minutes: totalMinutes)
+            let secs = max(0, Int(end.timeIntervalSince(now)))
+            if secs == 0 { return "Termina ahora" }
+            return "Queda " + formatHMS(seconds: secs)
         }
         let diffSeconds = event.startTime.timeIntervalSince(now)
         if diffSeconds <= 0 { return "Empezó ya" }
-        let totalMinutes = Int(diffSeconds / 60)
-        if totalMinutes == 0 { return "Empieza en menos de 1 min" }
-        return "Empieza en " + formatDuration(minutes: totalMinutes)
+        return "Empieza en " + formatHMS(seconds: Int(diffSeconds))
     }
 
-    private func formatDuration(minutes: Int) -> String {
-        if minutes < 60 {
-            return minutes == 1 ? "1 min" : "\(minutes) min"
-        }
-        let h = minutes / 60
-        let m = minutes % 60
-        let hLabel = h == 1 ? "1 h" : "\(h) h"
-        if m == 0 { return hLabel }
-        return "\(hLabel) \(m) min"
+    private func formatHMS(seconds: Int) -> String {
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        let s = seconds % 60
+        var parts: [String] = []
+        if h > 0 { parts.append("\(h) h") }
+        if m > 0 || h > 0 { parts.append("\(m) min") }
+        parts.append("\(s) s")
+        return parts.joined(separator: " ")
     }
 }
 
@@ -413,50 +405,53 @@ private struct TimelineEventRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
-            Text(timeLabel)
-                .font(Theme.Typography.timestamp)
-                .foregroundStyle(Theme.Colors.textSecondary)
-                .frame(width: 52, alignment: .trailing)
-                .padding(.top, Theme.Spacing.md)
+            // Hora a la izquierda
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(event.timeRangeLabel.components(separatedBy: " ").first ?? "")
+                    .font(Theme.Typography.captionEmphasized)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                if let dur = event.durationLabel {
+                    Text(dur)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                }
+            }
+            .frame(width: 50, alignment: .trailing)
 
+            // Bullet + línea
             VStack(spacing: 0) {
-                Circle()
-                    .fill(event.section.color)
-                    .frame(width: 10, height: 10)
-                    .padding(.top, Theme.Spacing.md + 2)
+                ZStack {
+                    Circle()
+                        .stroke(event.section.color.opacity(0.5), lineWidth: 1.5)
+                        .frame(width: 10, height: 10)
+                    Circle()
+                        .fill(event.section.color)
+                        .frame(width: 5, height: 5)
+                }
                 if !isLast {
                     Rectangle()
                         .fill(Theme.Colors.border)
                         .frame(width: 1)
-                        .frame(maxHeight: .infinity)
+                        .padding(.top, 2)
                 }
             }
-            .frame(width: 12)
 
-            card
-                .padding(.bottom, Theme.Spacing.sm)
-        }
-    }
-
-    private var card: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Rectangle()
-                .fill(event.section.color)
-                .frame(width: 3)
-
-            VStack(alignment: .leading, spacing: 3) {
+            // Card del evento
+            VStack(alignment: .leading, spacing: 4) {
                 Text(event.title)
                     .font(Theme.Typography.bodyEmphasized)
                     .foregroundStyle(Theme.Colors.textPrimary)
-                    .multilineTextAlignment(.leading)
                     .lineLimit(2)
 
-                // Solo ubicación si hay. Notas/descripción quedan para detalle.
-                if let loc = event.location, !loc.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.Colors.textTertiary)
+                HStack(spacing: 4) {
+                    Image(systemName: event.section.symbol)
+                        .font(.system(size: 10))
+                        .foregroundStyle(event.section.color)
+                    Text(event.section.displayName)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                    if let loc = event.location, !loc.isEmpty {
+                        Text("·").foregroundStyle(Theme.Colors.textQuaternary)
                         Text(loc)
                             .font(Theme.Typography.caption)
                             .foregroundStyle(Theme.Colors.textTertiary)
@@ -464,28 +459,23 @@ private struct TimelineEventRow: View {
                     }
                 }
             }
-            .padding(.vertical, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.sm)
             .padding(.horizontal, Theme.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                    .fill(Theme.Colors.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                    )
+            )
+            .padding(.bottom, isLast ? 0 : Theme.Spacing.sm)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                .fill(Theme.Colors.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
-        .focusCardShadow()
-    }
-
-    private var timeLabel: String {
-        DateFormatters.hourMinute.string(from: event.startTime)
     }
 }
 
-// MARK: - Mi Día task row
+// MARK: - Task row compacto (sin subtareas inline)
 
 private struct MiDiaTaskRow: View {
     let task: FocusTask
@@ -498,46 +488,41 @@ private struct MiDiaTaskRow: View {
         }) {
             HStack(spacing: Theme.Spacing.md) {
                 Image(systemName: task.done ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22, weight: .regular))
+                    .font(.system(size: 20))
                     .foregroundStyle(task.done ? Theme.Colors.success : Theme.Colors.textTertiary)
-                    .animation(.easeInOut(duration: 0.18), value: task.done)
 
-                VStack(alignment: .leading, spacing: 2) {
+                Circle()
+                    .fill(task.priority.color)
+                    .frame(width: 6, height: 6)
+                    .opacity(task.done ? 0.4 : 1)
+
+                VStack(alignment: .leading, spacing: 1) {
                     Text(task.title)
-                        .font(Theme.Typography.body)
+                        .font(Theme.Typography.bodyEmphasized)
                         .foregroundStyle(task.done ? Theme.Colors.textTertiary : Theme.Colors.textPrimary)
                         .strikethrough(task.done, color: Theme.Colors.textTertiary)
                         .multilineTextAlignment(.leading)
-
-                    HStack(spacing: 6) {
-                        StatePill(label: task.priority.label, tint: task.priority.color)
-                        if task.hasSubtasks {
-                            Text("\(task.completedSubtaskCount)/\(task.subtasks.count) subtareas")
-                                .font(Theme.Typography.caption)
-                                .foregroundStyle(Theme.Colors.textTertiary)
-                        }
+                    if task.hasSubtasks {
+                        Text("\(task.completedSubtaskCount)/\(task.subtasks.count) subtareas")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.textTertiary)
                     }
                 }
 
                 Spacer()
             }
             .padding(.horizontal, Theme.Spacing.lg)
-            .padding(.vertical, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.sm + 2)
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                     .fill(Theme.Colors.surface)
                     .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                             .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
                     )
+                    .focusCardShadow()
             )
-            .focusCardShadow()
         }
         .buttonStyle(.plain)
     }
-}
-
-#Preview {
-    MiDiaView()
-        .environmentObject(FocusDataStore())
 }

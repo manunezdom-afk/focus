@@ -2,11 +2,15 @@ import SwiftUI
 import Combine
 import Foundation
 
-/// Quick action que el usuario puede tocar en Nova.
+/// Quick action que el usuario puede tocar en la pestaña Acciones de Nova.
+/// 6 acciones cubren el ciclo del día: planificar, agregar, revisar, cerrar.
 enum NovaQuickAction: String, CaseIterable, Identifiable {
     case organizar
     case crearTarea
+    case crearEvento
     case revisarPendientes
+    case prepararManana
+    case cerrarDia
 
     var id: String { rawValue }
 
@@ -14,15 +18,32 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
         switch self {
         case .organizar: return "Organizar mi día"
         case .crearTarea: return "Crear tarea"
+        case .crearEvento: return "Crear evento"
         case .revisarPendientes: return "Revisar pendientes"
+        case .prepararManana: return "Preparar mañana"
+        case .cerrarDia: return "Cerrar el día"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .organizar:         return "Acomodo bloques de hoy con tus prioridades."
+        case .crearTarea:        return "Anoto una tarea con prioridad y categoría."
+        case .crearEvento:       return "Agendo un bloque o reunión en tu día."
+        case .revisarPendientes: return "Repaso lo que quedó sin horario o decisión."
+        case .prepararManana:    return "Reviso lo que viene y dejo el día armado."
+        case .cerrarDia:         return "Reviso lo hecho y limpio lo que no resolviste."
         }
     }
 
     var symbol: String {
         switch self {
-        case .organizar: return "sparkles"
-        case .crearTarea: return "checkmark.circle"
+        case .organizar:         return "sparkles"
+        case .crearTarea:        return "checkmark.circle"
+        case .crearEvento:       return "calendar.badge.plus"
         case .revisarPendientes: return "tray.full"
+        case .prepararManana:    return "moon.stars"
+        case .cerrarDia:         return "checkmark.seal"
         }
     }
 
@@ -34,8 +55,14 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
             return "Listo. Dejé tu mañana para foco profundo (10:00–11:30), una pausa real al mediodía y la sesión de estudio para Bases de Datos por la tarde. Te aviso cuando empiece cada bloque."
         case .crearTarea:
             return "Dime qué tarea quieres crear. Le pongo prioridad y categoría según el contexto. Ej: \"Entregar TP de Programación el viernes\"."
+        case .crearEvento:
+            return "Cuéntame qué evento, día y hora. Si quieres, también te bloqueo 10 minutos antes para prepararte."
         case .revisarPendientes:
             return "Tus 3 pendientes de mayor prioridad: repasar fórmulas del parcial, preparar la presentación de Acme y responder al profe. ¿Las acomodo en bloques de hoy o las muevo a mañana?"
+        case .prepararManana:
+            return "Mañana tienes clase a las 8 y tu jefa te marcó review a las 12. Te dejo un bloque de foco entre 10 y 12, y reservo 15 min antes para prepararte. ¿Te parece?"
+        case .cerrarDia:
+            return "Hoy completaste 3 tareas y avanzaste 2 bloques de foco. Quedaron 2 sin terminar. ¿Las paso a mañana o las dejo sin horario en pendientes?"
         }
     }
 }

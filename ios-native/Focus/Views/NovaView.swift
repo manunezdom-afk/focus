@@ -1,22 +1,19 @@
 import SwiftUI
 
-/// Nova como sheet (no es tab). Se abre desde el FocusBar de Mi Día.
-/// Tiene dos segmentos: Conversación y Bandeja.
+/// Nova como tab principal. Tres segmentos internos:
+/// - **Bandeja** (default): cards de decisiones de Nova con Aprobar/Posponer/Descartar.
+/// - **Acciones**: 6 quick actions para arrancar conversaciones útiles (organizar
+///   día, crear tarea, revisar pendientes, etc).
+/// - **Chat**: conversación libre con Nova como segunda capa.
+///
+/// Por diseño, Nova NO es solo un chat: aterrizar en Bandeja deja al usuario
+/// frente a decisiones concretas, no frente a un cursor parpadeando.
 struct NovaView: View {
-    enum Segment: Hashable { case chat, bandeja }
-
     @EnvironmentObject private var store: FocusDataStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var segment: Segment = .chat
+    @EnvironmentObject private var nav: NavigationCoordinator
+
     @State private var draft: String = ""
-    @State private var didAutoSubmit: Bool = false
     @FocusState private var inputFocused: Bool
-
-    let initialPrompt: String?
-
-    init(initialPrompt: String? = nil) {
-        self.initialPrompt = initialPrompt
-    }
 
     var body: some View {
         NavigationStack {
@@ -24,68 +21,67 @@ struct NovaView: View {
                 Theme.Colors.background.ignoresSafeArea()
 
                 VStack(spacing: 0) {
+                    branding
+                        .padding(.horizontal, Theme.Spacing.xl)
+                        .padding(.top, Theme.Spacing.md)
+
                     segmentedControl
                         .padding(.horizontal, Theme.Spacing.xl)
-                        .padding(.top, Theme.Spacing.sm)
+                        .padding(.top, Theme.Spacing.lg)
                         .padding(.bottom, Theme.Spacing.md)
-                        .background(Theme.Colors.background)
 
                     Group {
-                        if segment == .chat {
-                            chatContent
-                        } else {
-                            NovaInboxContent(
-                                onUpdate: { id, status in
-                                    store.updateSuggestion(id, status: status)
-                                }
-                            )
+                        switch nav.novaSegment {
+                        case .bandeja:  bandejaContent
+                        case .acciones: accionesContent
+                        case .chat:     chatContent
                         }
                     }
                 }
             }
-            .navigationTitle("Nova")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Theme.Colors.background, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.light, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 6) {
-                        // Identidad mínima: solo el punto Nova, sin pulse animado.
-                        Circle()
-                            .fill(Theme.Colors.novaGradient)
-                            .frame(width: 10, height: 10)
-                        Text("Nova")
-                            .font(Theme.Typography.bodyBold)
-                            .foregroundStyle(Theme.Colors.textPrimary)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Text("Cerrar")
-                            .font(Theme.Typography.bodyEmphasized)
-                            .foregroundStyle(Theme.Colors.focusAccent)
-                    }
-                }
-            }
+            .navigationBarHidden(true)
         }
-        .onAppear {
-            // Auto-submit del prompt inicial si llegó desde Mi Día.
-            guard !didAutoSubmit,
-                  let prompt = initialPrompt,
+        .onChange(of: nav.pendingNovaPrompt) { _, newPrompt in
+            // Si Mi Día (u otra pantalla) llega con un texto pendiente, lo
+            // disparamos al chat y limpiamos.
+            guard let prompt = newPrompt,
                   !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else { return }
-            didAutoSubmit = true
             store.sendNovaMessage(prompt)
+            nav.pendingNovaPrompt = nil
+        }
+        .onAppear {
+            // Drenar prompt pendiente en el primer appear también (no siempre se
+            // dispara onChange si el valor ya estaba seteado).
+            if let prompt = nav.pendingNovaPrompt,
+               !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                store.sendNovaMessage(prompt)
+                nav.pendingNovaPrompt = nil
+            }
         }
     }
 
-    // MARK: - Segmented
+    // MARK: - Branding header (consistente con Mi Día)
+
+    private var branding: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center) {
+                FocusBrandRow()
+                Spacer()
+            }
+            Text("Nova")
+                .font(Theme.Typography.title)
+                .foregroundStyle(Theme.Colors.textPrimary)
+        }
+    }
+
+    // MARK: - Segmented control
 
     private var segmentedControl: some View {
         HStack(spacing: 0) {
-            segmentButton(.chat, label: "Conversación", symbol: "bubble.left.fill")
-            segmentButton(.bandeja, label: "Bandeja", symbol: "tray.full.fill", badgeCount: store.pendingSuggestions.count)
+            segmentButton(.bandeja, label: "Bandeja", badge: store.pendingSuggestions.count)
+            segmentButton(.acciones, label: "Acciones")
+            segmentButton(.chat, label: "Chat")
         }
         .padding(3)
         .background(
@@ -94,20 +90,19 @@ struct NovaView: View {
         )
     }
 
-    private func segmentButton(_ seg: Segment, label: String, symbol: String, badgeCount: Int = 0) -> some View {
-        Button {
+    private func segmentButton(_ seg: NovaSegment, label: String, badge: Int = 0) -> some View {
+        let isSelected = nav.novaSegment == seg
+        return Button {
             HapticManager.shared.tick()
-            withAnimation(.easeInOut(duration: 0.18)) {
-                segment = seg
+            withAnimation(.easeInOut(duration: 0.20)) {
+                nav.novaSegment = seg
             }
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
                 Text(label)
                     .font(Theme.Typography.subheadEmphasized)
-                if badgeCount > 0 {
-                    Text("\(badgeCount)")
+                if badge > 0 {
+                    Text("\(badge)")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
@@ -115,24 +110,115 @@ struct NovaView: View {
                         .background(Capsule().fill(Theme.Colors.novaAccent))
                 }
             }
-            .foregroundStyle(segment == seg ? Theme.Colors.textPrimary : Theme.Colors.textTertiary)
+            .foregroundStyle(isSelected ? Theme.Colors.textPrimary : Theme.Colors.textTertiary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.sm)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                    .fill(segment == seg ? Theme.Colors.surface : Color.clear)
+                    .fill(isSelected ? Theme.Colors.surface : Color.clear)
                     .focusCardShadow()
             )
         }
         .buttonStyle(.plain)
     }
 
-    // MARK: - Chat content
+    // MARK: - Bandeja
+
+    private var bandejaContent: some View {
+        NovaInboxContent(
+            onUpdate: { id, status in
+                store.updateSuggestion(id, status: status)
+            }
+        )
+    }
+
+    // MARK: - Acciones
+
+    private var accionesContent: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                accionesHeader
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.top, Theme.Spacing.sm)
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: Theme.Spacing.md),
+                        GridItem(.flexible(), spacing: Theme.Spacing.md)
+                    ],
+                    spacing: Theme.Spacing.md
+                ) {
+                    ForEach(NovaQuickAction.allCases) { action in
+                        NovaActionCard(action: action) {
+                            store.runQuickAction(action)
+                            withAnimation(.easeInOut(duration: 0.20)) {
+                                nav.novaSegment = .chat
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, Theme.Spacing.xl)
+
+                tasksLink
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.top, Theme.Spacing.sm)
+
+                Spacer(minLength: Theme.Spacing.bottomBarSafety)
+            }
+        }
+    }
+
+    private var accionesHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("¿Qué quieres hacer?")
+                .font(Theme.Typography.title2)
+                .foregroundStyle(Theme.Colors.textPrimary)
+            Text("Toca una acción y Nova arranca contigo. Las decisiones quedan en Bandeja.")
+                .font(Theme.Typography.subhead)
+                .foregroundStyle(Theme.Colors.textSecondary)
+        }
+    }
+
+    /// Link a "Todas las tareas" — la única forma de llegar a la vista completa
+    /// ahora que Tareas no es tab principal.
+    private var tasksLink: some View {
+        NavigationLink {
+            TareasView()
+        } label: {
+            HStack(spacing: Theme.Spacing.md) {
+                IconBadge(symbol: "checklist", tint: Theme.Colors.focusAccent, size: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Todas las tareas")
+                        .font(Theme.Typography.bodyBold)
+                        .foregroundStyle(Theme.Colors.textPrimary)
+                    Text("Lista completa con filtros y subtareas.")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.textTertiary)
+            }
+            .padding(Theme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                    .fill(Theme.Colors.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                    )
+                    .focusCardShadow()
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Chat
 
     private var chatContent: some View {
         VStack(spacing: 0) {
             chatScroll
-            quickActionsRow
             inputBar
         }
     }
@@ -159,40 +245,8 @@ struct NovaView: View {
         }
     }
 
-    private var quickActionsRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Theme.Spacing.xs + 2) {
-                ForEach(NovaQuickAction.allCases) { action in
-                    Button {
-                        store.runQuickAction(action)
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: action.symbol)
-                                .font(.system(size: 10, weight: .semibold))
-                            Text(action.label)
-                                .font(Theme.Typography.subheadEmphasized)
-                        }
-                        .foregroundStyle(Theme.Colors.textSecondary)
-                        .padding(.horizontal, Theme.Spacing.md)
-                        .padding(.vertical, Theme.Spacing.xs + 2)
-                        .background(
-                            Capsule()
-                                .fill(Theme.Colors.surface)
-                                .overlay(
-                                    Capsule().strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, Theme.Spacing.lg)
-            .padding(.vertical, Theme.Spacing.xs + 2)
-        }
-    }
-
-    /// Input compacto, sin avatar Nova (ya estás en Nova) ni micrófono — solo
-    /// el campo y el botón de enviar. Reduce el feel "chat genérico".
+    /// Input compacto en la conversación — sin sparkle ni mic, ya estás dentro
+    /// de Nova. Reduce el feel "chat genérico".
     private var inputBar: some View {
         VStack(spacing: 0) {
             Rectangle()
@@ -254,6 +308,48 @@ struct NovaView: View {
     }
 }
 
+// MARK: - Action card (Acciones segment)
+
+private struct NovaActionCard: View {
+    let action: NovaQuickAction
+    let onTap: () -> Void
+
+    var body: some View {
+        Button {
+            HapticManager.shared.tap()
+            onTap()
+        } label: {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                IconBadge(symbol: action.symbol, tint: Theme.Colors.novaAccent, size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(action.label)
+                        .font(Theme.Typography.bodyBold)
+                        .foregroundStyle(Theme.Colors.textPrimary)
+                        .multilineTextAlignment(.leading)
+                    Text(action.subtitle)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(3)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(Theme.Spacing.md)
+            .frame(maxWidth: .infinity, minHeight: 130, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                    .fill(Theme.Colors.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                    )
+                    .focusCardShadow()
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Chat bubble
 
 private struct NovaMessageBubble: View {
@@ -264,7 +360,6 @@ private struct NovaMessageBubble: View {
             if message.role == .user {
                 Spacer(minLength: Theme.Spacing.xxl)
             } else {
-                // Marker minimalista — solo un punto, sin avatar circular.
                 Circle()
                     .fill(Theme.Colors.novaGradient)
                     .frame(width: 8, height: 8)

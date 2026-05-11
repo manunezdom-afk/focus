@@ -493,6 +493,30 @@ struct NovaSpark: Shape {
     }
 }
 
+/// Header row: logo Focus + fecha de hoy en azul. Aparece arriba a la
+/// izquierda de las pantallas principales (Mi Día, Nova) para reforzar
+/// identidad y dar contexto temporal de un vistazo.
+struct FocusBrandRow: View {
+    var size: CGFloat = 26
+
+    var body: some View {
+        HStack(spacing: 10) {
+            FocusLogoMark(size: size, shadow: false)
+            Text(dateLabel)
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(Theme.Colors.focusAccent)
+                .tracking(0.2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+    }
+
+    private var dateLabel: String {
+        let raw = DateFormatters.weekdayDayMonth.string(from: Date())
+        return DateFormatters.capitalizeFirst(raw)
+    }
+}
+
 /// Wordmark "FOCUS" letter-spaced. Para BootView y headers de marca.
 struct FocusWordmark: View {
     var fontSize: CGFloat = 14
