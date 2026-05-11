@@ -6,7 +6,7 @@ struct MiDiaView: View {
     @EnvironmentObject private var toast: ToastManager
     @State private var focusBarText: String = ""
     @State private var showAllEvents: Bool = false
-    @State private var showVoiceComingSoon: Bool = false
+    @State private var showNovaLive: Bool = false
     /// Evento que se está editando vía sheet. nil = sheet cerrado.
     @State private var editingEvent: FocusEvent? = nil
     /// Tarea que se está editando vía sheet. nil = sheet cerrado.
@@ -149,10 +149,13 @@ struct MiDiaView: View {
                 }
             )
         }
-        .alert("Voz próximamente", isPresented: $showVoiceComingSoon) {
-            Button("Entendido", role: .cancel) {}
-        } message: {
-            Text("El dictado por voz para Nova está en preparación. Por ahora puedes escribir tu mensaje.")
+        .fullScreenCover(isPresented: $showNovaLive) {
+            NovaLiveView { transcript in
+                // Texto transcrito → mismo flujo que tipear en FocusBar.
+                // Nova decide backend vs fallback, ejecuta acciones, sync
+                // Supabase + programa notificación si es recordatorio.
+                processNovaInline(text: transcript)
+            }
         }
         // Sheets de edición — se abren desde el menú "Editar" de cualquier
         // evento o tarea real en Mi Día.
@@ -266,7 +269,7 @@ struct MiDiaView: View {
             },
             onMic: {
                 HapticManager.shared.tap()
-                showVoiceComingSoon = true
+                showNovaLive = true
             }
         )
     }

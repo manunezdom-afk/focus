@@ -36,6 +36,8 @@
 		FA0000000000000000000091 /* SupabaseSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007B /* SupabaseSyncService.swift */; };
 		FA0000000000000000000092 /* NovaService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007C /* NovaService.swift */; };
 		FA0000000000000000000093 /* LocalNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007D /* LocalNotificationService.swift */; };
+		FA0000000000000000000094 /* NovaLiveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007E /* NovaLiveService.swift */; };
+		FA0000000000000000000095 /* NovaLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007F /* NovaLiveView.swift */; };
 		FA000000000000000000001A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000015 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -70,6 +72,8 @@
 		FA000000000000000000007B /* SupabaseSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseSyncService.swift; sourceTree = "<group>"; };
 		FA000000000000000000007C /* NovaService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaService.swift; sourceTree = "<group>"; };
 		FA000000000000000000007D /* LocalNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNotificationService.swift; sourceTree = "<group>"; };
+		FA000000000000000000007E /* NovaLiveService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaLiveService.swift; sourceTree = "<group>"; };
+		FA000000000000000000007F /* NovaLiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaLiveView.swift; sourceTree = "<group>"; };
 		FA0000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -125,6 +129,7 @@
 				FA0000000000000000000057 /* MiDiaView.swift */,
 				FA0000000000000000000058 /* CalendarioView.swift */,
 				FA0000000000000000000059 /* NovaView.swift */,
+				FA000000000000000000007F /* NovaLiveView.swift */,
 				FA0000000000000000000073 /* NovaInboxView.swift */,
 				FA000000000000000000005A /* TareasView.swift */,
 				FA000000000000000000005B /* AjustesView.swift */,
@@ -163,6 +168,7 @@
 				FA000000000000000000007B /* SupabaseSyncService.swift */,
 				FA000000000000000000007C /* NovaService.swift */,
 				FA000000000000000000007D /* LocalNotificationService.swift */,
+				FA000000000000000000007E /* NovaLiveService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -263,6 +269,8 @@
 				FA0000000000000000000091 /* SupabaseSyncService.swift in Sources */,
 				FA0000000000000000000092 /* NovaService.swift in Sources */,
 				FA0000000000000000000093 /* LocalNotificationService.swift in Sources */,
+				FA0000000000000000000094 /* NovaLiveService.swift in Sources */,
+				FA0000000000000000000095 /* NovaLiveView.swift in Sources */,
 				FA0000000000000000000081 /* FocusDataStore.swift in Sources */,
 				FA0000000000000000000084 /* FocusLocalStore.swift in Sources */,
 				FA0000000000000000000088 /* AuthStore.swift in Sources */,
@@ -411,7 +419,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Focus;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Focus usa la cámara para que Nova lea tu agenda o notas escritas y las convierta en eventos automáticamente.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Focus usa el micrófono para que puedas dictarle a Nova en lugar de escribir.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Focus usa el micrófono para que puedas pedirle a Nova que organice tu día con la voz.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Focus transcribe tu voz para convertirla en tareas, eventos y recordatorios.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -442,7 +451,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Focus;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Focus usa la cámara para que Nova lea tu agenda o notas escritas y las convierta en eventos automáticamente.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Focus usa el micrófono para que puedas dictarle a Nova en lugar de escribir.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Focus usa el micrófono para que puedas pedirle a Nova que organice tu día con la voz.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Focus transcribe tu voz para convertirla en tareas, eventos y recordatorios.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

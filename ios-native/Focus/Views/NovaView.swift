@@ -18,6 +18,7 @@ struct NovaView: View {
     @State private var showCreateEvent: Bool = false
     @State private var showImportCalendar: Bool = false
     @State private var showExportCalendar: Bool = false
+    @State private var showNovaLive: Bool = false
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -86,6 +87,13 @@ struct NovaView: View {
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
+        }
+        .fullScreenCover(isPresented: $showNovaLive) {
+            NovaLiveView { transcript in
+                // Misma puerta de entrada que el input escrito del chat.
+                // Backend o fallback local + acciones reales + sync.
+                store.sendNovaMessage(transcript)
+            }
         }
         .onChange(of: nav.pendingNovaPrompt) { _, newPrompt in
             // Si Mi Día (u otra pantalla) llega con un texto pendiente, lo
@@ -382,6 +390,7 @@ struct NovaView: View {
                     .padding(.bottom, Theme.Spacing.md)
 
                 VStack(spacing: Theme.Spacing.sm + 2) {
+                    novaLiveChip
                     emptyStateChip(.organizar, symbol: "sparkles", label: "Organizar mi día")
                     emptyStateChip(.crearTarea, symbol: "checkmark.circle", label: "Crear tarea")
                     emptyStateChip(.crearEvento, symbol: "calendar.badge.plus", label: "Agendar evento")
@@ -393,6 +402,44 @@ struct NovaView: View {
             }
             .frame(maxWidth: .infinity)
         }
+    }
+
+    /// Chip destacado del empty state que abre Nova Live (sheet de voz).
+    /// Estilo distintivo: gradient violeta sólido para que sobresalga
+    /// del resto de chips (que son neutrales).
+    private var novaLiveChip: some View {
+        Button {
+            HapticManager.shared.tap()
+            showNovaLive = true
+        } label: {
+            HStack(spacing: Theme.Spacing.sm) {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                Text("Hablar con Nova")
+                    .font(Theme.Typography.bodyBold)
+                    .foregroundStyle(.white)
+                Spacer()
+                Image(systemName: "waveform")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            .padding(.horizontal, Theme.Spacing.md + 2)
+            .padding(.vertical, Theme.Spacing.md)
+            .frame(maxWidth: .infinity)
+            .background(
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [Theme.Colors.focusAccent, Theme.Colors.novaAccent],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .shadow(color: Theme.Colors.novaAccent.opacity(0.35), radius: 14, y: 5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func emptyStateChip(_ action: NovaQuickAction, symbol: String, label: String) -> some View {
