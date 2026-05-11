@@ -29,7 +29,7 @@ struct NovaInboxView: View {
     var body: some View {
         ZStack {
             Theme.Colors.background.ignoresSafeArea()
-            NovaInboxContent(onUpdate: { _, _ in })
+            NovaInboxContent()
         }
         .navigationTitle("Bandeja de Nova")
         .navigationBarTitleDisplayMode(.inline)
@@ -38,11 +38,13 @@ struct NovaInboxView: View {
     }
 }
 
-/// Contenido sin navegación. Usar dentro del sheet de Nova.
+/// Contenido sin navegación. Usar dentro del tab Nova.
+/// Habla directo con el store y con el toast — al aprobar una sugerencia
+/// `.schedule`/`.task` crea la entidad real y notifica al usuario.
 struct NovaInboxContent: View {
     @EnvironmentObject private var store: FocusDataStore
+    @EnvironmentObject private var toast: ToastManager
     @State private var filter: InboxFilter = .pending
-    let onUpdate: (UUID, SuggestionStatus) -> Void
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -66,7 +68,7 @@ struct NovaInboxContent: View {
                         ForEach(filtered) { sug in
                             NovaSuggestionCard(suggestion: sug) { status in
                                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                    onUpdate(sug.id, status)
+                                    handleAction(suggestion: sug, status: status)
                                 }
                             }
                         }
@@ -76,6 +78,30 @@ struct NovaInboxContent: View {
 
                 Spacer(minLength: Theme.Spacing.bottomBarSafety)
             }
+        }
+    }
+
+    /// Despacha la acción del card al método correcto del store y muestra el
+    /// toast adecuado según el resultado.
+    private func handleAction(suggestion: NovaSuggestion, status: SuggestionStatus) {
+        switch status {
+        case .approved:
+            let result = store.approveSuggestion(suggestion.id)
+            switch result {
+            case .eventCreated(let event):
+                toast.success("Evento agendado · \(event.title)", symbol: "calendar.badge.plus")
+            case .taskCreated:
+                toast.success("Tarea creada")
+            case .acknowledged:
+                toast.show(.info("Sugerencia aprobada", symbol: "checkmark.circle.fill"))
+            }
+        case .postponed:
+            store.updateSuggestion(suggestion.id, status: .postponed)
+            toast.show(.info("Pospuesta para más tarde", symbol: "clock"))
+        case .dismissed:
+            store.updateSuggestion(suggestion.id, status: .dismissed)
+        case .pending:
+            break
         }
     }
 

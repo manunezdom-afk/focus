@@ -3,8 +3,10 @@ import SwiftUI
 struct MiDiaView: View {
     @EnvironmentObject private var store: FocusDataStore
     @EnvironmentObject private var nav: NavigationCoordinator
+    @EnvironmentObject private var toast: ToastManager
     @State private var focusBarText: String = ""
     @State private var showAllEvents: Bool = false
+    @State private var showVoiceComingSoon: Bool = false
 
     /// 3 bloques visibles por defecto — más allá de eso es ruido.
     private let visibleEventsLimit: Int = 3
@@ -77,6 +79,11 @@ struct MiDiaView: View {
                 .padding(.top, Theme.Spacing.sm)
             }
         }
+        .alert("Voz próximamente", isPresented: $showVoiceComingSoon) {
+            Button("Entendido", role: .cancel) {}
+        } message: {
+            Text("El dictado por voz para Nova está en preparación. Por ahora puedes escribir tu mensaje.")
+        }
     }
 
     // MARK: - Header
@@ -129,18 +136,27 @@ struct MiDiaView: View {
     }
 
     private var profileButton: some View {
-        Circle()
-            .fill(Theme.Colors.surface)
-            .frame(width: 42, height: 42)
-            .overlay(
-                Circle().strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-            )
-            .overlay(
-                Image(systemName: "person.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.textSecondary)
-            )
-            .focusCardShadow()
+        Button {
+            HapticManager.shared.tap()
+            withAnimation(.easeInOut(duration: 0.28)) {
+                nav.selectedTab = .ajustes
+            }
+        } label: {
+            Circle()
+                .fill(Theme.Colors.surface)
+                .frame(width: 42, height: 42)
+                .overlay(
+                    Circle().strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                )
+                .overlay(
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                )
+                .focusCardShadow()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Ajustes")
     }
 
     // MARK: - FocusBar (entry point omnipresente a Nova)
@@ -159,7 +175,10 @@ struct MiDiaView: View {
                     nav.openNova(segment: .bandeja)
                 }
             },
-            onMic: { HapticManager.shared.tap() }
+            onMic: {
+                HapticManager.shared.tap()
+                showVoiceComingSoon = true
+            }
         )
     }
 

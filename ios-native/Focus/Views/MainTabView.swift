@@ -85,6 +85,7 @@ final class NavigationCoordinator: ObservableObject {
 /// al fondo. Soporta swipe entre tabs (gesto nativo de `ScrollView .paging`).
 struct MainTabView: View {
     @StateObject private var nav = NavigationCoordinator()
+    @StateObject private var toast = ToastManager()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -93,9 +94,19 @@ struct MainTabView: View {
         }
         .background(Theme.Colors.background.ignoresSafeArea())
         .environmentObject(nav)
+        .environmentObject(toast)
         // El teclado no desplaza la tab bar — los inputs internos manejan su
         // propio padding bottom-safe.
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .overlay(alignment: .top) {
+            if let current = toast.current {
+                ToastBanner(toast: current)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(100)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.85), value: toast.current)
+            }
+        }
     }
 
     // MARK: - Contenido paginable

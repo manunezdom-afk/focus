@@ -8,10 +8,46 @@ struct LoginView: View {
     @State private var email: String = ""
     @State private var code: String = ""
     @State private var googleNotice: String? = nil
+    @State private var localError: String? = nil
+    @State private var resendCooldownSeconds: Int = 0
+    @State private var resendTimer: Task<Void, Never>? = nil
     @FocusState private var emailFocused: Bool
     @FocusState private var codeFocused: Bool
 
+    /// Regex razonable: algo@algo.dominio. Bloquea casos básicos como
+    /// "a@", "@b.com", "no-arroba". No es RFC 5322 completo a propósito.
+    private static let emailRegex = #"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$"#
+
+    private func isValidEmail(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.range(of: Self.emailRegex, options: .regularExpression) != nil
+    }
+
     var body: some View {
+        rootContent
+            .onAppear {
+                // Auto-focus en email al entrar a la pantalla.
+                if case .codeSent = auth.state { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    emailFocused = true
+                }
+            }
+            .onChange(of: auth.state) { _, newState in
+                // Auto-focus en código apenas Auth pase a .codeSent.
+                if case .codeSent = newState {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+                        codeFocused = true
+                    }
+                    startResendCooldown()
+                }
+            }
+            .onDisappear {
+                resendTimer?.cancel()
+                resendTimer = nil
+            }
+    }
+
+    private var rootContent: some View {
         ZStack {
             // Background con tinte azul muy sutil en la parte superior — identidad.
             Theme.Colors.background.ignoresSafeArea()
@@ -117,6 +153,10 @@ struct LoginView: View {
                 Task { await submitEmail() }
             }
 
+            if let local = localError {
+                errorBanner(local)
+            }
+
             orDivider
 
             googleButton
@@ -218,14 +258,39 @@ struct LoginView: View {
     }
 
     private func submitEmail() async {
-        guard !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            localError = "Escribe tu correo para continuar."
+            HapticManager.shared.warning()
+            return
+        }
+        guard isValidEmail(trimmed) else {
+            localError = "El correo no parece válido. Revisa el formato."
+            HapticManager.shared.warning()
+            return
+        }
+        localError = nil
         emailFocused = false
-        await auth.sendOTP(email: email)
+        await auth.sendOTP(email: trimmed)
         if case .codeSent = auth.state {
             code = ""
             // Auto-focus code field con leve delay (sheets necesitan render)
             try? await Task.sleep(nanoseconds: 250_000_000)
             codeFocused = true
+        }
+    }
+
+    // MARK: - Resend cooldown
+
+    private func startResendCooldown() {
+        resendTimer?.cancel()
+        resendCooldownSeconds = 30
+        resendTimer = Task { @MainActor in
+            while resendCooldownSeconds > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled { return }
+                resendCooldownSeconds = max(0, resendCooldownSeconds - 1)
+            }
         }
     }
 
@@ -304,13 +369,22 @@ struct LoginView: View {
                     .foregroundStyle(Theme.Colors.textQuaternary)
 
                 Button {
-                    Task { await auth.resendCode() }
+                    Task {
+                        await auth.resendCode()
+                        startResendCooldown()
+                    }
                 } label: {
-                    Text("Reenviar código")
+                    Text(resendCooldownSeconds > 0
+                         ? "Reenviar en \(resendCooldownSeconds) s"
+                         : "Reenviar código")
                         .font(Theme.Typography.subheadEmphasized)
-                        .foregroundStyle(Theme.Colors.focusAccent)
+                        .foregroundStyle(
+                            resendCooldownSeconds > 0
+                                ? Theme.Colors.textTertiary
+                                : Theme.Colors.focusAccent
+                        )
                 }
-                .disabled(auth.isWorking)
+                .disabled(auth.isWorking || resendCooldownSeconds > 0)
             }
             .padding(.top, Theme.Spacing.xs)
         }

@@ -11,8 +11,11 @@ import SwiftUI
 struct NovaView: View {
     @EnvironmentObject private var store: FocusDataStore
     @EnvironmentObject private var nav: NavigationCoordinator
+    @EnvironmentObject private var toast: ToastManager
 
     @State private var draft: String = ""
+    @State private var showCreateTask: Bool = false
+    @State private var showCreateEvent: Bool = false
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -41,6 +44,22 @@ struct NovaView: View {
             }
             .navigationBarHidden(true)
         }
+        .sheet(isPresented: $showCreateTask) {
+            NuevaTareaSheet { task in
+                store.addTask(task)
+                toast.success("Tarea creada")
+            }
+            .presentationDetents([.medium])
+            .presentationBackground(Theme.Colors.background)
+        }
+        .sheet(isPresented: $showCreateEvent) {
+            NuevoEventoSheet(initialDate: Date()) { event in
+                store.addEvent(event)
+                toast.success("Evento creado")
+            }
+            .presentationDetents([.medium, .large])
+            .presentationBackground(Theme.Colors.background)
+        }
         .onChange(of: nav.pendingNovaPrompt) { _, newPrompt in
             // Si Mi Día (u otra pantalla) llega con un texto pendiente, lo
             // disparamos al chat y limpiamos.
@@ -57,6 +76,67 @@ struct NovaView: View {
                !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 store.sendNovaMessage(prompt)
                 nav.pendingNovaPrompt = nil
+            }
+        }
+    }
+
+    // MARK: - Quick action dispatch
+
+    /// Routea cada quick action a su efecto real: sheets, segmentos, mensajes
+    /// + sugerencias en bandeja. Nada decorativo.
+    private func handleQuickAction(_ action: NovaQuickAction) {
+        HapticManager.shared.tap()
+        switch action {
+        case .crearTarea:
+            showCreateTask = true
+
+        case .crearEvento:
+            showCreateEvent = true
+
+        case .revisarPendientes:
+            withAnimation(.easeInOut(duration: 0.20)) {
+                nav.novaSegment = .bandeja
+            }
+
+        case .organizar:
+            store.runQuickAction(.organizar)
+            store.addSuggestion(NovaSuggestion(
+                title: "Plan del día actualizado",
+                detail: "Bloqueé tu mañana para foco profundo y dejé una pausa real al mediodía. Confirma si quieres aplicarlo.",
+                kind: .rebalance,
+                priority: .high,
+                suggestedAction: "Aplicar plan del día"
+            ))
+            toast.show(.info("Plan generado", symbol: "sparkles"))
+            withAnimation(.easeInOut(duration: 0.20)) {
+                nav.novaSegment = .bandeja
+            }
+
+        case .prepararManana:
+            store.runQuickAction(.prepararManana)
+            let cal = Calendar.current
+            let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+            let tomorrowStart = cal.date(bySettingHour: 10, minute: 0, second: 0, of: tomorrow)
+                ?? tomorrow
+            let tomorrowEnd = cal.date(byAdding: .hour, value: 2, to: tomorrowStart) ?? tomorrowStart
+            store.addSuggestion(NovaSuggestion(
+                title: "Bloque para mañana",
+                detail: "Te dejo 2 horas de foco antes de tu próxima reunión. Aprueba para agendarlo.",
+                kind: .schedule,
+                priority: .normal,
+                suggestedAction: "Foco \(DateFormatters.hourMinute.string(from: tomorrowStart))–\(DateFormatters.hourMinute.string(from: tomorrowEnd))"
+            ))
+            toast.show(.info("Sugerencia para mañana", symbol: "moon.stars"))
+            withAnimation(.easeInOut(duration: 0.20)) {
+                nav.novaSegment = .bandeja
+            }
+
+        case .cerrarDia:
+            store.runQuickAction(.cerrarDia)
+            // Saltar al chat — el resumen es conversacional, no una decisión
+            // que vaya a la bandeja.
+            withAnimation(.easeInOut(duration: 0.20)) {
+                nav.novaSegment = .chat
             }
         }
     }
@@ -125,11 +205,9 @@ struct NovaView: View {
     // MARK: - Bandeja
 
     private var bandejaContent: some View {
-        NovaInboxContent(
-            onUpdate: { id, status in
-                store.updateSuggestion(id, status: status)
-            }
-        )
+        // El contenido se conecta directo al store + toast; no necesita
+        // closure de callback ni inyección manual.
+        NovaInboxContent()
     }
 
     // MARK: - Acciones
@@ -150,10 +228,7 @@ struct NovaView: View {
                 ) {
                     ForEach(NovaQuickAction.allCases) { action in
                         NovaActionCard(action: action) {
-                            store.runQuickAction(action)
-                            withAnimation(.easeInOut(duration: 0.20)) {
-                                nav.novaSegment = .chat
-                            }
+                            handleQuickAction(action)
                         }
                     }
                 }
@@ -315,10 +390,7 @@ private struct NovaActionCard: View {
     let onTap: () -> Void
 
     var body: some View {
-        Button {
-            HapticManager.shared.tap()
-            onTap()
-        } label: {
+        Button(action: onTap) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 IconBadge(symbol: action.symbol, tint: Theme.Colors.novaAccent, size: 32)
                 VStack(alignment: .leading, spacing: 2) {

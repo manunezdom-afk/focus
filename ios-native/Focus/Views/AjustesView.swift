@@ -329,25 +329,30 @@ struct AjustesView: View {
                     symbol: "lock.shield",
                     tint: Theme.Colors.success,
                     title: "Tus datos",
-                    subtitle: "Solo tú y Nova ven tu información.",
-                    trailing: .chevron
+                    subtitle: "Hoy todo vive en este iPhone. Nada sale sin que lo apruebes.",
+                    trailing: .nothing
                 )
                 Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                // Privacidad y eliminación de cuenta requieren backend real
+                // (Supabase + endpoint de delete). Mientras tanto se muestran
+                // como "Próximamente" para no prometer algo que no funciona.
                 AjustesRow(
                     symbol: "doc.text",
                     tint: Theme.Colors.textSecondary,
                     title: "Política de privacidad",
-                    subtitle: "Cómo manejamos tu información.",
-                    trailing: .chevron
+                    subtitle: "Próximamente disponible.",
+                    trailing: .nothing
                 )
+                .opacity(0.55)
                 Divider().overlay(Theme.Colors.border).padding(.leading, 60)
                 AjustesRow(
                     symbol: "trash",
-                    tint: Theme.Colors.danger,
+                    tint: Theme.Colors.textTertiary,
                     title: "Eliminar cuenta",
-                    subtitle: "Borra todos tus datos de forma definitiva.",
-                    trailing: .chevron
+                    subtitle: "Próximamente. Por ahora puedes borrar tus datos locales debajo.",
+                    trailing: .nothing
                 )
+                .opacity(0.55)
             }
             .focusCardContainer()
         }

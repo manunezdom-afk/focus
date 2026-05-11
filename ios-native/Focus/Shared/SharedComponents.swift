@@ -72,6 +72,80 @@ enum AppVersion {
     }
 }
 
+// MARK: - Toast (banner transitorio de feedback)
+
+/// Toast efímero — se muestra arriba de la pantalla y desaparece solo.
+/// Usado para confirmar acciones ("Evento creado", "Sugerencia aprobada", etc).
+struct Toast: Identifiable, Equatable {
+    let id = UUID()
+    let message: String
+    let symbol: String
+    let tint: Color
+
+    static func success(_ message: String, symbol: String = "checkmark.circle.fill") -> Toast {
+        Toast(message: message, symbol: symbol, tint: Color(red: 0.20, green: 0.66, blue: 0.32))
+    }
+
+    static func info(_ message: String, symbol: String = "info.circle.fill") -> Toast {
+        Toast(message: message, symbol: symbol, tint: Color(red: 0.18, green: 0.39, blue: 0.92))
+    }
+
+    static func warning(_ message: String, symbol: String = "exclamationmark.triangle.fill") -> Toast {
+        Toast(message: message, symbol: symbol, tint: Color(red: 0.95, green: 0.65, blue: 0.15))
+    }
+}
+
+@MainActor
+final class ToastManager: ObservableObject {
+    @Published var current: Toast?
+
+    /// Muestra un toast por `duration` segundos. Si ya hay uno, lo reemplaza.
+    func show(_ toast: Toast, duration: TimeInterval = 2.4) {
+        current = toast
+        HapticManager.shared.tick()
+        let id = toast.id
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            await MainActor.run {
+                if self?.current?.id == id { self?.current = nil }
+            }
+        }
+    }
+
+    func success(_ message: String, symbol: String = "checkmark.circle.fill") {
+        show(.success(message, symbol: symbol))
+    }
+}
+
+struct ToastBanner: View {
+    let toast: Toast
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: toast.symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(toast.tint)
+            Text(toast.message)
+                .font(Theme.Typography.subheadEmphasized)
+                .foregroundStyle(Theme.Colors.textPrimary)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Theme.Spacing.md + 2)
+        .padding(.vertical, Theme.Spacing.sm + 2)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(Theme.Colors.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                        .strokeBorder(toast.tint.opacity(0.20), lineWidth: Theme.Stroke.hairline)
+                )
+                .shadow(color: Color.black.opacity(0.08), radius: 16, y: 4)
+        )
+        .padding(.horizontal, Theme.Spacing.xl)
+    }
+}
+
 // MARK: - Haptics
 
 final class HapticManager {

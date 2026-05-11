@@ -16,19 +16,19 @@ enum AuthError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .configMissing:
-            return "Auth no configurada. Falta el anon key de Supabase. Pegalo en FocusConfig.swift y rebuildeá."
+            return "Auth no configurada. Falta el anon key de Supabase en FocusConfig.swift."
         case .invalidEmail:
             return "El correo no parece válido."
         case .rateLimited:
-            return "Demasiados intentos. Esperá un minuto antes de pedir otro código."
+            return "Demasiados intentos. Espera un minuto antes de pedir otro código."
         case .emailNotConfigured:
-            return "El servidor de envío de correos no está configurado. Avisanos."
+            return "El servidor de envío de correos no está configurado todavía."
         case .emailSendFailed:
-            return "No pudimos enviar el correo. Probá de nuevo en un minuto."
+            return "No pudimos enviar el correo. Prueba de nuevo en un minuto."
         case .invalidCode:
-            return "El código es incorrecto. Revisalo o pedí uno nuevo."
+            return "El código es incorrecto. Revísalo o pide uno nuevo."
         case .otpExpired:
-            return "El código expiró. Pedí uno nuevo."
+            return "El código expiró. Pide uno nuevo."
         case .network(let msg):
             return "Error de red: \(msg)"
         case .unknown(let msg):

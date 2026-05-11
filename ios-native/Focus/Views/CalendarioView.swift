@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CalendarioView: View {
     @EnvironmentObject private var store: FocusDataStore
+    @EnvironmentObject private var toast: ToastManager
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var showCreateEvent = false
 
@@ -58,6 +59,9 @@ struct CalendarioView: View {
             .sheet(isPresented: $showCreateEvent) {
                 NuevoEventoSheet(initialDate: selectedDate) { newEvent in
                     store.addEvent(newEvent)
+                    toast.success("Evento creado")
+                    // Saltar al día del evento para que el usuario vea el resultado.
+                    selectedDate = Calendar.current.startOfDay(for: newEvent.startTime)
                 }
                 .presentationDetents([.medium, .large])
                 .presentationBackground(Theme.Colors.background)
@@ -319,9 +323,9 @@ private struct CalendarEventCard: View {
     }
 }
 
-// MARK: - Sheet de nuevo evento
+// MARK: - Sheet de nuevo evento (reusable desde Nova/Mi Día)
 
-private struct NuevoEventoSheet: View {
+struct NuevoEventoSheet: View {
     @Environment(\.dismiss) private var dismiss
     let initialDate: Date
     let onSave: (FocusEvent) -> Void

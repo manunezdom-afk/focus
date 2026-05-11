@@ -259,6 +259,79 @@ final class FocusDataStore: ObservableObject {
         }
     }
 
+    /// Agrega una sugerencia nueva a la bandeja (pending). Persiste.
+    func addSuggestion(_ suggestion: NovaSuggestion) {
+        suggestions.insert(suggestion, at: 0)
+        persistSuggestions()
+    }
+
+    /// Resultado de aprobar una sugerencia — la UI usa esto para mostrar el
+    /// toast correcto ("Evento creado", "Tarea creada", "Sugerencia aprobada").
+    enum SuggestionApprovalResult {
+        case eventCreated(FocusEvent)
+        case taskCreated(FocusTask)
+        case acknowledged
+    }
+
+    /// Aprueba una sugerencia y, según su tipo, crea la entidad asociada:
+    /// - `.schedule` → evento real en la agenda.
+    /// - `.task` → tarea en pendientes.
+    /// - resto → solo cambia estado a `.approved`.
+    /// Retorna el resultado para que la UI muestre feedback adecuado.
+    @discardableResult
+    func approveSuggestion(_ id: UUID) -> SuggestionApprovalResult {
+        guard let idx = suggestions.firstIndex(where: { $0.id == id }) else {
+            return .acknowledged
+        }
+        let sug = suggestions[idx]
+        suggestions[idx].status = .approved
+        suggestions[idx].resolvedAt = Date()
+        persistSuggestions()
+        HapticManager.shared.success()
+
+        switch sug.kind {
+        case .schedule:
+            // Crea un evento en la próxima hora redonda con 1h de duración.
+            // Es ad-hoc: cuando Nova real esté conectada, la propuesta vendrá
+            // con startTime/endTime sugeridos.
+            let cal = Calendar.current
+            let now = Date()
+            let nextHour = cal.date(
+                bySettingHour: cal.component(.hour, from: now) + 1,
+                minute: 0,
+                second: 0,
+                of: now
+            ) ?? now
+            let endHour = cal.date(byAdding: .hour, value: 1, to: nextHour) ?? nextHour
+            let event = FocusEvent(
+                title: sug.suggestedAction,
+                notes: sug.detail,
+                startTime: nextHour,
+                endTime: endHour,
+                section: .foco
+            )
+            addEvent(event)
+            suggestions[idx].relatedEventId = event.id
+            persistSuggestions()
+            return .eventCreated(event)
+
+        case .task:
+            let task = FocusTask(
+                title: sug.suggestedAction,
+                notes: sug.detail,
+                priority: sug.priority == .high ? .alta : .media,
+                category: .hoy
+            )
+            addTask(task)
+            suggestions[idx].relatedTaskId = task.id
+            persistSuggestions()
+            return .taskCreated(task)
+
+        case .rebalance, .break_, .prep:
+            return .acknowledged
+        }
+    }
+
     // MARK: - Nova
 
     func sendNovaMessage(_ text: String) {

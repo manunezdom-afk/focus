@@ -20,6 +20,7 @@ private enum TaskFilter: String, CaseIterable, Identifiable {
 
 struct TareasView: View {
     @EnvironmentObject private var store: FocusDataStore
+    @EnvironmentObject private var toast: ToastManager
     @State private var filter: TaskFilter = .pending
     @State private var showCreate = false
     @State private var expandedTaskIds: Set<UUID> = []
@@ -68,6 +69,7 @@ struct TareasView: View {
             .sheet(isPresented: $showCreate) {
                 NuevaTareaSheet { newTask in
                     store.addTask(newTask)
+                    toast.success("Tarea creada")
                 }
                 .presentationDetents([.medium])
                 .presentationBackground(Theme.Colors.background)
@@ -334,9 +336,9 @@ private struct TaskRowFull: View {
     }
 }
 
-// MARK: - Sheet de nueva tarea
+// MARK: - Sheet de nueva tarea (reusable desde Nova/Mi Día)
 
-private struct NuevaTareaSheet: View {
+struct NuevaTareaSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onSave: (FocusTask) -> Void
 
