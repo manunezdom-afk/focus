@@ -8,7 +8,8 @@ struct FocusApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(.light)
+                .tint(Theme.Colors.focusAccent)
         }
     }
 }

@@ -5,6 +5,32 @@ struct CalendarioView: View {
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var showCreateEvent = false
 
+    /// Eventos a mostrar para el día seleccionado. Si el usuario no tiene
+    /// ningún evento real, mostramos ejemplos para que vea la app llena.
+    private var displayEvents: [FocusEvent] {
+        if store.hasUserEvents {
+            return store.eventsFor(date: selectedDate)
+        }
+        let cal = Calendar.current
+        return DemoDataProvider.shared.exampleWeekEvents()
+            .filter { cal.isDate($0.startTime, inSameDayAs: selectedDate) }
+            .sorted { $0.startTime < $1.startTime }
+    }
+
+    private var showingExamples: Bool {
+        !store.hasUserEvents
+    }
+
+    /// Cuenta eventos para un día dado (para el dot indicator).
+    private func eventsCount(for date: Date) -> Int {
+        let cal = Calendar.current
+        if store.hasUserEvents {
+            return store.events.filter { cal.isDate($0.startTime, inSameDayAs: date) }.count
+        }
+        return DemoDataProvider.shared.exampleWeekEvents()
+            .filter { cal.isDate($0.startTime, inSameDayAs: date) }.count
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
@@ -14,13 +40,18 @@ struct CalendarioView: View {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                         header
                             .padding(.horizontal, Theme.Spacing.xl)
-                            .padding(.top, Theme.Spacing.lg)
+                            .padding(.top, Theme.Spacing.md)
 
-                        WeekDaySelector(
-                            selectedDate: $selectedDate,
-                            store: store
-                        )
-                        .padding(.horizontal, Theme.Spacing.xl)
+                        if showingExamples {
+                            ExampleBanner(
+                                title: "Así se vería tu semana",
+                                message: "Estos son eventos de ejemplo. Cuando crees el tuyo, desaparecen."
+                            )
+                            .padding(.horizontal, Theme.Spacing.xl)
+                        }
+
+                        weekSelector
+                            .padding(.horizontal, Theme.Spacing.xl)
 
                         dateDetailHeader
                             .padding(.horizontal, Theme.Spacing.xl)
@@ -68,11 +99,10 @@ struct CalendarioView: View {
         return raw.prefix(1).uppercased() + raw.dropFirst()
     }
 
-    // MARK: - Día seleccionado
+    // MARK: - Day detail
 
     private var dateDetailHeader: some View {
-        let events = store.eventsFor(date: selectedDate)
-        return HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(dayName)
                     .font(Theme.Typography.title2)
@@ -82,9 +112,9 @@ struct CalendarioView: View {
                     .foregroundStyle(Theme.Colors.textSecondary)
             }
             Spacer()
-            if !events.isEmpty {
+            if !displayEvents.isEmpty {
                 StatePill(
-                    label: "\(events.count) evento\(events.count == 1 ? "" : "s")",
+                    label: "\(displayEvents.count) evento\(displayEvents.count == 1 ? "" : "s")",
                     tint: Theme.Colors.focusAccent
                 )
             }
@@ -102,18 +132,14 @@ struct CalendarioView: View {
     }
 
     private var eventsCountLabel: String {
-        let events = store.eventsFor(date: selectedDate)
-        if events.isEmpty { return "Sin eventos." }
-        if events.count == 1 { return "Un evento agendado." }
-        return "\(events.count) eventos agendados."
+        if displayEvents.isEmpty { return "Sin eventos." }
+        if displayEvents.count == 1 { return "Un evento agendado." }
+        return "\(displayEvents.count) eventos agendados."
     }
-
-    // MARK: - Día detalle
 
     @ViewBuilder
     private var dayContent: some View {
-        let events = store.eventsFor(date: selectedDate)
-        if events.isEmpty {
+        if displayEvents.isEmpty {
             EmptyStateView(
                 symbol: "calendar",
                 title: "Día libre",
@@ -124,52 +150,26 @@ struct CalendarioView: View {
             .frame(minHeight: 280)
         } else {
             VStack(spacing: Theme.Spacing.md) {
-                ForEach(events) { event in
-                    CalendarEventCard(event: event)
+                ForEach(displayEvents) { event in
+                    CalendarEventCard(event: event, isExample: showingExamples)
                 }
             }
         }
     }
 
-    // MARK: - FAB
+    // MARK: - Week selector
 
-    private var floatingButton: some View {
-        Button {
-            HapticManager.shared.tap()
-            showCreateEvent = true
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(Theme.Colors.textPrimary)
-                .frame(width: 56, height: 56)
-                .background(
-                    Circle()
-                        .fill(Theme.Colors.focusAccent)
-                        .shadow(color: Theme.Colors.focusAccent.opacity(0.40), radius: 18, x: 0, y: 8)
-                )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Week-day selector (scroll horizontal de 14 días)
-
-private struct WeekDaySelector: View {
-    @Binding var selectedDate: Date
-    let store: FocusDataStore
-
-    private let cal = Calendar.current
-
-    var body: some View {
+    private var weekSelector: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Spacing.sm) {
                     ForEach(dayOffsets, id: \.self) { offset in
+                        let cal = Calendar.current
                         let date = cal.date(byAdding: .day, value: offset, to: cal.startOfDay(for: Date())) ?? Date()
                         DayPill(
                             date: date,
                             isSelected: cal.isDate(date, inSameDayAs: selectedDate),
-                            eventsCount: store.eventsFor(date: date).count
+                            eventsCount: eventsCount(for: date)
                         ) {
                             withAnimation(.easeInOut(duration: 0.18)) {
                                 selectedDate = cal.startOfDay(for: date)
@@ -190,7 +190,29 @@ private struct WeekDaySelector: View {
     private var dayOffsets: [Int] {
         Array(-2...11)
     }
+
+    // MARK: - FAB
+
+    private var floatingButton: some View {
+        Button {
+            HapticManager.shared.tap()
+            showCreateEvent = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(
+                    Circle()
+                        .fill(Theme.Colors.focusAccent)
+                        .shadow(color: Theme.Colors.focusAccent.opacity(0.35), radius: 16, x: 0, y: 6)
+                )
+        }
+        .buttonStyle(.plain)
+    }
 }
+
+// MARK: - Day pill
 
 private struct DayPill: View {
     let date: Date
@@ -203,26 +225,29 @@ private struct DayPill: View {
             VStack(spacing: 6) {
                 Text(weekdayShort)
                     .font(Theme.Typography.caption)
-                    .foregroundStyle(isSelected ? Theme.Colors.textPrimary : Theme.Colors.textTertiary)
+                    .foregroundStyle(isSelected ? .white : Theme.Colors.textTertiary)
                     .tracking(0.6)
                 Text("\(dayNumber)")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(isSelected ? Theme.Colors.textPrimary : Theme.Colors.textSecondary)
+                    .foregroundStyle(isSelected ? .white : Theme.Colors.textPrimary)
                 Circle()
-                    .fill(eventsCount > 0 ? (isSelected ? Theme.Colors.focusAccent : Theme.Colors.focusAccent.opacity(0.5)) : Color.clear)
+                    .fill(eventsCount > 0
+                          ? (isSelected ? Color.white.opacity(0.85) : Theme.Colors.focusAccent)
+                          : Color.clear)
                     .frame(width: 5, height: 5)
             }
-            .frame(width: 48, height: 70)
+            .frame(width: 50, height: 72)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                    .fill(isSelected ? Theme.Colors.surfaceHigh : Theme.Colors.surface)
+                    .fill(isSelected ? AnyShapeStyle(Theme.Colors.focusAccent) : AnyShapeStyle(Theme.Colors.surface))
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                             .strokeBorder(
-                                isSelected ? Theme.Colors.focusAccent.opacity(0.45) : Theme.Colors.border,
+                                isSelected ? Color.clear : Theme.Colors.border,
                                 lineWidth: Theme.Stroke.hairline
                             )
                     )
+                    .focusCardShadow()
             )
         }
         .buttonStyle(.plain)
@@ -240,10 +265,11 @@ private struct DayPill: View {
     }
 }
 
-// MARK: - Card de evento (vista día)
+// MARK: - Event card
 
 private struct CalendarEventCard: View {
     let event: FocusEvent
+    let isExample: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
@@ -265,9 +291,14 @@ private struct CalendarEventCard: View {
                 .clipShape(Capsule())
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                Text(event.title)
-                    .font(Theme.Typography.bodyEmphasized)
-                    .foregroundStyle(Theme.Colors.textPrimary)
+                HStack(spacing: 6) {
+                    Text(event.title)
+                        .font(Theme.Typography.bodyEmphasized)
+                        .foregroundStyle(Theme.Colors.textPrimary)
+                    if isExample {
+                        ExampleBadge()
+                    }
+                }
                 if let notes = event.notes, !notes.isEmpty {
                     Text(notes)
                         .font(Theme.Typography.subhead)
@@ -297,8 +328,15 @@ private struct CalendarEventCard: View {
                 .fill(Theme.Colors.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                        .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                        .strokeBorder(
+                            isExample ? Theme.Colors.novaAccent.opacity(0.18) : Theme.Colors.border,
+                            style: StrokeStyle(
+                                lineWidth: Theme.Stroke.hairline,
+                                dash: isExample ? [4, 3] : []
+                            )
+                        )
                 )
+                .focusCardShadow()
         )
     }
 }
@@ -337,16 +375,14 @@ private struct NuevoEventoSheet: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: Theme.Spacing.xl) {
-                        // Título
                         sheetField(label: "TÍTULO") {
-                            TextField("Reunión, foco, llamada…", text: $title, axis: .vertical)
+                            TextField("Clase, foco, reunión…", text: $title, axis: .vertical)
                                 .font(Theme.Typography.headline)
                                 .foregroundStyle(Theme.Colors.textPrimary)
                                 .tint(Theme.Colors.focusAccent)
                                 .lineLimit(1...3)
                         }
 
-                        // Día
                         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                             Text("DÍA").sectionLabelStyle()
                             DatePicker("", selection: $date, displayedComponents: .date)
@@ -364,7 +400,6 @@ private struct NuevoEventoSheet: View {
                                 )
                         }
 
-                        // Horarios
                         HStack(spacing: Theme.Spacing.md) {
                             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                                 Text("INICIO").sectionLabelStyle()
@@ -400,7 +435,6 @@ private struct NuevoEventoSheet: View {
                             }
                         }
 
-                        // Categoría
                         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                             Text("TIPO").sectionLabelStyle()
                             ScrollView(.horizontal, showsIndicators: false) {
@@ -412,9 +446,8 @@ private struct NuevoEventoSheet: View {
                             }
                         }
 
-                        // Ubicación
                         sheetField(label: "UBICACIÓN (OPCIONAL)") {
-                            TextField("Sala, café, link…", text: $location)
+                            TextField("Aula, oficina, link…", text: $location)
                                 .font(Theme.Typography.body)
                                 .foregroundStyle(Theme.Colors.textPrimary)
                                 .tint(Theme.Colors.focusAccent)
@@ -430,7 +463,6 @@ private struct NuevoEventoSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Theme.Colors.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancelar") { dismiss() }
@@ -456,15 +488,15 @@ private struct NuevoEventoSheet: View {
                 Text(s.displayName)
                     .font(Theme.Typography.subheadEmphasized)
             }
-            .foregroundStyle(section == s ? s.color : Theme.Colors.textSecondary)
+            .foregroundStyle(section == s ? .white : Theme.Colors.textSecondary)
             .padding(.horizontal, Theme.Spacing.md + 2)
-            .padding(.vertical, Theme.Spacing.sm - 1)
+            .padding(.vertical, Theme.Spacing.sm)
             .background(
                 Capsule()
-                    .fill(section == s ? s.color.opacity(0.14) : Theme.Colors.surface)
+                    .fill(section == s ? s.color : Theme.Colors.surface)
                     .overlay(
                         Capsule()
-                            .strokeBorder(section == s ? s.color.opacity(0.45) : Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                            .strokeBorder(section == s ? Color.clear : Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
                     )
             )
         }
@@ -494,12 +526,10 @@ private struct NuevoEventoSheet: View {
     private func save() {
         let cal = Calendar.current
         let dayStart = cal.startOfDay(for: date)
-
         func combine(_ time: Date) -> Date {
             let comps = cal.dateComponents([.hour, .minute], from: time)
             return cal.date(bySettingHour: comps.hour ?? 9, minute: comps.minute ?? 0, second: 0, of: dayStart) ?? dayStart
         }
-
         let event = FocusEvent(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes,
@@ -516,5 +546,4 @@ private struct NuevoEventoSheet: View {
 #Preview {
     CalendarioView()
         .environmentObject(FocusDataStore())
-        .preferredColorScheme(.dark)
 }

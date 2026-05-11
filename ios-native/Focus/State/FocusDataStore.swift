@@ -37,15 +37,15 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
     var novaReply: String {
         switch self {
         case .organizar:
-            return "Listo. Dejé tu mañana para foco profundo (9:30–11:00), reuniones después del almuerzo y un bloque para Acme a las 15:30. Te aviso cuando empiece cada uno."
+            return "Listo. Dejé tu mañana para foco profundo (10:00–11:30), una pausa real al mediodía y la sesión de estudio para Bases de Datos por la tarde. Te aviso cuando empiece cada bloque."
         case .crearTarea:
-            return "Dime qué tarea quieres crear. Le pongo prioridad y categoría según el contexto."
+            return "Dime qué tarea quieres crear. Le pongo prioridad y categoría según el contexto. Ej: \"Entregar TP de Programación el viernes\"."
         case .crearEvento:
-            return "Cuéntame qué evento, día y hora. Si quieres, te bloqueo 10 minutos antes para prepararte."
+            return "Cuéntame qué evento, día y hora. Si quieres, también te bloqueo 10 minutos antes para prepararte."
         case .revisarPendientes:
-            return "Tienes 3 tareas Alta sin completar: el informe Q1, el mail de Ana y la propuesta de Acme. ¿Las muevo al bloque de foco?"
+            return "Tus 3 pendientes de mayor prioridad: repasar fórmulas del parcial, preparar la presentación de Acme y responder al profe. ¿Las acomodo en bloques de hoy o las muevo a mañana?"
         case .resumenSemana:
-            return "Tu semana: 3 bloques de foco, 4 reuniones, 8 tareas pendientes. El jueves está más cargado. Si quieres puedo bajar una reunión al viernes."
+            return "Esta semana tienes 2 parciales, 1 entrega de TP y 3 reuniones de trabajo. El jueves es el día más cargado. Si quieres, paso una reunión al viernes."
         }
     }
 }
@@ -55,8 +55,20 @@ enum NovaResponder {
     static func reply(to text: String) -> String {
         let lower = text.lowercased()
 
-        if lower.contains("organiza") || lower.contains("planifica") || lower.contains("organizar") {
-            return "Bloqueo tu mañana para foco y dejo Acme para después del almuerzo. ¿Te muevo algo más?"
+        if lower.contains("organiza") || lower.contains("planifica") || lower.contains("agenda mi") {
+            return "Bloqueo tu mañana para foco, dejo una pausa al mediodía y reservo la tarde para estudio. ¿Te muevo algo más?"
+        }
+        if lower.contains("parcial") || lower.contains("examen") || lower.contains("final") {
+            return "Anotado. ¿Para qué día? Te armo bloques de repaso desde ahora hasta esa fecha y te recuerdo al principio de cada sesión."
+        }
+        if lower.contains("tp") || lower.contains("trabajo práctico") || lower.contains("entrega") {
+            return "Lo paso a Hoy con prioridad alta. ¿Quieres que también te bloquee 90 minutos de foco para avanzarlo?"
+        }
+        if lower.contains("clase") {
+            return "Te agendo la clase como bloque recurrente. ¿Qué día y hora? Si tienes el horario de la cursada te lo cargo todo en bloque."
+        }
+        if lower.contains("estudia") || lower.contains("foco") {
+            return "Reservo un bloque de foco. ¿Para qué materia o tema?"
         }
         if lower.contains("tarea") {
             return "Lo agrego como tarea con prioridad media. Si quieres otra categoría, dime."
@@ -64,40 +76,61 @@ enum NovaResponder {
         if lower.contains("evento") || lower.contains("reunión") || lower.contains("reunion") || lower.contains("llamada") {
             return "¿A qué hora y con quién? Lo agendo y te aviso 10 minutos antes."
         }
+        if lower.contains("gym") || lower.contains("entren") || lower.contains("correr") {
+            return "Bien. ¿A qué hora suele ser? Lo bloqueo todos los días en ese horario."
+        }
         if lower.contains("resumen") || lower.contains("semana") {
-            return "Esta semana tienes 3 bloques de foco, 4 reuniones y 8 tareas. El jueves es el día más cargado."
+            return "Esta semana tienes 2 parciales, 3 reuniones de trabajo y 1 entrega de TP. El jueves es el día más cargado."
         }
         if lower.contains("descans") || lower.contains("pausa") {
-            return "Reservo 20 minutos de descanso después de Acme. Tu cerebro lo va a agradecer."
+            return "Reservo 20 minutos de descanso después del próximo bloque pesado."
         }
         if lower.contains("hola") || lower.contains("ayuda") {
-            return "Soy Nova. Puedo organizar tu día, crear tareas y eventos, y resumirte la semana. ¿Por dónde empezamos?"
+            return "Soy Nova. Puedo organizar tu día, crear tareas y eventos, y recordarte lo importante. ¿Qué tienes pendiente esta semana?"
         }
         if lower.contains("mañana") {
-            return "Mañana tienes 2 reuniones y un bloque de foco libre entre 10:30 y 12:00. ¿Quieres que use ese hueco para algo?"
+            return "Mañana tienes clase a las 8 y un hueco libre de 10 a 12. ¿Quieres usarlo para foco o para estudio?"
         }
-        if lower.contains("ok") || lower.contains("dale") || lower.contains("listo") {
+        if lower.contains("ok") || lower.contains("dale") || lower.contains("listo") || lower.contains("perfecto") {
             return "Perfecto. Lo dejo así. Si cambia algo te aviso."
         }
-        return "Lo tomo en cuenta. ¿Quieres que lo convierta en tarea, evento o solo lo guarde como nota?"
+        return "Lo tomo en cuenta. ¿Quieres que lo convierta en tarea, evento o lo guarde como nota?"
     }
 }
 
-/// Store central de la app. Todas las views leen y mutan acá.
+/// Store central de la app. Empieza vacío.
+/// Cuando los arrays están vacíos, las views muestran ejemplos.
 @MainActor
 final class FocusDataStore: ObservableObject {
-    @Published var events: [FocusEvent]
-    @Published var tasks: [FocusTask]
+    @Published var events: [FocusEvent] = []
+    @Published var tasks: [FocusTask] = []
     @Published var suggestions: [NovaSuggestion]
     @Published var novaMessages: [NovaMessage]
     @Published var settings: AppSettings
 
     init() {
-        self.events = DemoDataProvider.shared.weekEvents()
-        self.tasks = DemoDataProvider.shared.allTasks()
+        // Mi Día y Tareas inician VACÍOS — la UI muestra ejemplos hasta que
+        // el usuario cree su primer evento/tarea real.
+        self.events = []
+        self.tasks = []
+        // La Bandeja de Nova siempre tiene sugerencias (Nova está "leyendo" tu día).
         self.suggestions = DemoDataProvider.shared.suggestions()
         self.novaMessages = DemoDataProvider.shared.welcomeNovaMessages()
         self.settings = .defaults
+    }
+
+    // MARK: - Estado: usuario ya creó algo?
+
+    var hasUserData: Bool {
+        !events.isEmpty || !tasks.isEmpty
+    }
+
+    var hasUserEvents: Bool {
+        !events.isEmpty
+    }
+
+    var hasUserTasks: Bool {
+        !tasks.isEmpty
     }
 
     // MARK: - Eventos
@@ -115,7 +148,7 @@ final class FocusDataStore: ObservableObject {
 
     var nextBlock: FocusEvent? {
         let now = Date()
-        return todayEvents().first { (event) in
+        return todayEvents().first { event in
             (event.endTime ?? event.startTime) >= now
         }
     }
@@ -132,7 +165,7 @@ final class FocusDataStore: ObservableObject {
 
     // MARK: - Tareas
 
-    func tasks(in category: TaskCategory) -> [FocusTask] {
+    func tasksIn(_ category: TaskCategory) -> [FocusTask] {
         tasks.filter { $0.category == category }
     }
 
@@ -195,7 +228,7 @@ final class FocusDataStore: ObservableObject {
 
         let reply = NovaResponder.reply(to: trimmed)
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 600_000_000)
+            try? await Task.sleep(nanoseconds: 650_000_000)
             await MainActor.run {
                 self?.novaMessages.append(NovaMessage(role: .nova, content: reply))
             }
@@ -208,7 +241,7 @@ final class FocusDataStore: ObservableObject {
 
         let reply = action.novaReply
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 550_000_000)
+            try? await Task.sleep(nanoseconds: 600_000_000)
             await MainActor.run {
                 self?.novaMessages.append(NovaMessage(role: .nova, content: reply))
             }

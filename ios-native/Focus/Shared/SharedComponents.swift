@@ -18,25 +18,11 @@ final class HapticManager {
         notification.prepare()
     }
 
-    func tap() {
-        lightImpact.impactOccurred(intensity: 0.7)
-    }
-
-    func tick() {
-        selection.selectionChanged()
-    }
-
-    func success() {
-        notification.notificationOccurred(.success)
-    }
-
-    func warning() {
-        notification.notificationOccurred(.warning)
-    }
-
-    func error() {
-        notification.notificationOccurred(.error)
-    }
+    func tap() { lightImpact.impactOccurred(intensity: 0.7) }
+    func tick() { selection.selectionChanged() }
+    func success() { notification.notificationOccurred(.success) }
+    func warning() { notification.notificationOccurred(.warning) }
+    func error() { notification.notificationOccurred(.error) }
 }
 
 // MARK: - Empty state
@@ -50,18 +36,14 @@ struct EmptyStateView: View {
 
     var body: some View {
         VStack(spacing: Theme.Spacing.lg) {
-            Image(systemName: symbol)
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(Theme.Colors.novaAccent.opacity(0.9))
-                .padding(Theme.Spacing.xl)
-                .background(
-                    Circle()
-                        .fill(Theme.Colors.surfaceElevated)
-                        .overlay(
-                            Circle()
-                                .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                        )
-                )
+            ZStack {
+                Circle()
+                    .fill(Theme.Colors.focusAccentSoft)
+                    .frame(width: 80, height: 80)
+                Image(systemName: symbol)
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundStyle(Theme.Colors.focusAccent)
+            }
 
             VStack(spacing: Theme.Spacing.xs) {
                 Text(title)
@@ -81,17 +63,13 @@ struct EmptyStateView: View {
                 }) {
                     Text(actionLabel)
                         .font(Theme.Typography.bodyBold)
-                        .foregroundStyle(Theme.Colors.textPrimary)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, Theme.Spacing.xl)
                         .padding(.vertical, Theme.Spacing.md)
                         .background(
-                            Capsule()
-                                .fill(Theme.Colors.novaAccentSoft)
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(Theme.Colors.novaAccent.opacity(0.55), lineWidth: Theme.Stroke.hairline)
-                                )
+                            Capsule().fill(Theme.Colors.focusAccent)
                         )
+                        .focusCardShadow()
                 }
                 .buttonStyle(.plain)
                 .padding(.top, Theme.Spacing.xs)
@@ -102,71 +80,95 @@ struct EmptyStateView: View {
     }
 }
 
-// MARK: - FocusBar input (visual; lleva texto a Nova)
+// MARK: - Gemini-style FocusBar (prominente, gradient cuando focuseado)
 
 struct FocusBarInput: View {
     @Binding var text: String
-    var placeholder: String = "Habla con Nova…"
+    var placeholder: String = "Pregúntale a Nova…"
     var onSubmit: () -> Void
+    var onTap: (() -> Void)? = nil
     var onMic: (() -> Void)? = nil
-    var onCamera: (() -> Void)? = nil
 
     @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack(spacing: Theme.Spacing.md) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Theme.Colors.novaAccent)
+            // Sparkle con gradiente Nova
+            ZStack {
+                Circle()
+                    .fill(Theme.Colors.novaGradient)
+                    .frame(width: 30, height: 30)
+                Image(systemName: "sparkle")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
 
             TextField(placeholder, text: $text, axis: .horizontal)
                 .focused($isFocused)
                 .font(Theme.Typography.body)
                 .foregroundStyle(Theme.Colors.textPrimary)
-                .tint(Theme.Colors.novaAccent)
+                .tint(Theme.Colors.focusAccent)
                 .submitLabel(.send)
                 .onSubmit {
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         onSubmit()
                     }
                 }
+                .onTapGesture {
+                    onTap?()
+                }
 
-            HStack(spacing: Theme.Spacing.lg) {
-                if let onCamera {
-                    Button(action: onCamera) {
-                        Image(systemName: "camera")
-                            .font(.system(size: 16))
-                            .foregroundStyle(Theme.Colors.textTertiary)
-                    }
-                    .buttonStyle(.plain)
+            if let onMic {
+                Button(action: onMic) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.focusAccent)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle().fill(Theme.Colors.focusAccentSoft)
+                        )
                 }
-                if let onMic {
-                    Button(action: onMic) {
-                        Image(systemName: "mic")
-                            .font(.system(size: 16))
-                            .foregroundStyle(Theme.Colors.textTertiary)
-                    }
-                    .buttonStyle(.plain)
+                .buttonStyle(.plain)
+            }
+
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    onSubmit()
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle().fill(Theme.Colors.focusAccent)
+                        )
                 }
+                .buttonStyle(.plain)
+                .transition(.scale.combined(with: .opacity))
             }
         }
-        .padding(.horizontal, Theme.Spacing.lg)
-        .padding(.vertical, Theme.Spacing.md + 2)
+        .padding(.horizontal, Theme.Spacing.md + 2)
+        .padding(.vertical, Theme.Spacing.md - 1)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                .fill(Theme.Colors.surfaceElevated)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                        .strokeBorder(
-                            isFocused ? Theme.Colors.novaAccent.opacity(0.55) : Theme.Colors.border,
-                            lineWidth: Theme.Stroke.hairline
-                        )
+            RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
+                .fill(Theme.Colors.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
+                .strokeBorder(
+                    isFocused
+                        ? AnyShapeStyle(Theme.Colors.novaGradient)
+                        : AnyShapeStyle(Theme.Colors.border),
+                    lineWidth: isFocused ? 1.5 : Theme.Stroke.hairline
                 )
         )
+        .focusCardShadow()
+        .animation(.easeInOut(duration: 0.2), value: isFocused)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: text.isEmpty)
     }
 }
 
-// MARK: - Pill chip (filtros, prioridades, secciones)
+// MARK: - Filter chip
 
 struct FilterChip: View {
     let label: String
@@ -180,16 +182,16 @@ struct FilterChip: View {
         }) {
             Text(label)
                 .font(Theme.Typography.subheadEmphasized)
-                .foregroundStyle(isSelected ? Theme.Colors.textPrimary : Theme.Colors.textSecondary)
+                .foregroundStyle(isSelected ? .white : Theme.Colors.textSecondary)
                 .padding(.horizontal, Theme.Spacing.md + 2)
-                .padding(.vertical, Theme.Spacing.sm - 1)
+                .padding(.vertical, Theme.Spacing.sm)
                 .background(
                     Capsule()
-                        .fill(isSelected ? Theme.Colors.surfaceHigh : Theme.Colors.surface)
+                        .fill(isSelected ? Theme.Colors.focusAccent : Theme.Colors.surface)
                         .overlay(
                             Capsule()
                                 .strokeBorder(
-                                    isSelected ? Theme.Colors.borderEmphasis : Theme.Colors.border,
+                                    isSelected ? Color.clear : Theme.Colors.border,
                                     lineWidth: Theme.Stroke.hairline
                                 )
                         )
@@ -199,7 +201,7 @@ struct FilterChip: View {
     }
 }
 
-// MARK: - Pill estática (etiqueta de tipo/sección/estado)
+// MARK: - StatePill (etiqueta de tipo/sección/estado)
 
 struct StatePill: View {
     let label: String
@@ -221,10 +223,74 @@ struct StatePill: View {
         .padding(.vertical, 4)
         .background(
             Capsule()
-                .fill(tint.opacity(0.12))
+                .fill(tint.opacity(0.10))
+        )
+    }
+}
+
+// MARK: - ExampleBadge (marca eventos/tareas como ejemplo)
+
+struct ExampleBadge: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 9, weight: .semibold))
+            Text("EJEMPLO")
+                .font(Theme.Typography.caption)
+                .tracking(0.9)
+        }
+        .foregroundStyle(Theme.Colors.novaAccent)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(Theme.Colors.novaAccentSoft)
                 .overlay(
                     Capsule()
-                        .strokeBorder(tint.opacity(0.30), lineWidth: Theme.Stroke.hairline)
+                        .strokeBorder(Theme.Colors.novaAccent.opacity(0.25), lineWidth: Theme.Stroke.hairline)
+                )
+        )
+    }
+}
+
+// MARK: - Banner inline para indicar que se ven ejemplos
+
+struct ExampleBanner: View {
+    let title: String
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            ZStack {
+                Circle()
+                    .fill(Theme.Colors.novaAccentSoft)
+                    .frame(width: 36, height: 36)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.novaAccent)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Theme.Typography.bodyBold)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                Text(message)
+                    .font(Theme.Typography.subhead)
+                    .foregroundStyle(Theme.Colors.textSecondary)
+                    .multilineTextAlignment(.leading)
+            }
+            Spacer()
+        }
+        .padding(Theme.Spacing.md + 2)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(Theme.Colors.novaAccentSoft)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                        .strokeBorder(
+                            Theme.Colors.novaAccent.opacity(0.25),
+                            style: StrokeStyle(lineWidth: 1, dash: [5, 4])
+                        )
                 )
         )
     }
@@ -257,19 +323,56 @@ struct IconBadge: View {
     let symbol: String
     let tint: Color
     var size: CGFloat = 36
+    var filled: Bool = false
 
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: size * 0.42, weight: .semibold))
-            .foregroundStyle(tint)
+            .foregroundStyle(filled ? .white : tint)
             .frame(width: size, height: size)
             .background(
                 Circle()
-                    .fill(tint.opacity(0.14))
+                    .fill(filled ? AnyShapeStyle(tint) : AnyShapeStyle(tint.opacity(0.12)))
+            )
+    }
+}
+
+// MARK: - Prompt chip (para empty state Mi Día)
+
+struct PromptChip: View {
+    let text: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: {
+            HapticManager.shared.tap()
+            action()
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.novaAccent)
+                Text(text)
+                    .font(Theme.Typography.subheadEmphasized)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.forward")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.textTertiary)
+            }
+            .padding(.horizontal, Theme.Spacing.md + 2)
+            .padding(.vertical, Theme.Spacing.md - 1)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                    .fill(Theme.Colors.surface)
                     .overlay(
-                        Circle()
-                            .strokeBorder(tint.opacity(0.30), lineWidth: Theme.Stroke.hairline)
+                        RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
                     )
             )
+            .focusCardShadow()
+        }
+        .buttonStyle(.plain)
     }
 }

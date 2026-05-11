@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum InboxFilter: String, CaseIterable, Identifiable {
+enum InboxFilter: String, CaseIterable, Identifiable {
     case pending
     case approved
     case postponed
@@ -24,68 +24,71 @@ private enum InboxFilter: String, CaseIterable, Identifiable {
     }
 }
 
+/// Standalone (con NavigationStack propio). Usar desde Ajustes → Bandeja.
 struct NovaInboxView: View {
-    @EnvironmentObject private var store: FocusDataStore
-    @State private var filter: InboxFilter = .pending
-
     var body: some View {
         ZStack {
             Theme.Colors.background.ignoresSafeArea()
-
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-                    header
-                        .padding(.horizontal, Theme.Spacing.xl)
-                        .padding(.top, Theme.Spacing.md)
-
-                    filterRow
-                        .padding(.horizontal, Theme.Spacing.xl)
-
-                    if filtered.isEmpty {
-                        EmptyStateView(
-                            symbol: emptySymbol,
-                            title: emptyTitle,
-                            message: emptyMessage
-                        )
-                        .frame(minHeight: 320)
-                    } else {
-                        VStack(spacing: Theme.Spacing.md) {
-                            ForEach(filtered) { sug in
-                                NovaSuggestionCard(suggestion: sug) { status in
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                        store.updateSuggestion(sug.id, status: status)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal, Theme.Spacing.xl)
-                    }
-
-                    Spacer(minLength: Theme.Spacing.bottomBarSafety)
-                }
-            }
+            NovaInboxContent(onUpdate: { _, _ in })
         }
         .navigationTitle("Bandeja de Nova")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.Colors.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
     }
+}
 
-    // MARK: - Header
+/// Contenido sin navegación. Usar dentro del sheet de Nova.
+struct NovaInboxContent: View {
+    @EnvironmentObject private var store: FocusDataStore
+    @State private var filter: InboxFilter = .pending
+    let onUpdate: (UUID, SuggestionStatus) -> Void
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Bandeja de Nova")
-                .font(Theme.Typography.title)
-                .foregroundStyle(Theme.Colors.textPrimary)
-            Text("Sugerencias inteligentes para tu día. Aprueba lo útil y descarta el resto.")
-                .font(Theme.Typography.body)
-                .foregroundStyle(Theme.Colors.textSecondary)
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                header
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.top, Theme.Spacing.md)
+
+                filterRow
+                    .padding(.horizontal, Theme.Spacing.xl)
+
+                if filtered.isEmpty {
+                    EmptyStateView(
+                        symbol: emptySymbol,
+                        title: emptyTitle,
+                        message: emptyMessage
+                    )
+                    .frame(minHeight: 280)
+                } else {
+                    VStack(spacing: Theme.Spacing.md) {
+                        ForEach(filtered) { sug in
+                            NovaSuggestionCard(suggestion: sug) { status in
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    onUpdate(sug.id, status)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, Theme.Spacing.xl)
+                }
+
+                Spacer(minLength: Theme.Spacing.bottomBarSafety)
+            }
         }
     }
 
-    // MARK: - Filtros
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Sugerencias inteligentes")
+                .font(Theme.Typography.title2)
+                .foregroundStyle(Theme.Colors.textPrimary)
+            Text("Nova mira tu día y te propone ajustes. Aprueba lo útil, descarta el resto.")
+                .font(Theme.Typography.subhead)
+                .foregroundStyle(Theme.Colors.textSecondary)
+        }
+    }
 
     private var filterRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -105,8 +108,6 @@ struct NovaInboxView: View {
             .sorted { $0.createdAt > $1.createdAt }
     }
 
-    // MARK: - Empty
-
     private var emptySymbol: String {
         switch filter {
         case .pending: return "checkmark.seal"
@@ -118,16 +119,16 @@ struct NovaInboxView: View {
     private var emptyTitle: String {
         switch filter {
         case .pending: return "Bandeja vacía"
-        case .approved: return "Sin sugerencias aprobadas"
+        case .approved: return "Aún nada aprobado"
         case .postponed: return "Nada pospuesto"
         }
     }
 
     private var emptyMessage: String {
         switch filter {
-        case .pending: return "Nova no tiene nada urgente para ti ahora. Cuando detecte algo útil, va a aparecer aquí."
-        case .approved: return "Cuando apruebes una sugerencia, va a quedar registrada aquí."
-        case .postponed: return "Las sugerencias que pospongas van a volver a aparecer más tarde."
+        case .pending: return "Nova no tiene nada para ti ahora. Cuando detecte algo útil, aparece acá."
+        case .approved: return "Cuando apruebes una sugerencia, va a quedar registrada acá."
+        case .postponed: return "Las sugerencias pospuestas vuelven a aparecer más tarde."
         }
     }
 }
@@ -155,7 +156,6 @@ struct NovaSuggestionCard: View {
                         }
                     }
                 }
-
                 Spacer()
             }
 
@@ -182,11 +182,12 @@ struct NovaSuggestionCard: View {
         .padding(Theme.Spacing.lg)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                .fill(Theme.Colors.surfaceElevated)
+                .fill(Theme.Colors.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                         .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
                 )
+                .focusCardShadow()
         )
     }
 
@@ -196,21 +197,21 @@ struct NovaSuggestionCard: View {
                 label: "Descartar",
                 symbol: "xmark",
                 tint: Theme.Colors.textSecondary,
-                fill: Theme.Colors.surface,
+                fill: Theme.Colors.surfaceHigh,
                 action: { onAction(.dismissed) }
             )
             actionButton(
                 label: "Posponer",
                 symbol: "clock",
                 tint: Theme.Colors.warning,
-                fill: Theme.Colors.warning.opacity(0.14),
+                fill: Theme.Colors.warning.opacity(0.10),
                 action: { onAction(.postponed) }
             )
             actionButton(
                 label: "Aprobar",
                 symbol: "checkmark",
                 tint: Theme.Colors.success,
-                fill: Theme.Colors.success.opacity(0.16),
+                fill: Theme.Colors.success,
                 emphasized: true,
                 action: { onAction(.approved) }
             )
@@ -236,7 +237,7 @@ struct NovaSuggestionCard: View {
                 Text(label)
                     .font(Theme.Typography.subheadEmphasized)
             }
-            .foregroundStyle(emphasized ? Theme.Colors.textPrimary : tint)
+            .foregroundStyle(emphasized ? .white : tint)
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.md - 2)
             .background(
@@ -244,7 +245,10 @@ struct NovaSuggestionCard: View {
                     .fill(fill)
                     .overlay(
                         Capsule()
-                            .strokeBorder(tint.opacity(emphasized ? 0.45 : 0.30), lineWidth: Theme.Stroke.hairline)
+                            .strokeBorder(
+                                emphasized ? Color.clear : tint.opacity(0.20),
+                                lineWidth: Theme.Stroke.hairline
+                            )
                     )
             )
         }
@@ -269,11 +273,7 @@ struct NovaSuggestionCard: View {
         .padding(.vertical, Theme.Spacing.sm)
         .background(
             Capsule()
-                .fill(resolvedTint.opacity(0.12))
-                .overlay(
-                    Capsule()
-                        .strokeBorder(resolvedTint.opacity(0.30), lineWidth: Theme.Stroke.hairline)
-                )
+                .fill(resolvedTint.opacity(0.10))
         )
     }
 
@@ -300,7 +300,7 @@ struct NovaSuggestionCard: View {
         case .approved: return Theme.Colors.success
         case .postponed: return Theme.Colors.warning
         case .dismissed: return Theme.Colors.textTertiary
-        case .pending: return Theme.Colors.novaAccent
+        case .pending: return Theme.Colors.focusAccent
         }
     }
 
@@ -318,5 +318,4 @@ struct NovaSuggestionCard: View {
         NovaInboxView()
             .environmentObject(FocusDataStore())
     }
-    .preferredColorScheme(.dark)
 }

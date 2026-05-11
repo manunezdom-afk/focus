@@ -71,7 +71,7 @@ struct AppSettings: Codable, Hashable {
         dailySummaryEnabled: true,
         smartSuggestionsEnabled: true,
         remindersEnabled: true,
-        appearance: .dark,
+        appearance: .light,
         novaPersonality: .focus,
         novaMemoryEnabled: true,
         novaVoiceEnabled: false,

@@ -1,9 +1,21 @@
 import SwiftUI
 
+/// Nova como sheet (no es tab). Se abre desde el FocusBar de Mi Día.
+/// Tiene dos segmentos: Conversación y Bandeja.
 struct NovaView: View {
+    enum Segment: Hashable { case chat, bandeja }
+
     @EnvironmentObject private var store: FocusDataStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var segment: Segment = .chat
     @State private var draft: String = ""
-    @State private var showInbox = false
+    @State private var didAutoSubmit: Bool = false
+
+    let initialPrompt: String?
+
+    init(initialPrompt: String? = nil) {
+        self.initialPrompt = initialPrompt
+    }
 
     var body: some View {
         NavigationStack {
@@ -11,157 +23,134 @@ struct NovaView: View {
                 Theme.Colors.background.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    header
-                    chatScroll
-                    inputBar
-                }
-            }
-            .navigationDestination(isPresented: $showInbox) {
-                NovaInboxView()
-            }
-        }
-    }
+                    segmentedControl
+                        .padding(.horizontal, Theme.Spacing.xl)
+                        .padding(.vertical, Theme.Spacing.md)
+                        .background(Theme.Colors.background)
 
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: Theme.Spacing.md) {
-                IconBadge(symbol: "sparkles", tint: Theme.Colors.novaAccent, size: 42)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Nova")
-                        .font(Theme.Typography.title)
-                        .foregroundStyle(Theme.Colors.textPrimary)
-                    Text("Tu centro inteligente para organizar el día.")
-                        .font(Theme.Typography.subhead)
-                        .foregroundStyle(Theme.Colors.textSecondary)
-                }
-                Spacer()
-                inboxButton
-            }
-            .padding(.horizontal, Theme.Spacing.xl)
-            .padding(.top, Theme.Spacing.lg)
-            .padding(.bottom, Theme.Spacing.md)
-
-            if store.pendingSuggestions.count > 0 {
-                Button {
-                    HapticManager.shared.tap()
-                    showInbox = true
-                } label: {
-                    HStack(spacing: Theme.Spacing.sm) {
-                        Image(systemName: "tray.full")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("\(store.pendingSuggestions.count) sugerencias en tu Bandeja")
-                            .font(Theme.Typography.subheadEmphasized)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
+                    Group {
+                        if segment == .chat {
+                            chatContent
+                        } else {
+                            NovaInboxContent(
+                                onUpdate: { id, status in
+                                    store.updateSuggestion(id, status: status)
+                                }
+                            )
+                        }
                     }
-                    .foregroundStyle(Theme.Colors.novaAccent)
-                    .padding(.horizontal, Theme.Spacing.md + 2)
-                    .padding(.vertical, Theme.Spacing.sm + 2)
-                    .background(
-                        Capsule()
-                            .fill(Theme.Colors.novaAccentSoft)
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(Theme.Colors.novaAccent.opacity(0.35), lineWidth: Theme.Stroke.hairline)
-                            )
-                    )
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, Theme.Spacing.xl)
-                .padding(.bottom, Theme.Spacing.md)
             }
-
-            quickActionsRow
-                .padding(.bottom, Theme.Spacing.md)
-
-            Rectangle()
-                .fill(Theme.Colors.border)
-                .frame(height: Theme.Stroke.hairline)
-                .opacity(0.6)
+            .navigationTitle("Nova")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Theme.Colors.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(Theme.Colors.novaGradient)
+                                .frame(width: 22, height: 22)
+                            Image(systemName: "sparkle")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        Text("Nova")
+                            .font(Theme.Typography.bodyBold)
+                            .foregroundStyle(Theme.Colors.textPrimary)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Text("Cerrar")
+                            .font(Theme.Typography.bodyEmphasized)
+                            .foregroundStyle(Theme.Colors.focusAccent)
+                    }
+                }
+            }
         }
-        .background(Theme.Colors.background)
+        .onAppear {
+            // Si llegamos con un prompt inicial, enviarlo automáticamente
+            if let prompt = initialPrompt,
+               !didAutoSubmit,
+               !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                didAutoSubmit = true
+                Task { @MainActor in
+                    store.sendNovaMessage(prompt)
+                }
+            }
+        }
     }
 
-    private var inboxButton: some View {
+    // MARK: - Segmented
+
+    private var segmentedControl: some View {
+        HStack(spacing: 0) {
+            segmentButton(.chat, label: "Conversación", symbol: "bubble.left.fill")
+            segmentButton(.bandeja, label: "Bandeja", symbol: "tray.full.fill", badgeCount: store.pendingSuggestions.count)
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(Theme.Colors.surfaceHigh)
+        )
+    }
+
+    private func segmentButton(_ seg: Segment, label: String, symbol: String, badgeCount: Int = 0) -> some View {
         Button {
-            HapticManager.shared.tap()
-            showInbox = true
+            HapticManager.shared.tick()
+            withAnimation(.easeInOut(duration: 0.18)) {
+                segment = seg
+            }
         } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: "tray.full")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Theme.Colors.textSecondary)
-                    .frame(width: 38, height: 38)
-                    .background(
-                        Circle()
-                            .fill(Theme.Colors.surfaceElevated)
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                            )
-                    )
-                if store.pendingSuggestions.count > 0 {
-                    Circle()
-                        .fill(Theme.Colors.novaAccent)
-                        .frame(width: 9, height: 9)
-                        .overlay(Circle().strokeBorder(Theme.Colors.background, lineWidth: 1.5))
-                        .offset(x: 2, y: -2)
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(label)
+                    .font(Theme.Typography.subheadEmphasized)
+                if badgeCount > 0 {
+                    Text("\(badgeCount)")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Theme.Colors.novaAccent))
                 }
             }
+            .foregroundStyle(segment == seg ? Theme.Colors.textPrimary : Theme.Colors.textTertiary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Theme.Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                    .fill(segment == seg ? Theme.Colors.surface : Color.clear)
+                    .focusCardShadow()
+            )
         }
         .buttonStyle(.plain)
     }
 
-    // MARK: - Quick actions
+    // MARK: - Chat content
 
-    private var quickActionsRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Theme.Spacing.sm) {
-                ForEach(NovaQuickAction.allCases) { action in
-                    Button {
-                        store.runQuickAction(action)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: action.symbol)
-                                .font(.system(size: 12, weight: .semibold))
-                            Text(action.label)
-                                .font(Theme.Typography.subheadEmphasized)
-                        }
-                        .foregroundStyle(Theme.Colors.textPrimary)
-                        .padding(.horizontal, Theme.Spacing.md + 2)
-                        .padding(.vertical, Theme.Spacing.sm + 1)
-                        .background(
-                            Capsule()
-                                .fill(Theme.Colors.surface)
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, Theme.Spacing.xl)
+    private var chatContent: some View {
+        VStack(spacing: 0) {
+            chatScroll
+            quickActionsRow
+            inputBar
         }
     }
-
-    // MARK: - Chat
 
     private var chatScroll: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 VStack(spacing: Theme.Spacing.md) {
                     ForEach(store.novaMessages) { msg in
-                        NovaMessageBubble(message: msg)
-                            .id(msg.id)
+                        NovaMessageBubble(message: msg).id(msg.id)
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
-                .padding(.top, Theme.Spacing.lg)
+                .padding(.top, Theme.Spacing.md)
                 .padding(.bottom, Theme.Spacing.md)
             }
             .onChange(of: store.novaMessages.count) { _, _ in
@@ -174,14 +163,44 @@ struct NovaView: View {
         }
     }
 
-    // MARK: - Input bar
+    private var quickActionsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Theme.Spacing.sm) {
+                ForEach(NovaQuickAction.allCases) { action in
+                    Button {
+                        store.runQuickAction(action)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: action.symbol)
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(action.label)
+                                .font(Theme.Typography.subheadEmphasized)
+                        }
+                        .foregroundStyle(Theme.Colors.textPrimary)
+                        .padding(.horizontal, Theme.Spacing.md + 2)
+                        .padding(.vertical, Theme.Spacing.sm)
+                        .background(
+                            Capsule()
+                                .fill(Theme.Colors.surface)
+                                .overlay(
+                                    Capsule().strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Theme.Spacing.xl)
+            .padding(.vertical, Theme.Spacing.sm)
+        }
+    }
 
     private var inputBar: some View {
         VStack(spacing: 0) {
             Rectangle()
                 .fill(Theme.Colors.border)
                 .frame(height: Theme.Stroke.hairline)
-                .opacity(0.5)
+                .opacity(0.6)
 
             FocusBarInput(
                 text: $draft,
@@ -211,26 +230,38 @@ private struct NovaMessageBubble: View {
             if message.role == .user {
                 Spacer(minLength: Theme.Spacing.xxxl)
             } else {
-                IconBadge(symbol: "sparkles", tint: Theme.Colors.novaAccent, size: 28)
+                ZStack {
+                    Circle()
+                        .fill(Theme.Colors.novaGradient)
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                }
             }
 
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
                 Text(message.content)
                     .font(Theme.Typography.body)
-                    .foregroundStyle(Theme.Colors.textPrimary)
+                    .foregroundStyle(message.role == .user ? .white : Theme.Colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, Theme.Spacing.md + 2)
                     .padding(.vertical, Theme.Spacing.md - 1)
                     .background(
                         RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                            .fill(message.role == .user ? Theme.Colors.novaAccentSoft : Theme.Colors.surface)
+                            .fill(
+                                message.role == .user
+                                    ? AnyShapeStyle(Theme.Colors.focusAccent)
+                                    : AnyShapeStyle(Theme.Colors.surface)
+                            )
                             .overlay(
                                 RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                                     .strokeBorder(
-                                        message.role == .user ? Theme.Colors.novaAccent.opacity(0.30) : Theme.Colors.border,
+                                        message.role == .user ? Color.clear : Theme.Colors.border,
                                         lineWidth: Theme.Stroke.hairline
                                     )
                             )
+                            .focusCardShadow()
                     )
                     .fixedSize(horizontal: false, vertical: true)
                 Text(timestampLabel)
@@ -250,10 +281,4 @@ private struct NovaMessageBubble: View {
         fmt.dateFormat = "HH:mm"
         return fmt.string(from: message.timestamp)
     }
-}
-
-#Preview {
-    NovaView()
-        .environmentObject(FocusDataStore())
-        .preferredColorScheme(.dark)
 }

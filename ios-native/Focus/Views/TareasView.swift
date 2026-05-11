@@ -24,6 +24,15 @@ struct TareasView: View {
     @State private var showCreate = false
     @State private var expandedTaskIds: Set<UUID> = []
 
+    /// Si el usuario no creó nada todavía, mostramos ejemplos.
+    private var displayTasks: [FocusTask] {
+        store.hasUserTasks ? store.tasks : DemoDataProvider.shared.exampleAllTasks()
+    }
+
+    private var showingExamples: Bool {
+        !store.hasUserTasks
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
@@ -33,7 +42,15 @@ struct TareasView: View {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                         header
                             .padding(.horizontal, Theme.Spacing.xl)
-                            .padding(.top, Theme.Spacing.lg)
+                            .padding(.top, Theme.Spacing.md)
+
+                        if showingExamples {
+                            ExampleBanner(
+                                title: "Ejemplo de tus tareas",
+                                message: "Estas son tareas de muestra. Cuando crees la tuya, desaparecen."
+                            )
+                            .padding(.horizontal, Theme.Spacing.xl)
+                        }
 
                         filtersRow
                             .padding(.horizontal, Theme.Spacing.xl)
@@ -84,6 +101,9 @@ struct TareasView: View {
     }
 
     private var headerSubtitle: String {
+        if showingExamples {
+            return "Lo que tienes pendiente, en un solo lugar."
+        }
         let pending = store.tasks.filter { !$0.done }.count
         if pending == 0 { return "No tienes pendientes. Disfruta el momento." }
         if pending == 1 { return "1 tarea pendiente. Vamos por ella." }
@@ -126,10 +146,19 @@ struct TareasView: View {
                 ForEach(tasks) { task in
                     TaskRowFull(
                         task: task,
+                        isExample: showingExamples,
                         isExpanded: expandedTaskIds.contains(task.id),
-                        onToggle: { store.toggleTask(task.id) },
+                        onToggle: {
+                            if !showingExamples {
+                                store.toggleTask(task.id)
+                            } else {
+                                HapticManager.shared.warning()
+                            }
+                        },
                         onToggleSubtask: { subId in
-                            store.toggleSubtask(taskId: task.id, subtaskId: subId)
+                            if !showingExamples {
+                                store.toggleSubtask(taskId: task.id, subtaskId: subId)
+                            }
                         },
                         onExpand: { toggleExpand(task.id) }
                     )
@@ -147,10 +176,10 @@ struct TareasView: View {
         }
     }
 
-    // MARK: - Filtering logic
+    // MARK: - Filtering
 
     private func filteredTasks(in category: TaskCategory) -> [FocusTask] {
-        let base = store.tasks.filter { $0.category == category }
+        let base = displayTasks.filter { $0.category == category }
         switch filter {
         case .all: return base
         case .pending: return base.filter { !$0.done }
@@ -190,12 +219,12 @@ struct TareasView: View {
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(Theme.Colors.textPrimary)
+                .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
                 .background(
                     Circle()
-                        .fill(Theme.Colors.novaAccent)
-                        .shadow(color: Theme.Colors.novaAccent.opacity(0.40), radius: 18, x: 0, y: 8)
+                        .fill(Theme.Colors.focusAccent)
+                        .shadow(color: Theme.Colors.focusAccent.opacity(0.35), radius: 16, x: 0, y: 6)
                 )
         }
         .buttonStyle(.plain)
@@ -206,6 +235,7 @@ struct TareasView: View {
 
 private struct TaskRowFull: View {
     let task: FocusTask
+    let isExample: Bool
     let isExpanded: Bool
     let onToggle: () -> Void
     let onToggleSubtask: (UUID) -> Void
@@ -229,8 +259,15 @@ private struct TaskRowFull: View {
                 .fill(Theme.Colors.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                        .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                        .strokeBorder(
+                            isExample ? Theme.Colors.novaAccent.opacity(0.18) : Theme.Colors.border,
+                            style: StrokeStyle(
+                                lineWidth: Theme.Stroke.hairline,
+                                dash: isExample ? [4, 3] : []
+                            )
+                        )
                 )
+                .focusCardShadow()
         )
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous))
     }
@@ -249,11 +286,16 @@ private struct TaskRowFull: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(task.title)
-                    .font(Theme.Typography.bodyEmphasized)
-                    .foregroundStyle(task.done ? Theme.Colors.textTertiary : Theme.Colors.textPrimary)
-                    .strikethrough(task.done, color: Theme.Colors.textTertiary)
-                    .multilineTextAlignment(.leading)
+                HStack(spacing: 6) {
+                    Text(task.title)
+                        .font(Theme.Typography.bodyEmphasized)
+                        .foregroundStyle(task.done ? Theme.Colors.textTertiary : Theme.Colors.textPrimary)
+                        .strikethrough(task.done, color: Theme.Colors.textTertiary)
+                        .multilineTextAlignment(.leading)
+                    if isExample {
+                        ExampleBadge()
+                    }
+                }
 
                 HStack(spacing: 6) {
                     StatePill(label: task.priority.label, tint: task.priority.color)
@@ -293,9 +335,7 @@ private struct TaskRowFull: View {
     private var subtasksList: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             ForEach(task.subtasks) { sub in
-                Button(action: {
-                    onToggleSubtask(sub.id)
-                }) {
+                Button(action: { onToggleSubtask(sub.id) }) {
                     HStack(spacing: Theme.Spacing.sm) {
                         Image(systemName: sub.isCompleted ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 16))
@@ -332,26 +372,14 @@ private struct NuevaTareaSheet: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: Theme.Spacing.xl) {
-                        // Título
-                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                            Text("TÍTULO").sectionLabelStyle()
+                        sheetField(label: "TÍTULO") {
                             TextField("¿Qué quieres hacer?", text: $title, axis: .vertical)
                                 .font(Theme.Typography.headline)
                                 .foregroundStyle(Theme.Colors.textPrimary)
-                                .tint(Theme.Colors.novaAccent)
+                                .tint(Theme.Colors.focusAccent)
                                 .lineLimit(1...3)
-                                .padding(Theme.Spacing.md)
-                                .background(
-                                    RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                                        .fill(Theme.Colors.surface)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                                                .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                                        )
-                                )
                         }
 
-                        // Categoría
                         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                             Text("CATEGORÍA").sectionLabelStyle()
                             HStack(spacing: Theme.Spacing.sm) {
@@ -363,56 +391,22 @@ private struct NuevaTareaSheet: View {
                             }
                         }
 
-                        // Prioridad
                         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                             Text("PRIORIDAD").sectionLabelStyle()
                             HStack(spacing: Theme.Spacing.sm) {
                                 ForEach(TaskPriority.allCases) { p in
-                                    Button {
-                                        HapticManager.shared.tick()
-                                        priority = p
-                                    } label: {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: p.symbol)
-                                                .font(.system(size: 11, weight: .semibold))
-                                            Text(p.label)
-                                                .font(Theme.Typography.subheadEmphasized)
-                                        }
-                                        .foregroundStyle(priority == p ? p.color : Theme.Colors.textSecondary)
-                                        .padding(.horizontal, Theme.Spacing.md + 2)
-                                        .padding(.vertical, Theme.Spacing.sm - 1)
-                                        .background(
-                                            Capsule()
-                                                .fill(priority == p ? p.color.opacity(0.14) : Theme.Colors.surface)
-                                                .overlay(
-                                                    Capsule()
-                                                        .strokeBorder(priority == p ? p.color.opacity(0.45) : Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                                                )
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
+                                    priorityChip(p)
                                 }
                             }
                         }
 
-                        // Notas
-                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                            Text("NOTAS").sectionLabelStyle()
+                        sheetField(label: "NOTAS") {
                             TextField("Detalles, contexto…", text: $notes, axis: .vertical)
                                 .font(Theme.Typography.body)
                                 .foregroundStyle(Theme.Colors.textPrimary)
-                                .tint(Theme.Colors.novaAccent)
+                                .tint(Theme.Colors.focusAccent)
                                 .lineLimit(2...5)
-                                .padding(Theme.Spacing.md)
-                                .frame(minHeight: 90, alignment: .topLeading)
-                                .background(
-                                    RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                                        .fill(Theme.Colors.surface)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                                                .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                                        )
-                                )
+                                .frame(minHeight: 70, alignment: .topLeading)
                         }
 
                         Spacer(minLength: Theme.Spacing.lg)
@@ -425,7 +419,6 @@ private struct NuevaTareaSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Theme.Colors.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancelar") { dismiss() }
@@ -444,10 +437,52 @@ private struct NuevaTareaSheet: View {
                         onSave(task)
                         dismiss()
                     }
-                    .foregroundStyle(canSave ? Theme.Colors.novaAccent : Theme.Colors.textTertiary)
+                    .foregroundStyle(canSave ? Theme.Colors.focusAccent : Theme.Colors.textTertiary)
                     .disabled(!canSave)
                 }
             }
+        }
+    }
+
+    private func priorityChip(_ p: TaskPriority) -> some View {
+        Button {
+            HapticManager.shared.tick()
+            priority = p
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: p.symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(p.label)
+                    .font(Theme.Typography.subheadEmphasized)
+            }
+            .foregroundStyle(priority == p ? .white : Theme.Colors.textSecondary)
+            .padding(.horizontal, Theme.Spacing.md + 2)
+            .padding(.vertical, Theme.Spacing.sm)
+            .background(
+                Capsule()
+                    .fill(priority == p ? p.color : Theme.Colors.surface)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(priority == p ? Color.clear : Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func sheetField<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text(label).sectionLabelStyle()
+            content()
+                .padding(Theme.Spacing.md)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                        .fill(Theme.Colors.surface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                                .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                        )
+                )
         }
     }
 
@@ -459,5 +494,4 @@ private struct NuevaTareaSheet: View {
 #Preview {
     TareasView()
         .environmentObject(FocusDataStore())
-        .preferredColorScheme(.dark)
 }

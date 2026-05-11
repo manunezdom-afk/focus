@@ -13,7 +13,7 @@ struct AjustesView: View {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
                         header
                             .padding(.horizontal, Theme.Spacing.xl)
-                            .padding(.top, Theme.Spacing.lg)
+                            .padding(.top, Theme.Spacing.md)
 
                         cuentaSection
                         planSection
@@ -245,8 +245,8 @@ struct AjustesView: View {
     private func appearanceSubtitle(_ pref: AppearancePreference) -> String {
         switch pref {
         case .system: return "Sigue lo que use tu iPhone."
-        case .dark: return "Modo oscuro siempre."
-        case .light: return "Próximamente disponible."
+        case .light: return "Claro siempre."
+        case .dark: return "Oscuro próximamente."
         }
     }
 
@@ -283,7 +283,7 @@ struct AjustesView: View {
         }
     }
 
-    // MARK: - Acerca de
+    // MARK: - Acerca
 
     private var acercaSection: some View {
         settingsSection(title: "Acerca de") {
@@ -315,8 +315,6 @@ struct AjustesView: View {
     }
 }
 
-// MARK: - Modificador de card contenedora
-
 private extension View {
     func focusCardContainer() -> some View {
         self
@@ -327,12 +325,11 @@ private extension View {
                         RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                             .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
                     )
+                    .focusCardShadow()
             )
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous))
     }
 }
-
-// MARK: - Fila de ajuste
 
 private enum AjustesTrailing {
     case chevron
@@ -384,7 +381,7 @@ private struct AjustesRow: View {
         case .check:
             Image(systemName: "checkmark")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Theme.Colors.novaAccent)
+                .foregroundStyle(Theme.Colors.focusAccent)
         case .badge(let text, let color):
             Text(text.uppercased())
                 .font(Theme.Typography.caption)
@@ -394,16 +391,12 @@ private struct AjustesRow: View {
                 .padding(.vertical, 3)
                 .background(
                     Capsule()
-                        .fill(color.opacity(0.14))
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(color.opacity(0.35), lineWidth: Theme.Stroke.hairline)
-                        )
+                        .fill(color.opacity(0.10))
                 )
         case .toggle(let binding):
             Toggle("", isOn: binding)
                 .labelsHidden()
-                .tint(Theme.Colors.novaAccent)
+                .tint(Theme.Colors.focusAccent)
         case .nothing:
             EmptyView()
         }
@@ -456,7 +449,7 @@ private struct PersonalitySheet: View {
                                     Spacer()
                                     if local == p {
                                         Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(Theme.Colors.novaAccent)
+                                            .foregroundStyle(Theme.Colors.focusAccent)
                                     }
                                 }
                                 .padding(Theme.Spacing.lg)
@@ -466,10 +459,11 @@ private struct PersonalitySheet: View {
                                         .overlay(
                                             RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                                                 .strokeBorder(
-                                                    local == p ? Theme.Colors.novaAccent.opacity(0.50) : Theme.Colors.border,
+                                                    local == p ? Theme.Colors.focusAccent.opacity(0.45) : Theme.Colors.border,
                                                     lineWidth: Theme.Stroke.hairline
                                                 )
                                         )
+                                        .focusCardShadow()
                                 )
                             }
                             .buttonStyle(.plain)
@@ -484,11 +478,10 @@ private struct PersonalitySheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Theme.Colors.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Listo") { dismiss() }
-                        .foregroundStyle(Theme.Colors.novaAccent)
+                        .foregroundStyle(Theme.Colors.focusAccent)
                 }
             }
         }
@@ -498,5 +491,4 @@ private struct PersonalitySheet: View {
 #Preview {
     AjustesView()
         .environmentObject(FocusDataStore())
-        .preferredColorScheme(.dark)
 }

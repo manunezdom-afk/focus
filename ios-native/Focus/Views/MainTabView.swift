@@ -5,13 +5,11 @@ struct MainTabView: View {
     enum Tab: Hashable {
         case miDia
         case calendario
-        case nova
         case tareas
         case ajustes
     }
 
     @State private var selection: Tab = .miDia
-    private let selectionFeedback = UISelectionFeedbackGenerator()
 
     init() {
         Self.configureTabBarAppearance()
@@ -27,19 +25,15 @@ struct MainTabView: View {
                 .tag(Tab.calendario)
                 .tabItem { Label("Calendario", systemImage: "calendar") }
 
-            NovaView()
-                .tag(Tab.nova)
-                .tabItem { Label("Nova", systemImage: "sparkles") }
-
             TareasView()
                 .tag(Tab.tareas)
-                .tabItem { Label("Tareas", systemImage: "checklist") }
+                .tabItem { Label("Tareas", systemImage: "checkmark.circle") }
 
             AjustesView()
                 .tag(Tab.ajustes)
                 .tabItem { Label("Ajustes", systemImage: "gearshape") }
         }
-        .tint(Theme.Colors.textPrimary)
+        .tint(Theme.Colors.focusAccent)
     }
 
     private var tabBinding: Binding<Tab> {
@@ -56,13 +50,15 @@ struct MainTabView: View {
 
     private static func configureTabBarAppearance() {
         let appearance = UITabBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        // Fondo (#06080F)
-        appearance.backgroundColor = UIColor(red: 0.024, green: 0.031, blue: 0.059, alpha: 1.0)
-        appearance.shadowColor = UIColor.white.withAlphaComponent(0.08)
+        appearance.configureWithDefaultBackground()
+        // Fondo blanco con leve blur
+        appearance.backgroundColor = UIColor.white.withAlphaComponent(0.96)
+        appearance.shadowColor = UIColor.black.withAlphaComponent(0.06)
 
-        let selectedColor = UIColor(red: 0.957, green: 0.965, blue: 0.980, alpha: 1.0)
-        let unselectedColor = UIColor.white.withAlphaComponent(0.40)
+        // Azul focus accent para selected (#2563EB)
+        let selectedColor = UIColor(red: 0.145, green: 0.388, blue: 0.922, alpha: 1.0)
+        // Slate-400 para unselected
+        let unselectedColor = UIColor(red: 0.580, green: 0.639, blue: 0.722, alpha: 1.0)
 
         appearance.stackedLayoutAppearance.selected.iconColor = selectedColor
         appearance.stackedLayoutAppearance.selected.titleTextAttributes = [
@@ -83,5 +79,4 @@ struct MainTabView: View {
 #Preview {
     MainTabView()
         .environmentObject(FocusDataStore())
-        .preferredColorScheme(.dark)
 }
