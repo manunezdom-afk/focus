@@ -269,31 +269,51 @@ struct MiDiaView: View {
 
     private func executeIntent(_ intent: NovaIntent, userText: String) -> InlineNovaResponse {
         switch intent {
-        case .createTask(let title, let recurrence, let wantsReminder):
+        case .createTask(let title, let dueDate, let recurrence, let wantsReminder):
+            // Si hay fecha y es hoy/mañana/esta semana, usamos esa categoría;
+            // si es más lejos, .algunDia. La category se mantiene compatible
+            // con el modelo existente; dueDate es metadata adicional.
+            let category = categoryForDueDate(dueDate)
             let task = FocusTask(
                 title: title,
                 priority: .media,
-                category: .hoy
+                category: category,
+                dueDate: dueDate
             )
             store.addTask(task)
             store.updateNovaContext(
                 from: userText,
                 title: title,
+                date: dueDate,
                 kind: .task,
                 taskId: task.id
             )
             let reminderNote = wantsReminder ? " Las notificaciones automáticas están en preparación." : ""
+            let dueLabel: String? = {
+                guard let d = dueDate else { return nil }
+                let cal = Calendar.current
+                if cal.isDateInToday(d) { return "hoy" }
+                if cal.isDateInTomorrow(d) { return "mañana" }
+                return DateFormatters.weekdayDay.string(from: d).lowercased()
+            }()
             if let rec = recurrence {
+                let due = dueLabel.map { " para el \($0)" } ?? ""
                 return InlineNovaResponse(
                     userText: userText,
                     summary: "Tarea creada (sin recurrencia todavía).",
-                    details: "«\(title)» queda en pendientes. La recurrencia (\(rec.label)) la dejamos preparada para más adelante.\(reminderNote)",
+                    details: "«\(title)»\(due). La recurrencia (\(rec.label)) la dejamos preparada para más adelante.\(reminderNote)",
                     action: .openTasksList
                 )
             }
+            let summary: String
+            if let due = dueLabel {
+                summary = "Tarea creada para \(due)."
+            } else {
+                summary = "Tarea creada en pendientes de hoy."
+            }
             return InlineNovaResponse(
                 userText: userText,
-                summary: "Tarea creada en pendientes de hoy.",
+                summary: summary,
                 details: "«\(title)»\(reminderNote)",
                 action: .openTasksList
             )
@@ -385,6 +405,8 @@ struct MiDiaView: View {
                 }
             case .setLocation(let loc):
                 event.location = loc
+            case .setTitle(let newTitle):
+                event.title = newTitle
             }
             store.updateEvent(event)
             store.updateNovaContext(
@@ -428,6 +450,39 @@ struct MiDiaView: View {
                 summary: "Listo, lo paso a tareas.",
                 details: "«\(title)» quedó en pendientes de hoy.",
                 action: .openTasksList
+            )
+
+        case .deleteLastItem:
+            // Borrar el último ítem creado (evento o tarea) usando el contexto.
+            let ctx = store.novaContext
+            if let eventId = ctx.lastEventId, store.events.contains(where: { $0.id == eventId }) {
+                let title = ctx.lastTitle ?? "Evento"
+                store.deleteEvent(eventId)
+                store.clearNovaContext()
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "Eliminado.",
+                    details: "«\(title)» se borró del calendario.",
+                    action: .dismiss
+                )
+            }
+            if let taskId = ctx.lastTaskId, store.tasks.contains(where: { $0.id == taskId }) {
+                let title = ctx.lastTitle ?? "Tarea"
+                store.deleteTask(taskId)
+                store.clearNovaContext()
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "Eliminada.",
+                    details: "«\(title)» se borró de pendientes.",
+                    action: .dismiss
+                )
+            }
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "No tengo nada reciente para borrar.",
+                details: "Si querés borrar algo más viejo, arrastrá a la izquierda en Mi Día o Calendario.",
+                action: .dismiss,
+                isError: true
             )
 
         case .organizeDay:
@@ -500,6 +555,21 @@ struct MiDiaView: View {
                 isError: true
             )
         }
+    }
+
+    /// Mapea una fecha de deadline a la categoría legacy del modelo
+    /// `FocusTask` (hoy / semana / algún día). Necesario hasta que migremos
+    /// a categorías derivadas de la fecha real.
+    private func categoryForDueDate(_ date: Date?) -> TaskCategory {
+        guard let date else { return .hoy }
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return .hoy }
+        // Mañana o cualquier día dentro de los próximos 7 días → semana.
+        if let diff = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: date)).day,
+           diff >= 1 && diff <= 7 {
+            return .semana
+        }
+        return .algunDia
     }
 
     private func clarifyHeadline(_ reason: NovaIntent.ClarifyReason) -> String {

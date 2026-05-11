@@ -322,21 +322,97 @@ struct NovaView: View {
 
     // MARK: - Chat
 
-    /// Layout estilo iMessage:
-    /// - El `ScrollView` con burbujas ocupa todo el espacio disponible.
-    /// - `safeAreaInset(edge: .bottom)` ancla el input arriba del teclado
-    ///   (cuando se abre) o del safe-area inferior (cuando está cerrado).
-    /// - El scroll baja automáticamente al último mensaje en envío y al
-    ///   enfocar el input.
+    /// Layout estilo iMessage cuando hay conversación, y estilo Gemini
+    /// cuando está vacío: hero centrado con NovaSparkMark + "¿Qué quieres
+    /// ordenar?" + chips de acciones rápidas. El input vive en `safeAreaInset`
+    /// para anclarse arriba del teclado.
     private var chatContent: some View {
-        chatScroll
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                inputBar
+        Group {
+            if store.novaMessages.isEmpty && !store.isNovaTyping {
+                emptyChatHero
+            } else {
+                chatScroll
             }
-            // El teclado modifica el bottom safe-area; SwiftUI re-aplica el
-            // inset y el scroll empuja correctamente las burbujas hacia
-            // arriba. No usamos `ignoresSafeArea(.keyboard)` aquí.
-            .scrollDismissesKeyboard(.interactively)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            inputBar
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    /// Empty state estilo Gemini: logo Nova grande centrado + saludo + chips.
+    private var emptyChatHero: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: Theme.Spacing.lg) {
+                Spacer(minLength: Theme.Spacing.xxxl)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Theme.Colors.novaGradient)
+                        .frame(width: 84, height: 84)
+                        .shadow(
+                            color: Theme.Colors.novaAccent.opacity(0.45),
+                            radius: 22, y: 8
+                        )
+                    NovaSparkMark(size: 36)
+                }
+                .padding(.bottom, Theme.Spacing.xs)
+
+                Text("¿Qué quieres ordenar?")
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                    .multilineTextAlignment(.center)
+
+                Text("Pídele a Nova un evento, una tarea, o que organice tu día.")
+                    .font(Theme.Typography.subhead)
+                    .foregroundStyle(Theme.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 300)
+                    .padding(.bottom, Theme.Spacing.md)
+
+                VStack(spacing: Theme.Spacing.sm + 2) {
+                    emptyStateChip(.organizar, symbol: "sparkles", label: "Organizar mi día")
+                    emptyStateChip(.crearTarea, symbol: "checkmark.circle", label: "Crear tarea")
+                    emptyStateChip(.crearEvento, symbol: "calendar.badge.plus", label: "Agendar evento")
+                    emptyStateChip(.revisarPendientes, symbol: "tray.full", label: "Revisar pendientes")
+                }
+                .padding(.horizontal, Theme.Spacing.xl)
+
+                Spacer(minLength: Theme.Spacing.xl)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func emptyStateChip(_ action: NovaQuickAction, symbol: String, label: String) -> some View {
+        Button {
+            handleQuickAction(action)
+        } label: {
+            HStack(spacing: Theme.Spacing.sm) {
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.novaAccent)
+                Text(label)
+                    .font(Theme.Typography.bodyEmphasized)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.textTertiary)
+            }
+            .padding(.horizontal, Theme.Spacing.md + 2)
+            .padding(.vertical, Theme.Spacing.md)
+            .frame(maxWidth: .infinity)
+            .background(
+                Capsule()
+                    .fill(Theme.Colors.surface)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                    )
+                    .focusCardShadow()
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var chatScroll: some View {
