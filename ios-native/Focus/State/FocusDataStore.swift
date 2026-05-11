@@ -211,8 +211,12 @@ enum NovaResponder {
         let lower = trimmed.lowercased()
         let wantsReminder = matches(lower, [
             "acuérdame", "acuerdame", "acordame",
-            "recuérdame", "recuerdame", "recordame",
-            "no olvides", "que no se me olvide"
+            "acuérdate", "acuerdate",
+            "acuérdalo", "acuerdalo",
+            "acordarme",
+            "recuérdame", "recuerdame", "recordame", "recordarme",
+            "no olvides", "no te olvides",
+            "que no se me olvide", "que me acuerde"
         ])
 
         // ──────────────────────────────────────────────────────────────
@@ -689,15 +693,18 @@ enum NovaResponder {
 
     private static func cleanTaskTitle(_ raw: String, when: Date?) -> String {
         var title = raw
-        // Quitar marcadores temporales (mañana / hoy / a las 5) y de lugar.
+        // Limpieza ampliada: temporal + recordatorio + fillers + ubicación,
+        // luego normalizar artículos antes de nombres propios.
         title = stripDateTimeMarkers(title)
+        title = stripReminderTriggers(title)
+        title = stripFillers(title)
         title = stripLocationMarker(title)
+        title = normalizeProperNounsAfterArticles(title)
         // Quitar muletillas pegadas al inicio.
         let stopPrefixes = [
             "que ", "de ", "el ", "la ", "los ", "las ",
             "para ", "a "
         ]
-        // Solo dropea muletillas si la frase aún tiene contenido.
         title = title.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
         var changed = true
@@ -743,10 +750,12 @@ enum NovaResponder {
         guard var raw = extractAfter(text, triggers: triggers, allowedTrailingPunct: ":.") else {
             return ""
         }
-        // Limpiar marcadores temporales y de lugar para que el título sea solo
-        // el "qué" del evento.
+        // Limpiar marcadores temporales, recordatorio, fillers y lugar.
         raw = stripDateTimeMarkers(raw)
+        raw = stripReminderTriggers(raw)
+        raw = stripFillers(raw)
         raw = stripLocationMarker(raw)
+        raw = normalizeProperNounsAfterArticles(raw)
         raw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
         return cleanupTitle(raw)
@@ -768,14 +777,60 @@ enum NovaResponder {
         #"\bmanana\b"#,
         #"\bpasado mañana\b"#,
         #"\bpasado manana\b"#,
+        #"\besta (tarde|noche|mañana|manana)\b"#,
+        #"\bal mediod(í|i)a\b"#,
         #"\bel (lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b"#,
-        #"\ba las? \d{1,2}(:\d{2})?(am|pm|hrs)?\b"#,
-        #"\b\d{1,2}:\d{2}\b"#
+        // Hora explícita "a las HH(:MM)(am|pm|hrs)" — el orden importa, va antes de "tipo".
+        #"\ba la?s? \d{1,2}(:\d{2})?\s*(am|pm|hrs|de la (mañana|manana|tarde|noche))?\b"#,
+        #"\b\d{1,2}:\d{2}\b"#,
+        // Hora coloquial: "tipo 3", "tipo las 3", "como a las 3", "a eso de las 3",
+        // "cerca de las 3", "alrededor de las 3".
+        #"\btipo (las? )?\d{1,2}(:\d{2})?\b"#,
+        #"\bcomo a la?s? \d{1,2}(:\d{2})?\b"#,
+        #"\b(a eso de|cerca de|alrededor de|por) la?s? \d{1,2}(:\d{2})?\b"#
+    ]
+
+    /// Frases que activan recordatorio. Las quitamos del título porque no son
+    /// parte de la acción, son metadata ("acuérdame" = "manda notificación").
+    private static let reminderTriggerPatterns: [String] = [
+        #"\bacu(é|e)rdame\b"#,
+        #"\bacu(é|e)rdate\b"#,
+        #"\bacu(é|e)rdalo\b"#,
+        #"\bacordarme\b"#,
+        #"\bacordame\b"#,
+        #"\brecu(é|e)rdame\b"#,
+        #"\brecuerdame\b"#,
+        #"\brecordame\b"#,
+        #"\brecordarme\b"#,
+        #"\bno (te )?olvides( de)?\b"#,
+        #"\bque no se me olvide\b"#,
+        #"\bque me acuerde\b"#
+    ]
+
+    /// Fillers que se quitan del título por amabilidad ("porfa", "oye"…).
+    private static let fillerPatterns: [String] = [
+        #"\bporfa(vor)?\b"#,
+        #"\bpor favor\b"#,
+        #"\boye\b"#,
+        #"\bhey\b"#,
+        #"\bdale\b"#
     ]
 
     private static func stripDateTimeMarkers(_ text: String) -> String {
+        replaceAll(in: text, patterns: dateTimeMarkerPatterns)
+    }
+
+    private static func stripReminderTriggers(_ text: String) -> String {
+        replaceAll(in: text, patterns: reminderTriggerPatterns)
+    }
+
+    private static func stripFillers(_ text: String) -> String {
+        replaceAll(in: text, patterns: fillerPatterns)
+    }
+
+    private static func replaceAll(in text: String, patterns: [String]) -> String {
         var out = text
-        for pattern in dateTimeMarkerPatterns {
+        for pattern in patterns {
             out = out.replacingOccurrences(
                 of: pattern,
                 with: "",
@@ -783,6 +838,32 @@ enum NovaResponder {
             )
         }
         return out
+    }
+
+    /// Quita artículos antes de nombres propios y los capitaliza:
+    /// "a la agustina" → "a Agustina"; "con el carlos" → "con Carlos".
+    /// Conservador — solo casos donde el artículo precede a palabra
+    /// minúscula simple (sin números ni puntuación).
+    private static func normalizeProperNounsAfterArticles(_ text: String) -> String {
+        let pattern = #"\b(a|con|de|para|por) (la|las|el|los) ([a-záéíóúñ]+)\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return text
+        }
+        let ns = text as NSString
+        var result = text
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        // Iterar en reversa para no invalidar rangos al reemplazar.
+        for match in matches.reversed() {
+            guard match.numberOfRanges >= 4 else { continue }
+            let prepRange = match.range(at: 1)
+            let nounRange = match.range(at: 3)
+            let prep = ns.substring(with: prepRange)
+            let noun = ns.substring(with: nounRange)
+            let capitalized = noun.prefix(1).uppercased() + noun.dropFirst()
+            let replacement = "\(prep) \(capitalized)"
+            result = (result as NSString).replacingCharacters(in: match.range, with: replacement)
+        }
+        return result
     }
 
     private static func stripLocationMarker(_ text: String) -> String {
@@ -1025,12 +1106,31 @@ final class FocusDataStore: ObservableObject {
     /// cada launch. Permite resolver "agéndalo X" o "y X" usando el último
     /// intent procesado.
     @Published var novaContext: NovaContext = NovaContext()
+    /// True mientras Nova "tipea" la respuesta. Se usa en el Chat para
+    /// mostrar el indicador de 3 puntos.
+    @Published var isNovaTyping: Bool = false
 
     init() {
         self.events = FocusLocalStore.load([FocusEvent].self, forKey: .events) ?? []
         self.tasks = FocusLocalStore.load([FocusTask].self, forKey: .tasks) ?? []
-        self.suggestions = FocusLocalStore.load([NovaSuggestion].self, forKey: .suggestions)
-            ?? DemoDataProvider.shared.suggestions()
+
+        // Sugerencias: NO pre-seedeamos demo en el store. Las demos viven
+        // solo como fallback dinámico en `displaySuggestions` cuando no hay
+        // datos del usuario. Esto evita que queden "stale" referenciando
+        // tareas/eventos inexistentes.
+        //
+        // Migración (one-shot): si el usuario tiene sugerencias persistidas
+        // que coinciden por título con el seed demo legacy y siguen en
+        // `.pending`, las purgamos. Las creadas por quick actions de Nova
+        // (organizar, preparar mañana, etc.) tienen títulos distintos y
+        // sobreviven.
+        let legacyDemoSeedTitles = Set(DemoDataProvider.shared.suggestions().map(\.title))
+        var loadedSuggestions = FocusLocalStore.load([NovaSuggestion].self, forKey: .suggestions) ?? []
+        loadedSuggestions.removeAll { sug in
+            legacyDemoSeedTitles.contains(sug.title) && sug.status == .pending
+        }
+        self.suggestions = loadedSuggestions
+
         self.novaMessages = FocusLocalStore.load([NovaMessage].self, forKey: .novaMessages)
             ?? DemoDataProvider.shared.welcomeNovaMessages()
         self.settings = FocusLocalStore.load(AppSettings.self, forKey: .settings)
@@ -1121,6 +1221,7 @@ final class FocusDataStore: ObservableObject {
     func deleteEvent(_ id: UUID) {
         events.removeAll { $0.id == id }
         persistEvents()
+        cleanupStaleSuggestions()
     }
 
     /// Actualiza un evento existente. No falla silenciosamente si el id no
@@ -1172,13 +1273,60 @@ final class FocusDataStore: ObservableObject {
     func deleteTask(_ id: UUID) {
         tasks.removeAll { $0.id == id }
         persistTasks()
+        cleanupStaleSuggestions()
         HapticManager.shared.tick()
     }
 
     // MARK: - Sugerencias
 
+    /// Sugerencias visibles en la Bandeja:
+    /// 1. Filtra del store las que referencian items que ya no existen.
+    /// 2. Si quedan, las muestra.
+    /// 3. Si NO quedan y el usuario NO tiene datos reales todavía
+    ///    (modo demo limpio), cae a las sugerencias de ejemplo dinámicas.
+    /// 4. Si NO quedan y el usuario YA creó algo real, vacío total.
+    var displaySuggestions: [NovaSuggestion] {
+        let valid = suggestions.filter { sug in
+            if let id = sug.relatedTaskId, !tasks.contains(where: { $0.id == id }) {
+                return false
+            }
+            if let id = sug.relatedEventId, !events.contains(where: { $0.id == id }) {
+                return false
+            }
+            return true
+        }
+        if !valid.isEmpty { return valid }
+        if hasUserData { return [] }
+        return DemoDataProvider.shared.suggestions()
+    }
+
+    /// Pendientes que se muestran a la UI (incluye fallback de demo). Es lo
+    /// que usan el badge de Nova y el chevron en Mi Día.
+    var pendingDisplaySuggestions: [NovaSuggestion] {
+        displaySuggestions.filter { $0.status == .pending }
+    }
+
+    /// Solo las pendientes REALES del store (sin fallback). Para lógica
+    /// interna que no quiere mezclar demo.
     var pendingSuggestions: [NovaSuggestion] {
         suggestions.filter { $0.status == .pending }
+    }
+
+    /// Elimina del store cualquier sugerencia que referencia un task/event
+    /// que ya no existe. Llamada después de borrar items o resetear demo
+    /// para mantener la Bandeja consistente.
+    func cleanupStaleSuggestions() {
+        let before = suggestions.count
+        suggestions.removeAll { sug in
+            if let id = sug.relatedTaskId, !tasks.contains(where: { $0.id == id }) {
+                return true
+            }
+            if let id = sug.relatedEventId, !events.contains(where: { $0.id == id }) {
+                return true
+            }
+            return false
+        }
+        if suggestions.count != before { persistSuggestions() }
     }
 
     func updateSuggestion(_ id: UUID, status: SuggestionStatus) {
@@ -1274,14 +1422,16 @@ final class FocusDataStore: ObservableObject {
         novaMessages.append(NovaMessage(role: .user, content: trimmed))
         persistNovaMessages()
         HapticManager.shared.tap()
+        isNovaTyping = true
 
-        let reply = NovaResponder.reply(to: trimmed)
+        let reply = NovaResponder.reply(to: trimmed, context: novaContext)
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 650_000_000)
+            try? await Task.sleep(nanoseconds: 850_000_000)
             await MainActor.run {
                 guard let self else { return }
                 self.novaMessages.append(NovaMessage(role: .nova, content: reply))
                 self.persistNovaMessages()
+                self.isNovaTyping = false
             }
         }
     }
@@ -1290,14 +1440,16 @@ final class FocusDataStore: ObservableObject {
         novaMessages.append(NovaMessage(role: .user, content: action.userText))
         persistNovaMessages()
         HapticManager.shared.tap()
+        isNovaTyping = true
 
         let reply = action.novaReply
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 600_000_000)
+            try? await Task.sleep(nanoseconds: 700_000_000)
             await MainActor.run {
                 guard let self else { return }
                 self.novaMessages.append(NovaMessage(role: .nova, content: reply))
                 self.persistNovaMessages()
+                self.isNovaTyping = false
             }
         }
     }
@@ -1316,13 +1468,16 @@ final class FocusDataStore: ObservableObject {
 
     /// Vuelve al estado inicial con datos de ejemplo (in-memory + disk).
     /// Equivale a "como cuando instalaste la app por primera vez".
+    /// **Importante**: NO pre-seedeamos sugerencias en el store. Las demos
+    /// vuelven a aparecer como fallback dinámico vía `displaySuggestions`.
     func resetToDemoState() {
         FocusLocalStore.clearAll()
         events = []
         tasks = []
-        suggestions = DemoDataProvider.shared.suggestions()
+        suggestions = []
         novaMessages = DemoDataProvider.shared.welcomeNovaMessages()
         settings = .defaults
+        novaContext = NovaContext()
         HapticManager.shared.success()
     }
 

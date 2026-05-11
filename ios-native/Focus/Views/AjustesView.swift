@@ -234,7 +234,7 @@ struct AjustesView: View {
                         symbol: "tray.full",
                         tint: Theme.Colors.novaAccent,
                         title: "Bandeja de Nova",
-                        subtitle: "\(store.pendingSuggestions.count) sugerencias pendientes",
+                        subtitle: "\(store.pendingDisplaySuggestions.count) sugerencias pendientes",
                         trailing: .chevron
                     )
                 }

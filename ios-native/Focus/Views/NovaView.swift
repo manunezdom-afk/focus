@@ -190,7 +190,7 @@ struct NovaView: View {
 
     private var segmentedControl: some View {
         HStack(spacing: 0) {
-            segmentButton(.bandeja, label: "Bandeja", badge: store.pendingSuggestions.count)
+            segmentButton(.bandeja, label: "Bandeja", badge: store.pendingDisplaySuggestions.count)
             segmentButton(.acciones, label: "Acciones")
             segmentButton(.chat, label: "Chat")
         }
@@ -342,9 +342,14 @@ struct NovaView: View {
     private var chatScroll: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
-                VStack(spacing: Theme.Spacing.sm) {
+                LazyVStack(spacing: Theme.Spacing.md) {
                     ForEach(store.novaMessages) { msg in
                         NovaMessageBubble(message: msg).id(msg.id)
+                    }
+                    if store.isNovaTyping {
+                        NovaTypingIndicator()
+                            .id(Self.typingAnchor)
+                            .transition(.opacity)
                     }
                     // Anchor invisible al final — permite hacer scroll a "abajo
                     // de todo" sin depender del último id (que puede cambiar
@@ -354,15 +359,16 @@ struct NovaView: View {
                         .id(Self.chatBottomAnchor)
                 }
                 .padding(.horizontal, Theme.Spacing.lg)
-                .padding(.top, Theme.Spacing.sm)
-                .padding(.bottom, Theme.Spacing.sm)
+                .padding(.top, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.md)
             }
             .onChange(of: store.novaMessages.count) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true)
             }
+            .onChange(of: store.isNovaTyping) { _, typing in
+                if typing { scrollToBottom(proxy: proxy, animated: true) }
+            }
             .onChange(of: inputFocused) { _, focused in
-                // Cuando el usuario tappea el input, asegurarnos de que el
-                // último mensaje queda visible justo arriba del teclado.
                 if focused {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         scrollToBottom(proxy: proxy, animated: true)
@@ -376,6 +382,7 @@ struct NovaView: View {
     }
 
     private static let chatBottomAnchor = "nova-chat-bottom"
+    private static let typingAnchor = "nova-typing"
 
     private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
         if animated {
@@ -498,44 +505,33 @@ private struct NovaActionCard: View {
     }
 }
 
-// MARK: - Chat bubble
+// MARK: - Chat bubble (estilo Gemini: avatar grande, bubbles cuidadas)
 
 private struct NovaMessageBubble: View {
     let message: NovaMessage
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.sm) {
-            if message.role == .user {
-                Spacer(minLength: Theme.Spacing.xxl)
+            if message.role == .nova {
+                novaAvatar
             } else {
-                Circle()
-                    .fill(Theme.Colors.novaGradient)
-                    .frame(width: 8, height: 8)
-                    .padding(.top, 9)
+                Spacer(minLength: Theme.Spacing.xxl)
             }
 
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+                if message.role == .nova {
+                    Text("Nova")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                        .tracking(0.3)
+                }
                 Text(message.content)
                     .font(Theme.Typography.subhead)
                     .foregroundStyle(message.role == .user ? .white : Theme.Colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, Theme.Spacing.md)
-                    .padding(.vertical, Theme.Spacing.sm + 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                            .fill(
-                                message.role == .user
-                                    ? AnyShapeStyle(Theme.Colors.focusAccent)
-                                    : AnyShapeStyle(Theme.Colors.surface)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                                    .strokeBorder(
-                                        message.role == .user ? Color.clear : Theme.Colors.border,
-                                        lineWidth: Theme.Stroke.hairline
-                                    )
-                            )
-                    )
+                    .padding(.vertical, Theme.Spacing.sm + 2)
+                    .background(bubbleBackground)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(timestampLabel)
                     .font(Theme.Typography.caption)
@@ -548,7 +544,106 @@ private struct NovaMessageBubble: View {
         }
     }
 
+    @ViewBuilder
+    private var bubbleBackground: some View {
+        if message.role == .user {
+            // Burbuja del usuario: gradient cobalto.
+            RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Theme.Colors.focusAccent,
+                            Theme.Colors.focusAccentHover
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: Theme.Colors.focusAccent.opacity(0.25), radius: 8, y: 3)
+        } else {
+            // Burbuja de Nova: superficie + halo violeta sutil (gradient soft).
+            RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                .fill(Theme.Colors.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Theme.Colors.novaAccent.opacity(0.18),
+                                    Theme.Colors.border.opacity(0.6)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: Theme.Stroke.hairline
+                        )
+                )
+                .shadow(color: Theme.Colors.novaAccent.opacity(0.08), radius: 10, y: 3)
+        }
+    }
+
+    private var novaAvatar: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Theme.Colors.novaGradient)
+                .frame(width: 30, height: 30)
+                .shadow(color: Theme.Colors.novaAccent.opacity(0.45), radius: 6, y: 2)
+            NovaSparkMark(size: 13)
+        }
+        .padding(.top, 18)  // alinear con el primer renglón de texto
+    }
+
     private var timestampLabel: String {
         DateFormatters.hourMinute.string(from: message.timestamp)
+    }
+}
+
+// MARK: - Typing indicator (3 puntos animados)
+
+/// Indicador "Nova está escribiendo": 3 puntos que pulsan en secuencia.
+/// Aparece debajo del último mensaje del usuario mientras `isNovaTyping == true`.
+private struct NovaTypingIndicator: View {
+    @State private var animating: Bool = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Theme.Colors.novaGradient)
+                    .frame(width: 30, height: 30)
+                    .shadow(color: Theme.Colors.novaAccent.opacity(0.45), radius: 6, y: 2)
+                NovaSparkMark(size: 13)
+            }
+            .padding(.top, 6)
+
+            HStack(spacing: 5) {
+                ForEach(0..<3) { i in
+                    Circle()
+                        .fill(Theme.Colors.textSecondary.opacity(0.7))
+                        .frame(width: 7, height: 7)
+                        .scaleEffect(animating ? 1.0 : 0.55)
+                        .opacity(animating ? 1.0 : 0.55)
+                        .animation(
+                            .easeInOut(duration: 0.65)
+                                .repeatForever(autoreverses: true)
+                                .delay(0.18 * Double(i)),
+                            value: animating
+                        )
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                    .fill(Theme.Colors.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                    )
+            )
+
+            Spacer(minLength: Theme.Spacing.xxl)
+        }
+        .onAppear { animating = true }
     }
 }

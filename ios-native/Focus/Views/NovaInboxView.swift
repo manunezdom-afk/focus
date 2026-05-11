@@ -82,8 +82,16 @@ struct NovaInboxContent: View {
     }
 
     /// Despacha la acción del card al método correcto del store y muestra el
-    /// toast adecuado según el resultado.
+    /// toast adecuado según el resultado. Si la sugerencia viene del fallback
+    /// demo (no está en el store), la copia al store antes de actuar — así la
+    /// acción persiste y el card desaparece de la lista filtrada.
     private func handleAction(suggestion: NovaSuggestion, status: SuggestionStatus) {
+        let isInStore = store.suggestions.contains(where: { $0.id == suggestion.id })
+        if !isInStore {
+            // Persistir la sugerencia demo antes de actuar.
+            store.addSuggestion(suggestion)
+        }
+
         switch status {
         case .approved:
             let result = store.approveSuggestion(suggestion.id)
@@ -129,7 +137,10 @@ struct NovaInboxContent: View {
     }
 
     private var filtered: [NovaSuggestion] {
-        store.suggestions
+        // `displaySuggestions` ya filtra stales y devuelve fallback de demo
+        // cuando no hay datos del usuario. La Bandeja nunca debe mostrar
+        // sugerencias que referencian items inexistentes.
+        store.displaySuggestions
             .filter { $0.status == filter.matchingStatus }
             .sorted { $0.createdAt > $1.createdAt }
     }
@@ -152,9 +163,12 @@ struct NovaInboxContent: View {
 
     private var emptyMessage: String {
         switch filter {
-        case .pending: return "Nova no tiene nada para ti ahora. Cuando detecte algo útil, aparece acá."
-        case .approved: return "Cuando apruebes una sugerencia, va a quedar registrada acá."
-        case .postponed: return "Las sugerencias pospuestas vuelven a aparecer más tarde."
+        case .pending:
+            return "Cuando agregues eventos o tareas, Nova te propondrá ajustes acá. Probá «organiza mi día» o «preparar mañana» desde el FocusBar."
+        case .approved:
+            return "Cuando apruebes una sugerencia, va a quedar registrada acá."
+        case .postponed:
+            return "Las sugerencias pospuestas vuelven a aparecer más tarde."
         }
     }
 }

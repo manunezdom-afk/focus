@@ -99,8 +99,26 @@ struct MiDiaView: View {
                     }
 
                     if let next = nextBlock {
-                        ProximoBloqueCard(event: next)
-                            .padding(.horizontal, Theme.Spacing.xl)
+                        SwipeToDelete(enabled: true) {
+                            if store.hasUserEvents {
+                                store.deleteEvent(next.id)
+                            } else {
+                                withAnimation(.easeOut(duration: 0.22)) {
+                                    dismissedDemoEventTitles.insert(next.title)
+                                }
+                            }
+                            toast.success("Evento eliminado", symbol: "trash.fill")
+                        } content: {
+                            ProximoBloqueCard(event: next) {
+                                if store.hasUserEvents {
+                                    store.deleteEvent(next.id)
+                                } else {
+                                    dismissedDemoEventTitles.insert(next.title)
+                                }
+                                toast.success("Evento eliminado", symbol: "trash.fill")
+                            }
+                        }
+                        .padding(.horizontal, Theme.Spacing.xl)
                     }
 
                     timelineSection
@@ -158,7 +176,7 @@ struct MiDiaView: View {
                             )
                     )
                     .focusCardShadow()
-                if store.pendingSuggestions.count > 0 {
+                if store.pendingDisplaySuggestions.count > 0 {
                     Circle()
                         .fill(Theme.Colors.novaAccent)
                         .frame(width: 10, height: 10)
@@ -738,18 +756,35 @@ struct MiDiaView: View {
 
 private struct ProximoBloqueCard: View {
     let event: FocusEvent
+    let onDelete: () -> Void
+
+    @State private var showDeleteConfirm: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             HStack(spacing: Theme.Spacing.sm) {
-                Text(event.isNow ? "EN CURSO" : "PRÓXIMO")
+                Text(headerLabel)
                     .font(Theme.Typography.captionEmphasized)
-                    .foregroundStyle(event.isNow ? Theme.Colors.success : Theme.Colors.focusAccent)
+                    .foregroundStyle(headerTint)
                     .tracking(1.2)
                 Spacer()
                 Text(event.timeRangeLabel)
                     .font(Theme.Typography.timestamp)
                     .foregroundStyle(Theme.Colors.textPrimary)
+
+                // Menú overflow ("·· · ") — alternativa al swipe para borrar.
+                Menu {
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Label("Eliminar", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                        .padding(.leading, 4)
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -757,10 +792,10 @@ private struct ProximoBloqueCard: View {
                     .font(Theme.Typography.title2)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .lineLimit(2)
-                // Contador en tiempo real (segundo a segundo, en azul) —
-                // el usuario ve exactamente cuánto falta sin que parezca un
-                // texto estático.
-                TimelineView(.periodic(from: .now, by: 1)) { context in
+                // Contador limpio: minutos (sin segundos). Recordatorios usan
+                // formato "Hoy a las HH:MM" / "Mañana a las HH:MM". `TimelineView`
+                // con period .everyMinute alcanza para textos al nivel de minuto.
+                TimelineView(.periodic(from: .now, by: 30)) { context in
                     Text(countdownLabel(now: context.date))
                         .font(Theme.Typography.subheadEmphasized)
                         .foregroundStyle(Theme.Colors.focusAccent)
@@ -770,7 +805,11 @@ private struct ProximoBloqueCard: View {
             }
 
             HStack(spacing: 6) {
-                StatePill(label: event.section.displayName, tint: event.section.color, symbol: event.section.symbol)
+                StatePill(
+                    label: event.displayAsPointInTime ? "Recordatorio" : event.section.displayName,
+                    tint: event.displayAsPointInTime ? Theme.Colors.sectionReminder : event.section.color,
+                    symbol: event.displayAsPointInTime ? "bell.fill" : event.section.symbol
+                )
                 if let loc = event.location, !loc.isEmpty {
                     LocationLabel(location: loc)
                 }
@@ -782,37 +821,67 @@ private struct ProximoBloqueCard: View {
                 .fill(Theme.Colors.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                        .strokeBorder(
-                            (event.isNow ? Theme.Colors.success : Theme.Colors.focusAccent).opacity(0.18),
-                            lineWidth: 1
-                        )
+                        .strokeBorder(headerTint.opacity(0.18), lineWidth: 1)
                 )
         )
         .focusCardShadow()
-    }
-
-    /// Texto del contador con h + min + s. Si hay >0 horas/minutos, los
-    /// muestra; los segundos siempre se muestran para reforzar el tick.
-    private func countdownLabel(now: Date) -> String {
-        if let end = event.endTime, event.startTime <= now && end >= now {
-            let secs = max(0, Int(end.timeIntervalSince(now)))
-            if secs == 0 { return "Termina ahora" }
-            return "Queda " + formatHMS(seconds: secs)
+        .contextMenu {
+            Button(role: .destructive, action: onDelete) {
+                Label("Eliminar", systemImage: "trash")
+            }
         }
-        let diffSeconds = event.startTime.timeIntervalSince(now)
-        if diffSeconds <= 0 { return "Empezó ya" }
-        return "Empieza en " + formatHMS(seconds: Int(diffSeconds))
     }
 
-    private func formatHMS(seconds: Int) -> String {
-        let h = seconds / 3600
-        let m = (seconds % 3600) / 60
-        let s = seconds % 60
-        var parts: [String] = []
-        if h > 0 { parts.append("\(h) h") }
-        if m > 0 || h > 0 { parts.append("\(m) min") }
-        parts.append("\(s) s")
-        return parts.joined(separator: " ")
+    private var headerLabel: String {
+        if event.isNow { return "EN CURSO" }
+        if event.displayAsPointInTime { return "RECORDATORIO" }
+        return "PRÓXIMO"
+    }
+
+    private var headerTint: Color {
+        if event.isNow { return Theme.Colors.success }
+        if event.displayAsPointInTime { return Theme.Colors.sectionReminder }
+        return Theme.Colors.focusAccent
+    }
+
+    /// Contador limpio sin segundos. Para recordatorios usa formato más
+    /// humano ("Hoy a las 15:00" / "Mañana a las 15:00").
+    private func countdownLabel(now: Date) -> String {
+        let cal = Calendar.current
+        // En curso (solo eventos con duración real).
+        if !event.displayAsPointInTime,
+           let end = event.endTime, event.startTime <= now && end >= now {
+            let totalMinutes = max(0, Int(end.timeIntervalSince(now) / 60))
+            if totalMinutes == 0 { return "Termina pronto" }
+            return "Queda " + formatHM(minutes: totalMinutes)
+        }
+        let diff = event.startTime.timeIntervalSince(now)
+        if diff <= 0 {
+            return event.displayAsPointInTime ? "Es ahora" : "Empezó ya"
+        }
+        // Recordatorios: formato humano absoluto.
+        if event.displayAsPointInTime {
+            let time = DateFormatters.hourMinute.string(from: event.startTime)
+            if cal.isDateInToday(event.startTime) { return "Hoy a las \(time)" }
+            if cal.isDateInTomorrow(event.startTime) { return "Mañana a las \(time)" }
+            let day = DateFormatters.weekdayDay.string(from: event.startTime).lowercased()
+            return "El \(day) a las \(time)"
+        }
+        // Eventos normales: "Empieza en N min" / "N h N min".
+        let totalMinutes = Int(diff / 60)
+        if totalMinutes == 0 { return "Empieza pronto" }
+        return "Empieza en " + formatHM(minutes: totalMinutes)
+    }
+
+    private func formatHM(minutes: Int) -> String {
+        if minutes < 60 {
+            return minutes == 1 ? "1 min" : "\(minutes) min"
+        }
+        let h = minutes / 60
+        let m = minutes % 60
+        let hLabel = h == 1 ? "1 h" : "\(h) h"
+        if m == 0 { return hLabel }
+        return "\(hLabel) \(m) min"
     }
 }
 
