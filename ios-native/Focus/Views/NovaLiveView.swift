@@ -181,16 +181,23 @@ struct NovaLiveView: View {
                 .frame(maxWidth: 320)
 
             if !service.transcript.isEmpty {
+                // lineLimit defensivo: si el usuario habla durante mucho rato
+                // el transcript podría empujar los botones fuera de pantalla.
+                // 5 líneas alcanza para frases completas + frase de corrección.
                 Text(service.transcript)
                     .font(Theme.Typography.body)
                     .foregroundStyle(.white.opacity(0.85))
                     .multilineTextAlignment(.center)
+                    .lineLimit(5)
+                    .truncationMode(.head)
                     .padding(.horizontal, Theme.Spacing.md)
                     .padding(.vertical, Theme.Spacing.sm)
+                    .frame(maxWidth: .infinity)
                     .background(
                         RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
                             .fill(.white.opacity(0.08))
                     )
+                    .padding(.horizontal, Theme.Spacing.lg)
                     .transition(.opacity)
             } else {
                 Text(stateSubtitle)
