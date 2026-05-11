@@ -2092,6 +2092,421 @@ final class FocusDataStore: ObservableObject {
         }
     }
 
+    // MARK: - Nova — backend actions
+
+    /// Resultado de aplicar `[BackendAction]` al store. La UI usa esto para
+    /// mostrar resúmenes claros ("Evento creado", "Tarea actualizada", etc.)
+    /// y para saber a qué pantalla saltar.
+    struct NovaApplyOutcome {
+        /// True cuando se ejecutó al menos una mutación real (excluye
+        /// `remember` que es transparente). Si es false, el caller debe
+        /// mostrar solo el `reply` textual del backend.
+        var didMutate: Bool = false
+        /// Resumen humano de la última mutación, listo para inline response.
+        var summary: String? = nil
+        /// Acciones ignoradas/strippadas — para diagnóstico en logs.
+        var ignored: [String] = []
+        /// ID del evento creado o editado en esta tanda (si aplica). Para
+        /// que el caller pueda saltar a Calendario / abrir detail.
+        var primaryEventId: UUID? = nil
+        /// ID de la tarea creada o editada en esta tanda (si aplica).
+        var primaryTaskId: UUID? = nil
+        /// Si la acción primaria fue un recordatorio puntual.
+        var primaryIsReminder: Bool = false
+    }
+
+    /// Aplica una secuencia de `BackendAction` al store. Cada mutación
+    /// pasa por los métodos existentes (`addEvent`, `updateEvent`, ...)
+    /// que ya sincronizan con Supabase. Diseñado para correr en main actor
+    /// (este store ya es @MainActor).
+    ///
+    /// Reglas:
+    /// - `add_recurring_event` se expande localmente a N `addEvent` (1..count).
+    /// - `edit_event` / `delete_event` con id que no matchea ningún evento
+    ///   local quedan registrados en `ignored` (no crashea).
+    /// - `remember` se ignora en V1 (no hay memory store local todavía).
+    /// - `unsupported(typeName)` queda registrado en `ignored`.
+    func applyBackendActions(
+        _ actions: [BackendAction],
+        userText: String
+    ) -> NovaApplyOutcome {
+        var outcome = NovaApplyOutcome()
+
+        for action in actions {
+            switch action {
+            case .addEvent(let payload):
+                if let event = makeEvent(from: payload, userText: userText) {
+                    addEvent(event)
+                    outcome.didMutate = true
+                    outcome.summary = summaryForCreatedEvent(event)
+                    outcome.primaryEventId = event.id
+                    outcome.primaryIsReminder = event.isReminder == true
+                    updateNovaContext(
+                        from: userText,
+                        title: event.title,
+                        date: event.startTime,
+                        location: event.location,
+                        section: event.section,
+                        kind: .event,
+                        eventId: event.id
+                    )
+                } else {
+                    outcome.ignored.append("add_event(invalid)")
+                }
+
+            case .addRecurringEvent(let payload, let recurrence):
+                let created = expandRecurringEvent(payload: payload, recurrence: recurrence, userText: userText)
+                if !created.isEmpty {
+                    outcome.didMutate = true
+                    outcome.summary = "Agendé \(created.count) instancia\(created.count == 1 ? "" : "s") de «\(payload.title)»."
+                    outcome.primaryEventId = created.first?.id
+                    updateNovaContext(
+                        from: userText,
+                        title: payload.title,
+                        date: created.first?.startTime,
+                        section: created.first?.section,
+                        kind: .event,
+                        eventId: created.first?.id
+                    )
+                } else {
+                    outcome.ignored.append("add_recurring_event(empty)")
+                }
+
+            case .editEvent(let idString, let updates):
+                guard let id = parseEventId(idString),
+                      var event = events.first(where: { $0.id == id }) else {
+                    outcome.ignored.append("edit_event(id_not_found)")
+                    continue
+                }
+                applyUpdates(updates, to: &event)
+                updateEvent(event)
+                outcome.didMutate = true
+                outcome.summary = "Actualicé «\(event.title)»."
+                outcome.primaryEventId = event.id
+                updateNovaContext(
+                    from: userText,
+                    title: event.title,
+                    date: event.startTime,
+                    location: event.location,
+                    section: event.section,
+                    kind: .event,
+                    eventId: event.id
+                )
+
+            case .deleteEvent(let idString):
+                guard let id = parseEventId(idString),
+                      let event = events.first(where: { $0.id == id }) else {
+                    outcome.ignored.append("delete_event(id_not_found)")
+                    continue
+                }
+                let title = event.title
+                deleteEvent(id)
+                outcome.didMutate = true
+                outcome.summary = "Eliminé «\(title)»."
+                clearNovaContext()
+
+            case .addTask(let payload):
+                if let task = makeTask(from: payload) {
+                    addTask(task)
+                    outcome.didMutate = true
+                    outcome.summary = "Tarea «\(task.title)» agregada."
+                    outcome.primaryTaskId = task.id
+                    updateNovaContext(
+                        from: userText,
+                        title: task.title,
+                        date: task.dueDate,
+                        kind: .task,
+                        taskId: task.id
+                    )
+                } else {
+                    outcome.ignored.append("add_task(invalid)")
+                }
+
+            case .toggleTask(let idString):
+                guard let id = parseEventId(idString),
+                      tasks.contains(where: { $0.id == id }) else {
+                    outcome.ignored.append("toggle_task(id_not_found)")
+                    continue
+                }
+                toggleTask(id)
+                outcome.didMutate = true
+                outcome.summary = "Tarea actualizada."
+                outcome.primaryTaskId = id
+
+            case .deleteTask(let idString):
+                guard let id = parseEventId(idString),
+                      let task = tasks.first(where: { $0.id == id }) else {
+                    outcome.ignored.append("delete_task(id_not_found)")
+                    continue
+                }
+                let title = task.title
+                deleteTask(id)
+                outcome.didMutate = true
+                outcome.summary = "Tarea «\(title)» eliminada."
+                clearNovaContext()
+
+            case .remember:
+                // V1: memoria no se persiste local todavía. Se ignora
+                // silenciosamente (es transparente para el usuario).
+                outcome.ignored.append("remember(skipped_v1)")
+
+            case .unsupported(let typeName):
+                outcome.ignored.append("unsupported(\(typeName))")
+            }
+        }
+
+        return outcome
+    }
+
+    /// Crea un `FocusEvent` desde el payload del backend. Resuelve fecha/hora,
+    /// section, isReminder, inferredDuration. Devuelve nil si no se puede
+    /// armar una hora válida.
+    private func makeEvent(from payload: BackendEventCreate, userText: String) -> FocusEvent? {
+        let title = payload.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+
+        let cal = Calendar.current
+        guard let startTime = NovaTimeFormatter.resolveDate(
+            dateString: payload.dateString,
+            timeString: payload.timeString
+        ) else { return nil }
+
+        // Reglas:
+        // - Si endTime null → es punto en el tiempo. Lo marcamos como
+        //   inferredDuration o isReminder según contexto.
+        // - Si título empieza con "Recordatorio:" o icon es "alarm" → reminder.
+        // - Si endTime explícita → rango real.
+        let backendIcon = payload.icon ?? ""
+        let isReminderHint = title.lowercased().hasPrefix("recordatorio")
+            || backendIcon.lowercased() == "alarm"
+
+        var explicitEnd: Date? = nil
+        if let endStr = payload.endTimeString,
+           !endStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let end = NovaTimeFormatter.resolveDate(
+                dateString: payload.dateString,
+                timeString: endStr
+           ),
+           end > startTime {
+            explicitEnd = end
+        }
+
+        // Sección: si isReminder → .reminder. Si no, primero icon, luego
+        // detectSection del título.
+        let section: EventSection
+        if isReminderHint {
+            section = .reminder
+        } else if let iconBased = sectionFromIcon(backendIcon) {
+            section = iconBased
+        } else {
+            section = NovaResponder.guessSection(for: title) ?? .reunion
+        }
+
+        // endTime: si recordatorio o sin endTime explícito → 5 min interno
+        // (la UI muestra como punto). Si endTime explícito → rango real.
+        let endTime: Date
+        let isReminderFlag: Bool?
+        let inferredFlag: Bool?
+        if isReminderHint {
+            endTime = cal.date(byAdding: .minute, value: 5, to: startTime) ?? startTime
+            isReminderFlag = true
+            inferredFlag = nil
+        } else if let explicit = explicitEnd {
+            endTime = explicit
+            isReminderFlag = nil
+            inferredFlag = false
+        } else {
+            endTime = cal.date(byAdding: .minute, value: 5, to: startTime) ?? startTime
+            isReminderFlag = nil
+            inferredFlag = true
+        }
+
+        return FocusEvent(
+            title: title,
+            notes: payload.notes,
+            startTime: startTime,
+            endTime: endTime,
+            section: section,
+            location: payload.location,
+            isReminder: isReminderFlag,
+            inferredDuration: inferredFlag
+        )
+    }
+
+    /// Crea un `FocusTask` desde el payload del backend.
+    private func makeTask(from payload: BackendTaskCreate) -> FocusTask? {
+        let title = payload.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        let priority = TaskPriority.fromBackendLabel(payload.priority)
+        let category = TaskCategory.fromBackendLabel(payload.category)
+        let linkedEventId = payload.linkedEventId.flatMap(parseEventId(_:))
+        let parentTaskId = payload.parentTaskId.flatMap(parseEventId(_:))
+        return FocusTask(
+            title: title,
+            priority: priority,
+            category: category,
+            linkedEventId: linkedEventId,
+            parentTaskId: parentTaskId
+        )
+    }
+
+    /// Aplica updates parciales a un evento. Solo toca los campos
+    /// presentes en `BackendEventUpdates`.
+    private func applyUpdates(_ updates: BackendEventUpdates, to event: inout FocusEvent) {
+        if let newTitle = updates.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !newTitle.isEmpty {
+            event.title = newTitle
+        }
+        let cal = Calendar.current
+        // Si hay date o time nuevos, recomponemos el startTime conservando
+        // los que NO vinieron.
+        if updates.dateString != nil || updates.timeString != nil {
+            let baseDate = updates.dateString.flatMap(NovaTimeFormatter.parseISODate)
+                ?? cal.startOfDay(for: event.startTime)
+            let (h, m): (Int, Int) = {
+                if let parsed = NovaTimeFormatter.parseHourMinute(updates.timeString) {
+                    return parsed
+                }
+                return (cal.component(.hour, from: event.startTime),
+                        cal.component(.minute, from: event.startTime))
+            }()
+            if let newStart = cal.date(bySettingHour: h, minute: m, second: 0, of: baseDate) {
+                event.startTime = newStart
+                // Si había rango explícito (no inferred), trasladar endTime
+                // manteniendo la duración.
+                if let oldEnd = event.endTime, event.inferredDuration != true {
+                    let delta = oldEnd.timeIntervalSince(event.startTime)
+                    event.endTime = newStart.addingTimeInterval(delta)
+                } else {
+                    // Recordatorio o duración inferida → 5 min después
+                    event.endTime = cal.date(byAdding: .minute, value: 5, to: newStart)
+                }
+            }
+        }
+        if let newEnd = NovaTimeFormatter.resolveDate(
+            dateString: updates.dateString ?? NovaTimeFormatter.formatISODate(from: event.startTime),
+            timeString: updates.endTimeString
+        ), updates.endTimeString != nil, newEnd > event.startTime {
+            event.endTime = newEnd
+            event.inferredDuration = false
+        }
+        if let loc = updates.location?.trimmingCharacters(in: .whitespacesAndNewlines), !loc.isEmpty {
+            event.location = loc
+        }
+    }
+
+    /// Expande un `add_recurring_event` a N `addEvent` locales. Conservador:
+    /// máximo 31 instancias por acción (límite del backend).
+    private func expandRecurringEvent(
+        payload: BackendEventCreate,
+        recurrence: BackendRecurrence,
+        userText: String
+    ) -> [FocusEvent] {
+        let cal = Calendar.current
+        guard let firstStart = NovaTimeFormatter.resolveDate(
+            dateString: recurrence.startDate ?? payload.dateString,
+            timeString: payload.timeString
+        ) else { return [] }
+
+        let pattern = recurrence.pattern.lowercased()
+        let limit: Int
+        let stride: Int
+
+        switch pattern {
+        case "daily":
+            limit = min(recurrence.count ?? 30, 31)
+            stride = 1
+        case "weekdays":
+            limit = min(recurrence.count ?? 22, 31)
+            stride = 1  // skip weekends abajo
+        case "weekly":
+            limit = min(recurrence.count ?? 12, 31)
+            stride = 7
+        default:
+            return []
+        }
+
+        var created: [FocusEvent] = []
+        var current = firstStart
+        var added = 0
+        var safety = 0
+        while added < limit && safety < 200 {
+            safety += 1
+            let weekday = cal.component(.weekday, from: current)
+            let isWeekend = (weekday == 1 || weekday == 7)
+            let shouldCreate: Bool
+            switch pattern {
+            case "weekdays":
+                shouldCreate = !isWeekend
+            case "weekly":
+                if let target = recurrence.weekday {
+                    let targetSwiftWeekday = (target % 7) + 1   // 0=dom backend → 1=dom Swift
+                    shouldCreate = weekday == targetSwiftWeekday
+                } else {
+                    shouldCreate = true
+                }
+            default:
+                shouldCreate = true
+            }
+
+            if shouldCreate {
+                let single = BackendEventCreate(
+                    title: payload.title,
+                    timeString: payload.timeString,
+                    endTimeString: payload.endTimeString,
+                    dateString: NovaTimeFormatter.formatISODate(from: current),
+                    section: payload.section,
+                    icon: payload.icon,
+                    reminderOffsets: payload.reminderOffsets,
+                    location: payload.location,
+                    notes: payload.notes
+                )
+                if let event = makeEvent(from: single, userText: userText) {
+                    addEvent(event)
+                    created.append(event)
+                    added += 1
+                }
+            }
+
+            // Avanzar al siguiente candidato.
+            guard let next = cal.date(byAdding: .day, value: stride, to: current) else { break }
+            current = next
+        }
+        return created
+    }
+
+    /// Mapeo conservador del `icon` del backend a `EventSection`.
+    private func sectionFromIcon(_ icon: String) -> EventSection? {
+        switch icon.lowercased() {
+        case "fitness_center":          return .descanso
+        case "groups":                  return .reunion
+        case "menu_book":               return .estudio
+        case "work":                    return .foco
+        case "alarm":                   return .reminder
+        case "local_hospital",
+             "shopping_cart", "cake",
+             "flight", "account_balance",
+             "restaurant":              return .personal
+        case "event":                   return .reunion
+        default:                        return nil
+        }
+    }
+
+    /// Construye un mensaje humano para confirmar la creación de un evento
+    /// — usado como `summary` inline ("Evento agregado a Calendario.").
+    private func summaryForCreatedEvent(_ event: FocusEvent) -> String {
+        if event.isReminder == true {
+            return "Recordatorio agendado."
+        }
+        return "Evento agregado a Calendario."
+    }
+
+    /// Parsea un `id` string del backend a UUID. Si no es UUID válido,
+    /// devolvemos nil (el caller registra en `ignored`).
+    private func parseEventId(_ raw: String) -> UUID? {
+        UUID(uuidString: raw.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     // MARK: - Nova
 
     func sendNovaMessage(_ text: String) {
@@ -2102,15 +2517,149 @@ final class FocusDataStore: ObservableObject {
         HapticManager.shared.tap()
         isNovaTyping = true
 
-        let reply = NovaResponder.reply(to: trimmed, context: novaContext)
+        // History snapshot ANTES de meter el mensaje del usuario en el
+        // history — el server espera turnos anteriores, no el actual.
+        let priorHistory: [NovaService.HistoryEntry] = novaMessages
+            .dropLast()  // sacar el del usuario que acabamos de pushear
+            .suffix(12)
+            .map { msg in
+                NovaService.HistoryEntry(
+                    role: msg.role == .user ? .user : .assistant,
+                    content: msg.content
+                )
+            }
+
+        // Snapshot de eventos/tareas para mandar al backend (mismas
+        // ventanas que Mi Día inline).
+        let cal = Calendar.current
+        let now = Date()
+        let horizon = cal.date(byAdding: .day, value: 7, to: now) ?? now
+        let visibleEvents = events
+            .filter { $0.startTime >= cal.startOfDay(for: now) && $0.startTime <= horizon }
+            .sorted { $0.startTime < $1.startTime }
+        let visibleTasks = tasks.filter { !$0.done }
+
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 850_000_000)
+            guard let self else { return }
+            // Mínimo de delay para que el indicador "escribiendo" no parpadee
+            // cuando el backend responde muy rápido o el fallback es instantáneo.
+            let minDelay: UInt64 = 350_000_000
+
+            let replyText: String
+            let actions: [BackendAction]
+            let smartActionsBlocked: Bool
+            let smartActionsMessage: String?
+            let usedFallback: Bool
+
+            if let creds = self.syncCredentialsSnapshot() {
+                do {
+                    let result = try await NovaService.send(
+                        message: trimmed,
+                        events: visibleEvents,
+                        tasks: visibleTasks,
+                        history: priorHistory,
+                        accessToken: creds.accessToken,
+                        surface: .novaChat
+                    )
+                    replyText = result.reply
+                    actions = result.actions
+                    smartActionsBlocked = result.smartActionsBlocked
+                    smartActionsMessage = result.smartActionsMessage
+                    usedFallback = false
+                } catch let err as NovaServiceError where err.canFallbackToLocal {
+                    replyText = await MainActor.run {
+                        NovaResponder.reply(to: trimmed, context: self.novaContext)
+                    }
+                    actions = []
+                    smartActionsBlocked = false
+                    smartActionsMessage = await MainActor.run {
+                        self.fallbackNoteForChat(error: err)
+                    }
+                    usedFallback = true
+                } catch {
+                    replyText = await MainActor.run {
+                        NovaResponder.reply(to: trimmed, context: self.novaContext)
+                    }
+                    actions = []
+                    smartActionsBlocked = false
+                    smartActionsMessage = nil
+                    usedFallback = true
+                }
+            } else {
+                // Demo / sin sesión → siempre parser local.
+                replyText = await MainActor.run {
+                    NovaResponder.reply(to: trimmed, context: self.novaContext)
+                }
+                actions = []
+                smartActionsBlocked = false
+                smartActionsMessage = nil
+                usedFallback = false
+            }
+
+            try? await Task.sleep(nanoseconds: minDelay)
+
             await MainActor.run {
-                guard let self else { return }
-                self.novaMessages.append(NovaMessage(role: .nova, content: reply))
+                // Aplicar las actions en el main actor (mutaciones del store).
+                let outcome = self.applyBackendActions(actions, userText: trimmed)
+                // Componer texto final del mensaje de Nova:
+                // 1. reply del backend (si vino)
+                // 2. resumen de la mutación (si hubo)
+                // 3. nota de fallback / cuota (si aplica)
+                var pieces: [String] = []
+                let cleanReply = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleanReply.isEmpty {
+                    pieces.append(cleanReply)
+                }
+                if outcome.didMutate, let s = outcome.summary, !s.isEmpty {
+                    // Solo agregar si no es duplicado del reply.
+                    if cleanReply.range(of: s) == nil {
+                        pieces.append(s)
+                    }
+                }
+                if smartActionsBlocked, let msg = smartActionsMessage {
+                    pieces.append(msg)
+                }
+                if usedFallback, let msg = smartActionsMessage {
+                    // En el flujo fallback, smartActionsMessage trae la nota
+                    // humana ("Usé el modo local…").
+                    if !pieces.contains(where: { $0 == msg }) {
+                        pieces.append(msg)
+                    }
+                }
+                let finalText = pieces.isEmpty
+                    ? "Listo."
+                    : pieces.joined(separator: "\n\n")
+
+                self.novaMessages.append(NovaMessage(role: .nova, content: finalText))
                 self.persistNovaMessages()
                 self.isNovaTyping = false
             }
+        }
+    }
+
+    /// Snapshot atómico de las credenciales — leemos en main actor y
+    /// devolvemos un valor inmutable para usar dentro del Task sin
+    /// data race.
+    @MainActor
+    private func syncCredentialsSnapshot() -> SyncCredentials? {
+        syncCredentials
+    }
+
+    /// Convierte un `NovaServiceError` recuperable en una frase humana
+    /// para mostrar al final del mensaje de Nova en el chat.
+    @MainActor
+    private func fallbackNoteForChat(error: NovaServiceError) -> String? {
+        switch error {
+        case .unauthorized:
+            return "(Estoy usando el modo local mientras vuelves a iniciar sesión.)"
+        case .quotaExceeded(let m):
+            return m.map { "(\($0))" } ?? "(Llegaste al límite diario de Nova.)"
+        case .offline:
+            return "(Sin conexión — usé el modo local.)"
+        case .timeout, .serviceUnavailable, .badLLMOutput, .network:
+            return "(Usé el modo local porque Nova avanzada no respondió.)"
+        default:
+            return nil
         }
     }
 

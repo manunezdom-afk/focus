@@ -273,16 +273,23 @@ struct MiDiaView: View {
 
     // MARK: - Nova inline (interacción principal desde Mi Día)
 
-    /// Procesa la petición del usuario localmente con `NovaResponder.parse`,
-    /// ejecuta el intent (crear tarea/evento, etc.) y muestra la respuesta
-    /// inline DEBAJO del FocusBar. No navega al chat — Mi Día es el flujo
-    /// principal para acciones rápidas.
+    /// Procesa la petición del usuario:
+    /// 1. Si hay sesión (`syncCredentials` no es nil), llama al backend
+    ///    `/api/focus-assistant` vía `NovaService`. Si responde OK,
+    ///    aplica las `actions` al store (sync Supabase automático) y
+    ///    muestra el `reply` como inline response.
+    /// 2. Si el backend falla con error "esperable" (401/429/timeout/red/
+    ///    quota), cae a `NovaResponder.parse` con una nota sutil al final.
+    /// 3. Si está en modo demo o no logueado, va directo al parser local
+    ///    (sin llamar backend, sin nota).
+    /// Mantiene la inline response abajo del FocusBar — no navega al chat.
     private func processNovaInline(text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         HapticManager.shared.tap()
 
-        // Loading inmediato — Nova "procesando" se ve aunque el parse sea sync.
+        // Loading inmediato — el usuario ve "procesando" mientras se decide
+        // el path (local o remoto).
         withAnimation(.easeInOut(duration: 0.18)) {
             inlineResponse = InlineNovaResponse(
                 userText: trimmed,
@@ -291,17 +298,180 @@ struct MiDiaView: View {
             )
         }
 
-        // Pequeño delay para que el usuario vea el loading aunque la
-        // respuesta sea instantánea. Cuando se conecte LLM real, este Task
-        // se reemplaza por la llamada HTTP.
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 280_000_000)
-            let intent = NovaResponder.parse(trimmed, context: store.novaContext)
-            let response = executeIntent(intent, userText: trimmed)
+            let response = await resolveNovaResponse(for: trimmed)
             withAnimation(.easeInOut(duration: 0.20)) {
                 inlineResponse = response
             }
         }
+    }
+
+    /// Decide backend vs. fallback local y devuelve el `InlineNovaResponse`
+    /// final. Centralizado acá para que `processNovaInline` quede limpio.
+    private func resolveNovaResponse(for trimmed: String) async -> InlineNovaResponse {
+        // Sin sesión activa → parser local directo. No mostramos nota
+        // porque el usuario está en modo demo a propósito.
+        guard let creds = store.syncCredentials else {
+            return runLocalFallback(for: trimmed, withNote: nil)
+        }
+
+        do {
+            let result = try await NovaService.send(
+                message: trimmed,
+                events: visibleEventsForContext(),
+                tasks: visibleTasksForContext(),
+                history: recentNovaHistory(),
+                accessToken: creds.accessToken,
+                surface: .inlineMiDia
+            )
+            return await applyBackendResult(result, userText: trimmed)
+        } catch let error as NovaServiceError {
+            if error.canFallbackToLocal {
+                let note = humanFallbackNote(for: error)
+                return runLocalFallback(for: trimmed, withNote: note)
+            }
+            return InlineNovaResponse(
+                userText: trimmed,
+                summary: "Nova tuvo un problema.",
+                details: error.errorDescription ?? "Inténtalo en un momento.",
+                isError: true
+            )
+        } catch {
+            return runLocalFallback(for: trimmed, withNote: "Usé el modo local porque Nova avanzada no respondió.")
+        }
+    }
+
+    /// Aplica el `NovaService.Result` al store y arma el inline response.
+    /// Si el backend solo devolvió `reply` sin actions (clarify o smalltalk),
+    /// mostramos solo el texto.
+    private func applyBackendResult(_ result: NovaService.Result, userText: String) async -> InlineNovaResponse {
+        let outcome = store.applyBackendActions(result.actions, userText: userText)
+
+        let replyText = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Cuota de smart actions agotada: pegar nota humana al final.
+        let blockedNote: String? = result.smartActionsBlocked
+            ? (result.smartActionsMessage ?? "Llegaste al límite diario de acciones de Nova.")
+            : nil
+
+        if outcome.didMutate {
+            // Hubo mutación: usamos el resumen del outcome como cabecera +
+            // el reply textual como detalle. Acción contextual según tipo.
+            let summary = outcome.summary ?? "Listo."
+            var details: String? = replyText.isEmpty ? nil : replyText
+            if let note = blockedNote {
+                details = [details, note].compactMap { $0 }.joined(separator: "\n\n")
+            }
+            let action: InlineNovaAction = {
+                if outcome.primaryEventId != nil { return .openCalendar }
+                if outcome.primaryTaskId != nil { return .openTasksList }
+                return .dismiss
+            }()
+            return InlineNovaResponse(
+                userText: userText,
+                summary: summary,
+                details: details,
+                action: action,
+                isError: false
+            )
+        }
+
+        // No hubo mutación: el backend devolvió solo texto (clarify o info).
+        let summary: String
+        let details: String?
+        if !replyText.isEmpty {
+            // Si el reply es corto y único, usarlo como summary; sino
+            // partir título/detalle por primera oración.
+            let parts = splitReplyForUI(replyText)
+            summary = parts.summary
+            details = parts.details
+        } else {
+            summary = "Nova respondió sin texto."
+            details = nil
+        }
+        let merged: String? = {
+            guard let note = blockedNote else { return details }
+            return [details, note].compactMap { $0 }.joined(separator: "\n\n")
+        }()
+        return InlineNovaResponse(
+            userText: userText,
+            summary: summary,
+            details: merged,
+            action: .dismiss,
+            isError: false
+        )
+    }
+
+    /// Corre el parser local y arma el inline response. Si `note` viene
+    /// dado, lo agrega al final del details para que el usuario sepa por
+    /// qué se usó fallback.
+    private func runLocalFallback(for trimmed: String, withNote note: String?) -> InlineNovaResponse {
+        let intent = NovaResponder.parse(trimmed, context: store.novaContext)
+        var response = executeIntent(intent, userText: trimmed)
+        if let note {
+            response.details = [response.details, note].compactMap { $0 }.joined(separator: "\n\n")
+        }
+        return response
+    }
+
+    /// Eventos que vamos a enviar como contexto al backend. Limita a hoy
+    /// + mañana + 7 días siguientes para no pasar el límite de tokens.
+    private func visibleEventsForContext() -> [FocusEvent] {
+        let cal = Calendar.current
+        let now = Date()
+        let horizon = cal.date(byAdding: .day, value: 7, to: now) ?? now
+        return store.events
+            .filter { $0.startTime >= cal.startOfDay(for: now) && $0.startTime <= horizon }
+            .sorted { $0.startTime < $1.startTime }
+    }
+
+    private func visibleTasksForContext() -> [FocusTask] {
+        store.tasks.filter { !$0.done }
+    }
+
+    /// Convierte los últimos turnos del chat en el shape `history` del
+    /// backend. Limita a 12 turnos (6 ida/vuelta).
+    private func recentNovaHistory() -> [NovaService.HistoryEntry] {
+        let recent = store.novaMessages.suffix(12)
+        return recent.map { msg in
+            NovaService.HistoryEntry(
+                role: msg.role == .user ? .user : .assistant,
+                content: msg.content
+            )
+        }
+    }
+
+    /// Mensajes amables que mostramos cuando el backend falla y caemos a local.
+    private func humanFallbackNote(for error: NovaServiceError) -> String? {
+        switch error {
+        case .unauthorized:
+            return "Tu sesión expiró. Estoy usando el modo local mientras vuelves a iniciar sesión."
+        case .quotaExceeded(let message):
+            return message ?? "Llegaste al límite diario de Nova. Estoy usando el modo local."
+        case .offline:
+            return "Sin conexión. Estoy usando el modo local."
+        case .timeout, .serviceUnavailable, .badLLMOutput, .network:
+            return "Usé el modo local porque Nova avanzada no respondió."
+        default:
+            return nil
+        }
+    }
+
+    /// Split del reply del backend en (summary, details). El backend ya
+    /// devuelve máx 2 oraciones; si hay punto final, lo partimos ahí.
+    private func splitReplyForUI(_ raw: String) -> (summary: String, details: String?) {
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Buscar primer punto seguido de espacio o fin de string.
+        if let dotRange = normalized.range(of: #"[.!?]\s+"#, options: .regularExpression) {
+            let first = String(normalized[..<dotRange.upperBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let rest = String(normalized[dotRange.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if rest.isEmpty {
+                return (first, nil)
+            }
+            return (first, rest)
+        }
+        return (normalized, nil)
     }
 
     private func executeIntent(_ intent: NovaIntent, userText: String) -> InlineNovaResponse {

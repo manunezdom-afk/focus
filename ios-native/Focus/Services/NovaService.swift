@@ -1,0 +1,728 @@
+import Foundation
+
+/// Cliente para `POST /api/focus-assistant`. Stateless: cada llamada arma
+/// el request, manda Bearer + body JSON y decodifica la respuesta.
+///
+/// El contrato del backend está documentado en `api/focus-assistant.js` +
+/// `api/_lib/systemPrompt.js`. Lo respetamos tal cual (lo usa también la
+/// web en producción); el mapping al modelo iOS (FocusEvent/FocusTask) se
+/// hace acá adentro para no contaminar el resto de la app.
+///
+/// Auth: el endpoint EXIGE Bearer válido. Sin sesión devuelve 401, y el
+/// caller debe usar fallback local (`NovaResponder`).
+///
+/// Privacidad: NUNCA loguear el accessToken completo ni los prompts/replies
+/// del usuario. Los logs solo dicen `name` o `status` del error.
+enum NovaService {
+
+    // MARK: - Public API
+
+    /// Origen de la llamada — el backend no lo usa todavía, pero lo
+    /// pasamos como flag a futuro para diferenciar costos por surface.
+    enum Surface: String {
+        case inlineMiDia = "inline_mi_dia"
+        case novaChat = "nova_chat"
+    }
+
+    /// Personalidad activa del usuario para el system prompt. Se mantiene
+    /// la lista canónica del backend.
+    enum Personality: String {
+        case focus
+        case cercana
+        case estrategica
+    }
+
+    /// Resultado exitoso de una llamada. El `reply` es texto plano corto
+    /// para mostrar al usuario. `actions` son mutaciones estructuradas
+    /// que el caller aplica al `FocusDataStore`.
+    struct Result {
+        let reply: String
+        let actions: [BackendAction]
+        let smartActionsBlocked: Bool
+        let smartActionsMessage: String?
+    }
+
+    /// Llama al backend. Lanza `NovaServiceError` para que el caller
+    /// decida si cae al parser local.
+    static func send(
+        message: String,
+        events: [FocusEvent],
+        tasks: [FocusTask],
+        history: [HistoryEntry],
+        accessToken: String,
+        personality: Personality = .focus,
+        surface: Surface = .inlineMiDia,
+        timezone: TimeZone = .current,
+        now: Date = Date()
+    ) async throws -> Result {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw NovaServiceError.emptyMessage }
+        guard trimmed.count <= 4000 else { throw NovaServiceError.messageTooLong }
+
+        let url = FocusConfig.apiOrigin.appendingPathComponent("api/focus-assistant")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 45  // matchea anthropic SDK timeout backend
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let payload = BackendRequestPayload(
+            message: trimmed,
+            novaPersonality: personality.rawValue,
+            mode: surface.rawValue,
+            events: events.map { BackendEventDTO(local: $0) },
+            tasks: tasks.map { BackendTaskDTO(local: $0) },
+            history: history.map { BackendHistoryEntry(role: $0.role.rawValue, content: $0.content) },
+            clientNow: Int(now.timeIntervalSince1970 * 1000),
+            clientTimezone: timezone.identifier
+        )
+
+        do {
+            request.httpBody = try jsonEncoder.encode(payload)
+        } catch {
+            throw NovaServiceError.encoding(error)
+        }
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let urlErr as URLError where urlErr.code == .timedOut {
+            throw NovaServiceError.timeout
+        } catch let urlErr as URLError where [.notConnectedToInternet, .networkConnectionLost, .dataNotAllowed].contains(urlErr.code) {
+            throw NovaServiceError.offline
+        } catch {
+            throw NovaServiceError.network(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw NovaServiceError.invalidResponse
+        }
+
+        switch http.statusCode {
+        case 200:
+            do {
+                let decoded = try jsonDecoder.decode(BackendResponsePayload.self, from: data)
+                return Result(
+                    reply: decoded.reply,
+                    actions: decoded.actions,
+                    smartActionsBlocked: decoded.smartActionsBlocked ?? false,
+                    smartActionsMessage: decoded.smartActionsMessage
+                )
+            } catch {
+                throw NovaServiceError.decoding(error)
+            }
+        case 401, 403:
+            throw NovaServiceError.unauthorized
+        case 429:
+            // Backend devuelve JSON con mensaje humano cuando es quota.
+            let msg = (try? jsonDecoder.decode(BackendErrorPayload.self, from: data))?.message
+            throw NovaServiceError.quotaExceeded(message: msg)
+        case 502:
+            throw NovaServiceError.badLLMOutput
+        case 503, 504:
+            throw NovaServiceError.serviceUnavailable
+        default:
+            throw NovaServiceError.server(status: http.statusCode)
+        }
+    }
+
+    // MARK: - History entry
+
+    /// Turno previo del chat enviado al backend. Mantener orden cronológico
+    /// (user/assistant alternados, idealmente).
+    struct HistoryEntry {
+        enum Role: String { case user, assistant }
+        let role: Role
+        let content: String
+    }
+
+    // MARK: - Internal coders
+
+    private static let jsonEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = []
+        return e
+    }()
+
+    private static let jsonDecoder: JSONDecoder = {
+        let d = JSONDecoder()
+        return d
+    }()
+}
+
+// MARK: - Errores tipados
+
+enum NovaServiceError: Error, LocalizedError {
+    case emptyMessage
+    case messageTooLong
+    case unauthorized           // 401/403 → caller debe usar fallback
+    case quotaExceeded(message: String?)
+    case badLLMOutput           // 502 (parser falló en backend)
+    case serviceUnavailable     // 503/504 (modelo / red upstream)
+    case offline
+    case timeout
+    case network(Error)
+    case invalidResponse
+    case encoding(Error)
+    case decoding(Error)
+    case server(status: Int)
+
+    /// True cuando el error es "esperable" y la app debería usar el
+    /// `NovaResponder` local con un mensaje sutil. False cuando el error
+    /// indica que algo fundamental falló (encoding bug, server 5xx raro)
+    /// y conviene mostrar mensaje de error real.
+    var canFallbackToLocal: Bool {
+        switch self {
+        case .unauthorized, .quotaExceeded, .offline, .timeout,
+             .serviceUnavailable, .badLLMOutput, .network:
+            return true
+        case .emptyMessage, .messageTooLong, .invalidResponse,
+             .encoding, .decoding, .server:
+            return false
+        }
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyMessage:        return "Mensaje vacío."
+        case .messageTooLong:      return "Mensaje demasiado largo."
+        case .unauthorized:        return "Sesión inválida."
+        case .quotaExceeded(let m): return m ?? "Llegaste al límite diario de Nova."
+        case .badLLMOutput:        return "La respuesta no se entendió. Intenta otra vez."
+        case .serviceUnavailable:  return "Nova está sobrecargada. Vuelve a intentar."
+        case .offline:             return "Sin conexión."
+        case .timeout:             return "Nova tardó demasiado."
+        case .network:             return "Error de red."
+        case .invalidResponse:     return "Respuesta inesperada del servidor."
+        case .encoding:            return "Error preparando la solicitud."
+        case .decoding:            return "Error procesando la respuesta."
+        case .server(let status):  return "Error del servidor (\(status))."
+        }
+    }
+}
+
+// MARK: - DTOs request
+
+/// Shape exacto del request que el backend espera (snake_case via CodingKeys).
+private struct BackendRequestPayload: Encodable {
+    let message: String
+    let novaPersonality: String
+    let mode: String
+    let events: [BackendEventDTO]
+    let tasks: [BackendTaskDTO]
+    let history: [BackendHistoryEntry]
+    let clientNow: Int
+    let clientTimezone: String
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case novaPersonality
+        case mode
+        case events
+        case tasks
+        case history
+        case clientNow
+        case clientTimezone
+    }
+}
+
+private struct BackendHistoryEntry: Encodable {
+    let role: String
+    let content: String
+}
+
+/// Shape de evento que el backend espera (referencia en
+/// `systemPrompt.js`). Hora como string "H:MM AM/PM", date YYYY-MM-DD.
+private struct BackendEventDTO: Encodable {
+    let id: String
+    let title: String
+    let time: String
+    let date: String?
+    let section: String
+
+    init(local event: FocusEvent) {
+        self.id = event.id.uuidString
+        self.title = event.title
+        self.time = NovaTimeFormatter.formatHourMinute(from: event.startTime)
+        self.date = NovaTimeFormatter.formatISODate(from: event.startTime)
+        let hour = Calendar.current.component(.hour, from: event.startTime)
+        self.section = hour >= 14 ? "evening" : "focus"
+    }
+}
+
+/// Shape de tarea que el backend espera.
+private struct BackendTaskDTO: Encodable {
+    let id: String
+    let label: String
+    let priority: String
+    let category: String
+    let done: Bool
+
+    init(local task: FocusTask) {
+        self.id = task.id.uuidString
+        self.label = task.title
+        self.priority = task.priority.backendLabel
+        self.category = task.category.backendLabel
+        self.done = task.done
+    }
+}
+
+// MARK: - DTOs response
+
+private struct BackendResponsePayload: Decodable {
+    let reply: String
+    let actions: [BackendAction]
+    let smartActionsBlocked: Bool?
+    let smartActionsMessage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case reply
+        case actions
+        case smartActionsBlocked = "smart_actions_blocked"
+        case smartActionsMessage = "smart_actions_message"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.reply = try c.decodeIfPresent(String.self, forKey: .reply) ?? ""
+        self.smartActionsBlocked = try c.decodeIfPresent(Bool.self, forKey: .smartActionsBlocked)
+        self.smartActionsMessage = try c.decodeIfPresent(String.self, forKey: .smartActionsMessage)
+        // Decodificar actions de forma resiliente: si un item falla por type
+        // desconocido o shape inesperado, lo saltamos en vez de tumbar todo.
+        if let raw = try? c.decode([RawAction].self, forKey: .actions) {
+            self.actions = raw.compactMap { $0.decoded }
+        } else {
+            self.actions = []
+        }
+    }
+}
+
+private struct BackendErrorPayload: Decodable {
+    let error: String?
+    let message: String?
+}
+
+// MARK: - Actions (heterogéneas)
+
+/// Acciones que el backend puede devolver. Mantiene los mismos cases que
+/// la lista canónica del system prompt. Si llega un tipo desconocido, lo
+/// envolvemos en `.unsupported` para loggear pero no crashear.
+enum BackendAction {
+    /// Crear evento — `endTime` null cuando no hay término.
+    case addEvent(BackendEventCreate)
+    /// Crear evento recurrente — cliente expande N instancias.
+    case addRecurringEvent(BackendEventCreate, BackendRecurrence)
+    /// Editar campos de un evento existente. `id` puede ser UUID del local.
+    case editEvent(id: String, updates: BackendEventUpdates)
+    /// Borrar evento.
+    case deleteEvent(id: String)
+    /// Crear tarea.
+    case addTask(BackendTaskCreate)
+    /// Toggle de tarea (marca/desmarca como hecha).
+    case toggleTask(id: String)
+    /// Borrar tarea.
+    case deleteTask(id: String)
+    /// Memoria sobre el usuario — V1: no se persiste, solo se loguea.
+    case remember
+    /// Type desconocido — guardamos el name para diagnóstico.
+    case unsupported(typeName: String)
+}
+
+/// Datos para crear un evento (matchea `event` del backend).
+struct BackendEventCreate {
+    let title: String
+    let timeString: String?      // "9:00 AM", "20:00", etc.
+    let endTimeString: String?   // null si recordatorio
+    let dateString: String?      // "YYYY-MM-DD"; null = hoy
+    let section: String?         // "focus" / "evening"
+    let icon: String?            // fitness_center | groups | …
+    let reminderOffsets: [Int]?
+    let location: String?
+    let notes: String?
+}
+
+/// Recurrencia (matchea shape backend).
+struct BackendRecurrence {
+    let pattern: String          // "daily" | "weekdays" | "weekly"
+    let weekday: Int?            // 0=domingo
+    let count: Int?
+    let startDate: String?       // "YYYY-MM-DD"
+}
+
+/// Campos parciales para editar un evento.
+struct BackendEventUpdates {
+    let title: String?
+    let timeString: String?
+    let endTimeString: String?
+    let dateString: String?
+    let location: String?
+    let reminderOffsets: [Int]?
+}
+
+/// Datos para crear una tarea.
+struct BackendTaskCreate {
+    let label: String
+    let priority: String?        // "Alta" | "Media" | "Baja"
+    let category: String?        // "hoy" | "semana" | "algún día"
+    let linkedEventId: String?
+    let parentTaskId: String?
+}
+
+// MARK: - Action decoding
+
+/// Decodificador resiliente: lee `type` primero y dispatch al case que
+/// corresponda. Si el shape interno está incompleto, devuelve `.unsupported`
+/// en vez de fallar.
+private struct RawAction: Decodable {
+    let decoded: BackendAction?
+
+    private enum DispatchKeys: String, CodingKey {
+        case type
+        case event
+        case task
+        case id
+        case updates
+        case recurrence
+        case memory
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: DispatchKeys.self)
+        let rawType = (try? c.decode(String.self, forKey: .type)) ?? ""
+
+        switch rawType {
+        case "add_event":
+            if let ev = try? c.decode(EventCreateDecoded.self, forKey: .event) {
+                self.decoded = .addEvent(ev.toModel())
+            } else {
+                self.decoded = .unsupported(typeName: rawType)
+            }
+        case "add_recurring_event":
+            let ev = try? c.decode(EventCreateDecoded.self, forKey: .event)
+            let rec = try? c.decode(RecurrenceDecoded.self, forKey: .recurrence)
+            if let ev, let rec {
+                self.decoded = .addRecurringEvent(ev.toModel(), rec.toModel())
+            } else {
+                self.decoded = .unsupported(typeName: rawType)
+            }
+        case "edit_event", "update_event":
+            let id = (try? c.decode(String.self, forKey: .id)) ?? ""
+            let upd = (try? c.decode(EventUpdatesDecoded.self, forKey: .updates))
+                ?? EventUpdatesDecoded()
+            if id.isEmpty {
+                self.decoded = .unsupported(typeName: rawType)
+            } else {
+                self.decoded = .editEvent(id: id, updates: upd.toModel())
+            }
+        case "delete_event":
+            if let id = try? c.decode(String.self, forKey: .id), !id.isEmpty {
+                self.decoded = .deleteEvent(id: id)
+            } else {
+                self.decoded = .unsupported(typeName: rawType)
+            }
+        case "add_task":
+            if let t = try? c.decode(TaskCreateDecoded.self, forKey: .task) {
+                self.decoded = .addTask(t.toModel())
+            } else {
+                self.decoded = .unsupported(typeName: rawType)
+            }
+        case "toggle_task":
+            if let id = try? c.decode(String.self, forKey: .id), !id.isEmpty {
+                self.decoded = .toggleTask(id: id)
+            } else {
+                self.decoded = .unsupported(typeName: rawType)
+            }
+        case "delete_task":
+            if let id = try? c.decode(String.self, forKey: .id), !id.isEmpty {
+                self.decoded = .deleteTask(id: id)
+            } else {
+                self.decoded = .unsupported(typeName: rawType)
+            }
+        case "remember":
+            self.decoded = .remember
+        default:
+            self.decoded = .unsupported(typeName: rawType)
+        }
+    }
+
+    // MARK: - Subdecoders
+
+    private struct EventCreateDecoded: Decodable {
+        let title: String?
+        let time: String?
+        let endTime: String?
+        let date: String?
+        let section: String?
+        let icon: String?
+        let reminderOffsets: [Int]?
+        let location: String?
+        let notes: String?
+
+        enum CodingKeys: String, CodingKey {
+            case title, time, endTime, date, section, icon
+            case reminderOffsets
+            case location, notes
+        }
+
+        func toModel() -> BackendEventCreate {
+            BackendEventCreate(
+                title: title ?? "",
+                timeString: time,
+                endTimeString: endTime,
+                dateString: date,
+                section: section,
+                icon: icon,
+                reminderOffsets: reminderOffsets,
+                location: location,
+                notes: notes
+            )
+        }
+    }
+
+    private struct EventUpdatesDecoded: Decodable {
+        let title: String?
+        let time: String?
+        let endTime: String?
+        let date: String?
+        let location: String?
+        let reminderOffsets: [Int]?
+
+        init() {
+            title = nil; time = nil; endTime = nil; date = nil
+            location = nil; reminderOffsets = nil
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.title = try c.decodeIfPresent(String.self, forKey: .title)
+            self.time = try c.decodeIfPresent(String.self, forKey: .time)
+            self.endTime = try c.decodeIfPresent(String.self, forKey: .endTime)
+            self.date = try c.decodeIfPresent(String.self, forKey: .date)
+            self.location = try c.decodeIfPresent(String.self, forKey: .location)
+            self.reminderOffsets = try c.decodeIfPresent([Int].self, forKey: .reminderOffsets)
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case title, time, endTime, date, location, reminderOffsets
+        }
+
+        func toModel() -> BackendEventUpdates {
+            BackendEventUpdates(
+                title: title,
+                timeString: time,
+                endTimeString: endTime,
+                dateString: date,
+                location: location,
+                reminderOffsets: reminderOffsets
+            )
+        }
+    }
+
+    private struct TaskCreateDecoded: Decodable {
+        let label: String?
+        let priority: String?
+        let category: String?
+        let linkedEventId: String?
+        let parentTaskId: String?
+
+        func toModel() -> BackendTaskCreate {
+            BackendTaskCreate(
+                label: label ?? "",
+                priority: priority,
+                category: category,
+                linkedEventId: linkedEventId,
+                parentTaskId: parentTaskId
+            )
+        }
+    }
+
+    private struct RecurrenceDecoded: Decodable {
+        let pattern: String?
+        let weekday: Int?
+        let count: Int?
+        let startDate: String?
+
+        func toModel() -> BackendRecurrence {
+            BackendRecurrence(
+                pattern: pattern ?? "daily",
+                weekday: weekday,
+                count: count,
+                startDate: startDate
+            )
+        }
+    }
+}
+
+// MARK: - Parsers de hora/fecha
+
+/// Conversión bidireccional entre Date y los strings que usa el backend.
+/// "9:00 AM" / "3:30 PM" / "20:00" → hora del día. "YYYY-MM-DD" → fecha.
+enum NovaTimeFormatter {
+
+    /// Fecha + hora del backend → Date local. Si solo viene `time` (sin
+    /// `date`), asume hoy. Si solo viene `date` (sin time), asume 9:00.
+    /// Si ambos null, retorna nil.
+    static func resolveDate(dateString: String?, timeString: String?) -> Date? {
+        let cal = Calendar.current
+        let now = Date()
+        let baseDay = parseISODate(dateString) ?? cal.startOfDay(for: now)
+        guard let (hour, minute) = parseHourMinute(timeString) else {
+            // Solo fecha, sin hora → 9:00 default
+            if dateString != nil {
+                return cal.date(bySettingHour: 9, minute: 0, second: 0, of: baseDay)
+            }
+            return nil
+        }
+        return cal.date(bySettingHour: hour, minute: minute, second: 0, of: baseDay)
+    }
+
+    /// "20:00" / "8:00 PM" / "8 PM" / "8am" → (hour, minute).
+    static func parseHourMinute(_ raw: String?) -> (Int, Int)? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        let lower = raw.lowercased()
+
+        // 24h "HH:MM" puro.
+        if let m = lower.range(of: #"^(\d{1,2}):(\d{2})$"#, options: .regularExpression) {
+            let parts = String(lower[m]).split(separator: ":")
+            if parts.count == 2,
+               let h = Int(parts[0]), h < 24,
+               let mn = Int(parts[1]), mn < 60 {
+                return (h, mn)
+            }
+        }
+
+        // "HH AM/PM" / "HH:MM AM/PM" / "HHam" / "HH PM".
+        let amPmPattern = #"^(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)$"#
+        if let regex = try? NSRegularExpression(pattern: amPmPattern, options: [.caseInsensitive]) {
+            let ns = lower as NSString
+            if let match = regex.firstMatch(in: lower, range: NSRange(location: 0, length: ns.length)),
+               match.numberOfRanges >= 4 {
+                let h = Int(ns.substring(with: match.range(at: 1))) ?? 0
+                let mn: Int = {
+                    let r = match.range(at: 2)
+                    if r.location == NSNotFound { return 0 }
+                    return Int(ns.substring(with: r)) ?? 0
+                }()
+                let suffix = ns.substring(with: match.range(at: 3)).lowercased()
+                let isPM = suffix.hasPrefix("p")
+                var hour24 = h
+                if h == 12 {
+                    hour24 = isPM ? 12 : 0
+                } else if isPM {
+                    hour24 = h + 12
+                }
+                if hour24 < 24, mn < 60 { return (hour24, mn) }
+            }
+        }
+
+        // 24h "HH" puro (poco común desde backend, pero por las dudas).
+        if let n = Int(lower), n >= 0, n < 24 {
+            return (n, 0)
+        }
+
+        return nil
+    }
+
+    /// "YYYY-MM-DD" → Date (medianoche local).
+    static func parseISODate(_ raw: String?) -> Date? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return nil }
+        let parts = raw.split(separator: "-")
+        guard parts.count == 3,
+              let y = Int(parts[0]),
+              let m = Int(parts[1]),
+              let d = Int(parts[2]) else { return nil }
+        var comps = DateComponents()
+        comps.year = y
+        comps.month = m
+        comps.day = d
+        return Calendar.current.date(from: comps)
+    }
+
+    /// Date → "h:mm AM/PM" en es-CL (formato que devuelve Anthropic en sus
+    /// ejemplos). Usado para serializar eventos al backend.
+    static func formatHourMinute(from date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "h:mm a"
+        return fmt.string(from: date).uppercased()
+    }
+
+    /// Date → "YYYY-MM-DD" en zona local.
+    static func formatISODate(from date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.string(from: date)
+    }
+}
+
+// MARK: - Mapping helpers
+
+extension TaskPriority {
+    /// Etiqueta que el backend espera para la prioridad. Mismo wording que
+    /// usa el system prompt ("Alta" / "Media" / "Baja").
+    fileprivate var backendLabel: String {
+        switch self {
+        case .alta:  return "Alta"
+        case .media: return "Media"
+        case .baja:  return "Baja"
+        }
+    }
+
+    /// Decodifica el `priority` que devuelve el backend. Es flexible: acepta
+    /// "Alta"/"alta", "high", etc. Cae a `.media` si no entiende.
+    static func fromBackendLabel(_ raw: String?) -> TaskPriority {
+        guard let raw = raw?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return .media }
+        switch raw {
+        case "alta", "high":     return .alta
+        case "baja", "low":      return .baja
+        default:                 return .media
+        }
+    }
+}
+
+extension TaskCategory {
+    fileprivate var backendLabel: String {
+        switch self {
+        case .hoy:      return "hoy"
+        case .semana:   return "semana"
+        case .algunDia: return "algún día"
+        }
+    }
+
+    static func fromBackendLabel(_ raw: String?) -> TaskCategory {
+        guard let raw = raw?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return .hoy }
+        if raw.contains("semana") { return .semana }
+        if raw.contains("algún") || raw.contains("algun") { return .algunDia }
+        return .hoy
+    }
+}
+
+/// Mapeo `icon` del backend → `EventSection` iOS. Conservador: cae a
+/// `.personal` para casos no mapeados; `isReminder=true` lo override
+/// arriba.
+extension EventSection {
+    static func fromBackendIcon(_ icon: String?) -> EventSection {
+        switch (icon ?? "").lowercased() {
+        case "fitness_center":     return .descanso
+        case "groups":             return .reunion
+        case "menu_book":          return .estudio
+        case "work":               return .foco
+        case "alarm":              return .reminder
+        case "local_hospital",
+             "shopping_cart",
+             "cake",
+             "flight",
+             "account_balance":    return .personal
+        case "restaurant":         return .personal
+        case "event":              return .reunion
+        default:                   return .personal
+        }
+    }
+}
