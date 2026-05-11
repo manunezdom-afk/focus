@@ -322,11 +322,21 @@ struct NovaView: View {
 
     // MARK: - Chat
 
+    /// Layout estilo iMessage:
+    /// - El `ScrollView` con burbujas ocupa todo el espacio disponible.
+    /// - `safeAreaInset(edge: .bottom)` ancla el input arriba del teclado
+    ///   (cuando se abre) o del safe-area inferior (cuando está cerrado).
+    /// - El scroll baja automáticamente al último mensaje en envío y al
+    ///   enfocar el input.
     private var chatContent: some View {
-        VStack(spacing: 0) {
-            chatScroll
-            inputBar
-        }
+        chatScroll
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                inputBar
+            }
+            // El teclado modifica el bottom safe-area; SwiftUI re-aplica el
+            // inset y el scroll empuja correctamente las burbujas hacia
+            // arriba. No usamos `ignoresSafeArea(.keyboard)` aquí.
+            .scrollDismissesKeyboard(.interactively)
     }
 
     private var chatScroll: some View {
@@ -336,23 +346,50 @@ struct NovaView: View {
                     ForEach(store.novaMessages) { msg in
                         NovaMessageBubble(message: msg).id(msg.id)
                     }
+                    // Anchor invisible al final — permite hacer scroll a "abajo
+                    // de todo" sin depender del último id (que puede cambiar
+                    // entre renders).
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.chatBottomAnchor)
                 }
                 .padding(.horizontal, Theme.Spacing.lg)
                 .padding(.top, Theme.Spacing.sm)
                 .padding(.bottom, Theme.Spacing.sm)
             }
             .onChange(of: store.novaMessages.count) { _, _ in
-                if let last = store.novaMessages.last {
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
+                scrollToBottom(proxy: proxy, animated: true)
+            }
+            .onChange(of: inputFocused) { _, focused in
+                // Cuando el usuario tappea el input, asegurarnos de que el
+                // último mensaje queda visible justo arriba del teclado.
+                if focused {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        scrollToBottom(proxy: proxy, animated: true)
                     }
                 }
+            }
+            .onAppear {
+                scrollToBottom(proxy: proxy, animated: false)
             }
         }
     }
 
-    /// Input compacto en la conversación — sin sparkle ni mic, ya estás dentro
-    /// de Nova. Reduce el feel "chat genérico".
+    private static let chatBottomAnchor = "nova-chat-bottom"
+
+    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.25)) {
+                proxy.scrollTo(Self.chatBottomAnchor, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(Self.chatBottomAnchor, anchor: .bottom)
+        }
+    }
+
+    /// Input multilínea para el chat. Vive dentro de `safeAreaInset(edge: .bottom)`
+    /// del scroll, por lo que iOS lo posiciona automáticamente arriba del teclado.
+    /// Crece hasta 4 líneas y después hace scroll interno.
     private var inputBar: some View {
         VStack(spacing: 0) {
             Rectangle()
@@ -360,14 +397,16 @@ struct NovaView: View {
                 .frame(height: Theme.Stroke.hairline)
                 .opacity(0.5)
 
-            HStack(spacing: Theme.Spacing.sm) {
-                TextField("Escríbele a Nova…", text: $draft, axis: .horizontal)
+            HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
+                TextField("Escríbele a Nova…", text: $draft, axis: .vertical)
                     .focused($inputFocused)
                     .font(Theme.Typography.body)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .tint(Theme.Colors.focusAccent)
+                    .lineLimit(1...4)
                     .submitLabel(.send)
                     .onSubmit(submitDraft)
+                    .padding(.vertical, 4)
 
                 Button(action: submitDraft) {
                     Image(systemName: "arrow.up")
@@ -388,10 +427,10 @@ struct NovaView: View {
             .padding(.horizontal, Theme.Spacing.md + 2)
             .padding(.vertical, Theme.Spacing.sm + 1)
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                     .fill(Theme.Colors.surface)
                     .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
+                        RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                             .strokeBorder(
                                 inputFocused ? Theme.Colors.focusAccent.opacity(0.4) : Theme.Colors.border,
                                 lineWidth: inputFocused ? 1.2 : Theme.Stroke.hairline
@@ -403,7 +442,13 @@ struct NovaView: View {
             .padding(.bottom, Theme.Spacing.sm)
             .animation(.easeInOut(duration: 0.18), value: inputFocused)
         }
-        .background(Theme.Colors.background)
+        // Background sólido sobre el área inferior, pintando también el
+        // safe-area cuando el teclado está cerrado para que no se vea el
+        // fondo del scroll por debajo.
+        .background(
+            Theme.Colors.background
+                .ignoresSafeArea(edges: .bottom)
+        )
     }
 
     private func submitDraft() {

@@ -82,15 +82,42 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
 
 // MARK: - Nova intents (estructurados, mock-friendly)
 
+/// Hint de recurrencia detectada en el texto del usuario. Por ahora la app NO
+/// soporta recurrencia nativa — solo se usa para que Nova responda con honestidad
+/// ("la recurrencia queda para próxima versión") en vez de prometer y fallar.
+enum RecurrenceHint: Hashable {
+    case daily
+    case weekly
+    case weeklyOn(label: String)   // "los lunes", "los miércoles"
+    case monthly
+    case unspecified               // "recurrente" sin frecuencia explícita
+
+    var label: String {
+        switch self {
+        case .daily:                return "todos los días"
+        case .weekly:               return "cada semana"
+        case .weeklyOn(let label):  return "todos \(label)"
+        case .monthly:              return "cada mes"
+        case .unspecified:          return "recurrente"
+        }
+    }
+}
+
 /// Lo que Nova entendió del mensaje del usuario. La interpretación es local
 /// (sin IA real); cuando se conecte el backend, este enum se mantiene y solo
 /// cambia el parser.
 enum NovaIntent: Hashable {
-    /// Crear tarea con un título identificado en el texto del usuario.
-    case createTask(title: String)
+    /// Crear tarea con título y, opcionalmente, una recurrencia detectada
+    /// (que aún no está implementada — el ejecutor avisa).
+    case createTask(title: String, recurrence: RecurrenceHint?)
     /// Crear evento. `when` es opcional — si no lo extrajimos, Nova pide
-    /// aclaración antes de crear el evento. `location` es opcional.
-    case createEvent(title: String, when: Date?, location: String?)
+    /// aclaración. `section` también opcional con default `.reunion`.
+    case createEvent(
+        title: String,
+        when: Date?,
+        location: String?,
+        section: EventSection?
+    )
     /// Organizar el día → genera sugerencias en la Bandeja.
     case organizeDay
     /// Revisar tareas pendientes → resumen inline.
@@ -105,52 +132,122 @@ enum NovaIntent: Hashable {
     enum ClarifyReason: Hashable {
         case taskNeedsTitle
         case eventNeedsTitle
+        case eventNeedsTime(title: String, partialDate: Date)
         case eventNeedsDateTime(title: String)
+        case noContext                  // "agéndalo" sin contexto previo
         case unclear
     }
 }
 
+// MARK: - Contexto de sesión de Nova (memoria corta)
+
+/// Memoria local de la última interacción con Nova. Permite resolver
+/// referencias tipo "agéndalo como tarea recurrente" — "lo" remite al título
+/// más reciente. NO se persiste en disco: vive solo en RAM durante la sesión.
+struct NovaContext: Equatable {
+    var lastInputText: String?
+    var lastTitle: String?
+    var lastDate: Date?
+    var lastLocation: String?
+    var lastSection: EventSection?
+    var lastIntentKind: Kind?
+    var lastEventId: UUID?
+    var lastTaskId: UUID?
+    var updatedAt: Date = Date()
+
+    enum Kind: Hashable {
+        case task
+        case event
+    }
+
+    var isFresh: Bool {
+        // Contexto válido por 10 minutos. Después se trata como "sin contexto".
+        Date().timeIntervalSince(updatedAt) < 600
+    }
+}
+
 /// Responde a texto libre. Tiene 2 caras:
-/// - `parse(_:)` → `NovaIntent` estructurado (para Mi Día inline).
+/// - `parse(_:context:)` → `NovaIntent` estructurado (para Mi Día inline).
 /// - `reply(to:)` → string variado para el chat completo.
 ///
-/// Reglas de parsing (heurísticas en español, sin IA):
-/// - Verbos de tarea: "crea tarea", "nueva tarea", "agrega tarea", "anota tarea".
-/// - Verbos de evento: "agenda", "crea evento", "tengo reunión", "reunión con",
-///   "tengo clase", "clase de", etc.
-/// - Tiempo: "hoy" / "mañana" / "pasado mañana" / día de la semana.
-/// - Hora: "a las HH(:MM)" o "HH:MM" suelto.
-/// - Lugar: "en <X>" al final del texto.
+/// Reglas de parsing en español natural (sin IA real):
+/// - **Verbos de tarea** (explícitos): "tengo que", "recordarme", "recuérdame",
+///   "comprar", "llamar", "responder", "estudiar X" (sin contexto de hora),
+///   "preparar", "revisar", "crea tarea", "anota".
+/// - **Verbos de evento**: "agenda", "agéndame", "agéndalo", "salir a",
+///   "ir a", "buscar a", "juntarme con", "reunión con", "tengo clase",
+///   "tengo prueba", "tengo parcial", "clase de", "tengo evento".
+/// - **Tiempo**: "hoy" / "mañana" / "pasado mañana" / día de la semana /
+///   "esta tarde" / "esta noche".
+/// - **Hora**: "a las HH(:MM)", "HH:MM" suelto, **"tipo N"** (colloquial,
+///   default PM 13–18h para N=1–6, etc.), "HHam/pm".
+/// - **Lugar**: " en <X>" al final del texto.
+/// - **Sección**: heurística por palabras (parcial → estudio, buscar →
+///   personal, reunión → reunión, gym → descanso, etc.).
+/// - **Recurrencia**: "todos los X", "cada semana", "diario" → `RecurrenceHint`.
+/// - **Contexto**: si el texto arranca con "agéndalo"/"y X"/etc. y hay un
+///   `NovaContext` reciente, completamos campos faltantes (título, fecha) con
+///   los del último intent.
 enum NovaResponder {
 
     // MARK: Public API
 
-    static func parse(_ text: String) -> NovaIntent {
+    /// Parser principal. `context` permite resolver referencias como
+    /// "agéndalo X" o "y X" en base al último intent.
+    static func parse(_ text: String, context: NovaContext = NovaContext()) -> NovaIntent {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
 
-        // Prioridad 1: preguntas sobre datos demo (la app reemplaza demo al
-        // crear el primer item real, no hay un botón "borrar").
+        // ──────────────────────────────────────────────────────────────
+        // 1. Referencias al contexto: "agéndalo", "agéndalo como tarea X",
+        //    "agéndame eso", "ponlo como tarea", "y como tarea recurrente".
+        //    Solo válidas si hay contexto fresco con un título.
+        // ──────────────────────────────────────────────────────────────
+        if isContextReference(lower), context.isFresh, let lastTitle = context.lastTitle {
+            // ¿El usuario quiere CAMBIAR el tipo (a tarea) o solo confirmar?
+            if matchesAny(lower, ["tarea", "como tarea", "pendiente", "anótalo"]) {
+                let recurrence = detectRecurrence(lower)
+                return .createTask(title: lastTitle, recurrence: recurrence)
+            }
+            // Si menciona "evento" o no menciona tipo → tratar como evento.
+            let when = extractDateTime(from: lower) ?? context.lastDate
+            let location = extractLocation(from: trimmed) ?? context.lastLocation
+            let section = context.lastSection ?? detectSection(in: lower)
+            if when == nil {
+                return .clarify(reason: .eventNeedsDateTime(title: lastTitle))
+            }
+            return .createEvent(title: lastTitle, when: when, location: location, section: section)
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // 2. Borrar ejemplos / demo — siempre redirige a Ajustes.
+        // ──────────────────────────────────────────────────────────────
         if matches(lower, [
             "borra ejemplo", "borrar ejemplo", "quita ejemplo", "quitar ejemplo",
             "limpia ejemplo", "limpiar ejemplo",
             "borra demo", "quita demo", "limpia demo",
-            "borra los ejemplo", "quita los ejemplo"
+            "borra los ejemplo", "quita los ejemplo",
+            "borrar datos demo", "borrar datos local"
         ]) {
             return .askAboutDemo
         }
 
-        // Prioridad 2: revisar / resumen.
+        // ──────────────────────────────────────────────────────────────
+        // 3. Revisar pendientes.
+        // ──────────────────────────────────────────────────────────────
         if matches(lower, [
             "revisa pendientes", "revisar pendientes",
             "qué tengo pendiente", "que tengo pendiente",
             "qué me falta", "que me falta",
-            "qué tengo hoy", "que tengo hoy"
+            "qué tengo hoy", "que tengo hoy",
+            "qué sigue", "que sigue", "qué hago ahora", "que hago ahora"
         ]) {
             return .reviewPending
         }
 
-        // Prioridad 3: organizar el día.
+        // ──────────────────────────────────────────────────────────────
+        // 4. Organizar el día.
+        // ──────────────────────────────────────────────────────────────
         if matches(lower, [
             "organiza mi día", "organiza mi dia",
             "organiza el día", "organiza el dia",
@@ -162,96 +259,188 @@ enum NovaResponder {
             return .organizeDay
         }
 
-        // Prioridad 4: crear tarea explícita.
-        let taskTriggers = [
+        // ──────────────────────────────────────────────────────────────
+        // 5. Tarea explícita: "tengo que X", "recordarme/recuérdame X",
+        //    "anota tarea X", "crea tarea X", verbos de quehacer
+        //    ("comprar X", "llamar X", "responder X", "preparar X",
+        //    "revisar X") cuando NO hay hora explícita.
+        // ──────────────────────────────────────────────────────────────
+        if let title = extractAfter(trimmed, triggers: [
             "crea tarea", "crea una tarea",
-            "nueva tarea", "agrega tarea",
-            "agregar tarea", "anota tarea",
-            "anota:", "tarea:"
-        ]
-        if let title = extractAfter(trimmed, triggers: taskTriggers, allowedTrailingPunct: ":.") {
-            if title.isEmpty {
-                return .clarify(reason: .taskNeedsTitle)
-            }
-            return .createTask(title: cleanupTitle(title))
+            "nueva tarea", "agrega tarea", "agregar tarea",
+            "anota tarea", "anota:", "tarea:"
+        ], allowedTrailingPunct: ":.") {
+            if title.isEmpty { return .clarify(reason: .taskNeedsTitle) }
+            let when = extractDateTime(from: lower)
+            let recurrence = detectRecurrence(lower)
+            return .createTask(
+                title: cleanTaskTitle(title, when: when),
+                recurrence: recurrence
+            )
         }
 
-        // Prioridad 5: crear evento (verbos amplios para capturar lenguaje natural).
+        // "tengo que X" / "recordarme X" / "recuérdame X" → tarea
+        let taskActionTriggers = [
+            "tengo que ", "recordarme ", "recuérdame ", "recuerdame ",
+            "no olvides ", "no olvidar "
+        ]
+        if let title = extractAfter(trimmed, triggers: taskActionTriggers) {
+            if title.isEmpty { return .clarify(reason: .taskNeedsTitle) }
+            let when = extractDateTime(from: lower)
+            let recurrence = detectRecurrence(lower)
+            return .createTask(
+                title: cleanTaskTitle(title, when: when),
+                recurrence: recurrence
+            )
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // 6. Evento — verbos amplios para capturar lenguaje natural
+        //    incluyendo informal ("salir a", "buscar a", "ir a").
+        // ──────────────────────────────────────────────────────────────
         let eventTriggers = [
             "agenda", "agéndame", "agendame", "agendar",
+            "agéndalo", "agendalo", "agéndala", "agendala",
             "crea evento", "crea un evento", "nuevo evento", "agrega evento",
-            "reunión con", "reunion con", "tengo reunión", "tengo reunion",
-            "tengo clase", "tengo evento",
-            "agéndalo", "agendalo"
+            "reunión con", "reunion con",
+            "tengo reunión", "tengo reunion",
+            "tengo clase", "clase de",
+            "tengo prueba", "tengo parcial", "tengo examen", "tengo final",
+            "tengo entrega",
+            "tengo evento", "tengo cita", "tengo turno",
+            "salir a ", "salir con ", "salgo con ",
+            "ir a ", "voy a ", "vamos a ",
+            "buscar a ", "ir a buscar ",
+            "juntarme con ", "juntarnos con ", "junta con ", "me junto con ",
+            "almuerzo con ", "cena con ", "desayuno con ", "café con "
         ]
         if matchesAny(lower, eventTriggers) {
             let title = extractEventTitle(trimmed, triggers: eventTriggers)
             let when = extractDateTime(from: lower)
             let location = extractLocation(from: trimmed)
+            let section = detectSection(in: lower)
             if title.isEmpty {
                 return .clarify(reason: .eventNeedsTitle)
             }
-            // Si entendimos título pero no fecha/hora, pedimos aclaración.
-            if when == nil {
-                return .clarify(reason: .eventNeedsDateTime(title: title))
+            // Caso: hay título y día pero falta hora → preguntar hora.
+            if let partial = when {
+                let hasExplicitTime = hasTimeMarker(lower)
+                if !hasExplicitTime, isAtDayDefault(partial) {
+                    return .clarify(reason: .eventNeedsTime(title: title, partialDate: partial))
+                }
+                return .createEvent(title: title, when: partial, location: location, section: section)
             }
-            return .createEvent(title: title, when: when, location: location)
+            return .clarify(reason: .eventNeedsDateTime(title: title))
         }
 
-        // Prioridad 6: small talk (saludos, agradecimientos).
+        // ──────────────────────────────────────────────────────────────
+        // 7. Quehaceres con verbo + complemento, sin "tengo que" explícito.
+        //    Ej: "comprar materiales mañana", "llamar al dentista".
+        //    Si hay hora → evento; si solo día o nada → tarea.
+        // ──────────────────────────────────────────────────────────────
+        let choreVerbs = [
+            "comprar ", "llamar ", "responder ", "estudiar ",
+            "preparar ", "revisar ", "leer ", "escribir ",
+            "mandar ", "enviar ", "pagar ", "ordenar ", "limpiar "
+        ]
+        if let title = extractAfter(trimmed, triggers: choreVerbs) {
+            if title.isEmpty { return .clarify(reason: .taskNeedsTitle) }
+            let when = extractDateTime(from: lower)
+            let hasExplicitTime = hasTimeMarker(lower)
+            // Reconstruir el título incluyendo el verbo de chore (ej. "Comprar materiales").
+            let verbUsed = firstMatchingTrigger(in: trimmed, triggers: choreVerbs) ?? ""
+            let fullTitle = cleanTaskTitle(
+                verbUsed.trimmingCharacters(in: .whitespacesAndNewlines) + " " + title,
+                when: when
+            )
+            if hasExplicitTime, let date = when {
+                let location = extractLocation(from: trimmed)
+                return .createEvent(title: fullTitle, when: date, location: location, section: .personal)
+            }
+            let recurrence = detectRecurrence(lower)
+            return .createTask(title: fullTitle, recurrence: recurrence)
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // 8. Solo hora/fecha sin verbo, en frases cortas → asumir evento.
+        //    Ej: "mañana 12 con Juan" → evento "Con Juan" mañana 12:00.
+        // ──────────────────────────────────────────────────────────────
+        if let when = extractDateTime(from: lower), hasTimeMarker(lower) {
+            let title = cleanupTitle(stripDateTimeMarkers(stripLocationMarker(trimmed)))
+            let location = extractLocation(from: trimmed)
+            let section = detectSection(in: lower)
+            if title.isEmpty {
+                return .clarify(reason: .eventNeedsTitle)
+            }
+            return .createEvent(title: title, when: when, location: location, section: section)
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // 9. Small talk.
+        // ──────────────────────────────────────────────────────────────
         if matches(lower, ["hola", "buenas", "buen día", "buen dia", "qué tal", "que tal"]) {
             return .smallTalk(reply: randomGreeting())
         }
-        if matches(lower, ["gracias", "perfecto", "dale", "ok", "listo", "genial", "buenísimo", "buenisimo"]) {
+        if matches(lower, [
+            "gracias", "perfecto", "dale", "ok ", "listo",
+            "genial", "buenísimo", "buenisimo"
+        ]) || lower == "ok" {
             return .smallTalk(reply: randomAcknowledgment())
         }
 
-        // No entiendo → clarify genérico.
+        // 10. Sin pistas → clarify.
         return .clarify(reason: .unclear)
     }
 
     /// String libre para el chat. Reusa `parse` para entender el mensaje y
     /// elige una respuesta variada en base al intent. Distinto del flujo
     /// inline: acá no ejecutamos acciones, solo respondemos textualmente.
-    static func reply(to text: String) -> String {
-        let intent = parse(text)
+    static func reply(to text: String, context: NovaContext = NovaContext()) -> String {
+        let intent = parse(text, context: context)
         switch intent {
-        case .createTask(let title):
+        case .createTask(let title, let recurrence):
+            let recBit = recurrence.map { " (\($0.label) — la recurrencia queda preparada para más adelante)" } ?? ""
             return Self.pick([
-                "Anoto «\(title)» como tarea de hoy con prioridad media.",
-                "Listo, agrego «\(title)» a tus pendientes. ¿Le subo la prioridad?",
-                "La meto como tarea de hoy. Si querés que sea para esta semana, decime."
+                "Anoto «\(title)» como tarea de hoy\(recBit).",
+                "Listo, agrego «\(title)» a tus pendientes\(recBit).",
+                "La meto como tarea de hoy\(recBit). Si querés cambiar la prioridad, decime."
             ])
-        case .createEvent(let title, let when, let location):
+        case .createEvent(let title, let when, let location, let section):
             let timeBit = when.map { "el \(DateFormatters.weekdayDay.string(from: $0).lowercased()) a las \(DateFormatters.hourMinute.string(from: $0))" } ?? "cuando me digas"
             let placeBit = location.map { " en \($0)" } ?? ""
+            let sectionBit = section.map { " (\($0.displayName.lowercased()))" } ?? ""
             return Self.pick([
-                "Agendo «\(title)»\(placeBit) \(timeBit). ¿Te bloqueo 10 min antes para prepararte?",
-                "Listo, evento «\(title)» \(timeBit)\(placeBit). Te aviso 10 min antes.",
-                "Va «\(title)» \(timeBit)\(placeBit). Si querés cambiar la hora, decime."
+                "Agendo «\(title)»\(placeBit) \(timeBit)\(sectionBit).",
+                "Listo, evento «\(title)» \(timeBit)\(placeBit)\(sectionBit).",
+                "Va «\(title)» \(timeBit)\(placeBit)\(sectionBit). Si querés cambiar algo, decime."
             ])
         case .organizeDay:
             return Self.pick([
                 "Te dejo tres sugerencias en la Bandeja: un bloque de foco temprano, una pausa al mediodía y revisar pendientes a la tarde.",
-                "Acomodé tu mañana para foco profundo y dejé tareas livianas para después de la siesta. Lo dejé en Bandeja.",
+                "Acomodé tu mañana para foco profundo y dejé tareas livianas para después de la siesta. Está en Bandeja.",
                 "Plan del día listo: tres bloques principales, una pausa real y los pendientes priorizados."
             ])
         case .reviewPending:
             return Self.pick([
-                "Te paso lo de hoy: revisa Mi Día arriba, los pendientes están en \"Pendientes de hoy\".",
-                "Mira «Pendientes de hoy» en Mi Día. Si querés que te los reorganice, decime «organiza mi día».",
-                "Tus pendientes de hoy están en la pantalla principal. ¿Querés que los priorice por urgencia?"
+                "Tus pendientes están en Mi Día → «Pendientes de hoy».",
+                "Mirá «Pendientes de hoy» en Mi Día. Si querés que los reorganice, decime «organiza mi día».",
+                "Lo tenés todo arriba en Mi Día. ¿Los priorizamos por urgencia?"
             ])
         case .askAboutDemo:
-            return "Los ejemplos solo aparecen mientras no tengas datos tuyos. Apenas crees tu primer evento o tarea, se reemplazan automáticamente."
+            return "Los ejemplos solo aparecen mientras no tengas datos tuyos. Apenas crees tu primer evento o tarea, se reemplazan automáticamente. Si querés borrar todo, andá a Ajustes → Datos locales."
         case .smallTalk(let reply):
             return reply
         case .clarify(.taskNeedsTitle):
             return "Decime qué tarea querés que anote. Ej: «crea tarea estudiar cálculo»."
         case .clarify(.eventNeedsTitle):
             return "¿Qué evento querés que agende? Ej: «agenda reunión con Juan mañana a las 12»."
+        case .clarify(.eventNeedsTime(let title, let date)):
+            let day = DateFormatters.weekdayDay.string(from: date).lowercased()
+            return "Tengo «\(title)» para el \(day). ¿A qué hora?"
         case .clarify(.eventNeedsDateTime(let title)):
             return "Tengo «\(title)». ¿Para qué día y a qué hora lo agendo?"
+        case .clarify(.noContext):
+            return "No estoy seguro a qué te referís. Decime qué querés agendar o crear."
         case .clarify(.unclear):
             return Self.pick([
                 "No estoy seguro de qué hacer. ¿Querés que cree una tarea, un evento o una sugerencia?",
@@ -291,6 +480,151 @@ enum NovaResponder {
 
     private static func matchesAny(_ text: String, _ triggers: [String]) -> Bool {
         triggers.contains { text.contains($0) }
+    }
+
+    private static func firstMatchingTrigger(in text: String, triggers: [String]) -> String? {
+        let lower = text.lowercased()
+        var best: (String, String.Index)?
+        for trigger in triggers {
+            if let range = lower.range(of: trigger),
+               best == nil || range.lowerBound < best!.1 {
+                best = (trigger, range.lowerBound)
+            }
+        }
+        return best?.0
+    }
+
+    /// True si el texto arranca con una referencia al ítem mencionado antes
+    /// ("agéndalo", "agéndame eso", "ponlo como", "y X").
+    private static func isContextReference(_ lower: String) -> Bool {
+        let starters = [
+            "agéndalo", "agendalo", "agéndala", "agendala",
+            "agéndame eso", "agendame eso",
+            "ponlo como", "ponla como",
+            "déjalo como", "dejalo como",
+            "y como tarea", "y como evento",
+            "y agéndalo", "y agendalo",
+            "y dejalo", "y déjalo"
+        ]
+        return starters.contains { lower.hasPrefix($0) || lower.contains(" \($0) ") }
+    }
+
+    // MARK: - Recurrence
+
+    private static func detectRecurrence(_ lower: String) -> RecurrenceHint? {
+        if matches(lower, ["todos los días", "todos los dias", "diariamente", "cada día", "cada dia"]) {
+            return .daily
+        }
+        if matches(lower, ["cada semana", "semanal", "todas las semanas"]) {
+            return .weekly
+        }
+        let weekdayMap: [(String, String)] = [
+            ("todos los lunes", "los lunes"),
+            ("todos los martes", "los martes"),
+            ("todos los miércoles", "los miércoles"),
+            ("todos los miercoles", "los miércoles"),
+            ("todos los jueves", "los jueves"),
+            ("todos los viernes", "los viernes"),
+            ("todos los sábados", "los sábados"),
+            ("todos los sabados", "los sábados"),
+            ("todos los domingos", "los domingos")
+        ]
+        for (trigger, label) in weekdayMap where lower.contains(trigger) {
+            return .weeklyOn(label: label)
+        }
+        if matches(lower, ["cada mes", "mensual", "mensualmente"]) {
+            return .monthly
+        }
+        if matches(lower, ["recurrente"]) {
+            return .unspecified
+        }
+        return nil
+    }
+
+    // MARK: - Sección por palabra-clave
+
+    private static func detectSection(in lower: String) -> EventSection? {
+        if matches(lower, [
+            "parcial", "examen", "final", "prueba",
+            "clase", "estudiar", "estudio", "tp ", "tarea de ",
+            "entrega", "presentación", "presentacion", "tesis"
+        ]) {
+            return .estudio
+        }
+        if matches(lower, [
+            "reunión", "reunion", "review", "1:1", "1on1",
+            "meet", "llamada", "call", "stand up", "standup", "stand-up",
+            "demo"
+        ]) {
+            return .reunion
+        }
+        if matches(lower, [
+            "amigo", "amiga", "amigas", "amigos",
+            "familia", "mamá", "papá", "mama", "papa",
+            "salir ", "buscar a ", "buscar al ", "buscar la ", "buscar el ",
+            "juntarme", "juntarnos", "junta con", "me junto",
+            "almuerzo", "cena", "desayuno", "café con", "cafe con",
+            "novia", "novio", "pareja"
+        ]) {
+            return .personal
+        }
+        if matches(lower, ["foco profundo", "deep work", "concentrar", "concentrarme"]) {
+            return .foco
+        }
+        if matches(lower, ["gym", "correr", "yoga", "pilates", "running", "siesta", "pausa", "descanso"]) {
+            return .descanso
+        }
+        return nil
+    }
+
+    // MARK: - Time markers
+
+    /// True si el texto incluye marcador explícito de hora (no solo día).
+    private static func hasTimeMarker(_ lower: String) -> Bool {
+        if firstCaptureInt(lower, pattern: #"a la?s? (\d{1,2})"#, group: 1) != nil { return true }
+        if firstCaptureInt(lower, pattern: #"\b(\d{1,2}):(\d{2})\b"#, group: 1) != nil { return true }
+        if firstCaptureInt(lower, pattern: #"\btipo\s+(?:las?\s+)?(\d{1,2})"#, group: 1) != nil { return true }
+        if firstCaptureInt(lower, pattern: #"\b(\d{1,2})\s*(am|pm|hs|hrs)\b"#, group: 1) != nil { return true }
+        if matches(lower, ["esta tarde", "esta noche", "esta mañana", "esta manana", "al mediodía", "al mediodia", "al atardecer"]) {
+            return true
+        }
+        return false
+    }
+
+    /// True si la fecha es exactamente 9:00 — nuestro default cuando hay día
+    /// pero no hora explícita. Lo usamos para detectar "evento sin hora".
+    private static func isAtDayDefault(_ date: Date) -> Bool {
+        let cal = Calendar.current
+        let hour = cal.component(.hour, from: date)
+        let minute = cal.component(.minute, from: date)
+        return hour == 9 && minute == 0
+    }
+
+    // MARK: - Title cleanup
+
+    private static func cleanTaskTitle(_ raw: String, when: Date?) -> String {
+        var title = raw
+        // Quitar marcadores temporales (mañana / hoy / a las 5) y de lugar.
+        title = stripDateTimeMarkers(title)
+        title = stripLocationMarker(title)
+        // Quitar muletillas pegadas al inicio.
+        let stopPrefixes = [
+            "que ", "de ", "el ", "la ", "los ", "las ",
+            "para ", "a "
+        ]
+        // Solo dropea muletillas si la frase aún tiene contenido.
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
+        var changed = true
+        while changed {
+            changed = false
+            for prefix in stopPrefixes where title.lowercased().hasPrefix(prefix) {
+                title = String(title.dropFirst(prefix.count))
+                changed = true
+            }
+            title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return cleanupTitle(title)
     }
 
     /// Extrae el texto después del PRIMER trigger encontrado (case-insensitive).
@@ -377,20 +711,28 @@ enum NovaResponder {
 
     /// Devuelve fecha+hora si el texto incluye marcador temporal. Si solo hay
     /// hora sin día, asume hoy (o mañana si la hora ya pasó). Si solo hay día
-    /// sin hora, asume 9:00.
+    /// sin hora, asume 9:00 (lo usamos como flag de "necesita hora").
     private static func extractDateTime(from lower: String) -> Date? {
         let cal = Calendar.current
         let now = Date()
         var dayBase: Date? = nil
+        var dayWasExplicit = false
 
         if lower.range(of: #"\bpasado ma(ñ|n)ana\b"#, options: .regularExpression) != nil {
             dayBase = cal.date(byAdding: .day, value: 2, to: now)
+            dayWasExplicit = true
         } else if lower.range(of: #"\bma(ñ|n)ana\b"#, options: .regularExpression) != nil {
             dayBase = cal.date(byAdding: .day, value: 1, to: now)
-        } else if lower.contains("hoy") {
+            dayWasExplicit = true
+        } else if lower.contains("hoy")
+            || lower.contains("esta tarde") || lower.contains("esta noche")
+            || lower.contains("esta mañana") || lower.contains("esta manana")
+            || lower.contains("al mediodía") || lower.contains("al mediodia") {
             dayBase = now
+            dayWasExplicit = true
         } else if let target = nextWeekday(in: lower, calendar: cal, from: now) {
             dayBase = target
+            dayWasExplicit = true
         }
 
         // Hora explícita
@@ -402,13 +744,16 @@ enum NovaResponder {
         if let (h, m) = hm {
             let start = cal.startOfDay(for: base)
             base = cal.date(bySettingHour: h, minute: m, second: 0, of: start) ?? start
-            // Si pusieron solo hora sin día y ya pasó, asumir mañana.
-            if dayBase == nil, base <= now {
+            // Si NO se dio día explícito y la hora ya pasó hoy → asumir mañana.
+            // Si SE dio día explícito (incluyendo "esta tarde"), respetamos
+            // aunque la hora ya pasó.
+            if !dayWasExplicit, base <= now {
                 base = cal.date(byAdding: .day, value: 1, to: base) ?? base
             }
             return base
         }
-        // Día sin hora → 9:00 default
+        // Día sin hora → 9:00 (placeholder; el caller debería detectarlo
+        // como "necesita hora" vía `isAtDayDefault`).
         let start = cal.startOfDay(for: base)
         return cal.date(bySettingHour: 9, minute: 0, second: 0, of: start)
     }
@@ -449,7 +794,7 @@ enum NovaResponder {
         }
         // 2) "a las 12" / "a la 1"
         if let h = firstCaptureInt(text, pattern: #"a la?s? (\d{1,2})\b"#, group: 1), h < 24 {
-            return (h, 0)
+            return (adjustAmPm(hour: h, in: text), 0)
         }
         // 3) "14:30" suelto
         if let h = firstCaptureInt(text, pattern: #"\b(\d{1,2}):(\d{2})\b"#, group: 1),
@@ -457,7 +802,53 @@ enum NovaResponder {
            h < 24, m < 60 {
             return (h, m)
         }
+        // 4) "tipo N" / "tipo las N" — colloquial Chilean.
+        //    Default a PM para N=1..11 (uso social diurno), salvo que el
+        //    texto diga explícitamente "de la mañana".
+        if let n = firstCaptureInt(text, pattern: #"\btipo\s+(?:las?\s+)?(\d{1,2})"#, group: 1),
+           n >= 0, n < 24 {
+            return (resolveTipoHour(n, in: text), 0)
+        }
+        // 5) "3pm" / "8am" / "12 pm"
+        if let n = firstCaptureInt(text, pattern: #"\b(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)\b"#, group: 1),
+           n >= 0, n <= 12 {
+            let isPM = text.range(of: #"\b\d{1,2}\s*(pm|p\.m\.)\b"#, options: .regularExpression) != nil
+            if n == 12 {
+                return isPM ? (12, 0) : (0, 0)
+            }
+            return isPM ? (n + 12, 0) : (n, 0)
+        }
+        // 6) "esta tarde" / "esta noche" / "al mediodía"
+        if text.contains("esta noche") { return (20, 0) }
+        if text.contains("esta tarde") { return (16, 0) }
+        if text.contains("al mediodía") || text.contains("al mediodia") { return (12, 0) }
+        if text.contains("esta mañana") || text.contains("esta manana") { return (9, 0) }
         return nil
+    }
+
+    /// "tipo 3" → 15. "tipo 8 de la mañana" → 8. "tipo 12" → 12.
+    private static func resolveTipoHour(_ n: Int, in text: String) -> Int {
+        let isMorning = text.contains("de la mañana") || text.contains("de la manana") || text.contains(" am")
+        let isAfternoon = text.contains("de la tarde") || text.contains("de la noche") || text.contains(" pm")
+        if isMorning { return n }
+        if isAfternoon, n < 12 { return n + 12 }
+        if n == 0 { return 12 }
+        if n == 12 { return 12 }
+        if n >= 13 { return n }  // ya en formato 24h
+        // 1..11 sin modificador → asumir PM (uso social común).
+        return n + 12
+    }
+
+    /// Ajusta hora N=1..12 si el texto trae "am"/"pm" suelto cerca.
+    private static func adjustAmPm(hour: Int, in text: String) -> Int {
+        guard hour <= 12 else { return hour }
+        if text.range(of: #"\b\d{1,2}\s*(pm|p\.m\.|de la tarde|de la noche)\b"#, options: .regularExpression) != nil {
+            return hour == 12 ? 12 : hour + 12
+        }
+        if text.range(of: #"\b\d{1,2}\s*(am|a\.m\.|de la mañana|de la manana)\b"#, options: .regularExpression) != nil {
+            return hour == 12 ? 0 : hour
+        }
+        return hour
     }
 
     private static func firstCaptureInt(_ text: String, pattern: String, group: Int) -> Int? {
@@ -505,6 +896,10 @@ final class FocusDataStore: ObservableObject {
     @Published var suggestions: [NovaSuggestion]
     @Published var novaMessages: [NovaMessage]
     @Published var settings: AppSettings
+    /// Memoria de sesión para Nova. NO persiste a disco — se reinicia con
+    /// cada launch. Permite resolver "agéndalo X" o "y X" usando el último
+    /// intent procesado.
+    @Published var novaContext: NovaContext = NovaContext()
 
     init() {
         self.events = FocusLocalStore.load([FocusEvent].self, forKey: .events) ?? []
@@ -515,6 +910,38 @@ final class FocusDataStore: ObservableObject {
             ?? DemoDataProvider.shared.welcomeNovaMessages()
         self.settings = FocusLocalStore.load(AppSettings.self, forKey: .settings)
             ?? .defaults
+    }
+
+    // MARK: - Nova context (memoria de sesión)
+
+    /// Actualiza el contexto después de procesar un intent. Permite que el
+    /// siguiente turno resuelva referencias ("agéndalo como tarea") sin
+    /// pedirle al usuario que repita.
+    func updateNovaContext(
+        from input: String,
+        title: String,
+        date: Date? = nil,
+        location: String? = nil,
+        section: EventSection? = nil,
+        kind: NovaContext.Kind,
+        eventId: UUID? = nil,
+        taskId: UUID? = nil
+    ) {
+        novaContext = NovaContext(
+            lastInputText: input,
+            lastTitle: title,
+            lastDate: date,
+            lastLocation: location,
+            lastSection: section,
+            lastIntentKind: kind,
+            lastEventId: eventId,
+            lastTaskId: taskId,
+            updatedAt: Date()
+        )
+    }
+
+    func clearNovaContext() {
+        novaContext = NovaContext()
     }
 
     // MARK: - Persistencia (privado)

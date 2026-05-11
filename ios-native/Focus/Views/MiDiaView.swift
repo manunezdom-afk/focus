@@ -222,7 +222,7 @@ struct MiDiaView: View {
         // se reemplaza por la llamada HTTP.
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 280_000_000)
-            let intent = NovaResponder.parse(trimmed)
+            let intent = NovaResponder.parse(trimmed, context: store.novaContext)
             let response = executeIntent(intent, userText: trimmed)
             withAnimation(.easeInOut(duration: 0.20)) {
                 inlineResponse = response
@@ -232,24 +232,37 @@ struct MiDiaView: View {
 
     private func executeIntent(_ intent: NovaIntent, userText: String) -> InlineNovaResponse {
         switch intent {
-        case .createTask(let title):
+        case .createTask(let title, let recurrence):
             let task = FocusTask(
                 title: title,
                 priority: .media,
                 category: .hoy
             )
             store.addTask(task)
+            store.updateNovaContext(
+                from: userText,
+                title: title,
+                kind: .task,
+                taskId: task.id
+            )
+            if let rec = recurrence {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "Tarea creada (sin recurrencia todavía).",
+                    details: "«\(title)» queda en pendientes. La recurrencia (\(rec.label)) la dejamos preparada para más adelante.",
+                    action: .openTasksList
+                )
+            }
             return InlineNovaResponse(
                 userText: userText,
-                summary: "Tarea creada.",
-                details: "«\(title)» quedó en pendientes de hoy.",
+                summary: "Tarea creada en pendientes de hoy.",
+                details: "«\(title)»",
                 action: .openTasksList
             )
 
-        case .createEvent(let title, let when, let location):
+        case .createEvent(let title, let when, let location, let section):
             guard let date = when else {
-                // El parser no debería llegar acá (ya generaría .clarify) pero
-                // por defensa.
+                // El parser ya debería emitir .clarify acá; defensa por si no.
                 return InlineNovaResponse(
                     userText: userText,
                     summary: "Necesito saber el día y la hora.",
@@ -259,19 +272,29 @@ struct MiDiaView: View {
             }
             let cal = Calendar.current
             let end = cal.date(byAdding: .hour, value: 1, to: date) ?? date
+            let effectiveSection = section ?? .reunion
             let event = FocusEvent(
                 title: title,
                 startTime: date,
                 endTime: end,
-                section: .reunion,
+                section: effectiveSection,
                 location: location
             )
             store.addEvent(event)
+            store.updateNovaContext(
+                from: userText,
+                title: title,
+                date: date,
+                location: location,
+                section: effectiveSection,
+                kind: .event,
+                eventId: event.id
+            )
             let timeLabel = DateFormatters.hourMinute.string(from: date)
             let dayLabel = DateFormatters.capitalizeFirst(
                 DateFormatters.weekdayDay.string(from: date)
             )
-            var detail = "\(dayLabel) · \(timeLabel)"
+            var detail = "\(dayLabel) · \(timeLabel) · \(effectiveSection.displayName.lowercased())"
             if let loc = location { detail += " · \(loc)" }
             return InlineNovaResponse(
                 userText: userText,
@@ -356,7 +379,10 @@ struct MiDiaView: View {
         switch reason {
         case .taskNeedsTitle:           return "¿Qué tarea querés que anote?"
         case .eventNeedsTitle:          return "¿Qué evento querés agendar?"
+        case .eventNeedsTime(let title, _):
+            return "Tengo «\(title)». ¿A qué hora?"
         case .eventNeedsDateTime:       return "Necesito el día y la hora."
+        case .noContext:                return "No estoy seguro a qué te referís."
         case .unclear:                  return "No estoy seguro de qué hacer."
         }
     }
@@ -367,6 +393,11 @@ struct MiDiaView: View {
             return "Probá: «crea tarea estudiar cálculo»."
         case .eventNeedsTitle:
             return "Probá: «agenda reunión con Juan mañana a las 12»."
+        case .eventNeedsTime(_, let date):
+            let day = DateFormatters.weekdayDay.string(from: date).lowercased()
+            return "Decime una hora para el \(day). Ej: «a las 14» o «tipo 3»."
+        case .noContext:
+            return "Volvé a decirme qué querés crear. Ej: «agenda reunión mañana a las 12»."
         case .eventNeedsDateTime(let title):
             return "Decime cuándo. Ej: «\(title) mañana a las 12»."
         case .unclear:
