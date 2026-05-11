@@ -363,11 +363,19 @@ struct SwipeToDelete<Content: View>: View {
                 .transition(.opacity)
             }
 
-            // Contenido offsetteado horizontalmente.
-            content
-                .offset(x: offset)
-                .simultaneousGesture(enabled ? swipeGesture : nil)
-                .animation(.spring(response: 0.32, dampingFraction: 0.85), value: offset)
+            // Contenido offsetteado horizontalmente. La rama explícita evita
+            // pasar `nil` a `simultaneousGesture` (no es un overload válido y
+            // puede hacer que SwiftUI ignore el gesto silenciosamente).
+            Group {
+                if enabled {
+                    content
+                        .offset(x: offset)
+                        .simultaneousGesture(swipeGesture)
+                } else {
+                    content
+                }
+            }
+            .animation(.spring(response: 0.32, dampingFraction: 0.85), value: offset)
         }
         .clipped()
     }
@@ -664,6 +672,19 @@ struct FocusBarInput: View {
                 // padding vertical mínimo para que el área de toque sea
                 // cómoda incluso con 1 línea.
                 .padding(.vertical, 4)
+                // Toolbar "Listo" sobre el teclado para cerrarlo
+                // explícitamente. iOS lo muestra solo cuando el campo está
+                // enfocado.
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Listo") {
+                            isFocused = false
+                        }
+                        .foregroundStyle(Theme.Colors.focusAccent)
+                        .fontWeight(.semibold)
+                    }
+                }
 
             if let onMic {
                 Button(action: onMic) {

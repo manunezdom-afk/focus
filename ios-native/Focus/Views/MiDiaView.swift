@@ -10,6 +10,12 @@ struct MiDiaView: View {
     /// Última respuesta inline de Nova. Se reemplaza al enviar otra petición
     /// y se puede cerrar manualmente. NO está en el store; es estado de UI.
     @State private var inlineResponse: InlineNovaResponse? = nil
+    /// Títulos de items demo "descartados" en esta sesión. Permite que el
+    /// usuario pueda quitar ejemplos de Mi Día con swipe (los UUIDs de demo
+    /// se regeneran en cada call, por eso filtramos por título). Se pierde
+    /// al cerrar la app — al regresar, los ejemplos vuelven.
+    @State private var dismissedDemoEventTitles: Set<String> = []
+    @State private var dismissedDemoTaskTitles: Set<String> = []
 
     /// 3 bloques visibles por defecto — más allá de eso es ruido.
     private let visibleEventsLimit: Int = 3
@@ -19,20 +25,24 @@ struct MiDiaView: View {
 
     // MARK: - Source of truth
 
-    /// Eventos visibles: del usuario si tiene, demo si no.
+    /// Eventos visibles: del usuario si tiene, demo si no (excluyendo los
+    /// que el usuario descartó en esta sesión).
     private var displayEvents: [FocusEvent] {
         if store.hasUserEvents {
             return store.todayEvents()
         }
         return DemoDataProvider.shared.exampleTodayEvents()
+            .filter { !dismissedDemoEventTitles.contains($0.title) }
     }
 
-    /// Pendientes visibles: del usuario si tiene, demo si no.
+    /// Pendientes visibles: del usuario si tiene, demo si no (excluyendo
+    /// descartados).
     private var displayPendingTasks: [FocusTask] {
         if store.hasUserTasks {
             return store.pendingTodayTasks
         }
-        return DemoDataProvider.shared.exampleTodayTasks().filter { !$0.done }
+        return DemoDataProvider.shared.exampleTodayTasks()
+            .filter { !$0.done && !dismissedDemoTaskTitles.contains($0.title) }
     }
 
     private var nextBlock: FocusEvent? {
@@ -63,7 +73,10 @@ struct MiDiaView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     header
                         .padding(.horizontal, Theme.Spacing.xl)
-                        .padding(.top, Theme.Spacing.md)
+                        // Padding superior generoso para que el header no
+                        // quede pegado al notch/Dynamic Island. iOS ya respeta
+                        // safeArea, pero +12pt extra da aire para la marca.
+                        .padding(.top, Theme.Spacing.lg)
 
                     focusBar
                         .padding(.horizontal, Theme.Spacing.xl)
@@ -98,6 +111,9 @@ struct MiDiaView: View {
                 }
                 .padding(.top, Theme.Spacing.sm)
             }
+            // Scroll dismisses keyboard: tan pronto como el usuario arrastra
+            // hacia abajo, el teclado se baja. Patrón nativo iOS.
+            .scrollDismissesKeyboard(.immediately)
         }
         .alert("Voz próximamente", isPresented: $showVoiceComingSoon) {
             Button("Entendido", role: .cancel) {}
@@ -188,6 +204,12 @@ struct MiDiaView: View {
             onSubmit: {
                 let text = focusBarText
                 focusBarText = ""
+                // Cerrar teclado tras enviar — el usuario ve la respuesta
+                // inline sin que el teclado tape Mi Día.
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil, from: nil, for: nil
+                )
                 processNovaInline(text: text)
             },
             onMic: {
@@ -271,14 +293,26 @@ struct MiDiaView: View {
                 )
             }
             let cal = Calendar.current
-            let end = cal.date(byAdding: .hour, value: 1, to: date) ?? date
-            let effectiveSection = section ?? .reunion
+            // Recordatorios → duración interna mínima (5 min) + flag para que
+            // la UI muestre solo la hora puntual ("15:00"). Eventos normales
+            // → duración por defecto 1 hora ("15:00 – 16:00").
+            let durationMinutes = wantsReminder ? 5 : 60
+            let end = cal.date(byAdding: .minute, value: durationMinutes, to: date) ?? date
+            // Para recordatorios usamos la sección que detectó el parser; si
+            // no hay nada, .reminder (más semántico que .reunion).
+            let effectiveSection: EventSection
+            if wantsReminder {
+                effectiveSection = section ?? .reminder
+            } else {
+                effectiveSection = section ?? .reunion
+            }
             let event = FocusEvent(
                 title: title,
                 startTime: date,
                 endTime: end,
                 section: effectiveSection,
-                location: location
+                location: location,
+                isReminder: wantsReminder ? true : nil
             )
             store.addEvent(event)
             store.updateNovaContext(
@@ -294,12 +328,15 @@ struct MiDiaView: View {
             let dayLabel = DateFormatters.capitalizeFirst(
                 DateFormatters.weekdayDay.string(from: date)
             )
-            var detail = "\(dayLabel) · \(timeLabel) · \(effectiveSection.displayName.lowercased())"
+            let kindLabel = wantsReminder ? "recordatorio" : effectiveSection.displayName.lowercased()
+            var detail = "\(dayLabel) · \(timeLabel) · \(kindLabel)"
             if let loc = location { detail += " · \(loc)" }
-            if wantsReminder { detail += "\nLas notificaciones inteligentes están en preparación." }
+            if wantsReminder {
+                detail += "\nLas notificaciones automáticas están en preparación."
+            }
             return InlineNovaResponse(
                 userText: userText,
-                summary: "Evento agregado a Calendario.",
+                summary: wantsReminder ? "Recordatorio agendado." : "Evento agregado a Calendario.",
                 details: detail,
                 action: .openCalendar
             )
@@ -540,14 +577,32 @@ struct MiDiaView: View {
 
                 VStack(spacing: 0) {
                     ForEach(Array(shown.enumerated()), id: \.element.id) { idx, event in
-                        SwipeToDelete(enabled: store.hasUserEvents) {
-                            store.deleteEvent(event.id)
+                        SwipeToDelete(enabled: true) {
+                            if store.hasUserEvents {
+                                store.deleteEvent(event.id)
+                            } else {
+                                withAnimation(.easeOut(duration: 0.22)) {
+                                    dismissedDemoEventTitles.insert(event.title)
+                                }
+                            }
                             toast.success("Evento eliminado", symbol: "trash.fill")
                         } content: {
                             TimelineEventRow(
                                 event: event,
                                 isLast: idx == shown.count - 1 && hiddenCount == 0
                             )
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                if store.hasUserEvents {
+                                    store.deleteEvent(event.id)
+                                } else {
+                                    dismissedDemoEventTitles.insert(event.title)
+                                }
+                                toast.success("Evento eliminado", symbol: "trash.fill")
+                            } label: {
+                                Label("Eliminar", systemImage: "trash")
+                            }
                         }
                     }
                 }
@@ -616,12 +671,30 @@ struct MiDiaView: View {
             } else {
                 VStack(spacing: Theme.Spacing.sm) {
                     ForEach(shown) { task in
-                        SwipeToDelete(enabled: store.hasUserTasks) {
-                            store.deleteTask(task.id)
+                        SwipeToDelete(enabled: true) {
+                            if store.hasUserTasks {
+                                store.deleteTask(task.id)
+                            } else {
+                                withAnimation(.easeOut(duration: 0.22)) {
+                                    dismissedDemoTaskTitles.insert(task.title)
+                                }
+                            }
                             toast.success("Tarea eliminada", symbol: "trash.fill")
                         } content: {
                             MiDiaTaskRow(task: task) {
                                 store.toggleTask(task.id)
+                            }
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                if store.hasUserTasks {
+                                    store.deleteTask(task.id)
+                                } else {
+                                    dismissedDemoTaskTitles.insert(task.title)
+                                }
+                                toast.success("Tarea eliminada", symbol: "trash.fill")
+                            } label: {
+                                Label("Eliminar", systemImage: "trash")
                             }
                         }
                     }

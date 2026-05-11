@@ -88,10 +88,17 @@ struct FocusEvent: Identifiable, Codable, Hashable {
     var url: String?
     /// Última vez que sincronizamos contra el servicio externo.
     var lastSyncedAt: Date?
+    /// Si es `true`, el evento se muestra como punto en el tiempo (solo hora
+    /// de inicio, sin rango). El usuario lo creó con "acuérdame"/"recuérdame"
+    /// y conceptualmente es un recordatorio, no un bloque con duración.
+    var isReminder: Bool?
 
     /// Origen efectivo del evento. Si `source` es nil (data legacy) lo
     /// tratamos como `.local`.
     var effectiveSource: EventSource { source ?? .local }
+
+    /// True si la card debe mostrar solo la hora de inicio (sin "15:00–16:00").
+    var displayAsPointInTime: Bool { isReminder == true }
 
     init(
         id: UUID = UUID(),
@@ -108,7 +115,8 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         externalCalendarId: String? = nil,
         externalEventId: String? = nil,
         url: String? = nil,
-        lastSyncedAt: Date? = nil
+        lastSyncedAt: Date? = nil,
+        isReminder: Bool? = nil
     ) {
         self.id = id
         self.title = title
@@ -125,11 +133,14 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         self.externalEventId = externalEventId
         self.url = url
         self.lastSyncedAt = lastSyncedAt
+        self.isReminder = isReminder
     }
 
     var timeRangeLabel: String {
         let fmt = DateFormatters.hourMinute
         let start = fmt.string(from: startTime)
+        // Recordatorios se muestran como punto en el tiempo (sin rango).
+        if displayAsPointInTime { return start }
         if let endTime {
             return "\(start) – \(fmt.string(from: endTime))"
         }
@@ -137,6 +148,8 @@ struct FocusEvent: Identifiable, Codable, Hashable {
     }
 
     var durationLabel: String? {
+        // Para recordatorios no mostramos duración (no representa un bloque).
+        if displayAsPointInTime { return nil }
         guard let end = endTime else { return nil }
         let mins = Int(end.timeIntervalSince(startTime) / 60)
         if mins < 60 {

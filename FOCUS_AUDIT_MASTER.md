@@ -35,6 +35,7 @@ Documento central de auditoría continua del proyecto Focus.
 | 17 | 2026-05-11 | Nova inline + input multilínea + parser refactor | **Bug Nova lleva al chat**: Mi Día ahora ejecuta inline el intent y muestra respuesta debajo del FocusBar (`InlineNovaResponseView`). Nunca navega al chat salvo que el usuario tappee "Abrir chat" desde un `.clarify`. **Bug input cortado**: `FocusBarInput` pasa a `axis: .vertical` + `lineLimit(1...5)`, crece hasta 5 líneas y después scroll interno con cursor visible. HStack alinea botones a `.bottom`. Botón enviar siempre presente, deshabilitado sin texto. **NovaResponder estructurado** con `parse(_:context:) -> NovaIntent`: estados `createTask(title, recurrence)`, `createEvent(title, when, location, section)`, `organizeDay`, `reviewPending`, `askAboutDemo`, `smallTalk(reply)`, `clarify(reason)` (con razones específicas). **`reply(to:)`** randomiza entre 2-3 variantes por intent. |
 | 18 | 2026-05-11 | Nova parser inteligente + contexto + chat keyboard | **Parser expandido** con triggers naturales en español chileno/informal: "salir a", "ir a", "buscar a", "juntarme con", "tengo prueba/parcial/clase", "tengo que", "recuérdame", verbos de quehacer ("comprar", "llamar", "responder", "preparar"). **"tipo N"** colloquial: `tipo 3` → 15:00 (default PM 13–18h para N=1–6), `tipo 8 de la mañana` → 08:00. AM/PM (`3pm`, `8am`) y `esta tarde/noche/mañana` mapean a horas concretas. **Sección por keyword**: parcial/examen/clase → estudio; buscar/salir/almuerzo/café → personal; gym/yoga → descanso; reunión/llamada → reunión. **`RecurrenceHint`** (daily/weekly/weeklyOn/monthly/unspecified) detectado en texto; el ejecutor crea tarea normal y explica que la recurrencia queda preparada. **`NovaContext`** memoria de sesión (RAM, 10 min TTL): `lastTitle`, `lastDate`, `lastLocation`, `lastSection`, `lastIntentKind`, `lastEventId/TaskId`. Frases como `agéndalo como tarea recurrente` resuelven título y fecha desde el último intent. **`eventNeedsTime(title, partialDate)`** clarify nuevo cuando el usuario da día pero no hora ("tengo parcial el jueves" → "Tengo «Parcial» para el jueves. ¿A qué hora?"). **Chat keyboard fix**: `chatContent` ahora usa `.safeAreaInset(edge: .bottom)` para anclar el input automáticamente arriba del teclado. ScrollView se posiciona al último mensaje en envío y al enfocar input. `scrollDismissesKeyboard(.interactively)` permite arrastrar para cerrar teclado. Input del chat pasa a multilínea (`axis: .vertical` + `lineLimit(1...4)`). **Límites conocidos** del parser local: solo procesa UN intent por frase (no maneja "agenda X y crea tarea Y"); no edita ni borra items por nombre; recurrencia visible pero no funcional; sin entender meses específicos ("15 de diciembre"). |
 | 19 | 2026-05-11 | Lenguaje coloquial chileno + correcciones + swipe-to-delete | **Bug "a las 3" → 03:00**: `adjustAmPm` ahora aplica regla coloquial cuando NO hay marcador AM/PM: 1–7 → PM (13:00..19:00), 8–11 → AM (mantener), 12 → 12:00. Marcadores explícitos respetados: `de la mañana`/`madrugada` → AM, `de la tarde`/`de la noche`/`pm` → PM. **Bug día se va a mañana sin pedir**: cuando no hay día explícito, mantenemos HOY incluso si la hora pasó. Solo bumpeamos a mañana si el gap > 4h y no hay verbo de actividad inminente (ir/salir/buscar/acuérdame). **Patrones nuevos de hora**: `como a las 3`, `a eso de las 3`, `cerca de las 3`, `alrededor de las 3` — todos resuelven a 15:00. **Correcciones contextuales**: `isCorrectionStart` detecta `no,` / `no `/ `mejor` / `cámbialo` / `ponlo` / `pásalo` / `muévelo`. Casos cubiertos: `no, mañana` → `correctLastEvent(.shiftDays(1))`; `cámbialo a las 18` → `correctLastEvent(.setTime(18,0))`; `en sala H013` (corrección sola) → `setLocation(...)`; `ponlo como tarea` → `convertLastToTask` (borra evento, crea tarea con mismo título). **`acuérdame`/`recuérdame`**: el parser activa `wantsReminder` y el inline response avisa "Las notificaciones inteligentes están en preparación" — honesto sobre estado. **`SwipeToDelete`** componente nuevo: arrastrar fila hacia la izquierda muestra fondo rojo con basurero; pasar threshold (70pt) confirma delete con animación y haptic warning. Aplicado a TimelineEventRow + MiDiaTaskRow en Mi Día, a CalendarEventCard en Calendario, y a TaskRowFull en Tareas. **Solo habilitado para items reales** — los de demo no se borran (no están en el store). Toast "Evento eliminado" / "Tarea eliminada" al confirmar. **`FocusDataStore.updateEvent(_:)`** nuevo método. **Vercel**: `npm run build` local pasa (576 módulos, dist/ generado OK). El email de "Failed production deployment" probablemente fue transitorio del runner — el commit actual debería deployar Ready. Si persiste, hay que revisar el log específico desde el dashboard de Vercel. |
+| 20 | 2026-05-11 | Bugs finales: pendientes, recordatorios, notch, teclado | **Bug pendientes no se podían borrar**: SwipeToDelete tenía `simultaneousGesture(nil)` cuando `enabled = false` — SwiftUI lo ignoraba silenciosamente. Refactor con `Group { if enabled ... else }` explícito. **Demo dismissable inline**: Mi Día ahora mantiene `dismissedDemoEventTitles`/`dismissedDemoTaskTitles` (Set<String>, sesión-only). Swipe sobre cualquier fila (real o demo) la oculta inmediatamente; real va al `store.deleteX`, demo va al set local. Filtramos en `displayEvents`/`displayPendingTasks`. **`contextMenu` backup**: long-press en cualquier fila de evento/tarea en Mi Día muestra "Eliminar" — vía alternativa al swipe, no falla por conflictos de gesto. **Reminders sin duración falsa**: `FocusEvent.isReminder: Bool?` nuevo, backward-compat por ser optional. `timeRangeLabel` y `durationLabel` chequean `displayAsPointInTime` y muestran solo la hora ("15:00" en vez de "15:00 – 16:00"). El parser ya seteaba `wantsReminder` desde "acuérdame"/"recuérdame"; el ejecutor de Mi Día ahora crea el evento con `isReminder: true`, duración interna de 5 min (necesario para que ordene en el timeline) y sección `.reminder` por defecto. Inline response cambia el copy: "Recordatorio agendado" + "Las notificaciones automáticas están en preparación". **Notch/Dynamic Island**: padding superior del header de Mi Día sube de `Theme.Spacing.md` (12pt) a `Theme.Spacing.lg` (16pt). Junto al safe-area que iOS ya respeta, da aire suficiente al logo+fecha+título. **Teclado dismiss**: `.scrollDismissesKeyboard(.immediately)` en el ScrollView de Mi Día — arrastrar hacia abajo cierra el teclado. `FocusBarInput` agrega toolbar "Listo" en `placement: .keyboard` que también lo cierra. Tras submit en Mi Día, llamamos `UIResponder.resignFirstResponder` para limpiar foco. **Vercel**: sin CLI/auth disponibles desde la sesión Claude, no puedo leer logs. El user tiene que abrir Vercel Dashboard → focus → Deployments → último Failed → Build Logs y pegar el error. Documentado en sección 17 nueva. |
 
 ## Audit Pass 2 — Findings completos (2026-05-11)
 
@@ -830,6 +831,61 @@ Esto preserva la promesa "modo demo = todo local, nada sale del iPhone".
 
 - Sync bidireccional con Google/Apple (escribir cambios de Focus de vuelta al calendario externo). Empezar lectura-only.
 - Resolver conflictos automáticamente. V1: si el usuario crea uno en Google y otro en Focus a la misma hora, Focus solo muestra el de Focus y deja una sugerencia en Bandeja "Tienes conflicto con tu calendario de Google a las 14:00".
+
+---
+
+## 14.7. Vercel — diagnóstico de deploy fallido
+
+> Pendiente porque no tengo acceso a Vercel CLI ni a `gh auth` desde esta sesión. Local build pasa (`npm run build` → 576 módulos, dist/ OK, service worker estampado con commit SHA).
+
+### Pasos exactos para diagnosticar
+
+1. Abrir https://vercel.com en el navegador (logueado con la cuenta del proyecto).
+2. Ir al proyecto **focus** (debería estar bajo el team `manunezdom-afk` o personal).
+3. Click en pestaña **Deployments**.
+4. Ubicar el deployment con estado **Failed** (badge rojo).
+5. Click sobre él → abre la página del deployment.
+6. Click en **Build Logs** (o pestaña "Logs" si está en la nueva UI).
+7. Copiar las **últimas 30–40 líneas** del log (las que vienen después de `error:` o `Failed`).
+8. Pegarlas en una próxima sesión para que yo pueda diagnosticar.
+
+### Causas más probables sin acceso a logs
+
+| Síntoma | Causa probable | Fix |
+|---|---|---|
+| `Cannot find module 'X'` | Dependencia no en `package.json` o lock desincronizado | Verificar `package.json` + `package-lock.json` |
+| Build runner timeout | Vercel runner saturado (transitorio) | Re-deploy desde dashboard |
+| `Function exceeds size limit` | Función Node con bundle muy grande | Mover deps a `_lib/` o aliviar imports |
+| Env var faltante para build | `VITE_SUPABASE_URL` o similar no seteada en Vercel | Revisar Vercel → Settings → Environment Variables |
+| `ANTHROPIC_API_KEY` requerida en build | Algún script de build la lee | Confirmar que esté en Vercel env vars (NO commit) |
+| `12 function limit` excedido | Vercel Hobby acepta máx 12 functions | Actualmente exactamente 12; revisar si algo nuevo se agregó |
+
+### Funciones serverless actuales (12/12 en Hobby)
+
+```
+api/analyze-photo.js
+api/auth/delete-account.js
+api/auth/email/send-otp.js
+api/calendar-feeds.js
+api/cron-notifications.js
+api/focus-assistant.js
+api/ics-feed.js
+api/kairos/inbox.js
+api/kairos/link.js
+api/me/plan.js
+api/push.js
+api/transcribe.js
+```
+
+`api/_lib/*.js` y `api/_supabaseAdmin.js` no cuentan (los `_` los excluye Vercel).
+
+### Endpoints usados por la app iOS nativa
+
+- `POST /api/auth/email/send-otp` (Resend SMTP) — login OTP.
+- `POST /auth/v1/verify` (Supabase directo, NO Vercel) — verify OTP.
+- `POST /auth/v1/token?grant_type=refresh_token` (Supabase directo) — refresh.
+
+→ Si solo falla la build de Vercel pero `/auth/v1/*` sigue respondiendo (que es directo a Supabase), la app iOS sigue funcionando para login. Las acciones futuras que dependan de `/api/focus-assistant` (Nova real) sí caerían si producción está rota.
 
 ---
 
