@@ -26,6 +26,22 @@ struct MiDiaView: View {
         ZStack {
             Theme.Colors.background.ignoresSafeArea()
 
+            // Hero zone: gradiente azul muy sutil detrás del header + FocusBar.
+            // Diferencia visualmente Mi Día de las otras tabs.
+            VStack(spacing: 0) {
+                LinearGradient(
+                    colors: [
+                        Theme.Colors.focusAccent.opacity(0.08),
+                        Theme.Colors.background
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 280)
+                Spacer()
+            }
+            .ignoresSafeArea()
+
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     header

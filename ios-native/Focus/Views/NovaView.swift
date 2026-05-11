@@ -10,6 +10,8 @@ struct NovaView: View {
     @State private var segment: Segment = .chat
     @State private var draft: String = ""
     @State private var didAutoSubmit: Bool = false
+    @State private var sparkleScale: CGFloat = 1.0
+    @State private var sparkleHue: Double = 0
 
     let initialPrompt: String?
 
@@ -52,10 +54,16 @@ struct NovaView: View {
                         ZStack {
                             Circle()
                                 .fill(Theme.Colors.novaGradient)
-                                .frame(width: 22, height: 22)
+                                .frame(width: 24, height: 24)
+                                .shadow(color: Theme.Colors.novaAccent.opacity(0.45), radius: 6, y: 1)
                             Image(systemName: "sparkle")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.white)
+                                .scaleEffect(sparkleScale)
+                                .animation(
+                                    .easeInOut(duration: 1.4).repeatForever(autoreverses: true),
+                                    value: sparkleScale
+                                )
                         }
                         Text("Nova")
                             .font(Theme.Typography.bodyBold)
@@ -72,8 +80,10 @@ struct NovaView: View {
             }
         }
         .onAppear {
-            // Si llegamos con un prompt inicial, enviarlo automáticamente.
-            // store es @MainActor y onAppear corre en main thread → llamada directa.
+            // Sparkle pulse continuo — identidad Nova viva.
+            sparkleScale = 1.20
+
+            // Auto-submit del prompt inicial si llegó desde Mi Día.
             guard !didAutoSubmit,
                   let prompt = initialPrompt,
                   !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

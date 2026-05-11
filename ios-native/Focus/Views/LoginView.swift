@@ -12,12 +12,26 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
+            // Background con tinte azul muy sutil en la parte superior — identidad.
             Theme.Colors.background.ignoresSafeArea()
+            VStack(spacing: 0) {
+                LinearGradient(
+                    colors: [
+                        Theme.Colors.focusAccent.opacity(0.10),
+                        Theme.Colors.background
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 360)
+                Spacer()
+            }
+            .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                Spacer(minLength: Theme.Spacing.huge)
+                Spacer(minLength: Theme.Spacing.xxxl)
                 brand
-                Spacer(minLength: Theme.Spacing.huge)
+                Spacer(minLength: Theme.Spacing.xxxl)
                 content
                     .padding(.horizontal, Theme.Spacing.xl)
                 Spacer()
@@ -31,11 +45,11 @@ struct LoginView: View {
 
     private var brand: some View {
         VStack(spacing: Theme.Spacing.md) {
-            FocusLogoMark(size: 78)
-                .padding(.bottom, Theme.Spacing.sm)
+            FocusLogoMark(size: 108)
+                .padding(.bottom, Theme.Spacing.md)
 
             Text("Focus")
-                .font(.system(size: 36, weight: .semibold))
+                .font(.system(size: 42, weight: .semibold))
                 .foregroundStyle(Theme.Colors.textPrimary)
                 .tracking(0.3)
 
@@ -246,13 +260,23 @@ struct LoginView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Spacing.md + 2)
+            .padding(.vertical, Theme.Spacing.md + 4)
             .background(
                 Capsule()
-                    .fill(isEnabled ? Theme.Colors.focusAccent : Theme.Colors.focusAccent.opacity(0.35))
+                    .fill(
+                        isEnabled
+                        ? AnyShapeStyle(LinearGradient(
+                            colors: [
+                                Theme.Colors.focusAccent,
+                                Theme.Colors.focusAccentHover
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing))
+                        : AnyShapeStyle(Theme.Colors.focusAccent.opacity(0.30))
+                    )
                     .shadow(
-                        color: isEnabled ? Theme.Colors.focusAccent.opacity(0.30) : .clear,
-                        radius: 12, x: 0, y: 4
+                        color: isEnabled ? Theme.Colors.focusAccent.opacity(0.40) : .clear,
+                        radius: 16, x: 0, y: 6
                     )
             )
         }

@@ -410,13 +410,20 @@ struct IconBadge: View {
 
 // MARK: - Focus brand mark (logo SwiftUI consistente con AppIcon)
 
-/// Sol/medalla blanca de 8 rayos sobre squircle azul vivo.
-/// Matchea visualmente el AppIcon que ve el usuario en home screen.
+/// Sol/medalla blanca de 8 pétalos redondeados sobre squircle azul vivo.
+/// V3 — matchea el AppIcon (pétalos como capsules rotadas, no polígono star).
+///
+/// Family system:
+/// - Focus → blueGradient (cobalto + navy)
+/// - Kairos (futuro) → violetGradient
+/// - Spark (futuro) → orangeGradient
+/// El componente acepta `gradient` para variar por app.
 struct FocusLogoMark: View {
     var size: CGFloat = 96
     var shadow: Bool = true
+    var gradient: LinearGradient = FocusLogoMark.defaultGradient
 
-    private let blueGradient = LinearGradient(
+    static let defaultGradient = LinearGradient(
         colors: [
             Color(red: 0.180, green: 0.310, blue: 0.910),  // #2E4FE8
             Color(red: 0.118, green: 0.227, blue: 0.541)   // #1E3A8A
@@ -427,60 +434,36 @@ struct FocusLogoMark: View {
 
     var body: some View {
         ZStack {
-            // Squircle azul (iOS aplica esta forma al AppIcon).
+            // Squircle azul (iOS aplica esta forma al AppIcon real).
             RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-                .fill(blueGradient)
+                .fill(gradient)
                 .frame(width: size, height: size)
                 .shadow(
-                    color: shadow ? Color(red: 0.06, green: 0.10, blue: 0.40).opacity(0.30) : .clear,
-                    radius: shadow ? size * 0.20 : 0,
+                    color: shadow ? Color(red: 0.06, green: 0.10, blue: 0.40).opacity(0.32) : .clear,
+                    radius: shadow ? size * 0.22 : 0,
                     x: 0,
                     y: shadow ? size * 0.06 : 0
                 )
 
-            // Sol blanco de 8 rayos.
-            EightPointSun()
-                .fill(Color.white)
-                .frame(width: size * 0.72, height: size * 0.72)
+            // 8 pétalos blancos rotados — match Python script.
+            ForEach(0..<8, id: \.self) { i in
+                Capsule()
+                    .fill(Color.white)
+                    .frame(width: size * 0.16, height: size * 0.22)
+                    .offset(y: -size * 0.21)
+                    .rotationEffect(.degrees(Double(i) * 45))
+            }
 
-            // Disco central blanco (base sólida).
+            // Disco central blanco (cubre la unión de los pétalos).
             Circle()
                 .fill(Color.white)
-                .frame(width: size * 0.36, height: size * 0.36)
+                .frame(width: size * 0.38, height: size * 0.38)
 
             // Punto interior azul (donut effect).
             Circle()
-                .fill(blueGradient)
-                .frame(width: size * 0.15, height: size * 0.15)
+                .fill(gradient)
+                .frame(width: size * 0.17, height: size * 0.17)
         }
-    }
-}
-
-/// Polígono star de 8 puntas (16 vértices alternando outer/inner radius).
-private struct EightPointSun: Shape {
-    let points: Int = 8
-    let innerRatio: CGFloat = 0.40
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let outerR = min(rect.width, rect.height) / 2
-        let innerR = outerR * innerRatio
-        let totalVertices = points * 2
-
-        for i in 0..<totalVertices {
-            let angle = CGFloat(i) * .pi / CGFloat(points) - .pi / 2
-            let r = i % 2 == 0 ? outerR : innerR
-            let x = center.x + cos(angle) * r
-            let y = center.y + sin(angle) * r
-            if i == 0 {
-                path.move(to: CGPoint(x: x, y: y))
-            } else {
-                path.addLine(to: CGPoint(x: x, y: y))
-            }
-        }
-        path.closeSubpath()
-        return path
     }
 }
 

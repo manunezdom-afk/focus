@@ -2,18 +2,14 @@
 """
 scripts/build-ios-appicon.py
 
-Genera el AppIcon 1024×1024 de Focus iOS — V2: sol/medalla blanca sobre
-gradiente azul vivo. Refleja la identidad visual del producto.
+AppIcon V3 de Focus — sol/medalla blanca de 8 pétalos REDONDEADOS sobre
+gradiente azul vivo. Match más cercano al logo original del usuario.
+
+V3 vs V2: pétalos como capsules rotadas (no polígono star puntiagudo).
+Más premium, menos "shuriken".
 
 Reglas iOS / App Store:
-- 1024×1024 px exacto · RGB sin canal alpha.
-- Sin transparencia. Sin esquinas redondeadas (iOS aplica máscara squircle).
-
-Diseño V2:
-- Fondo: gradiente vertical azul vivo (#2E4FE8 → #1E3A8A).
-- Símbolo: sol/medalla blanca de 8 rayos + disco central blanco con punto
-  azul interior (efecto "donut"). Más memorable y único que la F geométrica
-  anterior.
+- 1024×1024 px exacto · RGB sin canal alpha · sin transparencia.
 
 Output:
 - ios-native/Focus/Assets.xcassets/AppIcon.appiconset/AppIcon.png
@@ -22,7 +18,7 @@ Output:
 Uso: python3 scripts/build-ios-appicon.py
 """
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 from pathlib import Path
 import json
 import math
@@ -35,13 +31,12 @@ OUT_CONTENTS = APPICON_DIR / "Contents.json"
 OUT_PREVIEW = REPO / "docs/assets/focus-app-icon-preview.png"
 
 SIZE = 1024
-SS = 4  # supersampling para anti-aliasing limpio en bordes del polígono
+SS = 4  # supersampling para antialiasing limpio
 
-# Paleta
-C_TOP = (46, 79, 232)       # #2E4FE8 azul vivo (top, brillante)
-C_BOTTOM = (30, 58, 138)    # #1E3A8A azul profundo (bottom, profundo)
+C_TOP = (46, 79, 232)       # #2E4FE8 azul vivo (top)
+C_BOTTOM = (30, 58, 138)    # #1E3A8A azul profundo (bottom)
 WHITE = (255, 255, 255)
-CENTER_DOT = (46, 79, 232)  # #2E4FE8 mismo azul vivo (matchea el top)
+DOT = (46, 79, 232)         # mismo azul que el top — donut effect
 
 
 def lerp(a, b, t):
@@ -49,7 +44,7 @@ def lerp(a, b, t):
 
 
 def build_gradient(size: int) -> Image.Image:
-    """Gradiente vertical lineal C_TOP → C_BOTTOM (RGB sin alpha)."""
+    """Gradiente vertical lineal C_TOP → C_BOTTOM."""
     img = Image.new("RGB", (size, size), C_TOP)
     draw = ImageDraw.Draw(img)
     for y in range(size):
@@ -58,63 +53,56 @@ def build_gradient(size: int) -> Image.Image:
     return img
 
 
-def draw_sun(draw: ImageDraw.ImageDraw, size: int) -> None:
-    """Dibuja un sol/medalla blanca de 8 rayos con disco + dot central."""
-    cx, cy = size / 2, size / 2
+def build_petal_layer(size: int) -> Image.Image:
+    """Genera UN pétalo (capsule blanca redondeada) arriba del centro.
+    Después se rota 8× y se compone para formar el sol/medalla.
+    Proporciones: ancho relativamente grande, alto moderado (no flor larga).
+    """
+    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
 
-    # Estrella de 8 rayos: 16 vértices alternando outer / inner radius.
-    # Inner radius dejamos pequeño para que los rayos se vean separados.
-    outer_r = size * 0.36
-    inner_r = size * 0.14
-
-    star = []
-    for i in range(16):
-        angle = math.pi * i / 8 - math.pi / 2  # arrancar mirando arriba
-        r = outer_r if i % 2 == 0 else inner_r
-        x = cx + math.cos(angle) * r
-        y = cy + math.sin(angle) * r
-        star.append((x, y))
-    draw.polygon(star, fill=WHITE)
-
-    # Disco central blanco — cubre los cortes profundos del polígono y da
-    # la sensación de "base" sólida desde donde salen los rayos.
-    disk_r = size * 0.18
-    draw.ellipse(
-        [cx - disk_r, cy - disk_r, cx + disk_r, cy + disk_r],
-        fill=WHITE,
-    )
-
-    # Punto azul interior — efecto "donut".
-    dot_r = size * 0.075
-    draw.ellipse(
-        [cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r],
-        fill=CENTER_DOT,
-    )
-
-
-def write_contents_json() -> None:
-    contents = {
-        "images": [
-            {
-                "filename": "AppIcon.png",
-                "idiom": "universal",
-                "platform": "ios",
-                "size": "1024x1024",
-            }
-        ],
-        "info": {"author": "xcode", "version": 1},
-    }
-    with OUT_CONTENTS.open("w", encoding="utf-8") as f:
-        json.dump(contents, f, indent=2)
-        f.write("\n")
+    # Pétalo: más ancho que alto para look "rayo de sol" no "flor margarita".
+    petal_w = size * 0.16
+    petal_h = size * 0.22
+    cx = size / 2
+    # Centro del pétalo más cerca del centro del icono → ray se ve "saliendo" del disco.
+    offset_from_center = size * 0.21
+    petal_cy = size / 2 - offset_from_center
+    draw.ellipse([
+        cx - petal_w / 2,
+        petal_cy - petal_h / 2,
+        cx + petal_w / 2,
+        petal_cy + petal_h / 2,
+    ], fill=(*WHITE, 255))
+    return layer
 
 
 def main() -> int:
-    # Renderizamos a 4× luego downscale → antialiasing prolijo del polígono.
-    big_size = SIZE * SS
-    img = build_gradient(big_size)
+    big = SIZE * SS
+
+    # 1. Background con gradiente.
+    img = build_gradient(big).convert("RGBA")
+
+    # 2. Pétalos: dibujamos 1 pétalo, rotamos y componemos 8 veces.
+    base_petal = build_petal_layer(big)
+    for i in range(8):
+        angle_deg = i * 45.0
+        # PIL rotate: positive = counterclockwise. Usamos -angle para clockwise.
+        rotated = base_petal.rotate(-angle_deg, resample=Image.BICUBIC, expand=False)
+        img = Image.alpha_composite(img, rotated)
+
+    # 3. Disco central blanco más grande — los pétalos "salen" de él.
     draw = ImageDraw.Draw(img)
-    draw_sun(draw, big_size)
+    cx, cy = big / 2, big / 2
+    disk_r = big * 0.19
+    draw.ellipse([cx - disk_r, cy - disk_r, cx + disk_r, cy + disk_r], fill=(*WHITE, 255))
+
+    # 4. Punto azul interior — donut effect.
+    dot_r = big * 0.085
+    draw.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], fill=(*DOT, 255))
+
+    # 5. Downscale a 1024×1024 con Lanczos para AA limpio. Flatten a RGB.
+    img = img.convert("RGB")
     img = img.resize((SIZE, SIZE), Image.LANCZOS)
 
     assert img.size == (SIZE, SIZE) and img.mode == "RGB"
@@ -123,13 +111,24 @@ def main() -> int:
     OUT_PREVIEW.parent.mkdir(parents=True, exist_ok=True)
     img.save(OUT_APPICON, "PNG", optimize=True)
     img.save(OUT_PREVIEW, "PNG", optimize=True)
-    write_contents_json()
 
-    rel = OUT_APPICON.relative_to(REPO)
-    rel_prev = OUT_PREVIEW.relative_to(REPO)
-    print(f"✓ AppIcon V2 (sol+medalla): {rel}")
+    # Update Contents.json (idempotente).
+    contents = {
+        "images": [{
+            "filename": "AppIcon.png",
+            "idiom": "universal",
+            "platform": "ios",
+            "size": "1024x1024",
+        }],
+        "info": {"author": "xcode", "version": 1},
+    }
+    with OUT_CONTENTS.open("w", encoding="utf-8") as f:
+        json.dump(contents, f, indent=2)
+        f.write("\n")
+
+    print(f"✓ AppIcon V3 (rounded petals): {OUT_APPICON.relative_to(REPO)}")
     print(f"  {SIZE}×{SIZE} RGB · sin alpha · {OUT_APPICON.stat().st_size // 1024}KB")
-    print(f"✓ Preview: {rel_prev}")
+    print(f"✓ Preview: {OUT_PREVIEW.relative_to(REPO)}")
     return 0
 
 

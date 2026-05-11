@@ -1,8 +1,31 @@
 import SwiftUI
 
 /// Paleta y tokens de Focus.
-/// Estética: light, limpio, azul-acento. Gemini-inspired pero serio.
-/// Pensado para universitarios y trabajadores que necesitan claridad.
+///
+/// Estética: light, limpio, azul-acento. Premium / iOS nativo.
+///
+/// **Family system** — Focus es parte de una familia de productos. Cada app
+/// comparte estructura visual (radios, spacing, tipografía, componentes) y
+/// varía sólo los acentos de marca:
+///
+/// - **Focus** → `brandPrimary` = focusAccent (azul cobalto). Identidad:
+///   claridad, organización, estructura, calma, control. Foco: calendario,
+///   tareas, planificación diaria + Nova.
+/// - **Kairos** (futuro) → `brandPrimary` = violeta/púrpura. Identidad:
+///   profundidad, estudio, inteligencia. Foco: sesiones de estudio.
+/// - **Spark** (futuro) → `brandPrimary` = naranja/dorado. Identidad: energía,
+///   impulso, ejecución. Foco: activación, sprints, momentum.
+///
+/// Todas comparten:
+/// - Mismo wordmark / lockup pattern.
+/// - Misma estructura de Theme (Colors, Typography, Spacing, Radius).
+/// - Misma familia tipográfica (SF Pro / sistema).
+/// - Mismas curvas/radios (Theme.Radius).
+/// - Misma iconografía base (SF Symbols).
+/// - Mismo Nova accent (violeta) — Nova es transversal a la familia.
+///
+/// Para portar Theme a otra app de la familia, basta con cambiar `focusAccent`
+/// → `brandPrimary` específico y los `sectionFoco`/`sectionReunion` semánticos.
 enum Theme {
 
     // MARK: - Colors

@@ -19,19 +19,27 @@ struct MainTabView: View {
         TabView(selection: tabBinding) {
             MiDiaView()
                 .tag(Tab.miDia)
-                .tabItem { Label("Mi día", systemImage: "sun.max") }
+                .tabItem {
+                    Label("Mi día", systemImage: selection == .miDia ? "sun.max.fill" : "sun.max")
+                }
 
             CalendarioView()
                 .tag(Tab.calendario)
-                .tabItem { Label("Calendario", systemImage: "calendar") }
+                .tabItem {
+                    Label("Calendario", systemImage: selection == .calendario ? "calendar" : "calendar")
+                }
 
             TareasView()
                 .tag(Tab.tareas)
-                .tabItem { Label("Tareas", systemImage: "checkmark.circle") }
+                .tabItem {
+                    Label("Tareas", systemImage: selection == .tareas ? "checkmark.circle.fill" : "checkmark.circle")
+                }
 
             AjustesView()
                 .tag(Tab.ajustes)
-                .tabItem { Label("Ajustes", systemImage: "gearshape") }
+                .tabItem {
+                    Label("Ajustes", systemImage: selection == .ajustes ? "gearshape.fill" : "gearshape")
+                }
         }
         .tint(Theme.Colors.focusAccent)
     }
@@ -48,27 +56,31 @@ struct MainTabView: View {
         )
     }
 
+    /// Tab bar refinada: blur ultra-thin (más liviano) + iconos algo más pequeños
+    /// + labels más finos. Menos protagonista, más nativo iOS premium.
     private static func configureTabBarAppearance() {
         let appearance = UITabBarAppearance()
-        appearance.configureWithDefaultBackground()
-        // Fondo blanco con leve blur
-        appearance.backgroundColor = UIColor.white.withAlphaComponent(0.96)
-        appearance.shadowColor = UIColor.black.withAlphaComponent(0.06)
+        appearance.configureWithTransparentBackground()
+        appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+        appearance.backgroundColor = UIColor.white.withAlphaComponent(0.78)
+        appearance.shadowColor = UIColor.black.withAlphaComponent(0.04)
 
-        // Azul focus accent para selected (#2563EB)
+        // Focus accent blue para selected (#2563EB)
         let selectedColor = UIColor(red: 0.145, green: 0.388, blue: 0.922, alpha: 1.0)
-        // Slate-400 para unselected
-        let unselectedColor = UIColor(red: 0.580, green: 0.639, blue: 0.722, alpha: 1.0)
+        let unselectedColor = UIColor(red: 0.435, green: 0.480, blue: 0.580, alpha: 1.0)
+
+        let selectedFont = UIFont.systemFont(ofSize: 10, weight: .semibold)
+        let normalFont = UIFont.systemFont(ofSize: 10, weight: .regular)
 
         appearance.stackedLayoutAppearance.selected.iconColor = selectedColor
         appearance.stackedLayoutAppearance.selected.titleTextAttributes = [
             .foregroundColor: selectedColor,
-            .font: UIFont.systemFont(ofSize: 10, weight: .semibold)
+            .font: selectedFont
         ]
         appearance.stackedLayoutAppearance.normal.iconColor = unselectedColor
         appearance.stackedLayoutAppearance.normal.titleTextAttributes = [
             .foregroundColor: unselectedColor,
-            .font: UIFont.systemFont(ofSize: 10, weight: .medium)
+            .font: normalFont
         ]
 
         UITabBar.appearance().standardAppearance = appearance
