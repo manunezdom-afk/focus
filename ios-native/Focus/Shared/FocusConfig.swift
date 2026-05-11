@@ -2,23 +2,24 @@ import Foundation
 
 /// Configuración pública de Focus. NO contiene secretos.
 ///
-/// - `supabaseURL`: documentado en AUTH_SESSION_AUDIT.md.
-/// - `supabaseAnonKey`: JWT público. Es seguro tenerlo en el cliente (RLS controla
-///   el acceso real). Si está vacío, la app permite modo demo pero NO puede
-///   iniciar sesión real. Para obtenerlo: Supabase Dashboard → tu proyecto →
-///   Settings → API → "Project API keys" → "anon public".
+/// - `supabaseURL`: URL del proyecto Supabase.
+/// - `supabaseAnonKey`: clave pública del cliente (publishable). Es segura
+///   en el binario — Supabase RLS controla el acceso real. NUNCA usar
+///   `sb_secret_*` ni un JWT con `role: service_role` acá.
 /// - `apiOrigin`: base URL del backend Vercel (donde viven /api/*).
 ///
-/// SEGURIDAD: NUNCA pongas `service_role` acá. Eso vive server-side
-/// en Vercel env vars (`SUPABASE_SERVICE_ROLE_KEY`).
+/// **Formatos válidos para anon key**:
+/// - `sb_publishable_*` (nuevo formato Supabase, late 2024+) — *este es el que usamos*.
+/// - `eyJ...` (legacy JWT con `role: anon`) — sigue funcionando si lo prefieres.
+///
+/// **Cómo rotar la key**: Supabase Dashboard → Settings → API → "Publishable key".
+/// Pegarla aquí y rebuild.
 enum FocusConfig {
     static let supabaseURL = URL(string: "https://hvwqeemtfoyvfmongwzo.supabase.co")!
 
-    /// ⚠️ Pegá acá tu VITE_SUPABASE_ANON_KEY de Supabase Dashboard.
-    /// Es un JWT que empieza con "eyJ...". Es público (anon, no service_role).
-    /// Mientras esté vacío, login real falla con mensaje "Configuración faltante";
-    /// modo demo funciona sin problema.
-    static let supabaseAnonKey = ""
+    /// Publishable key del proyecto Focus. Seguro en cliente — RLS protege los datos.
+    /// Si la rotás, actualizá también `VITE_SUPABASE_ANON_KEY` en Vercel.
+    static let supabaseAnonKey = "sb_publishable_uZZhxCyQPfb9K_4xawZV6g_FTUGEvhF"
 
     static let apiOrigin = URL(string: "https://www.usefocus.me")!
 
