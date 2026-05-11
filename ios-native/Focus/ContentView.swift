@@ -31,6 +31,10 @@ struct ContentView: View {
     private var routedContent: some View {
         if !hasSeenOnboarding {
             OnboardingView()
+        } else if case .loading = auth.state {
+            // Refresh-token en curso (o init aún resolviendo): seguir
+            // mostrando BootView para no parpadear Login.
+            BootView()
         } else if auth.isAuthenticatedOrDemo {
             MainTabView()
         } else {

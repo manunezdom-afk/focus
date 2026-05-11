@@ -21,13 +21,53 @@ final class AuthStore: ObservableObject {
     private let expiresAtKey = "focus.v1.auth.expiresAt"
 
     init() {
-        if let session = loadPersistedSession(), !session.isExpired {
-            state = .loggedIn(session)
-        } else {
-            if loadPersistedSession() != nil {
-                // Había sesión pero está expirada → limpiar
+        if let session = loadPersistedSession() {
+            if !session.isExpired {
+                // Sesión válida — entrar directo.
+                state = .loggedIn(session)
+            } else if !session.refreshToken.isEmpty {
+                // Access token expirado pero hay refresh token: arrancar en
+                // loading y disparar refresh asíncrono. Si funciona, la sesión
+                // se renueva sin que el usuario vea Login.
+                state = .loading
+                Task { [weak self] in
+                    await self?.attemptRefresh(using: session)
+                }
+            } else {
+                // Hay datos pero sin refresh — limpio y a Login.
                 KeychainStore.clearAllAuth()
+                state = .loggedOut
             }
+        } else {
+            state = .loggedOut
+        }
+    }
+
+    // MARK: - Refresh
+
+    /// Intenta renovar la sesión con el refresh token persistido. Solo se
+    /// llama desde `init()` cuando la sesión está expirada. Si falla, limpia
+    /// los tokens locales y manda al usuario a Login con un mensaje claro.
+    /// **No toca datos locales** (eventos/tareas/etc) — solo limpia auth.
+    private func attemptRefresh(using expired: SupabaseSession) async {
+        do {
+            let renewed = try await AuthService.refreshSession(refreshToken: expired.refreshToken)
+            // Si Supabase no devolvió user (algunas configs no incluyen),
+            // reutilizamos el userId/email del persistido.
+            let merged = SupabaseSession(
+                accessToken: renewed.accessToken,
+                refreshToken: renewed.refreshToken,
+                expiresAt: renewed.expiresAt,
+                userId: renewed.userId.isEmpty ? expired.userId : renewed.userId,
+                email: renewed.email.isEmpty ? expired.email : renewed.email
+            )
+            persistSession(merged)
+            state = .loggedIn(merged)
+        } catch {
+            // Refresh falló — limpiamos auth pero NO datos locales.
+            KeychainStore.clearAllAuth()
+            UserDefaults.standard.removeObject(forKey: expiresAtKey)
+            lastError = "Tu sesión expiró. Vuelve a iniciar sesión."
             state = .loggedOut
         }
     }

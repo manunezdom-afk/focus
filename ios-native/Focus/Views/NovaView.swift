@@ -16,6 +16,8 @@ struct NovaView: View {
     @State private var draft: String = ""
     @State private var showCreateTask: Bool = false
     @State private var showCreateEvent: Bool = false
+    @State private var showImportCalendar: Bool = false
+    @State private var showExportCalendar: Bool = false
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -60,6 +62,29 @@ struct NovaView: View {
             .presentationDetents([.medium, .large])
             .presentationBackground(Theme.Colors.background)
         }
+        .sheet(isPresented: $showImportCalendar) {
+            ComingSoonSheet(
+                title: "Importar calendario",
+                message: "Próximamente podrás traer eventos desde Google Calendar, Apple Calendar o un archivo .ics. Nova te ayudará a ordenarlos, detectar conflictos y dejar bloques de foco entre medio.",
+                icon: "square.and.arrow.down",
+                iconTint: Theme.Colors.novaAccent,
+                secondaryAction: (label: "Crear evento manual", action: {
+                    showCreateEvent = true
+                })
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showExportCalendar) {
+            ComingSoonSheet(
+                title: "Exportar calendario",
+                message: "Próximamente podrás sacar tu agenda como archivo .ics o sincronizar de vuelta a Google/Apple Calendar. Por ahora todo se guarda local en tu iPhone.",
+                icon: "square.and.arrow.up",
+                iconTint: Theme.Colors.novaAccent
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
         .onChange(of: nav.pendingNovaPrompt) { _, newPrompt in
             // Si Mi Día (u otra pantalla) llega con un texto pendiente, lo
             // disparamos al chat y limpiamos.
@@ -92,6 +117,12 @@ struct NovaView: View {
 
         case .crearEvento:
             showCreateEvent = true
+
+        case .importarCalendario:
+            showImportCalendar = true
+
+        case .exportarCalendario:
+            showExportCalendar = true
 
         case .revisarPendientes:
             withAnimation(.easeInOut(duration: 0.20)) {

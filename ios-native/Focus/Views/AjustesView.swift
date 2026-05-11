@@ -8,6 +8,7 @@ struct AjustesView: View {
     @State private var showResetConfirm = false
     @State private var showClearConfirm = false
     @State private var showSignOutConfirm = false
+    @State private var calendarSheet: CalendarConnectionSheet? = nil
 
     var body: some View {
         NavigationStack {
@@ -22,6 +23,7 @@ struct AjustesView: View {
 
                         cuentaSection
                         novaSection
+                        calendariosSection
                         notificacionesSection
                         aparienciaSection
                         privacidadSection
@@ -43,6 +45,16 @@ struct AjustesView: View {
                 }
                 .presentationDetents([.medium])
                 .presentationBackground(Theme.Colors.background)
+            }
+            .sheet(item: $calendarSheet) { sheet in
+                ComingSoonSheet(
+                    title: sheet.title,
+                    message: sheet.message,
+                    icon: sheet.icon,
+                    iconTint: sheet.tint
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
             .confirmationDialog(
                 "Restablecer datos demo",
@@ -230,6 +242,93 @@ struct AjustesView: View {
             }
             .focusCardContainer()
         }
+    }
+
+    // MARK: - Calendarios conectados
+
+    /// Lista de integraciones futuras. Todas abren un `ComingSoonSheet`
+    /// honesto hasta que C5+ implemente la integración real (OAuth Google,
+    /// EventKit Apple, parser .ics). Diseñadas para no parecer botones
+    /// muertos: cada una explica qué va a poder hacer.
+    private var calendariosSection: some View {
+        settingsSection(title: "Calendarios conectados") {
+            VStack(spacing: 0) {
+                calendarRow(
+                    symbol: "applelogo",
+                    tint: Theme.Colors.textSecondary,
+                    title: "Apple Calendar",
+                    subtitle: "Importar eventos del calendario del sistema.",
+                    sheet: CalendarConnectionSheet(
+                        title: "Apple Calendar",
+                        message: "Próximamente podrás traer tus eventos desde el calendario del iPhone usando EventKit. Nova los va a leer para sugerirte mejores bloques de foco.",
+                        icon: "applelogo",
+                        tint: Theme.Colors.textSecondary
+                    )
+                )
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                calendarRow(
+                    symbol: "g.circle.fill",
+                    tint: Color(red: 0.259, green: 0.522, blue: 0.957),
+                    title: "Google Calendar",
+                    subtitle: "Sincronizar agenda con tu cuenta Google.",
+                    sheet: CalendarConnectionSheet(
+                        title: "Google Calendar",
+                        message: "Próximamente podrás conectar tu cuenta de Google con OAuth. Focus va a leer tus eventos y, si querés, escribir los bloques de foco de vuelta.",
+                        icon: "g.circle.fill",
+                        tint: Color(red: 0.259, green: 0.522, blue: 0.957)
+                    )
+                )
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                calendarRow(
+                    symbol: "doc.text.fill",
+                    tint: Theme.Colors.focusAccent,
+                    title: "Archivo .ics",
+                    subtitle: "Importar/exportar archivos de calendario.",
+                    sheet: CalendarConnectionSheet(
+                        title: "Archivo .ics",
+                        message: "Próximamente podrás importar un .ics (formato estándar de calendario) o exportar tu agenda como .ics para abrirla en cualquier otra app.",
+                        icon: "doc.text.fill",
+                        tint: Theme.Colors.focusAccent
+                    )
+                )
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                calendarRow(
+                    symbol: "map.fill",
+                    tint: Theme.Colors.warning,
+                    title: "Ubicaciones (Maps / Waze)",
+                    subtitle: "Abrir ubicaciones de eventos en mapas.",
+                    sheet: CalendarConnectionSheet(
+                        title: "Abrir ubicaciones",
+                        message: "Más adelante podrás abrir las ubicaciones de tus eventos en Apple Maps, Google Maps o Waze con un tap. Por ahora la ubicación se guarda como texto.",
+                        icon: "map.fill",
+                        tint: Theme.Colors.warning
+                    )
+                )
+            }
+            .focusCardContainer()
+        }
+    }
+
+    private func calendarRow(
+        symbol: String,
+        tint: Color,
+        title: String,
+        subtitle: String,
+        sheet: CalendarConnectionSheet
+    ) -> some View {
+        Button {
+            HapticManager.shared.tap()
+            calendarSheet = sheet
+        } label: {
+            AjustesRow(
+                symbol: symbol,
+                tint: tint,
+                title: title,
+                subtitle: subtitle,
+                trailing: .chevron
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Notificaciones
@@ -638,6 +737,19 @@ private struct PersonalitySheet: View {
             }
         }
     }
+}
+
+// MARK: - Calendar connection sheet payload
+
+/// Item identificable que dispara `ComingSoonSheet` desde las filas de
+/// "Calendarios conectados". Cuando integraciones reales aterrizen (C5+),
+/// estas filas pasarán a abrir su propio flujo en vez de este sheet.
+struct CalendarConnectionSheet: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let icon: String
+    let tint: Color
 }
 
 #Preview {

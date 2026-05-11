@@ -31,6 +31,7 @@ Documento central de auditoría continua del proyecto Focus.
 | 13 | 2026-05-11 | Nova como tab central + navegación paginable | **4 tabs** (Mi día/Calendario/Nova/Ajustes), Tareas sale del tab bar. **Swipe horizontal** entre tabs (ScrollView .paging). **NavigationCoordinator** central. **NovaView**: 3 segmentos (Bandeja default / Acciones / Chat). 6 quick actions visibles. **Mi Día header**: FocusLogoMark + fecha en azul + título. Contador con segundos format natural ("Queda 1 h 36 min 24 s"). |
 | 14 | 2026-05-11 | QA pass — make core interactions functional | **Toast system** (`ToastManager` + `ToastBanner`) inyectado en MainTabView con overlay arriba. Feedback en eventos/tareas/sugerencias creadas. **MiDía fixes**: botón perfil → tab Ajustes; botón mic → alert honesto "Voz próximamente". **Nova quick actions reales**: Crear tarea/evento abren sheets reales (NuevaTareaSheet, NuevoEventoSheet ahora internal y reusables); Organizar/Preparar mañana crean sugerencia en bandeja; Revisar pendientes → bandeja; Cerrar día → chat. **Bandeja approve**: `.schedule` crea evento real, `.task` crea tarea real, otros solo `.approved`. **LoginView**: regex de email + error inline, auto-focus email al entrar y código al pasar a `.codeSent`, cooldown de 30s en "Reenviar código". **Ajustes**: política de privacidad y eliminar cuenta marcadas "Próximamente" (no prometen funcionalidad inexistente). **AuthService**: dialecto neutro (sin voseo). |
 | 15 | 2026-05-11 | C4 cerrado — Supabase OTP auth funcional end-to-end | **Publishable key pegada** en `FocusConfig.supabaseAnonKey` (formato nuevo `sb_publishable_*`, NO service_role). Verificado HTTP 200 en `/auth/v1/health` y respuesta correcta de `/auth/v1/verify` con código bogus (`otp_expired`) — endpoint reconoce el proyecto. Build OK, instalado en iPhone 16. AuthStore persiste sesión en Keychain (`accessToken`, `refreshToken`, `userId`, `email`) y `expiresAt` en UserDefaults. **Limitación conocida**: refresh token rotation NO implementada — cuando el access_token expira (1h por defecto en Supabase), la sesión expira y el usuario vuelve a login. Para extender la sesión se necesita un endpoint `/auth/v1/token?grant_type=refresh_token` (futuro). |
+| 16 | 2026-05-11 | C4.1 cerrado — refresh token automático + prep import/export calendario | **`AuthService.refreshSession(refreshToken:)`** nuevo método que pega contra `/auth/v1/token?grant_type=refresh_token` con `apikey` + `Authorization: Bearer <anon>` headers. Decodifica `expires_at` o cae a `expires_in` o fallback 1h. Errores `expired/invalid/401` → `otpExpired` → fuerza re-login. **`AuthStore.init()`** ahora detecta sesión expirada con refresh válido y arranca en `state = .loading`, dispara Task que renueva en background. Si OK → `.loggedIn` sin parpadeo de Login. Si falla → `.loggedOut` con mensaje "Tu sesión expiró. Vuelve a iniciar sesión." Limpia solo auth (Keychain + UserDefaults `expiresAt`); **NO toca FocusLocalStore**. **`ContentView`** respeta `.loading` mostrando BootView (evita flash de Login durante refresh). **Phase EXTRA — import/export calendario V1 informativo**: `NovaQuickAction` agrega `importarCalendario` + `exportarCalendario` (8 actions ahora). Ajustes gana sección "Calendarios conectados" con 4 filas (Apple Calendar, Google Calendar, .ics, Maps/Waze) que abren `ComingSoonSheet` honesto. **`FocusEvent`** gana fields opcionales para C5/C6 (backward-compat con JSON existente vía optional + decodeIfPresent): `source`, `externalCalendarId`, `externalEventId`, `url`, `lastSyncedAt`. Nuevo enum `EventSource` (local/google/apple/ics). Computed `effectiveSource` defaults a `.local`. **`LocationLabel`** componente nuevo: ubicación tappable en cards de Mi Día y Calendario → sheet "Más adelante podrás abrir en Apple Maps / Google Maps / Waze". **`ComingSoonSheet`** componente reutilizable (icono, título, mensaje, botón "Entendido" + acción secundaria opcional). |
 
 ## Audit Pass 2 — Findings completos (2026-05-11)
 
@@ -43,7 +44,7 @@ Documento central de auditoría continua del proyecto Focus.
 | C1 | Cero persistencia local | `FocusDataStore.init` deja arrays vacíos en memoria | Tareas/eventos creados por el usuario se PIERDEN al matar app | `State/FocusDataStore.swift` | Implementar `UserDefaults` (encode `[FocusTask]`/`[FocusEvent]` como JSON) o `SwiftData` | ✅ **Resuelto V1 audit pass 3** — `FocusLocalStore` con UserDefaults+JSON. Migración a Supabase queda pendiente para sync multi-device. |
 | C2 | AppIcon sin PNG | `Assets.xcassets/AppIcon.appiconset/Contents.json` declara 1024x1024 pero la carpeta no contiene PNG | TestFlight/App Store **rechazan** sin icon. Build Debug funciona pero archive fallaría | `ios-native/Focus/Assets.xcassets/AppIcon.appiconset/` | Agregar PNG 1024×1024 (diseño) + variantes vía `npm run build:ios-icons` (script ya existe en `scripts/`) | ✅ **Resuelto V1 audit pass 4** — `scripts/build-ios-appicon.py` genera 1024×1024 RGB con gradiente slate→cobalt + F blanca. Diseño temporal V1, sustituible por diseño profesional antes de App Store público. |
 | C3 | Nova desconectado del backend real | `NovaResponder` solo keyword matching local | No es Nova de verdad. Bloquea promesa de producto | `State/FocusDataStore.swift` → `NovaResponder` | Implementar `NovaService` con `URLSession` a `/api/focus-assistant` + JWT Supabase | 🔜 (requiere auth Supabase primero) |
-| C4 | Sin auth Supabase | No hay login flow ni sesión en la app nativa | Datos de usuario no se asocian a cuenta; Nova no puede personalizar | `ios-native/Focus/` | Agregar SPM `supabase-swift` + `AuthService` + `LoginView` con OTP | ✅ **Cerrado audit pass 15** — publishable key pegada (`sb_publishable_*`, NO service_role), endpoint `/auth/v1/verify` verificado contra el proyecto Focus. Sesión persiste en Keychain. Limitación: refresh token rotation pendiente (al expirar el access_token, vuelve a login). |
+| C4 | Sin auth Supabase | No hay login flow ni sesión en la app nativa | Datos de usuario no se asocian a cuenta; Nova no puede personalizar | `ios-native/Focus/` | Agregar SPM `supabase-swift` + `AuthService` + `LoginView` con OTP | ✅ **Cerrado audit pass 15** — publishable key pegada (`sb_publishable_*`, NO service_role), endpoint `/auth/v1/verify` verificado. **C4.1 cerrado pass 16** — `refreshSession()` + AuthStore renueva access_token con refresh_token al boot. Sesión sobrevive a la expiración de 1h sin re-login. |
 
 ### ALTOS
 
@@ -695,6 +696,137 @@ Nuevo archivo: `ios-native/Focus/State/FocusLocalStore.swift` (95 líneas).
 - [ ] Webhook Stripe (`/api/stripe-webhook`) para Pro.
 - [ ] Endpoint de health-check público (`/api/health`).
 - [ ] Logs estructurados (JSON) para todos los endpoints sensibles.
+
+---
+
+## 14.5. C5 — Sync Supabase: plan técnico (preparado, sin implementar)
+
+> Drafteado en audit pass 16. **No implementar sync completo en una sesión sin revisar este plan punto por punto con el usuario.** Antes de cualquier código, validar con el dueño del producto el shape de datos.
+
+### Estado actual local vs server
+
+| Modelo local (`ios-native/Focus/Models/`) | Tabla server (`supabase/schema.sql`) | Alineación |
+|---|---|---|
+| `FocusEvent` | `public.events` | ⚠️ Parcial. Server usa `time TEXT` + `date TEXT` (legacy web); nativo usa `startTime: Date` + `endTime: Date?`. Falta `location`, `notes`, `source`, `externalCalendarId`, `externalEventId`, `url`, `lastSyncedAt`. |
+| `FocusTask` (con `subtasks: [FocusSubtask]`) | `public.tasks` + migración 016 (parent_task_id) | ⚠️ Server modela subtareas como filas con `parent_task_id`; nativo las anida. Falta `notes` en server. |
+| `NovaSuggestion` | `public.suggestions` | ⚠️ Kinds distintos. Local: `schedule/task/rebalance/break_/prep` con status `pending/approved/postponed/dismissed`. Server: `add_event/edit_event/delete_event/mark_task_done` con status `pending/approved/rejected`. Conversion no-trivial. |
+| `NovaMessage` | — | ❌ No existe tabla. Si queremos historial cross-device, necesita `nova_messages` table. |
+| `AppSettings` | `public.user_profiles` (parcial — sólo personality) | ⚠️ Local tiene 8+ toggles; server sólo `personality` y `timezone`. |
+
+### Plan de implementación recomendado
+
+**Orden propuesto (de menos a más riesgo):**
+
+1. **Migración `018_native_events_v2.sql`**: agregar `start_at TIMESTAMPTZ`, `end_at TIMESTAMPTZ`, `notes TEXT`, `location TEXT`, `source TEXT`, `external_calendar_id TEXT`, `external_event_id TEXT`, `url TEXT`, `last_synced_at TIMESTAMPTZ` a `events`. Mantener `time/date` por compat con web legacy. **Backwards-safe**: todos nullables.
+2. **Migración `019_task_notes.sql`**: agregar `notes TEXT` a `tasks`.
+3. **Decisión sobre `suggestions`**: O bien (a) extender server enum para soportar kinds nativos, o (b) mantener bandeja local-only por ahora (probable mejor V1).
+4. **Implementar `SupabaseService.swift`** en `ios-native/Focus/Services/`:
+   - REST directo contra PostgREST (`<supabase>/rest/v1/events`), NO via Vercel backend. Más simple, menos hops.
+   - Headers obligatorios: `apikey: <publishable>`, `Authorization: Bearer <access_token>`, `Content-Type: application/json`, `Prefer: return=representation` (para obtener la fila guardada).
+   - RLS ya filtra por `auth.uid() = user_id` — el server-side rechaza queries sin JWT válido.
+5. **Refactor `FocusDataStore` → write-through cache**:
+   - Local sigue siendo source of truth para UI (no esperar red).
+   - `addEvent(event)` ahora también llama `SupabaseService.upsertEvent(event)` en background.
+   - Errores de red no rompen UX — la app sigue funcionando offline. Toast suave si falla persistencia remota.
+   - En boot: `SupabaseService.fetchEvents(since: lastSyncedAt)` → merge con local (server gana si `updated_at` server > `updated_at` local). Solo cuando `auth.state == .loggedIn`, NO en `.demo`.
+6. **Tareas + subtareas**: análogo a eventos, con flattening (subtarea = task con `parent_task_id`).
+7. **Settings**: extender `user_profiles` o nueva tabla `user_settings` con todos los toggles.
+8. **Nova messages**: opcional V2. Por ahora chat queda local.
+
+### Endpoints concretos
+
+| Operación | Endpoint | Auth header |
+|---|---|---|
+| Insert evento | `POST <supabase>/rest/v1/events` | Bearer access_token |
+| List eventos | `GET <supabase>/rest/v1/events?user_id=eq.<uid>&order=start_at.desc` | Bearer access_token |
+| Update evento | `PATCH <supabase>/rest/v1/events?id=eq.<id>` | Bearer access_token |
+| Delete evento | `DELETE <supabase>/rest/v1/events?id=eq.<id>` | Bearer access_token |
+
+Todas con `apikey: <publishable>` extra (Supabase lo exige siempre).
+
+### Modo demo
+
+`state = .demo` no debe disparar ningún POST/PATCH a Supabase. Toda la lógica de `SupabaseService` debe gatearse por:
+
+```swift
+guard case .loggedIn(let session) = auth.state else { return }
+```
+
+Esto preserva la promesa "modo demo = todo local, nada sale del iPhone".
+
+### Conflictos y pérdida de datos
+
+- **Estrategia V1**: last-write-wins por `updated_at`. Suficiente para single-user, single-device.
+- **Estrategia V2 (multi-device)**: vector clocks o CRDT — fuera de scope.
+- **Migración inicial** (usuario que ya creó datos locales y luego se loguea): subir todos los locales al server (no tienen `user_id` server-side todavía), marcar como `lastSyncedAt = ahora`. **Cuidado**: NO borrar locales antes de confirmar OK en server.
+
+### RLS — riesgos
+
+- Cada tabla tiene policy `USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id)`.
+- ⚠️ El cliente debe SIEMPRE enviar `user_id = <session.userId>` en el body de inserts. Si lo olvida, RLS rechaza con 403.
+- Tests sugeridos: insert con JWT diferente al user_id (debe fallar 403), insert sin JWT (debe fallar 401), select sin filter de user_id (debe traer solo lo del usuario por RLS).
+
+### Riesgos para implementación
+
+| Riesgo | Mitigación |
+|---|---|
+| Modo demo dispara writes al server | Gatear todo `SupabaseService` con `case .loggedIn`. |
+| Conflictos de dates (TEXT legacy vs TIMESTAMPTZ nativo) | Migración 018 antes de empezar; doble-escribir mientras coexistan. |
+| Token expira durante un sync largo | El refresh automático del pass 16 cubre boot; para syncs intermedios, hacer `refreshSession()` on 401. |
+| RLS rechaza por falta de `user_id` en body | Helper `buildEventBody(event, userId)` centralizado. |
+| Pérdida de datos al primer login (usuario con datos locales previos) | Migración upload one-shot: subir TODOS los locales antes de aceptar como sincronizado. |
+| Conversion suggestions kind | Empezar con suggestions local-only; reabrir si Nova real necesita cross-device. |
+
+### Próximo paso recomendado
+
+**No empezar C5 sin antes**:
+1. Revisar este plan con el usuario.
+2. Confirmar shape de datos (especialmente events).
+3. Decidir si `nova_messages` y `app_settings` se sincronizan o no.
+4. Escribir las migraciones 018+019 primero.
+5. Después: `SupabaseService` + refactor de `FocusDataStore`.
+
+---
+
+## 14.6. Importar / exportar calendario — V1 informativo (preparado, no implementado)
+
+> Drafteado en audit pass 16. La V1 muestra Nova/Ajustes con las opciones futuras de forma honesta (`ComingSoonSheet`) y deja la estructura de datos lista. No agrega permisos, OAuth ni navegación externa todavía.
+
+### Lo que YA está en código
+
+- `NovaQuickAction` agrega `importarCalendario` + `exportarCalendario` (en pestaña Acciones de Nova).
+- Tap en estas acciones abre `ComingSoonSheet` con texto del flujo futuro y botón secundario "Crear evento manual" (en importar).
+- Ajustes → sección "Calendarios conectados" con 4 filas (Apple Calendar / Google Calendar / Archivo .ics / Maps&Waze) que abren `ComingSoonSheet` específico cada una.
+- Tap en `LocationLabel` (etiqueta de ubicación en cualquier card de evento) abre `ComingSoonSheet` anticipando Maps/Waze.
+- `FocusEvent` ya tiene fields opcionales: `source: EventSource?` (local/google/apple/ics), `externalCalendarId`, `externalEventId`, `url`, `lastSyncedAt`. Backwards-compatible con JSON guardado pre-V1.
+
+### Lo que queda pendiente (orden sugerido)
+
+1. **Importar archivo .ics (más simple)** — usar `DocumentPicker` para que el usuario elija un .ics y un parser propio (los .ics son texto plano con keys conocidas: `BEGIN:VEVENT`/`SUMMARY`/`DTSTART`/`DTEND`/`LOCATION`/`UID`). Marcar eventos importados con `source = .ics` + `externalEventId = UID`.
+2. **Apple EventKit (lectura)** — `EventKit` framework. Requiere `NSCalendarsUsageDescription` en Info.plist. Permiso del sistema. Importar eventos del calendario local. Marcar con `source = .apple` + `externalEventId = EKEvent.eventIdentifier`.
+3. **Exportar .ics** — generar texto VCALENDAR a partir de eventos locales y usar `UIActivityViewController` (share sheet) para que el usuario lo guarde/envíe.
+4. **Google Calendar OAuth** — el más complejo. Requiere SPM `GoogleSignIn-iOS` o flow manual con AppAuth-iOS. URL scheme custom, callback handling. Marcar eventos con `source = .google` + `externalCalendarId = google_calendar_id` + `externalEventId = google_event_id`.
+5. **Abrir ubicaciones en Maps/Waze** — usar `UIApplication.shared.open(url:)`:
+   - Apple Maps: `http://maps.apple.com/?q=<address>`
+   - Google Maps: `comgooglemaps://?q=<address>` o web fallback
+   - Waze: `waze://?q=<address>` o web fallback
+   - Usar `canOpenURL(_:)` para detectar apps instaladas (requiere whitelist en `LSApplicationQueriesSchemes` del Info.plist).
+
+### Riesgos / consideraciones
+
+| Riesgo | Mitigación |
+|---|---|
+| Permisos de calendario iOS (NSCalendarsUsageDescription) | Pedir explícitamente con copy claro antes del primer acceso. |
+| OAuth Google complejidad y mantenimiento | Evaluar SPM official vs flow manual. Token rotation. |
+| Duplicados de eventos (mismo evento desde 2 sources) | Dedupe por `externalEventId` antes de upsert. |
+| Conflicto calendar local vs Supabase remote | Resolver con `lastSyncedAt` + `updated_at` (mismo patrón que C5). |
+| Privacidad: lectura de calendario expone info sensible | Permiso opt-in claro. NO subir a Supabase salvo que el usuario lo apruebe explícitamente. |
+| `LSApplicationQueriesSchemes` para Waze/Google Maps | Whitelist en Info.plist. Si no está, `canOpenURL` siempre devuelve false. |
+
+### No-objetivos en esta fase
+
+- Sync bidireccional con Google/Apple (escribir cambios de Focus de vuelta al calendario externo). Empezar lectura-only.
+- Resolver conflictos automáticamente. V1: si el usuario crea uno en Google y otro en Focus a la misma hora, Focus solo muestra el de Focus y deja una sugerencia en Bandeja "Tienes conflicto con tu calendario de Google a las 14:00".
 
 ---
 

@@ -295,16 +295,9 @@ private struct CalendarEventCard: View {
                     .multilineTextAlignment(.leading)
 
                 // Solo ubicación si hay. Notes/descripción quedan para detalle.
+                // Tap → ComingSoonSheet anticipando Maps/Waze.
                 if let loc = event.location, !loc.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.Colors.textTertiary)
-                        Text(loc)
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.textTertiary)
-                            .lineLimit(1)
-                    }
+                    LocationLabel(location: loc)
                 }
             }
 

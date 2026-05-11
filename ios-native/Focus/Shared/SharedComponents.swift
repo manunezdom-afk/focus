@@ -146,6 +146,132 @@ struct ToastBanner: View {
     }
 }
 
+// MARK: - LocationLabel (tap → sheet "Próximamente Maps")
+
+/// Etiqueta de ubicación tappable. Cuando se conecten integraciones (C5+)
+/// abrirá Apple Maps / Google Maps / Waze; por ahora explica el flujo
+/// futuro vía `ComingSoonSheet`. No agrega navegación externa.
+struct LocationLabel: View {
+    let location: String
+
+    @State private var showSheet: Bool = false
+
+    var body: some View {
+        Button {
+            HapticManager.shared.tick()
+            showSheet = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "mappin")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.Colors.textTertiary)
+                Text(location)
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.textTertiary)
+                    .lineLimit(1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showSheet) {
+            ComingSoonSheet(
+                title: location,
+                message: "Más adelante podrás abrir esta ubicación en Apple Maps, Google Maps o Waze con un tap. Por ahora la guardamos como texto.",
+                icon: "map.fill",
+                iconTint: Theme.Colors.warning
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+// MARK: - "Próximamente" sheet reutilizable
+
+/// Sheet informativo para features que todavía no están implementadas.
+/// Reemplaza botones muertos por explicaciones honestas.
+struct ComingSoonSheet: View {
+    let title: String
+    let message: String
+    var icon: String = "clock.badge"
+    var iconTint: Color = Theme.Colors.focusAccent
+    var secondaryAction: (label: String, action: () -> Void)? = nil
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: Theme.Spacing.lg) {
+            ZStack {
+                Circle()
+                    .fill(iconTint.opacity(0.12))
+                    .frame(width: 64, height: 64)
+                Image(systemName: icon)
+                    .font(.system(size: 26, weight: .regular))
+                    .foregroundStyle(iconTint)
+            }
+            .padding(.top, Theme.Spacing.xl)
+
+            VStack(spacing: Theme.Spacing.sm) {
+                Text(title)
+                    .font(Theme.Typography.title2)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                    .multilineTextAlignment(.center)
+                Text(message)
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(Theme.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, Theme.Spacing.xl)
+
+            Spacer(minLength: Theme.Spacing.md)
+
+            VStack(spacing: Theme.Spacing.sm) {
+                if let secondary = secondaryAction {
+                    Button {
+                        dismiss()
+                        // Pequeño delay para que el sheet cierre antes de
+                        // disparar la siguiente acción.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            secondary.action()
+                        }
+                    } label: {
+                        Text(secondary.label)
+                            .font(Theme.Typography.bodyBold)
+                            .foregroundStyle(Theme.Colors.focusAccent)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, Theme.Spacing.md + 2)
+                            .background(
+                                Capsule()
+                                    .fill(Theme.Colors.focusAccentSoft)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Entendido")
+                        .font(Theme.Typography.bodyBold)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Theme.Spacing.md + 2)
+                        .background(
+                            Capsule()
+                                .fill(Theme.Colors.focusAccent)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, Theme.Spacing.xl)
+            .padding(.bottom, Theme.Spacing.xl)
+        }
+        .frame(maxWidth: .infinity)
+        .background(Theme.Colors.background)
+    }
+}
+
 // MARK: - Haptics
 
 final class HapticManager {

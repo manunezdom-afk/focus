@@ -195,6 +195,91 @@ enum AuthService {
         }
     }
 
+    // MARK: - Refresh session
+
+    private struct RefreshBody: Encodable {
+        let refresh_token: String
+    }
+
+    /// Renueva la sesión usando el refresh token. Devuelve la nueva sesión
+    /// (con nuevo access_token + posiblemente nuevo refresh_token rotado).
+    ///
+    /// Endpoint: `POST /auth/v1/token?grant_type=refresh_token`.
+    /// Supabase a veces rota el refresh_token (recomendado) y a veces lo
+    /// reutiliza — siempre tomamos el que viene en la respuesta.
+    static func refreshSession(refreshToken: String) async throws -> SupabaseSession {
+        guard FocusConfig.isAuthConfigured else {
+            throw AuthError.configMissing
+        }
+        guard !refreshToken.isEmpty else {
+            throw AuthError.invalidCode
+        }
+
+        var components = URLComponents(
+            url: FocusConfig.supabaseURL.appendingPathComponent("/auth/v1/token"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "grant_type", value: "refresh_token")]
+        guard let url = components?.url else {
+            throw AuthError.unknown("URL refresh inválida")
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(FocusConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(FocusConfig.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try encoder.encode(RefreshBody(refresh_token: refreshToken))
+
+        do {
+            let (data, resp) = try await session.data(for: req)
+            guard let http = resp as? HTTPURLResponse else {
+                throw AuthError.unknown("Respuesta HTTP inválida")
+            }
+
+            if (200..<300).contains(http.statusCode) {
+                let r = try decoder.decode(RefreshResponse.self, from: data)
+                // Supabase puede devolver expires_at (Unix seconds) o sólo
+                // expires_in (TTL en segundos). Preferimos expires_at; si
+                // falta, derivamos de expires_in.
+                let expiresAt: Date
+                if let absolute = r.expires_at {
+                    expiresAt = Date(timeIntervalSince1970: absolute)
+                } else if let ttl = r.expires_in {
+                    expiresAt = Date().addingTimeInterval(TimeInterval(ttl))
+                } else {
+                    // Fallback ultra-conservador: 1 hora desde ahora.
+                    expiresAt = Date().addingTimeInterval(3600)
+                }
+                return SupabaseSession(
+                    accessToken: r.access_token,
+                    // Supabase a veces no devuelve refresh nuevo (raro). Si no
+                    // viene, reutilizamos el viejo — sigue siendo válido hasta
+                    // que el server lo rote.
+                    refreshToken: r.refresh_token ?? refreshToken,
+                    expiresAt: expiresAt,
+                    userId: r.user?.id ?? "",
+                    email: r.user?.email ?? ""
+                )
+            }
+
+            // Errores: refresh token vencido/revocado → forzar re-login.
+            let body = try? decoder.decode(ErrorBody.self, from: data)
+            let raw = body?.error_description ?? body?.msg ?? body?.error ?? ""
+            let msg = raw.lowercased()
+            if msg.contains("expired") || msg.contains("invalid") || http.statusCode == 401 {
+                throw AuthError.otpExpired
+            }
+            throw AuthError.unknown(raw.isEmpty ? "HTTP \(http.statusCode)" : raw)
+        } catch let err as AuthError {
+            throw err
+        } catch let err as URLError {
+            throw AuthError.network(err.localizedDescription)
+        } catch {
+            throw AuthError.network(error.localizedDescription)
+        }
+    }
+
     // MARK: - Sign out
 
     /// MVP: solo limpia local. Cuando agreguemos sync con backend, llamar
@@ -211,6 +296,19 @@ private struct VerifyResponse: Decodable {
     let refresh_token: String
     let expires_at: Double
     let user: SBUser
+
+    struct SBUser: Decodable {
+        let id: String
+        let email: String?
+    }
+}
+
+private struct RefreshResponse: Decodable {
+    let access_token: String
+    let refresh_token: String?
+    let expires_at: Double?
+    let expires_in: Int?
+    let user: SBUser?
 
     struct SBUser: Decodable {
         let id: String

@@ -3,7 +3,8 @@ import Combine
 import Foundation
 
 /// Quick action que el usuario puede tocar en la pestaña Acciones de Nova.
-/// 6 acciones cubren el ciclo del día: planificar, agregar, revisar, cerrar.
+/// Cubre el ciclo del día (planificar / agregar / revisar / cerrar) más el
+/// flujo de calendario externo (importar / exportar — V1 informativo).
 enum NovaQuickAction: String, CaseIterable, Identifiable {
     case organizar
     case crearTarea
@@ -11,39 +12,47 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
     case revisarPendientes
     case prepararManana
     case cerrarDia
+    case importarCalendario
+    case exportarCalendario
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .organizar: return "Organizar mi día"
-        case .crearTarea: return "Crear tarea"
-        case .crearEvento: return "Crear evento"
-        case .revisarPendientes: return "Revisar pendientes"
-        case .prepararManana: return "Preparar mañana"
-        case .cerrarDia: return "Cerrar el día"
+        case .organizar:          return "Organizar mi día"
+        case .crearTarea:         return "Crear tarea"
+        case .crearEvento:        return "Crear evento"
+        case .revisarPendientes:  return "Revisar pendientes"
+        case .prepararManana:     return "Preparar mañana"
+        case .cerrarDia:          return "Cerrar el día"
+        case .importarCalendario: return "Importar calendario"
+        case .exportarCalendario: return "Exportar calendario"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .organizar:         return "Acomodo bloques de hoy con tus prioridades."
-        case .crearTarea:        return "Anoto una tarea con prioridad y categoría."
-        case .crearEvento:       return "Agendo un bloque o reunión en tu día."
-        case .revisarPendientes: return "Repaso lo que quedó sin horario o decisión."
-        case .prepararManana:    return "Reviso lo que viene y dejo el día armado."
-        case .cerrarDia:         return "Reviso lo hecho y limpio lo que no resolviste."
+        case .organizar:          return "Acomodo bloques de hoy con tus prioridades."
+        case .crearTarea:         return "Anoto una tarea con prioridad y categoría."
+        case .crearEvento:        return "Agendo un bloque o reunión en tu día."
+        case .revisarPendientes:  return "Repaso lo que quedó sin horario o decisión."
+        case .prepararManana:     return "Reviso lo que viene y dejo el día armado."
+        case .cerrarDia:          return "Reviso lo hecho y limpio lo que no resolviste."
+        case .importarCalendario: return "Traer eventos de Google, Apple o un .ics."
+        case .exportarCalendario: return "Sacar tu agenda como .ics o a otro calendario."
         }
     }
 
     var symbol: String {
         switch self {
-        case .organizar:         return "sparkles"
-        case .crearTarea:        return "checkmark.circle"
-        case .crearEvento:       return "calendar.badge.plus"
-        case .revisarPendientes: return "tray.full"
-        case .prepararManana:    return "moon.stars"
-        case .cerrarDia:         return "checkmark.seal"
+        case .organizar:          return "sparkles"
+        case .crearTarea:         return "checkmark.circle"
+        case .crearEvento:        return "calendar.badge.plus"
+        case .revisarPendientes:  return "tray.full"
+        case .prepararManana:     return "moon.stars"
+        case .cerrarDia:          return "checkmark.seal"
+        case .importarCalendario: return "square.and.arrow.down"
+        case .exportarCalendario: return "square.and.arrow.up"
         }
     }
 
@@ -63,6 +72,10 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
             return "Mañana tienes clase a las 8 y tu jefa te marcó review a las 12. Te dejo un bloque de foco entre 10 y 12, y reservo 15 min antes para prepararte. ¿Te parece?"
         case .cerrarDia:
             return "Hoy completaste 3 tareas y avanzaste 2 bloques de foco. Quedaron 2 sin terminar. ¿Las paso a mañana o las dejo sin horario en pendientes?"
+        case .importarCalendario:
+            return "Puedo ayudarte a traer tus eventos desde Google Calendar, Apple Calendar o un archivo .ics. Cuando conectemos la integración, revisaré conflictos, tareas sin horario y bloques disponibles."
+        case .exportarCalendario:
+            return "Cuando conectemos la exportación, vas a poder mandar tu agenda como .ics o sincronizarla a Google/Apple Calendar. Por ahora solo guardamos local en tu iPhone."
         }
     }
 }

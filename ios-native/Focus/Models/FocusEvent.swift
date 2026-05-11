@@ -52,6 +52,16 @@ enum EventStatus: String, Codable, Hashable {
     case cancelled
 }
 
+/// De dónde viene un evento. `local` = creado en Focus. El resto se reserva
+/// para cuando conectemos integraciones reales (Apple EventKit / Google
+/// Calendar OAuth / archivo .ics). Por ahora siempre es nil → tratar como local.
+enum EventSource: String, Codable, Hashable {
+    case local
+    case google
+    case apple
+    case ics
+}
+
 struct FocusEvent: Identifiable, Codable, Hashable {
     let id: UUID
     var title: String
@@ -64,6 +74,25 @@ struct FocusEvent: Identifiable, Codable, Hashable {
     var featured: Bool
     var linkedTaskIds: [UUID]
 
+    // MARK: - Fields preparados para C5/C6 (integraciones externas)
+    // Son **opcionales** a propósito: el `init(from decoder:)` sintetizado por
+    // Swift usa `decodeIfPresent` para Optionals, así que el JSON guardado
+    // antes de esta versión (sin estos keys) sigue decodificando sin error.
+    /// Origen del evento. `nil` → tratar como `.local` (ver `effectiveSource`).
+    var source: EventSource?
+    /// ID del calendario externo (ej. el calendarId de Google).
+    var externalCalendarId: String?
+    /// ID del evento en el sistema externo (para detectar duplicados al sync).
+    var externalEventId: String?
+    /// URL asociada (ej. link de Meet/Zoom). Distinto de `location`.
+    var url: String?
+    /// Última vez que sincronizamos contra el servicio externo.
+    var lastSyncedAt: Date?
+
+    /// Origen efectivo del evento. Si `source` es nil (data legacy) lo
+    /// tratamos como `.local`.
+    var effectiveSource: EventSource { source ?? .local }
+
     init(
         id: UUID = UUID(),
         title: String,
@@ -74,7 +103,12 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         status: EventStatus = .scheduled,
         location: String? = nil,
         featured: Bool = false,
-        linkedTaskIds: [UUID] = []
+        linkedTaskIds: [UUID] = [],
+        source: EventSource? = nil,
+        externalCalendarId: String? = nil,
+        externalEventId: String? = nil,
+        url: String? = nil,
+        lastSyncedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -86,6 +120,11 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         self.location = location
         self.featured = featured
         self.linkedTaskIds = linkedTaskIds
+        self.source = source
+        self.externalCalendarId = externalCalendarId
+        self.externalEventId = externalEventId
+        self.url = url
+        self.lastSyncedAt = lastSyncedAt
     }
 
     var timeRangeLabel: String {

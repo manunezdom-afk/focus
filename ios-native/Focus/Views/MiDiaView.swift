@@ -367,12 +367,7 @@ private struct ProximoBloqueCard: View {
             HStack(spacing: 6) {
                 StatePill(label: event.section.displayName, tint: event.section.color, symbol: event.section.symbol)
                 if let loc = event.location, !loc.isEmpty {
-                    Image(systemName: "mappin")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.Colors.textTertiary)
-                    Text(loc)
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.Colors.textTertiary)
+                    LocationLabel(location: loc)
                 }
             }
         }
