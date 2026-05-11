@@ -19,6 +19,14 @@ struct FocusApp: App {
                 .task(id: authChangeId) {
                     syncAuthIntoDataStore()
                 }
+                // Bootstrap notificaciones locales: al arrancar la app,
+                // re-asegurar que cada recordatorio futuro tenga su notif
+                // programada. iOS no persiste notifs locales al reinstalar
+                // ni siempre tras updates, así que esto cubre el gap.
+                // Solo dispara una vez por sesión.
+                .task {
+                    dataStore.bootstrapLocalNotifications()
+                }
         }
     }
 

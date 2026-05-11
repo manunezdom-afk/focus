@@ -35,6 +35,7 @@
 		FA0000000000000000000090 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007A /* OnboardingView.swift */; };
 		FA0000000000000000000091 /* SupabaseSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007B /* SupabaseSyncService.swift */; };
 		FA0000000000000000000092 /* NovaService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007C /* NovaService.swift */; };
+		FA0000000000000000000093 /* LocalNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007D /* LocalNotificationService.swift */; };
 		FA000000000000000000001A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000015 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -68,6 +69,7 @@
 		FA000000000000000000007A /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		FA000000000000000000007B /* SupabaseSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseSyncService.swift; sourceTree = "<group>"; };
 		FA000000000000000000007C /* NovaService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaService.swift; sourceTree = "<group>"; };
+		FA000000000000000000007D /* LocalNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNotificationService.swift; sourceTree = "<group>"; };
 		FA0000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -160,6 +162,7 @@
 				FA0000000000000000000077 /* AuthService.swift */,
 				FA000000000000000000007B /* SupabaseSyncService.swift */,
 				FA000000000000000000007C /* NovaService.swift */,
+				FA000000000000000000007D /* LocalNotificationService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -259,6 +262,7 @@
 				FA0000000000000000000087 /* AuthService.swift in Sources */,
 				FA0000000000000000000091 /* SupabaseSyncService.swift in Sources */,
 				FA0000000000000000000092 /* NovaService.swift in Sources */,
+				FA0000000000000000000093 /* LocalNotificationService.swift in Sources */,
 				FA0000000000000000000081 /* FocusDataStore.swift in Sources */,
 				FA0000000000000000000084 /* FocusLocalStore.swift in Sources */,
 				FA0000000000000000000088 /* AuthStore.swift in Sources */,

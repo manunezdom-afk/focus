@@ -1,4 +1,6 @@
 import SwiftUI
+import UserNotifications
+import UIKit
 
 struct AjustesView: View {
     @EnvironmentObject private var store: FocusDataStore
@@ -9,6 +11,9 @@ struct AjustesView: View {
     @State private var showClearConfirm = false
     @State private var showSignOutConfirm = false
     @State private var calendarSheet: CalendarConnectionSheet? = nil
+    /// Estado del permiso de notificaciones — se refresca cuando la vista
+    /// aparece y después de pedir autorización.
+    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
 
     var body: some View {
         NavigationStack {
@@ -39,6 +44,9 @@ struct AjustesView: View {
                         Spacer(minLength: Theme.Spacing.bottomBarSafety)
                     }
                 }
+            }
+            .task {
+                await refreshNotificationStatus()
             }
             .sheet(isPresented: $showPersonalitySheet) {
                 PersonalitySheet(
@@ -428,13 +436,22 @@ struct AjustesView: View {
     // MARK: - Notificaciones
 
     private var notificacionesSection: some View {
-        settingsSection(title: "Notificaciones") {
+        settingsSection(
+            title: "Notificaciones",
+            footer: "Focus usa notificaciones locales para recordarte eventos y tareas en este iPhone. No hay push remoto todavía."
+        ) {
             VStack(spacing: 0) {
+                // Estado real del permiso del sistema — la primera fila es la
+                // que importa. Las demás filas son configuración aspiracional
+                // (resumen / sugerencias) que sigue como toggle visual hasta
+                // que se implemente realmente.
+                permissionRow
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
                 AjustesRow(
                     symbol: "bell.fill",
                     tint: Theme.Colors.warning,
                     title: "Recordatorios",
-                    subtitle: "10 minutos antes de cada evento.",
+                    subtitle: "Avísame en la hora del evento.",
                     trailing: .toggle(Binding(
                         get: { store.settings.remindersEnabled },
                         set: { v in store.updateSettings { $0.remindersEnabled = v } }
@@ -445,7 +462,7 @@ struct AjustesView: View {
                     symbol: "sun.max.fill",
                     tint: Theme.Colors.warning,
                     title: "Resumen diario",
-                    subtitle: "Cada mañana, tu día de un vistazo.",
+                    subtitle: "Cada mañana, tu día de un vistazo (próximamente).",
                     trailing: .toggle(Binding(
                         get: { store.settings.dailySummaryEnabled },
                         set: { v in store.updateSettings { $0.dailySummaryEnabled = v } }
@@ -456,7 +473,7 @@ struct AjustesView: View {
                     symbol: "sparkles",
                     tint: Theme.Colors.novaAccent,
                     title: "Sugerencias inteligentes",
-                    subtitle: "Nova te avisa cuando detecta algo útil.",
+                    subtitle: "Nova te avisa cuando detecta algo útil (próximamente).",
                     trailing: .toggle(Binding(
                         get: { store.settings.smartSuggestionsEnabled },
                         set: { v in store.updateSettings { $0.smartSuggestionsEnabled = v } }
@@ -464,6 +481,78 @@ struct AjustesView: View {
                 )
             }
             .focusCardContainer()
+        }
+    }
+
+    /// Row dinámico según el estado del permiso de notificaciones del iPhone.
+    /// - `.authorized` / `.provisional` / `.ephemeral` → muestra "Activadas".
+    /// - `.notDetermined` → botón "Activar" que dispara `requestAuthorization`.
+    /// - `.denied` → mensaje claro + botón "Abrir Ajustes del iPhone".
+    @ViewBuilder
+    private var permissionRow: some View {
+        switch notificationStatus {
+        case .authorized, .provisional, .ephemeral:
+            AjustesRow(
+                symbol: "checkmark.seal.fill",
+                tint: Theme.Colors.success,
+                title: "Permiso del iPhone",
+                subtitle: "Activadas. Focus puede avisarte.",
+                trailing: .nothing
+            )
+        case .notDetermined:
+            Button {
+                Task {
+                    HapticManager.shared.tap()
+                    _ = await LocalNotificationService.shared.requestAuthorization()
+                    await refreshNotificationStatus()
+                    // Si el usuario aceptó y hay recordatorios futuros,
+                    // los programamos ahora.
+                    if notificationStatus == .authorized && store.settings.remindersEnabled {
+                        store.bootstrapLocalNotifications()
+                    }
+                }
+            } label: {
+                AjustesRow(
+                    symbol: "bell.badge.fill",
+                    tint: Theme.Colors.focusAccent,
+                    title: "Permiso del iPhone",
+                    subtitle: "Aún no solicitadas. Toca para activarlas.",
+                    trailing: .nothing
+                )
+            }
+            .buttonStyle(.plain)
+        case .denied:
+            Button {
+                HapticManager.shared.tap()
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                AjustesRow(
+                    symbol: "bell.slash.fill",
+                    tint: Theme.Colors.warning,
+                    title: "Permiso del iPhone",
+                    subtitle: "Denegadas. Toca para abrir Ajustes del iPhone.",
+                    trailing: .nothing
+                )
+            }
+            .buttonStyle(.plain)
+        @unknown default:
+            AjustesRow(
+                symbol: "bell.fill",
+                tint: Theme.Colors.textTertiary,
+                title: "Permiso del iPhone",
+                subtitle: "Estado desconocido.",
+                trailing: .nothing
+            )
+        }
+    }
+
+    /// Refresca el estado del permiso desde UNUserNotificationCenter.
+    private func refreshNotificationStatus() async {
+        let status = await LocalNotificationService.shared.currentStatus()
+        await MainActor.run {
+            self.notificationStatus = status
         }
     }
 
@@ -649,6 +738,7 @@ struct AjustesView: View {
 
     private func settingsSection<Content: View>(
         title: String,
+        footer: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
@@ -656,6 +746,14 @@ struct AjustesView: View {
                 .padding(.horizontal, Theme.Spacing.xl)
             content()
                 .padding(.horizontal, Theme.Spacing.xl)
+            if let footer {
+                Text(footer)
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.textTertiary)
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.top, -Theme.Spacing.xs)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

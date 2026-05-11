@@ -2100,6 +2100,10 @@ final class FocusDataStore: ObservableObject {
         }
         events = byId.values.sorted { $0.startTime < $1.startTime }
         persistEvents()
+        // Re-sync notificaciones locales: si algún evento remoto trajo un
+        // recordatorio futuro nuevo, lo programamos. Identifiers estables
+        // por id → no duplica para los que ya estaban programados.
+        resyncAllLocalNotifications()
     }
 
     private func mergeRemoteTasks(_ remote: [RemoteFocusTask]) {
@@ -2231,6 +2235,7 @@ final class FocusDataStore: ObservableObject {
         events.sort { $0.startTime < $1.startTime }
         persistEvents()
         uploadEvent(event)
+        syncLocalNotification(for: event)
         HapticManager.shared.success()
     }
 
@@ -2239,6 +2244,8 @@ final class FocusDataStore: ObservableObject {
         persistEvents()
         cleanupStaleSuggestions()
         softDeleteEventRemote(id)
+        // Cancelar notificación local SIEMPRE — si no existía, no-op.
+        LocalNotificationService.shared.cancelReminder(eventId: id)
     }
 
     /// Actualiza un evento existente. No falla silenciosamente si el id no
@@ -2249,7 +2256,71 @@ final class FocusDataStore: ObservableObject {
         events.sort { $0.startTime < $1.startTime }
         persistEvents()
         uploadEvent(event)
+        syncLocalNotification(for: event)
         HapticManager.shared.tick()
+    }
+
+    /// Re-sincroniza la notificación local para `event`. Tres ramas:
+    /// - `isReminder == true` + `startTime > now` + permisos OK + toggle ON →
+    ///   programa (idempotente, reemplaza pendiente anterior).
+    /// - Cualquier otro caso → cancela la pendiente si existía (cubre el
+    ///   flujo "evento dejó de ser recordatorio" o "se movió al pasado").
+    ///
+    /// Si el toggle está apagado o falta permiso, cancelamos cualquier
+    /// pendiente sobrante — así el usuario que apaga el switch deja de ver
+    /// alertas inmediatamente.
+    private func syncLocalNotification(for event: FocusEvent) {
+        // No es recordatorio o ya pasó → cancel y listo.
+        guard event.isReminder == true, event.startTime > Date() else {
+            LocalNotificationService.shared.cancelReminder(eventId: event.id)
+            return
+        }
+        // Toggle global apagado → cancel todo lo nuestro y no schedule más.
+        guard settings.remindersEnabled else {
+            LocalNotificationService.shared.cancelReminder(eventId: event.id)
+            return
+        }
+        Task { [event] in
+            let status = await LocalNotificationService.shared.currentStatus()
+            switch status {
+            case .authorized, .provisional, .ephemeral:
+                await LocalNotificationService.shared.scheduleReminder(for: event)
+            case .notDetermined:
+                // Pedimos permiso una sola vez. Si el usuario acepta,
+                // programamos. Si rechaza, queda el evento sin alerta —
+                // Ajustes mostrará el estado y dará botón para activar.
+                let resolved = await LocalNotificationService.shared.requestAuthorization()
+                if resolved == .authorized || resolved == .provisional {
+                    await LocalNotificationService.shared.scheduleReminder(for: event)
+                }
+            case .denied:
+                // El usuario rechazó antes. No hacemos nada — Ajustes
+                // mostrará "denegadas" + botón para abrir Settings del iPhone.
+                break
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    /// Re-sincroniza notificaciones para TODOS los eventos vigentes. Se
+    /// llama al final de `mergeRemoteEvents` para asegurar que cualquier
+    /// evento traído de Supabase con `isReminder=true` tenga notificación
+    /// local programada (los identifiers son estables por id, así que no
+    /// duplica).
+    private func resyncAllLocalNotifications() {
+        for event in events where event.isReminder == true && event.startTime > Date() {
+            syncLocalNotification(for: event)
+        }
+    }
+
+    /// Llamado por `FocusApp` al arrancar — asegura que recordatorios
+    /// futuros tengan sus notificaciones programadas. iOS no garantiza
+    /// persistir notificaciones locales tras reinstalar la app, así que
+    /// esto cubre el caso. Idempotente: identifiers estables por id.
+    func bootstrapLocalNotifications() {
+        guard settings.remindersEnabled else { return }
+        resyncAllLocalNotifications()
     }
 
     // MARK: - Tareas
@@ -3308,11 +3379,25 @@ final class FocusDataStore: ObservableObject {
     // MARK: - Ajustes
 
     func updateSettings(_ mutator: (inout AppSettings) -> Void) {
+        let before = settings.remindersEnabled
         var copy = settings
         mutator(&copy)
         settings = copy
         persistSettings()
         HapticManager.shared.tick()
+
+        // Si el toggle "Recordatorios" cambió, re-sync notifs:
+        // OFF → cancela todas las pendientes.
+        // ON → reprograma futuras (con permiso si toca).
+        if before != settings.remindersEnabled {
+            if settings.remindersEnabled {
+                resyncAllLocalNotifications()
+            } else {
+                Task {
+                    await LocalNotificationService.shared.cancelAllReminders()
+                }
+            }
+        }
     }
 
     // MARK: - Reset / borrar datos locales
@@ -3333,6 +3418,7 @@ final class FocusDataStore: ObservableObject {
         novaContext = NovaContext()
         dismissedDemoEventTitles = []
         dismissedDemoTaskTitles = []
+        Task { await LocalNotificationService.shared.cancelAllReminders() }
         HapticManager.shared.success()
     }
 
@@ -3349,6 +3435,7 @@ final class FocusDataStore: ObservableObject {
         novaContext = NovaContext()
         dismissedDemoEventTitles = []
         dismissedDemoTaskTitles = []
+        Task { await LocalNotificationService.shared.cancelAllReminders() }
         HapticManager.shared.success()
     }
 }
