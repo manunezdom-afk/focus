@@ -19,7 +19,9 @@ struct AjustesView: View {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
                         header
                             .padding(.horizontal, Theme.Spacing.xl)
-                            .padding(.top, Theme.Spacing.md)
+                            // Padding superior `.lg` para mantener consistencia
+                            // con Mi Día y dar aire al notch/Dynamic Island.
+                            .padding(.top, Theme.Spacing.lg)
 
                         cuentaSection
                         novaSection

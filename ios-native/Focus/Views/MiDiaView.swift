@@ -137,6 +137,17 @@ struct MiDiaView: View {
             // Scroll dismisses keyboard: tan pronto como el usuario arrastra
             // hacia abajo, el teclado se baja. Patrón nativo iOS.
             .scrollDismissesKeyboard(.immediately)
+            // Tap-outside dismiss: cualquier tap en el scroll cierra el
+            // teclado. `.simultaneousGesture` corre en paralelo con los taps
+            // de botones — no consume sus acciones.
+            .simultaneousGesture(
+                TapGesture().onEnded { _ in
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil, from: nil, for: nil
+                    )
+                }
+            )
         }
         .alert("Voz próximamente", isPresented: $showVoiceComingSoon) {
             Button("Entendido", role: .cancel) {}

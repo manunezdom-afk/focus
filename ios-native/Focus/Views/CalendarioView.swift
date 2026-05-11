@@ -56,7 +56,9 @@ struct CalendarioView: View {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                         header
                             .padding(.horizontal, Theme.Spacing.xl)
-                            .padding(.top, Theme.Spacing.md)
+                            // `.lg` consistente con Mi Día/Ajustes/Nova —
+                            // aire respecto al notch/Dynamic Island.
+                            .padding(.top, Theme.Spacing.lg)
 
                         modePicker
                             .padding(.horizontal, Theme.Spacing.xl)

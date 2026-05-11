@@ -28,7 +28,9 @@ struct NovaView: View {
                 VStack(spacing: 0) {
                     branding
                         .padding(.horizontal, Theme.Spacing.xl)
-                        .padding(.top, Theme.Spacing.md)
+                        // `.lg` para consistencia con Mi Día/Ajustes y aire
+                        // suficiente respecto al notch/Dynamic Island.
+                        .padding(.top, Theme.Spacing.lg)
 
                     segmentedControl
                         .padding(.horizontal, Theme.Spacing.xl)
@@ -338,6 +340,16 @@ struct NovaView: View {
             inputBar
         }
         .scrollDismissesKeyboard(.interactively)
+        // Tap-outside dismiss: cualquier tap dentro del chat (no en input)
+        // cierra el teclado. Convive con taps de chips y burbujas.
+        .simultaneousGesture(
+            TapGesture().onEnded { _ in
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil, from: nil, for: nil
+                )
+            }
+        )
     }
 
     /// Empty state estilo Gemini: logo Nova grande centrado + saludo + chips.
