@@ -307,9 +307,36 @@ struct MiDiaView: View {
     }
 
     /// Decide backend vs. fallback local y devuelve el `InlineNovaResponse`
-    /// final. Centralizado acá para que `processNovaInline` quede limpio.
+    /// final. Estrategia:
+    /// 1. Pre-parse local (cheap). Si el intent requiere contexto del cliente
+    ///    (correcciones al último ítem, follow-up de pending, comandos meta),
+    ///    se short-circuit y NO se llama al backend — el backend no tiene
+    ///    el `lastEventId` ni el pending, así que no podría resolverlos.
+    /// 2. Si el local diría clarify con título, guardar pending preventivo
+    ///    para que el siguiente turno corto se pueda completar localmente
+    ///    aunque el backend haya respondido.
+    /// 3. Llamar backend con accessToken; fallback local en errores recuperables.
     private func resolveNovaResponse(for trimmed: String) async -> InlineNovaResponse {
-        // Sin sesión activa → parser local directo. No mostramos nota
+        let preIntent = NovaResponder.parse(trimmed, context: store.novaContext)
+
+        // 1. Short-circuit: intents que requieren contexto local que el
+        //    backend no tiene (corrige/borra último ítem, follow-up
+        //    pending resuelto, comandos meta del cliente).
+        if shouldShortCircuit(preIntent) {
+            return executeIntent(preIntent, userText: trimmed)
+        }
+
+        // 2. Save pending preventivo si local diría clarify con título.
+        if case .clarify(let reason) = preIntent,
+           let pending = buildPendingClarification(
+               from: reason,
+               userText: trimmed,
+               source: .inlineMiDia
+           ) {
+            store.setPendingClarification(pending)
+        }
+
+        // 3. Sin sesión activa → parser local directo. No mostramos nota
         // porque el usuario está en modo demo a propósito.
         guard let creds = store.syncCredentials else {
             return runLocalFallback(for: trimmed, withNote: nil)
@@ -338,6 +365,31 @@ struct MiDiaView: View {
             )
         } catch {
             return runLocalFallback(for: trimmed, withNote: "Usé el modo local porque Nova avanzada no respondió.")
+        }
+    }
+
+    /// True cuando el intent local SIEMPRE es mejor que el backend porque
+    /// requiere contexto cliente o porque el backend lo entendería peor.
+    /// Conservador: solo cubre casos donde tenemos alta confianza.
+    private func shouldShortCircuit(_ intent: NovaIntent) -> Bool {
+        switch intent {
+        case .correctLastEvent, .deleteLastItem, .convertLastToTask:
+            // Corrige/borra el último ítem usando `lastEventId`/`lastTaskId`
+            // del contexto local. Backend no tiene esos ids.
+            return true
+        case .organizeDay, .reviewPending, .askAboutDemo:
+            // Comandos meta del cliente — generan suggestions/listados locales,
+            // no requieren NLU del backend.
+            return true
+        case .smallTalk:
+            // Confirmaciones/cancelaciones cortas que el local ya resolvió.
+            return true
+        case .createEvent, .createTask:
+            // Solo si el local resolvió un follow-up con pending activo —
+            // significa que estaba completando una pregunta previa.
+            return store.novaContext.pendingIsActive
+        default:
+            return false
         }
     }
 

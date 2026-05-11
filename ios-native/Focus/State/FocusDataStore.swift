@@ -2870,13 +2870,27 @@ final class FocusDataStore: ObservableObject {
         HapticManager.shared.tap()
         isNovaTyping = true
 
-        // Pre-parse local: si el parser ya detecta que el mensaje deja una
-        // clarify (Nova preguntará algo), guardamos pending ANTES de llamar
-        // al backend. Si después el backend resuelve con actions, el pending
-        // se limpia automáticamente al ejecutar `updateNovaContext`. Si el
-        // backend deja sin actions (también pregunta), el pending sobrevive
-        // y el próximo turno corto lo puede completar.
+        // Pre-parse local: si el parser ya resuelve la intención sin
+        // ambigüedad (correcciones, follow-ups, comandos meta), short-circuit
+        // el backend — backend no tiene `lastEventId` ni el pending local.
+        // Si el parser sugiere clarify con título, guardamos pending para
+        // que el siguiente turno corto pueda completarlo localmente.
         let preIntent = NovaResponder.parse(trimmed, context: novaContext)
+        if shouldShortCircuitLocally(preIntent),
+           let localReply = applyLocalNovaIntent(preIntent, userText: trimmed) {
+            // Mini-delay para que el typing indicator no parpadee, luego
+            // append y terminar — sin tocar backend.
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                await MainActor.run {
+                    guard let self else { return }
+                    self.novaMessages.append(NovaMessage(role: .nova, content: localReply))
+                    self.persistNovaMessages()
+                    self.isNovaTyping = false
+                }
+            }
+            return
+        }
         if case .clarify(let reason) = preIntent,
            let pending = buildChatPendingClarification(from: reason, userText: trimmed) {
             setPendingClarification(pending)
@@ -3012,6 +3026,211 @@ final class FocusDataStore: ObservableObject {
 
     /// Convierte un `NovaServiceError` recuperable en una frase humana
     /// para mostrar al final del mensaje de Nova en el chat.
+    /// True cuando un intent local debe short-circuit el flujo del backend.
+    /// Misma lógica que `MiDiaView.shouldShortCircuit` — duplicada acá para
+    /// que el chat la pueda usar sin acoplar State a SwiftUI.
+    func shouldShortCircuitLocally(_ intent: NovaIntent) -> Bool {
+        switch intent {
+        case .correctLastEvent, .deleteLastItem, .convertLastToTask:
+            return true
+        case .organizeDay, .reviewPending, .askAboutDemo:
+            return true
+        case .smallTalk:
+            return true
+        case .createEvent, .createTask:
+            return novaContext.pendingIsActive
+        default:
+            return false
+        }
+    }
+
+    /// Ejecuta un intent local del parser y devuelve el texto que el chat
+    /// debe mostrar. Usado por `sendNovaMessage` cuando short-circuit-ea
+    /// el backend (correcciones al último ítem, follow-ups de pending,
+    /// comandos meta, confirmaciones cortas).
+    ///
+    /// Side effects: dispara `addEvent`/`updateEvent`/`deleteEvent`/`addTask`/
+    /// `addSuggestion` etc. — todos los métodos que ya sincronizan Supabase.
+    /// Devuelve nil si el intent no debería ejecutarse acá (caller fall-through).
+    func applyLocalNovaIntent(_ intent: NovaIntent, userText: String) -> String? {
+        switch intent {
+        case .createEvent(let title, let when, let explicitEnd, let location, let section, let wantsReminder):
+            guard let date = when else { return nil }
+            let cal = Calendar.current
+            let end: Date
+            let isReminderFlag: Bool?
+            let inferredFlag: Bool?
+            if wantsReminder {
+                end = cal.date(byAdding: .minute, value: 5, to: date) ?? date
+                isReminderFlag = true
+                inferredFlag = nil
+            } else if let explicit = explicitEnd, explicit > date {
+                end = explicit
+                isReminderFlag = nil
+                inferredFlag = false
+            } else {
+                end = cal.date(byAdding: .minute, value: 5, to: date) ?? date
+                isReminderFlag = nil
+                inferredFlag = true
+            }
+            let effectiveSection: EventSection = wantsReminder
+                ? (section ?? .reminder)
+                : (section ?? .reunion)
+            let event = FocusEvent(
+                title: title,
+                startTime: date,
+                endTime: end,
+                section: effectiveSection,
+                location: location,
+                isReminder: isReminderFlag,
+                inferredDuration: inferredFlag
+            )
+            addEvent(event)
+            updateNovaContext(
+                from: userText,
+                title: title,
+                date: date,
+                location: location,
+                section: effectiveSection,
+                kind: .event,
+                eventId: event.id
+            )
+            let timeLabel = DateFormatters.hourMinute.string(from: date)
+            let dayLabel = DateFormatters.weekdayDay.string(from: date).lowercased()
+            return wantsReminder
+                ? "Listo, te lo recuerdo «\(title)» el \(dayLabel) a las \(timeLabel)."
+                : "Agendé «\(title)» el \(dayLabel) a las \(timeLabel)."
+
+        case .createTask(let title, let dueDate, _, let wantsReminder):
+            let category: TaskCategory = {
+                guard let dueDate else { return .hoy }
+                let cal = Calendar.current
+                if cal.isDateInToday(dueDate) { return .hoy }
+                if let diff = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: dueDate)).day,
+                   diff >= 1 && diff <= 7 { return .semana }
+                return .algunDia
+            }()
+            let task = FocusTask(title: title, priority: .media, category: category, dueDate: dueDate)
+            addTask(task)
+            updateNovaContext(from: userText, title: title, date: dueDate, kind: .task, taskId: task.id)
+            let dueBit: String = {
+                guard let dueDate else { return "" }
+                let cal = Calendar.current
+                if cal.isDateInToday(dueDate) { return " para hoy" }
+                if cal.isDateInTomorrow(dueDate) { return " para mañana" }
+                return " para el " + DateFormatters.weekdayDay.string(from: dueDate).lowercased()
+            }()
+            let remBit = wantsReminder ? " (con recordatorio)" : ""
+            return "Anoto «\(title)»\(dueBit) como tarea.\(remBit)"
+
+        case .correctLastEvent(let modifier):
+            guard let eventId = novaContext.lastEventId,
+                  var event = events.first(where: { $0.id == eventId }) else {
+                return "No tengo nada reciente para mover. Crea un evento nuevo cuando quieras."
+            }
+            let cal = Calendar.current
+            switch modifier {
+            case .shiftDays(let offset):
+                if let newStart = cal.date(byAdding: .day, value: offset, to: event.startTime) {
+                    event.startTime = newStart
+                }
+                if let oldEnd = event.endTime,
+                   let newEnd = cal.date(byAdding: .day, value: offset, to: oldEnd) {
+                    event.endTime = newEnd
+                }
+            case .setTime(let h, let m):
+                let day = cal.startOfDay(for: event.startTime)
+                if let newStart = cal.date(bySettingHour: h, minute: m, second: 0, of: day) {
+                    event.startTime = newStart
+                    event.endTime = cal.date(byAdding: .hour, value: 1, to: newStart)
+                }
+            case .setLocation(let loc):
+                event.location = loc
+            case .setTitle(let newTitle):
+                event.title = newTitle
+            }
+            updateEvent(event)
+            updateNovaContext(
+                from: userText,
+                title: event.title,
+                date: event.startTime,
+                location: event.location,
+                section: event.section,
+                kind: .event,
+                eventId: event.id
+            )
+            let timeLabel = DateFormatters.hourMinute.string(from: event.startTime)
+            let dayLabel = DateFormatters.weekdayDay.string(from: event.startTime).lowercased()
+            return "Listo, moví «\(event.title)» al \(dayLabel) \(timeLabel)."
+
+        case .convertLastToTask:
+            let title = novaContext.lastTitle ?? "Nueva tarea"
+            let task = FocusTask(title: title, priority: .media, category: .hoy)
+            addTask(task)
+            if let eventId = novaContext.lastEventId {
+                deleteEvent(eventId)
+            }
+            updateNovaContext(from: userText, title: title, kind: .task, taskId: task.id)
+            return "Lo paso a tareas. «\(title)» quedó en tus pendientes de hoy."
+
+        case .deleteLastItem:
+            if let eventId = novaContext.lastEventId,
+               let event = events.first(where: { $0.id == eventId }) {
+                let title = event.title
+                deleteEvent(eventId)
+                clearNovaContext()
+                return "Eliminado. «\(title)» se borró del calendario."
+            }
+            if let taskId = novaContext.lastTaskId,
+               let task = tasks.first(where: { $0.id == taskId }) {
+                let title = task.title
+                deleteTask(taskId)
+                clearNovaContext()
+                return "Eliminada. «\(title)» se borró de pendientes."
+            }
+            return "No tengo nada reciente para borrar."
+
+        case .organizeDay:
+            addSuggestion(NovaSuggestion(
+                title: "Plan del día",
+                detail: "Te dejo bloques de foco más temprano y los pendientes pesados para después del mediodía. Aprueba para aplicar.",
+                kind: .rebalance,
+                priority: .high,
+                suggestedAction: "Aplicar plan del día"
+            ))
+            addSuggestion(NovaSuggestion(
+                title: "Pausa al mediodía",
+                detail: "Te reservo 20 min libres entre bloques.",
+                kind: .break_,
+                priority: .normal,
+                suggestedAction: "Reservar pausa 13:00"
+            ))
+            return "Dejé sugerencias en la Bandeja. Aprueba las que te sirvan."
+
+        case .reviewPending:
+            let pending = pendingTodayTasks
+            if pending.isEmpty {
+                return "No tienes pendientes para hoy. Disfrútalo."
+            }
+            let preview = pending.prefix(3).map { "• \($0.title)" }.joined(separator: "\n")
+            let count = pending.count
+            return count == 1
+                ? "Tienes 1 pendiente hoy:\n\(preview)"
+                : "Tienes \(count) pendientes hoy:\n\(preview)"
+
+        case .askAboutDemo:
+            return "Los ejemplos solo aparecen mientras no tengas datos tuyos. Apenas creas tu primer evento o tarea, se reemplazan automáticamente."
+
+        case .smallTalk(let reply):
+            return reply
+
+        case .clarify:
+            // No short-circuit en clarify — el caller decide si llamar al
+            // backend para que pregunte mejor o usar el local responder.
+            return nil
+        }
+    }
+
     /// Construye un PendingClarification para el chat a partir de un
     /// ClarifyReason del parser local. Espejo de `buildPendingClarification`
     /// de MiDiaView, pero con `source: .novaChat`.
