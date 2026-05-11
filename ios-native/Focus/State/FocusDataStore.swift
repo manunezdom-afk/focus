@@ -146,6 +146,9 @@ enum NovaIntent: Hashable {
         case eventNeedsTitle
         case eventNeedsTime(title: String, partialDate: Date)
         case eventNeedsDateTime(title: String)
+        /// "ir a buscar agustina en 20" — "en N" con N en 13..23 puede ser
+        /// hora 24h (20:00) o relativo (en 20 minutos). Pedimos cuál.
+        case ambiguousTime24OrRelative(title: String, value: Int)
         case noContext                  // "agéndalo" sin contexto previo
         case unclear
     }
@@ -173,6 +176,13 @@ struct NovaContext: Equatable {
     var lastIntentKind: Kind?
     var lastEventId: UUID?
     var lastTaskId: UUID?
+    /// Título tentativo cuando Nova hace una clarify y la acción NO se llegó
+    /// a ejecutar. El siguiente turno (ej. "a las 20", "en 20 minutos") puede
+    /// usarlo para completar la acción sin pedir al usuario que repita.
+    /// Se limpia al ejecutar cualquier intent real.
+    var pendingTitle: String?
+    var pendingSection: EventSection?
+    var pendingWantsReminder: Bool = false
     var updatedAt: Date = Date()
 
     enum Kind: Hashable {
@@ -378,14 +388,23 @@ enum NovaResponder {
         ]
         if let title = extractAfter(trimmed, triggers: taskActionTriggers) {
             if title.isEmpty { return .clarify(reason: .taskNeedsTitle) }
-            let when = extractDateTime(from: lower)
-            let recurrence = detectRecurrence(lower)
-            return .createTask(
-                title: cleanTaskTitle(title, when: when),
-                dueDate: when,
-                recurrence: recurrence,
-                wantsReminder: wantsReminder
-            )
+            // Si después del trigger hay hora explícita ("recuérdame buscar a
+            // la Agustina tipo 20"), es un RECORDATORIO PUNTUAL (evento con
+            // isReminder=true), no una tarea sin hora. Caer al flujo de
+            // evento más abajo — sección 6 lo capturará por el verbo
+            // ("buscar a ") y sección 8 por la hora libre. wantsReminder ya
+            // está seteado por matching ("recuérdame").
+            if !hasTimeMarker(lower) {
+                let when = extractDateTime(from: lower)
+                let recurrence = detectRecurrence(lower)
+                return .createTask(
+                    title: cleanTaskTitle(title, when: when),
+                    dueDate: when,
+                    recurrence: recurrence,
+                    wantsReminder: wantsReminder
+                )
+            }
+            // hasTimeMarker: continúa al flujo de evento abajo.
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -434,6 +453,11 @@ enum NovaResponder {
                     wantsReminder: wantsReminder
                 )
             }
+            // Antes de pedir "necesito día y hora": chequear "en N" ambiguo
+            // ("ir a buscar agustina en 20"). 20:00 vs en 20 minutos → preguntar.
+            if let n = ambiguousEnNValue(in: lower) {
+                return .clarify(reason: .ambiguousTime24OrRelative(title: title, value: n))
+            }
             return .clarify(reason: .eventNeedsDateTime(title: title))
         }
 
@@ -476,12 +500,29 @@ enum NovaResponder {
         // ──────────────────────────────────────────────────────────────
         // 8. Solo hora/fecha sin verbo, en frases cortas → asumir evento.
         //    Ej: "mañana 12 con Juan" → evento "Con Juan" mañana 12:00.
+        //
+        //    Si Nova preguntó algo antes (clarify) y guardó `pendingTitle`,
+        //    completamos la acción con ese título — esto resuelve el flujo:
+        //      "ir a buscar agustina en 20"
+        //      → "¿20:00 o en 20 min?"
+        //      → "a las 20" → crea «Buscar a Agustina» hoy 20:00.
         // ──────────────────────────────────────────────────────────────
         if let when = extractDateTime(from: lower), hasTimeMarker(lower) {
             let title = cleanupTitle(stripDateTimeMarkers(stripLocationMarker(trimmed)))
             let location = extractLocation(from: trimmed)
             let section = detectSection(in: lower)
             if title.isEmpty {
+                if context.isFresh, let pending = context.pendingTitle {
+                    let explicitEnd = extractExplicitEndTime(from: lower, startTime: when)
+                    return .createEvent(
+                        title: pending,
+                        when: when,
+                        endTime: explicitEnd,
+                        location: location ?? context.lastLocation,
+                        section: section ?? context.pendingSection ?? context.lastSection,
+                        wantsReminder: wantsReminder || context.pendingWantsReminder
+                    )
+                }
                 return .clarify(reason: .eventNeedsTitle)
             }
             let explicitEnd = extractExplicitEndTime(from: lower, startTime: when)
@@ -579,6 +620,9 @@ enum NovaResponder {
             return "Tengo «\(title)» para el \(day). ¿A qué hora?"
         case .clarify(.eventNeedsDateTime(let title)):
             return "Tengo «\(title)». ¿Para qué día y a qué hora lo agendo?"
+        case .clarify(.ambiguousTime24OrRelative(let title, let value)):
+            let hourPadded = String(format: "%02d:00", value)
+            return "Tengo «\(title)». ¿Te refieres a las \(hourPadded) o en \(value) minutos?"
         case .clarify(.noContext):
             return "No estoy seguro a qué te referís. Decime qué querés agendar o crear."
         case .clarify(.unclear):
@@ -720,6 +764,13 @@ enum NovaResponder {
 
     // MARK: - Sección por palabra-clave
 
+    /// Wrapper público para que el caller (Mi Día) pueda guessear la sección
+    /// del texto original sin acceder a internals. Usado al guardar
+    /// `pendingSection` cuando Nova devuelve un clarify.
+    static func guessSection(for text: String) -> EventSection? {
+        detectSection(in: text.lowercased())
+    }
+
     private static func detectSection(in lower: String) -> EventSection? {
         if matches(lower, [
             "parcial", "examen", "final", "prueba",
@@ -799,7 +850,12 @@ enum NovaResponder {
         if firstCaptureInt(lower, pattern: #"a la?s? (\d{1,2})"#, group: 1) != nil { return true }
         if firstCaptureInt(lower, pattern: #"\b(\d{1,2}):(\d{2})\b"#, group: 1) != nil { return true }
         if firstCaptureInt(lower, pattern: #"\btipo\s+(?:las?\s+)?(\d{1,2})"#, group: 1) != nil { return true }
-        if firstCaptureInt(lower, pattern: #"\b(\d{1,2})\s*(am|pm|hs|hrs)\b"#, group: 1) != nil { return true }
+        if firstCaptureInt(lower, pattern: #"\b(\d{1,2})\s*(am|pm|hs|hrs?)\b"#, group: 1) != nil { return true }
+        // "en N minutos" / "en N min" / "en N h" / "en N hora(s)" / "en N hrs"
+        if lower.range(
+            of: #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\b"#,
+            options: .regularExpression
+        ) != nil { return true }
         if matches(lower, [
             "esta tarde", "esta noche", "esta mañana", "esta manana",
             "al mediodía", "al mediodia", "al atardecer",
@@ -927,11 +983,31 @@ enum NovaResponder {
             rest = rest.trimmingCharacters(in: .whitespacesAndNewlines)
                 .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
 
-            let verb = capitalizeFirst(
-                matchedLower.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
-            if rest.isEmpty { return verb }
-            return "\(verb) \(rest)"
+            // Normalización de verbo: "ir a buscar X" en español natural es
+            // simplemente "Buscar a X" (decir "Ir a buscar a X" es redundante).
+            // Cuando el trigger fue "ir a buscar " consumimos su "a" leading
+            // del rest si quedó, para evitar "Buscar a a Agustina".
+            let trimmedTriggerLower = matchedLower.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedVerb: String
+            if trimmedTriggerLower == "ir a buscar" {
+                normalizedVerb = "Buscar a"
+                let leadingPrefixes = ["a la ", "a las ", "a el ", "a los ", "al ", "a "]
+                for p in leadingPrefixes where rest.lowercased().hasPrefix(p) {
+                    rest = String(rest.dropFirst(p.count))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    break
+                }
+            } else {
+                normalizedVerb = capitalizeFirst(trimmedTriggerLower)
+            }
+
+            // Capitalizar primera palabra de `rest` si es minúscula y no es
+            // una preposición/artículo — captura "agustina" → "Agustina"
+            // cuando no fue normalizado por el artículo previo.
+            rest = capitalizeFirstNounIfLower(rest)
+
+            if rest.isEmpty { return normalizedVerb }
+            return "\(normalizedVerb) \(rest)"
         }
 
         // Caso B: trigger tipo "tengo X" — el título es X.
@@ -987,6 +1063,31 @@ enum NovaResponder {
         return first.uppercased() + collapsed.dropFirst()
     }
 
+    /// Capitaliza la primera palabra de `text` SOLO si es un sustantivo (no
+    /// preposición ni artículo). Captura "agustina" → "Agustina" cuando no
+    /// hubo artículo previo que dispare `normalizeProperNounsAfterArticles`.
+    /// Conservador: si la palabra es preposición/artículo conocida, queda
+    /// como está (otro paso del pipeline ya la habrá manejado).
+    private static func capitalizeFirstNounIfLower(_ text: String) -> String {
+        let prepositionsAndArticles: Set<String> = [
+            "a", "con", "de", "del", "para", "por", "en", "y", "o",
+            "el", "la", "los", "las", "un", "una", "unos", "unas",
+            "al"
+        ]
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let firstWord = parts.first else { return trimmed }
+        let firstStr = String(firstWord)
+        if prepositionsAndArticles.contains(firstStr.lowercased()) { return trimmed }
+        guard let firstChar = firstStr.first, firstChar.isLowercase else { return trimmed }
+        let cap = firstStr.prefix(1).uppercased() + firstStr.dropFirst()
+        if parts.count > 1 {
+            return cap + " " + String(parts[1])
+        }
+        return cap
+    }
+
     private static let dateTimeMarkerPatterns: [String] = [
         #"\bhoy\b"#,
         #"\bmañana\b"#,
@@ -1001,13 +1102,23 @@ enum NovaResponder {
         #"\bal final del d(í|i)a\b"#,
         #"\bal amanecer\b"#,
         // Hora explícita "a las HH(:MM)(am|pm|hrs)" — el orden importa, va antes de "tipo".
-        #"\ba la?s? \d{1,2}(:\d{2})?\s*(am|pm|hrs|de la (mañana|manana|tarde|noche))?\b"#,
+        #"\ba la?s? \d{1,2}(:\d{2})?\s*(am|pm|hrs?|de la (mañana|manana|tarde|noche))?\b"#,
         #"\b\d{1,2}:\d{2}\b"#,
         // Hora coloquial: "tipo 3", "tipo las 3", "como a las 3", "a eso de las 3",
         // "cerca de las 3", "alrededor de las 3".
         #"\btipo (las? )?\d{1,2}(:\d{2})?\b"#,
         #"\bcomo a la?s? \d{1,2}(:\d{2})?\b"#,
-        #"\b(a eso de|cerca de|alrededor de|por) la?s? \d{1,2}(:\d{2})?\b"#
+        #"\b(a eso de|cerca de|alrededor de|por) la?s? \d{1,2}(:\d{2})?\b"#,
+        // Relativo "en N minutos" / "en N horas" — orden importa: va ANTES
+        // que "en N" suelto para que se consuma con la unidad.
+        #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\b"#,
+        // "N hrs" / "N hs" sueltos (24h, ej. "20 hrs").
+        #"\b\d{1,2}\s*hrs?\b"#,
+        #"\b\d{1,2}\s*hs\b"#,
+        // "en N" suelto (sin unidad) — cuando "en" + número aparece pegado
+        // a una acción, es un horario o un offset; en cualquier caso, no debe
+        // quedar en el título. Se procesa al final para no comerse "en N min".
+        #"\ben\s+\d{1,2}\b"#
     ]
 
     /// Frases que activan recordatorio. Las quitamos del título porque no son
@@ -1110,6 +1221,25 @@ enum NovaResponder {
     private static func extractDateTime(from lower: String) -> Date? {
         let cal = Calendar.current
         let now = Date()
+
+        // Offset relativo a "ahora": "en N minutos" / "en N min" / "en N hora(s)"
+        // / "en N h" / "en N hrs". Solo se aplica cuando hay unidad explícita —
+        // "en 20" suelto se trata como ambiguo en `parse()`.
+        if let mins = firstCaptureInt(
+            lower,
+            pattern: #"\ben\s+(\d{1,3})\s+(min|minutos?)\b"#,
+            group: 1
+        ), mins > 0, mins <= 720 {
+            return cal.date(byAdding: .minute, value: mins, to: now)
+        }
+        if let hours = firstCaptureInt(
+            lower,
+            pattern: #"\ben\s+(\d{1,2})\s+(h|hs|hrs?|horas?)\b"#,
+            group: 1
+        ), hours > 0, hours <= 12 {
+            return cal.date(byAdding: .hour, value: hours, to: now)
+        }
+
         var dayBase: Date? = nil
         var dayWasExplicit = false
 
@@ -1265,6 +1395,17 @@ enum NovaResponder {
             }
             return isPM ? (n + 12, 0) : (n, 0)
         }
+        // 5b) Notación 24h coloquial: "20 hrs", "20 hs", "20:00 hrs", "8 hrs"
+        //     — el número se toma literal (no se aplica adjustAmPm). Solo
+        //     0..23 son válidos.
+        if let n = firstCaptureInt(text, pattern: #"\b(\d{1,2})\s*hrs?\b"#, group: 1),
+           n >= 0, n < 24 {
+            return (n, 0)
+        }
+        if let n = firstCaptureInt(text, pattern: #"\b(\d{1,2})\s*hs\b"#, group: 1),
+           n >= 0, n < 24 {
+            return (n, 0)
+        }
         // 6) "esta tarde" / "esta noche" / "al mediodía"
         if text.contains("esta noche") { return (20, 0) }
         if text.contains("esta tarde") { return (16, 0) }
@@ -1358,7 +1499,32 @@ enum NovaResponder {
         let withoutPrefix = chunk
             .replacingOccurrences(of: #"^(?i)en\s+"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return withoutPrefix.isEmpty ? nil : cleanupTitle(withoutPrefix)
+        guard !withoutPrefix.isEmpty else { return nil }
+        // Rechazo de "ubicaciones" que son en realidad expresiones horarias:
+        // "en 20" / "en 20 minutos" / "en 2 horas" / "en 20 hrs" — son tiempo,
+        // no lugar. Sin este filtro, FocusEvent.location quedaría con "20".
+        if withoutPrefix.range(
+            of: #"^\d{1,3}(\s+(min|minutos?|h|hs|hrs?|horas?))?$"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil {
+            return nil
+        }
+        return cleanupTitle(withoutPrefix)
+    }
+
+    /// Detecta el patrón "en N" (N en 13..23) cuando NO viene acompañado de
+    /// unidad ("minutos", "horas", "hrs"…). En ese caso "en 20" es ambiguo:
+    /// puede significar a las 20:00 o en 20 minutos. El caller pide
+    /// clarificación al usuario.
+    fileprivate static func ambiguousEnNValue(in lower: String) -> Int? {
+        // Si ya tiene unidad explícita, NO es ambiguo (ya lo manejó extractDateTime).
+        if lower.range(
+            of: #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\b"#,
+            options: .regularExpression
+        ) != nil { return nil }
+        guard let n = firstCaptureInt(lower, pattern: #"\ben\s+(\d{1,2})\b"#, group: 1),
+              n >= 13, n <= 23 else { return nil }
+        return n
     }
 }
 
@@ -1491,8 +1657,27 @@ final class FocusDataStore: ObservableObject {
             lastIntentKind: kind,
             lastEventId: eventId,
             lastTaskId: taskId,
+            pendingTitle: nil,
+            pendingSection: nil,
+            pendingWantsReminder: false,
             updatedAt: Date()
         )
+    }
+
+    /// Guarda título tentativo cuando Nova respondió con clarify (no se ejecutó
+    /// nada). El siguiente turno con solo hora ("a las 20", "en 20 minutos")
+    /// completará la acción usando este título.
+    func setPendingNovaContext(
+        title: String,
+        section: EventSection? = nil,
+        wantsReminder: Bool = false
+    ) {
+        var ctx = novaContext
+        ctx.pendingTitle = title
+        ctx.pendingSection = section
+        ctx.pendingWantsReminder = wantsReminder
+        ctx.updatedAt = Date()
+        novaContext = ctx
     }
 
     func clearNovaContext() {

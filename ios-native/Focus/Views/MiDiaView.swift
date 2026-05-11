@@ -603,6 +603,22 @@ struct MiDiaView: View {
             )
 
         case .clarify(let reason):
+            // Guarda título tentativo para que el siguiente turno pueda
+            // completar la acción ("a las 20" → reusa título de la pregunta).
+            switch reason {
+            case .eventNeedsTime(let title, _),
+                 .eventNeedsDateTime(let title),
+                 .ambiguousTime24OrRelative(let title, _):
+                let wantsReminder = userText.lowercased().contains("acu")
+                    || userText.lowercased().contains("recu")
+                store.setPendingNovaContext(
+                    title: title,
+                    section: NovaResponder.guessSection(for: userText),
+                    wantsReminder: wantsReminder
+                )
+            case .taskNeedsTitle, .eventNeedsTitle, .noContext, .unclear:
+                break
+            }
             return InlineNovaResponse(
                 userText: userText,
                 summary: clarifyHeadline(reason),
@@ -630,12 +646,16 @@ struct MiDiaView: View {
 
     private func clarifyHeadline(_ reason: NovaIntent.ClarifyReason) -> String {
         switch reason {
-        case .taskNeedsTitle:           return "¿Qué tarea querés que anote?"
-        case .eventNeedsTitle:          return "¿Qué evento querés agendar?"
+        case .taskNeedsTitle:           return "¿Qué tarea quieres que anote?"
+        case .eventNeedsTitle:          return "¿Qué evento quieres agendar?"
         case .eventNeedsTime(let title, _):
             return "Tengo «\(title)». ¿A qué hora?"
-        case .eventNeedsDateTime:       return "Necesito el día y la hora."
-        case .noContext:                return "No estoy seguro a qué te referís."
+        case .eventNeedsDateTime(let title):
+            return "Tengo «\(title)». ¿Cuándo?"
+        case .ambiguousTime24OrRelative(_, let value):
+            let hourPadded = String(format: "%02d:00", value)
+            return "¿Te refieres a las \(hourPadded) o en \(value) minutos?"
+        case .noContext:                return "No estoy seguro a qué te refieres."
         case .unclear:                  return "No estoy seguro de qué hacer."
         }
     }
@@ -643,18 +663,20 @@ struct MiDiaView: View {
     private func clarifyDetail(_ reason: NovaIntent.ClarifyReason) -> String {
         switch reason {
         case .taskNeedsTitle:
-            return "Probá: «crea tarea estudiar cálculo»."
+            return "Prueba: «crea tarea estudiar cálculo»."
         case .eventNeedsTitle:
-            return "Probá: «agenda reunión con Juan mañana a las 12»."
+            return "Prueba: «agenda reunión con Juan mañana a las 12»."
         case .eventNeedsTime(_, let date):
             let day = DateFormatters.weekdayDay.string(from: date).lowercased()
-            return "Decime una hora para el \(day). Ej: «a las 14» o «tipo 3»."
+            return "Dime una hora para el \(day). Ej: «a las 14» o «tipo 3»."
+        case .ambiguousTime24OrRelative(_, let value):
+            return "Responde «a las \(value)» (hora 24h) o «en \(value) minutos» (relativo a ahora)."
         case .noContext:
-            return "Volvé a decirme qué querés crear. Ej: «agenda reunión mañana a las 12»."
+            return "Vuelve a decirme qué quieres crear. Ej: «agenda reunión mañana a las 12»."
         case .eventNeedsDateTime(let title):
-            return "Decime cuándo. Ej: «\(title) mañana a las 12»."
+            return "Dime cuándo. Ej: «\(title) mañana a las 12»."
         case .unclear:
-            return "Puedo crear tareas, agendar eventos u ordenar tu día. Decime con más detalle."
+            return "Puedo crear tareas, agendar eventos u ordenar tu día. Dime con más detalle."
         }
     }
 
