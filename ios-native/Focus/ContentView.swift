@@ -10,7 +10,7 @@ struct ContentView: View {
                     .transition(.opacity)
                     .zIndex(1)
             } else {
-                HomeView()
+                MainTabView()
                     .transition(.opacity)
                     .zIndex(0)
             }
