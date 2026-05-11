@@ -14,11 +14,15 @@ enum FocusLocalStore {
 
     /// Claves persistidas. Cualquier dato nuevo a persistir agregar acá con prefix versionado.
     enum Key: String, CaseIterable {
-        case tasks         = "focus.v1.tasks"
-        case events        = "focus.v1.events"
-        case suggestions   = "focus.v1.suggestions"
-        case novaMessages  = "focus.v1.novaMessages"
-        case settings      = "focus.v1.settings"
+        case tasks                  = "focus.v1.tasks"
+        case events                 = "focus.v1.events"
+        case suggestions            = "focus.v1.suggestions"
+        case novaMessages           = "focus.v1.novaMessages"
+        case settings               = "focus.v1.settings"
+        /// Títulos de eventos/tareas demo que el usuario descartó. Sobreviven
+        /// al cerrar la app — los ejemplos descartados NO vuelven a aparecer.
+        case dismissedDemoEvents    = "focus.v1.dismissedDemoEvents"
+        case dismissedDemoTasks     = "focus.v1.dismissedDemoTasks"
     }
 
     // MARK: - Encoders cacheados (mismo motivo que DateFormatters)

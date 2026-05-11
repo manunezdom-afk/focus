@@ -10,12 +10,9 @@ struct MiDiaView: View {
     /// Última respuesta inline de Nova. Se reemplaza al enviar otra petición
     /// y se puede cerrar manualmente. NO está en el store; es estado de UI.
     @State private var inlineResponse: InlineNovaResponse? = nil
-    /// Títulos de items demo "descartados" en esta sesión. Permite que el
-    /// usuario pueda quitar ejemplos de Mi Día con swipe (los UUIDs de demo
-    /// se regeneran en cada call, por eso filtramos por título). Se pierde
-    /// al cerrar la app — al regresar, los ejemplos vuelven.
-    @State private var dismissedDemoEventTitles: Set<String> = []
-    @State private var dismissedDemoTaskTitles: Set<String> = []
+    // Descartes de demo viven ahora en `FocusDataStore` (persisten a disco).
+    // Acceso: `store.dismissedDemoEventTitles` / `store.dismissedDemoTaskTitles`
+    // y `store.dismissDemoEvent(title:)` / `store.dismissDemoTask(title:)`.
 
     /// 3 bloques visibles por defecto — más allá de eso es ruido.
     private let visibleEventsLimit: Int = 3
@@ -26,23 +23,23 @@ struct MiDiaView: View {
     // MARK: - Source of truth
 
     /// Eventos visibles: del usuario si tiene, demo si no (excluyendo los
-    /// que el usuario descartó en esta sesión).
+    /// títulos descartados — persisten a disco vía store).
     private var displayEvents: [FocusEvent] {
         if store.hasUserEvents {
             return store.todayEvents()
         }
         return DemoDataProvider.shared.exampleTodayEvents()
-            .filter { !dismissedDemoEventTitles.contains($0.title) }
+            .filter { !store.dismissedDemoEventTitles.contains($0.title) }
     }
 
     /// Pendientes visibles: del usuario si tiene, demo si no (excluyendo
-    /// descartados).
+    /// descartados — persisten a disco vía store).
     private var displayPendingTasks: [FocusTask] {
         if store.hasUserTasks {
             return store.pendingTodayTasks
         }
         return DemoDataProvider.shared.exampleTodayTasks()
-            .filter { !$0.done && !dismissedDemoTaskTitles.contains($0.title) }
+            .filter { !$0.done && !store.dismissedDemoTaskTitles.contains($0.title) }
     }
 
     private var nextBlock: FocusEvent? {
@@ -104,7 +101,7 @@ struct MiDiaView: View {
                                 store.deleteEvent(next.id)
                             } else {
                                 withAnimation(.easeOut(duration: 0.22)) {
-                                    dismissedDemoEventTitles.insert(next.title)
+                                    store.dismissDemoEvent(title: next.title)
                                 }
                             }
                             toast.success("Evento eliminado", symbol: "trash.fill")
@@ -113,7 +110,7 @@ struct MiDiaView: View {
                                 if store.hasUserEvents {
                                     store.deleteEvent(next.id)
                                 } else {
-                                    dismissedDemoEventTitles.insert(next.title)
+                                    store.dismissDemoEvent(title: next.title)
                                 }
                                 toast.success("Evento eliminado", symbol: "trash.fill")
                             }
@@ -600,7 +597,7 @@ struct MiDiaView: View {
                                 store.deleteEvent(event.id)
                             } else {
                                 withAnimation(.easeOut(duration: 0.22)) {
-                                    dismissedDemoEventTitles.insert(event.title)
+                                    store.dismissDemoEvent(title: event.title)
                                 }
                             }
                             toast.success("Evento eliminado", symbol: "trash.fill")
@@ -615,7 +612,7 @@ struct MiDiaView: View {
                                 if store.hasUserEvents {
                                     store.deleteEvent(event.id)
                                 } else {
-                                    dismissedDemoEventTitles.insert(event.title)
+                                    store.dismissDemoEvent(title: event.title)
                                 }
                                 toast.success("Evento eliminado", symbol: "trash.fill")
                             } label: {
@@ -694,7 +691,7 @@ struct MiDiaView: View {
                                 store.deleteTask(task.id)
                             } else {
                                 withAnimation(.easeOut(duration: 0.22)) {
-                                    dismissedDemoTaskTitles.insert(task.title)
+                                    store.dismissDemoTask(title: task.title)
                                 }
                             }
                             toast.success("Tarea eliminada", symbol: "trash.fill")
@@ -708,7 +705,7 @@ struct MiDiaView: View {
                                 if store.hasUserTasks {
                                     store.deleteTask(task.id)
                                 } else {
-                                    dismissedDemoTaskTitles.insert(task.title)
+                                    store.dismissDemoTask(title: task.title)
                                 }
                                 toast.success("Tarea eliminada", symbol: "trash.fill")
                             } label: {

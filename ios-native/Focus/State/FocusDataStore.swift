@@ -1109,6 +1109,11 @@ final class FocusDataStore: ObservableObject {
     /// True mientras Nova "tipea" la respuesta. Se usa en el Chat para
     /// mostrar el indicador de 3 puntos.
     @Published var isNovaTyping: Bool = false
+    /// Títulos de ítems demo descartados por el usuario. **Sí persisten** a
+    /// disco — si el usuario hace swipe-borrar a un ejemplo, no debe volver
+    /// a aparecer al reabrir la app. Solo aplica cuando `!hasUserData`.
+    @Published var dismissedDemoEventTitles: Set<String>
+    @Published var dismissedDemoTaskTitles: Set<String>
 
     init() {
         self.events = FocusLocalStore.load([FocusEvent].self, forKey: .events) ?? []
@@ -1135,6 +1140,29 @@ final class FocusDataStore: ObservableObject {
             ?? DemoDataProvider.shared.welcomeNovaMessages()
         self.settings = FocusLocalStore.load(AppSettings.self, forKey: .settings)
             ?? .defaults
+
+        // Descartes de demo: cargar persistidos para que sobrevivan al cierre
+        // de app. Si el usuario borró un ejemplo, no debe volver al reabrir.
+        let storedDismissedEvents = FocusLocalStore.load([String].self, forKey: .dismissedDemoEvents) ?? []
+        let storedDismissedTasks = FocusLocalStore.load([String].self, forKey: .dismissedDemoTasks) ?? []
+        self.dismissedDemoEventTitles = Set(storedDismissedEvents)
+        self.dismissedDemoTaskTitles = Set(storedDismissedTasks)
+    }
+
+    private func persistDismissedDemoEvents() {
+        FocusLocalStore.save(Array(dismissedDemoEventTitles), forKey: .dismissedDemoEvents)
+    }
+    private func persistDismissedDemoTasks() {
+        FocusLocalStore.save(Array(dismissedDemoTaskTitles), forKey: .dismissedDemoTasks)
+    }
+
+    func dismissDemoEvent(title: String) {
+        dismissedDemoEventTitles.insert(title)
+        persistDismissedDemoEvents()
+    }
+    func dismissDemoTask(title: String) {
+        dismissedDemoTaskTitles.insert(title)
+        persistDismissedDemoTasks()
     }
 
     // MARK: - Nova context (memoria de sesión)
@@ -1470,6 +1498,8 @@ final class FocusDataStore: ObservableObject {
     /// Equivale a "como cuando instalaste la app por primera vez".
     /// **Importante**: NO pre-seedeamos sugerencias en el store. Las demos
     /// vuelven a aparecer como fallback dinámico vía `displaySuggestions`.
+    /// También se limpian los descartes de demo — al restablecer, los
+    /// ejemplos vuelven a estar visibles.
     func resetToDemoState() {
         FocusLocalStore.clearAll()
         events = []
@@ -1478,6 +1508,8 @@ final class FocusDataStore: ObservableObject {
         novaMessages = DemoDataProvider.shared.welcomeNovaMessages()
         settings = .defaults
         novaContext = NovaContext()
+        dismissedDemoEventTitles = []
+        dismissedDemoTaskTitles = []
         HapticManager.shared.success()
     }
 
@@ -1491,6 +1523,9 @@ final class FocusDataStore: ObservableObject {
         suggestions = []
         novaMessages = []
         settings = .defaults
+        novaContext = NovaContext()
+        dismissedDemoEventTitles = []
+        dismissedDemoTaskTitles = []
         HapticManager.shared.success()
     }
 }
