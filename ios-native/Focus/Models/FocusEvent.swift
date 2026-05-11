@@ -92,13 +92,22 @@ struct FocusEvent: Identifiable, Codable, Hashable {
     /// de inicio, sin rango). El usuario lo creó con "acuérdame"/"recuérdame"
     /// y conceptualmente es un recordatorio, no un bloque con duración.
     var isReminder: Bool?
+    /// `true` cuando Nova creó el evento sin que el usuario haya dado hora
+    /// fin explícita (no dijo "de X a Y", "hasta Y", "por N horas"). La UI
+    /// muestra solo la hora puntual aunque internamente el evento tenga
+    /// duración mínima para mantener orden en el timeline.
+    var inferredDuration: Bool?
 
     /// Origen efectivo del evento. Si `source` es nil (data legacy) lo
     /// tratamos como `.local`.
     var effectiveSource: EventSource { source ?? .local }
 
     /// True si la card debe mostrar solo la hora de inicio (sin "15:00–16:00").
-    var displayAsPointInTime: Bool { isReminder == true }
+    /// Es punto en el tiempo cuando es recordatorio O cuando la duración fue
+    /// inferida (no explícita).
+    var displayAsPointInTime: Bool {
+        isReminder == true || inferredDuration == true
+    }
 
     init(
         id: UUID = UUID(),
@@ -116,7 +125,8 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         externalEventId: String? = nil,
         url: String? = nil,
         lastSyncedAt: Date? = nil,
-        isReminder: Bool? = nil
+        isReminder: Bool? = nil,
+        inferredDuration: Bool? = nil
     ) {
         self.id = id
         self.title = title
@@ -134,6 +144,7 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         self.url = url
         self.lastSyncedAt = lastSyncedAt
         self.isReminder = isReminder
+        self.inferredDuration = inferredDuration
     }
 
     var timeRangeLabel: String {

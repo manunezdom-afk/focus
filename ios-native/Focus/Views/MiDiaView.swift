@@ -7,6 +7,10 @@ struct MiDiaView: View {
     @State private var focusBarText: String = ""
     @State private var showAllEvents: Bool = false
     @State private var showVoiceComingSoon: Bool = false
+    /// Evento que se está editando vía sheet. nil = sheet cerrado.
+    @State private var editingEvent: FocusEvent? = nil
+    /// Tarea que se está editando vía sheet. nil = sheet cerrado.
+    @State private var editingTask: FocusTask? = nil
     /// Última respuesta inline de Nova. Se reemplaza al enviar otra petición
     /// y se puede cerrar manualmente. NO está en el store; es estado de UI.
     @State private var inlineResponse: InlineNovaResponse? = nil
@@ -106,14 +110,18 @@ struct MiDiaView: View {
                             }
                             toast.success("Evento eliminado", symbol: "trash.fill")
                         } content: {
-                            ProximoBloqueCard(event: next) {
-                                if store.hasUserEvents {
-                                    store.deleteEvent(next.id)
-                                } else {
-                                    store.dismissDemoEvent(title: next.title)
+                            ProximoBloqueCard(
+                                event: next,
+                                onEdit: store.hasUserEvents ? { editingEvent = next } : nil,
+                                onDelete: {
+                                    if store.hasUserEvents {
+                                        store.deleteEvent(next.id)
+                                    } else {
+                                        store.dismissDemoEvent(title: next.title)
+                                    }
+                                    toast.success("Evento eliminado", symbol: "trash.fill")
                                 }
-                                toast.success("Evento eliminado", symbol: "trash.fill")
-                            }
+                            )
                         }
                         .padding(.horizontal, Theme.Spacing.xl)
                     }
@@ -134,6 +142,24 @@ struct MiDiaView: View {
             Button("Entendido", role: .cancel) {}
         } message: {
             Text("El dictado por voz para Nova está en preparación. Por ahora puedes escribir tu mensaje.")
+        }
+        // Sheets de edición — se abren desde el menú "Editar" de cualquier
+        // evento o tarea real en Mi Día.
+        .sheet(item: $editingEvent) { event in
+            NuevoEventoSheet(editing: event) { updated in
+                store.updateEvent(updated)
+                toast.success("Evento actualizado")
+            }
+            .presentationDetents([.medium, .large])
+            .presentationBackground(Theme.Colors.background)
+        }
+        .sheet(item: $editingTask) { task in
+            NuevaTareaSheet(editing: task) { updated in
+                store.updateTask(updated)
+                toast.success("Tarea actualizada")
+            }
+            .presentationDetents([.medium])
+            .presentationBackground(Theme.Colors.background)
         }
     }
 
@@ -318,7 +344,7 @@ struct MiDiaView: View {
                 action: .openTasksList
             )
 
-        case .createEvent(let title, let when, let location, let section, let wantsReminder):
+        case .createEvent(let title, let when, let explicitEnd, let location, let section, let wantsReminder):
             guard let date = when else {
                 return InlineNovaResponse(
                     userText: userText,
@@ -328,13 +354,31 @@ struct MiDiaView: View {
                 )
             }
             let cal = Calendar.current
-            // Recordatorios → duración interna mínima (5 min) + flag para que
-            // la UI muestre solo la hora puntual ("15:00"). Eventos normales
-            // → duración por defecto 1 hora ("15:00 – 16:00").
-            let durationMinutes = wantsReminder ? 5 : 60
-            let end = cal.date(byAdding: .minute, value: durationMinutes, to: date) ?? date
-            // Para recordatorios usamos la sección que detectó el parser; si
-            // no hay nada, .reminder (más semántico que .reunion).
+            // Tres rutas:
+            // 1) Recordatorio (wantsReminder o intención puntual) → duración
+            //    interna mínima 5 min + isReminder=true, UI como punto.
+            // 2) Rango explícito ("de 3 a 4", "hasta 4", "por 1h") → end real,
+            //    UI como rango. inferredDuration = false.
+            // 3) Sin end-time explícita y sin reminder → duración interna 5 min
+            //    pero `inferredDuration: true` para que la UI lo muestre como
+            //    punto puntual.
+            let end: Date
+            let isReminderFlag: Bool?
+            let inferredFlag: Bool?
+            if wantsReminder {
+                end = cal.date(byAdding: .minute, value: 5, to: date) ?? date
+                isReminderFlag = true
+                inferredFlag = nil
+            } else if let explicit = explicitEnd, explicit > date {
+                end = explicit
+                isReminderFlag = nil
+                inferredFlag = false
+            } else {
+                end = cal.date(byAdding: .minute, value: 5, to: date) ?? date
+                isReminderFlag = nil
+                inferredFlag = true
+            }
+
             let effectiveSection: EventSection
             if wantsReminder {
                 effectiveSection = section ?? .reminder
@@ -347,7 +391,8 @@ struct MiDiaView: View {
                 endTime: end,
                 section: effectiveSection,
                 location: location,
-                isReminder: wantsReminder ? true : nil
+                isReminder: isReminderFlag,
+                inferredDuration: inferredFlag
             )
             store.addEvent(event)
             store.updateNovaContext(
@@ -678,6 +723,13 @@ struct MiDiaView: View {
                             )
                         }
                         .contextMenu {
+                            if store.hasUserEvents {
+                                Button {
+                                    editingEvent = event
+                                } label: {
+                                    Label("Editar", systemImage: "pencil")
+                                }
+                            }
                             Button(role: .destructive) {
                                 if store.hasUserEvents {
                                     store.deleteEvent(event.id)
@@ -771,6 +823,13 @@ struct MiDiaView: View {
                             }
                         }
                         .contextMenu {
+                            if store.hasUserTasks {
+                                Button {
+                                    editingTask = task
+                                } label: {
+                                    Label("Editar", systemImage: "pencil")
+                                }
+                            }
                             Button(role: .destructive) {
                                 if store.hasUserTasks {
                                     store.deleteTask(task.id)
@@ -823,6 +882,8 @@ struct MiDiaView: View {
 
 private struct ProximoBloqueCard: View {
     let event: FocusEvent
+    /// Si está presente, mostrar opción "Editar" en el menú. Para demos es nil.
+    let onEdit: (() -> Void)?
     let onDelete: () -> Void
 
     @State private var showDeleteConfirm: Bool = false
@@ -839,8 +900,15 @@ private struct ProximoBloqueCard: View {
                     .font(Theme.Typography.timestamp)
                     .foregroundStyle(Theme.Colors.textPrimary)
 
-                // Menú overflow ("·· · ") — alternativa al swipe para borrar.
+                // Menú overflow (· · ·) — Editar (si aplica) + Eliminar.
                 Menu {
+                    if let onEdit {
+                        Button {
+                            onEdit()
+                        } label: {
+                            Label("Editar", systemImage: "pencil")
+                        }
+                    }
                     Button(role: .destructive) {
                         onDelete()
                     } label: {
@@ -859,10 +927,11 @@ private struct ProximoBloqueCard: View {
                     .font(Theme.Typography.title2)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .lineLimit(2)
-                // Contador limpio: minutos (sin segundos). Recordatorios usan
-                // formato "Hoy a las HH:MM" / "Mañana a las HH:MM". `TimelineView`
-                // con period .everyMinute alcanza para textos al nivel de minuto.
-                TimelineView(.periodic(from: .now, by: 30)) { context in
+                // Contador: tick cada 1s para que los eventos EN CURSO
+                // muestren minutos + segundos en tiempo real. Eventos
+                // futuros y recordatorios actualizan al mismo ritmo pero
+                // su texto solo cambia al cruzar minuto/hora.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(countdownLabel(now: context.date))
                         .font(Theme.Typography.subheadEmphasized)
                         .foregroundStyle(Theme.Colors.focusAccent)
@@ -893,6 +962,11 @@ private struct ProximoBloqueCard: View {
         )
         .focusCardShadow()
         .contextMenu {
+            if let onEdit {
+                Button(action: onEdit) {
+                    Label("Editar", systemImage: "pencil")
+                }
+            }
             Button(role: .destructive, action: onDelete) {
                 Label("Eliminar", systemImage: "trash")
             }
@@ -911,22 +985,22 @@ private struct ProximoBloqueCard: View {
         return Theme.Colors.focusAccent
     }
 
-    /// Contador limpio sin segundos. Para recordatorios usa formato más
-    /// humano ("Hoy a las 15:00" / "Mañana a las 15:00").
+    /// Contador con segundos solo cuando el evento está EN CURSO. Recordatorios
+    /// y eventos puntuales: formato absoluto humano sin segundos.
     private func countdownLabel(now: Date) -> String {
         let cal = Calendar.current
-        // En curso (solo eventos con duración real).
+        // En curso → minutos + segundos ("Termina en 24 min 18 s")
         if !event.displayAsPointInTime,
            let end = event.endTime, event.startTime <= now && end >= now {
-            let totalMinutes = max(0, Int(end.timeIntervalSince(now) / 60))
-            if totalMinutes == 0 { return "Termina pronto" }
-            return "Queda " + formatHM(minutes: totalMinutes)
+            let totalSeconds = max(0, Int(end.timeIntervalSince(now)))
+            if totalSeconds == 0 { return "Termina ahora" }
+            return "Termina en " + formatMS(seconds: totalSeconds)
         }
         let diff = event.startTime.timeIntervalSince(now)
         if diff <= 0 {
             return event.displayAsPointInTime ? "Es ahora" : "Empezó ya"
         }
-        // Recordatorios: formato humano absoluto.
+        // Recordatorios y eventos sin duración explícita: formato absoluto.
         if event.displayAsPointInTime {
             let time = DateFormatters.hourMinute.string(from: event.startTime)
             if cal.isDateInToday(event.startTime) { return "Hoy a las \(time)" }
@@ -934,10 +1008,24 @@ private struct ProximoBloqueCard: View {
             let day = DateFormatters.weekdayDay.string(from: event.startTime).lowercased()
             return "El \(day) a las \(time)"
         }
-        // Eventos normales: "Empieza en N min" / "N h N min".
+        // Eventos futuros con duración: "Empieza en N min" / "N h N min" (sin
+        // segundos para no parpadear el texto cada segundo durante horas).
         let totalMinutes = Int(diff / 60)
         if totalMinutes == 0 { return "Empieza pronto" }
         return "Empieza en " + formatHM(minutes: totalMinutes)
+    }
+
+    /// Formato minutos + segundos para eventos EN CURSO.
+    /// "5 min 42 s" / "1 min 5 s" / "42 s".
+    private func formatMS(seconds: Int) -> String {
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        let s = seconds % 60
+        var parts: [String] = []
+        if h > 0 { parts.append("\(h) h") }
+        if h > 0 || m > 0 { parts.append("\(m) min") }
+        parts.append("\(s) s")
+        return parts.joined(separator: " ")
     }
 
     private func formatHM(minutes: Int) -> String {

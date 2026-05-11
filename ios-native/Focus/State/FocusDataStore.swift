@@ -112,9 +112,13 @@ enum NovaIntent: Hashable {
     case createTask(title: String, dueDate: Date?, recurrence: RecurrenceHint?, wantsReminder: Bool)
     /// Crear evento. `when` es opcional — si no lo extrajimos, Nova pide
     /// aclaración. `section` también opcional con default `.reunion`.
+    /// `endTime` es no-nil solo cuando el usuario dio hora-fin explícita
+    /// ("de 3 a 4", "hasta las 4", "por 1h"). Si es nil, el evento se
+    /// muestra como punto en el tiempo.
     case createEvent(
         title: String,
         when: Date?,
+        endTime: Date?,
         location: String?,
         section: EventSection?,
         wantsReminder: Bool
@@ -293,7 +297,15 @@ enum NovaResponder {
             if when == nil {
                 return .clarify(reason: .eventNeedsDateTime(title: lastTitle))
             }
-            return .createEvent(title: lastTitle, when: when, location: location, section: section, wantsReminder: wantsReminder)
+            let explicitEnd = when.flatMap { extractExplicitEndTime(from: lower, startTime: $0) }
+            return .createEvent(
+                title: lastTitle,
+                when: when,
+                endTime: explicitEnd,
+                location: location,
+                section: section,
+                wantsReminder: wantsReminder
+            )
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -412,7 +424,15 @@ enum NovaResponder {
                 if !hasExplicitTime, isAtDayDefault(partial) {
                     return .clarify(reason: .eventNeedsTime(title: title, partialDate: partial))
                 }
-                return .createEvent(title: title, when: partial, location: location, section: section, wantsReminder: wantsReminder)
+                let explicitEnd = extractExplicitEndTime(from: lower, startTime: partial)
+                return .createEvent(
+                    title: title,
+                    when: partial,
+                    endTime: explicitEnd,
+                    location: location,
+                    section: section,
+                    wantsReminder: wantsReminder
+                )
             }
             return .clarify(reason: .eventNeedsDateTime(title: title))
         }
@@ -439,7 +459,15 @@ enum NovaResponder {
             )
             if hasExplicitTime, let date = when {
                 let location = extractLocation(from: trimmed)
-                return .createEvent(title: fullTitle, when: date, location: location, section: .personal, wantsReminder: wantsReminder)
+                let explicitEnd = extractExplicitEndTime(from: lower, startTime: date)
+                return .createEvent(
+                    title: fullTitle,
+                    when: date,
+                    endTime: explicitEnd,
+                    location: location,
+                    section: .personal,
+                    wantsReminder: wantsReminder
+                )
             }
             let recurrence = detectRecurrence(lower)
             return .createTask(title: fullTitle, dueDate: when, recurrence: recurrence, wantsReminder: wantsReminder)
@@ -456,7 +484,15 @@ enum NovaResponder {
             if title.isEmpty {
                 return .clarify(reason: .eventNeedsTitle)
             }
-            return .createEvent(title: title, when: when, location: location, section: section, wantsReminder: wantsReminder)
+            let explicitEnd = extractExplicitEndTime(from: lower, startTime: when)
+            return .createEvent(
+                title: title,
+                when: when,
+                endTime: explicitEnd,
+                location: location,
+                section: section,
+                wantsReminder: wantsReminder
+            )
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -491,7 +527,7 @@ enum NovaResponder {
                 "Listo, agrego «\(title)»\(dueBit) a tus pendientes\(recBit).\(remBit)",
                 "La meto como tarea\(dueBit)\(recBit). Si querés cambiar la prioridad, decime.\(remBit)"
             ])
-        case .createEvent(let title, let when, let location, let section, let wantsReminder):
+        case .createEvent(let title, let when, _, let location, let section, let wantsReminder):
             let timeBit = when.map { "el \(DateFormatters.weekdayDay.string(from: $0).lowercased()) a las \(DateFormatters.hourMinute.string(from: $0))" } ?? "cuando me digas"
             let placeBit = location.map { " en \($0)" } ?? ""
             let sectionBit = section.map { " (\($0.displayName.lowercased()))" } ?? ""
@@ -719,6 +755,44 @@ enum NovaResponder {
     }
 
     // MARK: - Time markers
+
+    /// Si el texto incluye un rango/duración explícita ("de 3 a 4",
+    /// "hasta las 4", "por 1 hora"), devuelve el endTime calculado a partir
+    /// del start. `nil` cuando el usuario solo dio hora de inicio.
+    private static func extractExplicitEndTime(from lower: String, startTime: Date) -> Date? {
+        let cal = Calendar.current
+        // Caso 1: "de HH a HH(:MM)" / "de las HH a las HH"
+        if let endH = firstCaptureInt(
+            lower,
+            pattern: #"de (la?s? )?\d{1,2}(:\d{2})? a (la?s? )?(\d{1,2})(:\d{2})?"#,
+            group: 4
+        ), endH >= 0, endH < 24 {
+            let endM = firstCaptureInt(
+                lower,
+                pattern: #"de (la?s? )?\d{1,2}(:\d{2})? a (la?s? )?\d{1,2}:(\d{2})"#,
+                group: 4
+            ) ?? 0
+            let dayStart = cal.startOfDay(for: startTime)
+            let resolvedEndH = adjustAmPm(hour: endH, in: lower)
+            return cal.date(bySettingHour: resolvedEndH, minute: endM, second: 0, of: dayStart)
+        }
+        // Caso 2: "hasta las HH(:MM)"
+        if let endH = firstCaptureInt(lower, pattern: #"hasta (la?s? )?(\d{1,2})"#, group: 2),
+           endH >= 0, endH < 24 {
+            let endM = firstCaptureInt(lower, pattern: #"hasta (la?s? )?\d{1,2}:(\d{2})"#, group: 2) ?? 0
+            let dayStart = cal.startOfDay(for: startTime)
+            let resolvedEndH = adjustAmPm(hour: endH, in: lower)
+            return cal.date(bySettingHour: resolvedEndH, minute: endM, second: 0, of: dayStart)
+        }
+        // Caso 3: "por N hora(s)/minuto(s)" / "durante N hora(s)"
+        if let hours = firstCaptureInt(lower, pattern: #"(?:por|durante) (\d{1,2})\s?(h|horas?|hr|hrs)"#, group: 1) {
+            return cal.date(byAdding: .hour, value: hours, to: startTime)
+        }
+        if let mins = firstCaptureInt(lower, pattern: #"(?:por|durante) (\d{1,3})\s?(min|minutos?)"#, group: 1) {
+            return cal.date(byAdding: .minute, value: mins, to: startTime)
+        }
+        return nil
+    }
 
     /// True si el texto incluye marcador explícito de hora (no solo día).
     private static func hasTimeMarker(_ lower: String) -> Bool {
@@ -1508,6 +1582,14 @@ final class FocusDataStore: ObservableObject {
         tasks.removeAll { $0.id == id }
         persistTasks()
         cleanupStaleSuggestions()
+        HapticManager.shared.tick()
+    }
+
+    /// Actualiza una tarea existente. Si el id no existe, no hace nada.
+    func updateTask(_ task: FocusTask) {
+        guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        tasks[idx] = task
+        persistTasks()
         HapticManager.shared.tick()
     }
 

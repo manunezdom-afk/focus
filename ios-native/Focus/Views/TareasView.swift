@@ -24,6 +24,8 @@ struct TareasView: View {
     @State private var filter: TaskFilter = .pending
     @State private var showCreate = false
     @State private var expandedTaskIds: Set<UUID> = []
+    /// Tarea en edición. nil = sheet cerrado.
+    @State private var editingTask: FocusTask? = nil
 
     /// Si el usuario no creó nada todavía, mostramos ejemplos.
     private var displayTasks: [FocusTask] {
@@ -70,6 +72,14 @@ struct TareasView: View {
                 NuevaTareaSheet { newTask in
                     store.addTask(newTask)
                     toast.success("Tarea creada")
+                }
+                .presentationDetents([.medium])
+                .presentationBackground(Theme.Colors.background)
+            }
+            .sheet(item: $editingTask) { task in
+                NuevaTareaSheet(editing: task) { updated in
+                    store.updateTask(updated)
+                    toast.success("Tarea actualizada")
                 }
                 .presentationDetents([.medium])
                 .presentationBackground(Theme.Colors.background)
@@ -172,6 +182,21 @@ struct TareasView: View {
                             },
                             onExpand: { toggleExpand(task.id) }
                         )
+                    }
+                    .contextMenu {
+                        if store.hasUserTasks {
+                            Button {
+                                editingTask = task
+                            } label: {
+                                Label("Editar", systemImage: "pencil")
+                            }
+                        }
+                        Button(role: .destructive) {
+                            store.deleteTask(task.id)
+                            toast.success("Tarea eliminada", symbol: "trash.fill")
+                        } label: {
+                            Label("Eliminar", systemImage: "trash")
+                        }
                     }
                 }
             }
@@ -345,12 +370,44 @@ private struct TaskRowFull: View {
 
 struct NuevaTareaSheet: View {
     @Environment(\.dismiss) private var dismiss
+    /// Si está editando, conservamos id + done + subtasks para que el update
+    /// no pierda esos campos.
+    private let editingId: UUID?
+    private let editingDone: Bool
+    private let editingDoneAt: Date?
+    private let editingSubtasks: [FocusSubtask]
+    private let editingDueDate: Date?
+    private let editingDueTime: Date?
     let onSave: (FocusTask) -> Void
 
     @State private var title: String = ""
     @State private var notes: String = ""
     @State private var category: TaskCategory = .hoy
     @State private var priority: TaskPriority = .media
+
+    init(onSave: @escaping (FocusTask) -> Void) {
+        self.editingId = nil
+        self.editingDone = false
+        self.editingDoneAt = nil
+        self.editingSubtasks = []
+        self.editingDueDate = nil
+        self.editingDueTime = nil
+        self.onSave = onSave
+    }
+
+    init(editing task: FocusTask, onSave: @escaping (FocusTask) -> Void) {
+        self.editingId = task.id
+        self.editingDone = task.done
+        self.editingDoneAt = task.doneAt
+        self.editingSubtasks = task.subtasks
+        self.editingDueDate = task.dueDate
+        self.editingDueTime = task.dueTime
+        self.onSave = onSave
+        _title = State(initialValue: task.title)
+        _notes = State(initialValue: task.notes ?? "")
+        _category = State(initialValue: task.category)
+        _priority = State(initialValue: task.priority)
+    }
 
     var body: some View {
         NavigationStack {
@@ -416,10 +473,16 @@ struct NuevaTareaSheet: View {
                         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !trimmed.isEmpty else { return }
                         let task = FocusTask(
+                            id: editingId ?? UUID(),
                             title: trimmed,
                             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes,
+                            done: editingDone,
+                            doneAt: editingDoneAt,
                             priority: priority,
-                            category: category
+                            category: category,
+                            dueDate: editingDueDate,
+                            dueTime: editingDueTime,
+                            subtasks: editingSubtasks
                         )
                         onSave(task)
                         dismiss()

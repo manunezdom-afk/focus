@@ -1,10 +1,25 @@
 import SwiftUI
 
 struct CalendarioView: View {
+    /// Modos de visualización del Calendario. Día/Semana/Mes son los típicos.
+    enum ViewMode: String, CaseIterable, Identifiable {
+        case day, week, month
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .day: return "Día"
+            case .week: return "Semana"
+            case .month: return "Mes"
+            }
+        }
+    }
+
     @EnvironmentObject private var store: FocusDataStore
     @EnvironmentObject private var toast: ToastManager
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
+    @State private var viewMode: ViewMode = .week
     @State private var showCreateEvent = false
+    @State private var editingEvent: FocusEvent? = nil
 
     /// Eventos a mostrar para el día seleccionado. Si el usuario no tiene
     /// ningún evento real, mostramos ejemplos para que vea la app llena.
@@ -43,14 +58,19 @@ struct CalendarioView: View {
                             .padding(.horizontal, Theme.Spacing.xl)
                             .padding(.top, Theme.Spacing.md)
 
-                        weekSelector
+                        modePicker
                             .padding(.horizontal, Theme.Spacing.xl)
 
-                        dateDetailHeader
-                            .padding(.horizontal, Theme.Spacing.xl)
-
-                        dayContent
-                            .padding(.horizontal, Theme.Spacing.xl)
+                        Group {
+                            switch viewMode {
+                            case .day:
+                                dayMode
+                            case .week:
+                                weekMode
+                            case .month:
+                                monthMode
+                            }
+                        }
 
                         Spacer(minLength: Theme.Spacing.bottomBarSafety)
                     }
@@ -60,12 +80,104 @@ struct CalendarioView: View {
                 NuevoEventoSheet(initialDate: selectedDate) { newEvent in
                     store.addEvent(newEvent)
                     toast.success("Evento creado")
-                    // Saltar al día del evento para que el usuario vea el resultado.
                     selectedDate = Calendar.current.startOfDay(for: newEvent.startTime)
                 }
                 .presentationDetents([.medium, .large])
                 .presentationBackground(Theme.Colors.background)
             }
+            .sheet(item: $editingEvent) { event in
+                NuevoEventoSheet(editing: event) { updated in
+                    store.updateEvent(updated)
+                    toast.success("Evento actualizado")
+                    selectedDate = Calendar.current.startOfDay(for: updated.startTime)
+                }
+                .presentationDetents([.medium, .large])
+                .presentationBackground(Theme.Colors.background)
+            }
+        }
+    }
+
+    // MARK: - Mode picker
+
+    private var modePicker: some View {
+        HStack(spacing: 0) {
+            ForEach(ViewMode.allCases) { mode in
+                modePickerButton(mode)
+            }
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(Theme.Colors.surfaceHigh)
+        )
+    }
+
+    private func modePickerButton(_ mode: ViewMode) -> some View {
+        let isSelected = viewMode == mode
+        return Button {
+            HapticManager.shared.tick()
+            withAnimation(.easeInOut(duration: 0.20)) {
+                viewMode = mode
+            }
+        } label: {
+            Text(mode.label)
+                .font(Theme.Typography.subheadEmphasized)
+                .foregroundStyle(isSelected ? Theme.Colors.textPrimary : Theme.Colors.textTertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                        .fill(isSelected ? Theme.Colors.surface : Color.clear)
+                        .focusCardShadow()
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Modes
+
+    /// Modo "Día": fecha grande arriba + lista de eventos del día.
+    private var dayMode: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            dateDetailHeader
+                .padding(.horizontal, Theme.Spacing.xl)
+            dayContent
+                .padding(.horizontal, Theme.Spacing.xl)
+        }
+    }
+
+    /// Modo "Semana": selector de 14 días + detalle del día seleccionado.
+    private var weekMode: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            weekSelector
+                .padding(.horizontal, Theme.Spacing.xl)
+            dateDetailHeader
+                .padding(.horizontal, Theme.Spacing.xl)
+            dayContent
+                .padding(.horizontal, Theme.Spacing.xl)
+        }
+    }
+
+    /// Modo "Mes": grilla mensual con puntos en días con eventos.
+    private var monthMode: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            MonthGridView(
+                anchorDate: selectedDate,
+                eventsCount: { eventsCount(for: $0) },
+                isSelected: { Calendar.current.isDate($0, inSameDayAs: selectedDate) },
+                onTapDay: { date in
+                    HapticManager.shared.tick()
+                    selectedDate = Calendar.current.startOfDay(for: date)
+                }
+            )
+            .padding(.horizontal, Theme.Spacing.xl)
+
+            // Resumen del día seleccionado debajo de la grilla.
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                dateDetailHeader
+                dayContent
+            }
+            .padding(.horizontal, Theme.Spacing.xl)
         }
     }
 
@@ -176,6 +288,23 @@ struct CalendarioView: View {
                         toast.success("Evento eliminado", symbol: "trash.fill")
                     } content: {
                         CalendarEventCard(event: event)
+                    }
+                    // Long-press → Editar / Eliminar. Solo en eventos reales
+                    // del usuario (no en demo).
+                    .contextMenu {
+                        if store.hasUserEvents {
+                            Button {
+                                editingEvent = event
+                            } label: {
+                                Label("Editar", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                store.deleteEvent(event.id)
+                                toast.success("Evento eliminado", symbol: "trash.fill")
+                            } label: {
+                                Label("Eliminar", systemImage: "trash")
+                            }
+                        }
                     }
                 }
             }
@@ -325,7 +454,11 @@ private struct CalendarEventCard: View {
 
 struct NuevoEventoSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let initialDate: Date
+    /// Si está editando, conservamos el id + flags para hacer update en vez
+    /// de insert.
+    private let editingId: UUID?
+    private let editingIsReminder: Bool?
+    private let editingDisplayAsPoint: Bool?
     let onSave: (FocusEvent) -> Void
 
     @State private var title: String = ""
@@ -336,8 +469,11 @@ struct NuevoEventoSheet: View {
     @State private var endTime: Date
     @State private var section: EventSection = .reunion
 
+    /// Inicializador de "nuevo evento": prefija fecha y deja título vacío.
     init(initialDate: Date, onSave: @escaping (FocusEvent) -> Void) {
-        self.initialDate = initialDate
+        self.editingId = nil
+        self.editingIsReminder = nil
+        self.editingDisplayAsPoint = nil
         self.onSave = onSave
         let cal = Calendar.current
         let baseDay = cal.startOfDay(for: initialDate)
@@ -346,6 +482,24 @@ struct NuevoEventoSheet: View {
         _date = State(initialValue: baseDay)
         _startTime = State(initialValue: nextHour)
         _endTime = State(initialValue: oneHourLater)
+    }
+
+    /// Inicializador de "editar evento": precarga todos los campos del evento
+    /// y conserva su id para que `onSave` produzca un update.
+    init(editing event: FocusEvent, onSave: @escaping (FocusEvent) -> Void) {
+        self.editingId = event.id
+        self.editingIsReminder = event.isReminder
+        self.editingDisplayAsPoint = event.displayAsPointInTime ? true : nil
+        self.onSave = onSave
+        let cal = Calendar.current
+        let baseDay = cal.startOfDay(for: event.startTime)
+        _title = State(initialValue: event.title)
+        _location = State(initialValue: event.location ?? "")
+        _notes = State(initialValue: event.notes ?? "")
+        _date = State(initialValue: baseDay)
+        _startTime = State(initialValue: event.startTime)
+        _endTime = State(initialValue: event.endTime ?? cal.date(byAdding: .hour, value: 1, to: event.startTime) ?? event.startTime)
+        _section = State(initialValue: event.section)
     }
 
     var body: some View {
@@ -516,16 +670,164 @@ struct NuevoEventoSheet: View {
             let comps = cal.dateComponents([.hour, .minute], from: time)
             return cal.date(bySettingHour: comps.hour ?? 9, minute: comps.minute ?? 0, second: 0, of: dayStart) ?? dayStart
         }
+        // Si estoy editando, conservar el id original + isReminder; si no,
+        // crear evento nuevo con un id fresco. Editar manualmente desde el
+        // sheet implica que el usuario eligió un rango explícito → ya no
+        // tratamos el evento como "point in time" salvo que fuera reminder.
         let event = FocusEvent(
+            id: editingId ?? UUID(),
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes,
             startTime: combine(startTime),
             endTime: combine(endTime),
             section: section,
-            location: location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : location
+            location: location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : location,
+            isReminder: editingIsReminder
         )
         onSave(event)
         dismiss()
+    }
+}
+
+// MARK: - Month grid
+
+/// Grilla mensual simple. 7 columnas (L-D), 5-6 filas. Cada celda muestra
+/// el día y un punto cobalto si hay eventos. Tap cambia `selectedDate`.
+private struct MonthGridView: View {
+    let anchorDate: Date
+    let eventsCount: (Date) -> Int
+    let isSelected: (Date) -> Bool
+    let onTapDay: (Date) -> Void
+
+    @State private var monthOffset: Int = 0
+
+    private var calendar: Calendar { Calendar.current }
+
+    private var displayedMonth: Date {
+        calendar.date(byAdding: .month, value: monthOffset, to: anchorDate) ?? anchorDate
+    }
+
+    private var monthYearLabel: String {
+        DateFormatters.capitalizeFirst(DateFormatters.monthYear.string(from: displayedMonth))
+    }
+
+    /// Días que se muestran en la grilla: incluye días vacíos al inicio para
+    /// alinear el primer día del mes con el día de la semana correspondiente
+    /// (L=2 en es_ES). Devuelve nil para celdas vacías.
+    private var gridDays: [Date?] {
+        let comps = calendar.dateComponents([.year, .month], from: displayedMonth)
+        guard let firstOfMonth = calendar.date(from: comps) else { return [] }
+        let range = calendar.range(of: .day, in: .month, for: firstOfMonth) ?? 1..<2
+        let daysInMonth = range.count
+
+        // Día de la semana del primer día (1 = domingo en Calendar gregoriano,
+        // pero queremos lunes-domingo). Ajustamos al estilo es-ES.
+        let firstWeekday = calendar.component(.weekday, from: firstOfMonth)
+        // weekday: 1=Dom, 2=Lun, 3=Mar, 4=Mié, 5=Jue, 6=Vie, 7=Sáb
+        // Queremos columna 0=Lun, 1=Mar, ..., 6=Dom.
+        let leadingEmpty = (firstWeekday + 5) % 7   // domingo → 6, lunes → 0
+
+        var days: [Date?] = Array(repeating: nil, count: leadingEmpty)
+        for d in 1...daysInMonth {
+            if let date = calendar.date(byAdding: .day, value: d - 1, to: firstOfMonth) {
+                days.append(date)
+            }
+        }
+        // Completar hasta múltiplo de 7 para que la grilla quede pareja.
+        while days.count % 7 != 0 { days.append(nil) }
+        return days
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            HStack {
+                Text(monthYearLabel)
+                    .font(Theme.Typography.bodyBold)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                Spacer()
+                Button {
+                    HapticManager.shared.tick()
+                    monthOffset -= 1
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.focusAccent)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(Theme.Colors.focusAccentSoft))
+                }
+                .buttonStyle(.plain)
+                Button {
+                    HapticManager.shared.tick()
+                    monthOffset += 1
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.focusAccent)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(Theme.Colors.focusAccentSoft))
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Encabezado de días de la semana (L M M J V S D).
+            HStack(spacing: 0) {
+                ForEach(["L", "M", "M", "J", "V", "S", "D"], id: \.self) { letter in
+                    Text(letter)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7),
+                spacing: 4
+            ) {
+                ForEach(Array(gridDays.enumerated()), id: \.offset) { _, day in
+                    monthCell(for: day)
+                }
+            }
+        }
+        .padding(Theme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(Theme.Colors.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                        .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                )
+                .focusCardShadow()
+        )
+    }
+
+    @ViewBuilder
+    private func monthCell(for day: Date?) -> some View {
+        if let day = day {
+            let count = eventsCount(day)
+            let selected = isSelected(day)
+            let isToday = calendar.isDateInToday(day)
+            Button {
+                onTapDay(day)
+            } label: {
+                VStack(spacing: 2) {
+                    Text("\(calendar.component(.day, from: day))")
+                        .font(.system(size: 13, weight: selected || isToday ? .semibold : .regular))
+                        .foregroundStyle(selected ? .white : (isToday ? Theme.Colors.focusAccent : Theme.Colors.textPrimary))
+                    // Dot cuando hay eventos. Cobalto si seleccionado fondo blanco.
+                    Circle()
+                        .fill(count > 0 ? (selected ? Color.white : Theme.Colors.focusAccent) : Color.clear)
+                        .frame(width: 4, height: 4)
+                }
+                .frame(maxWidth: .infinity, minHeight: 38)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(selected ? Theme.Colors.focusAccent : Color.clear)
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            Color.clear.frame(minHeight: 38)
+        }
     }
 }
 
