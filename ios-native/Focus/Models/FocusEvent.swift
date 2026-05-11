@@ -37,7 +37,7 @@ enum EventSection: String, Codable, CaseIterable, Hashable, Identifiable {
         switch self {
         case .foco: return "scope"
         case .reunion: return "person.2.fill"
-        case .personal: return "heart.fill"
+        case .personal: return "person.fill"
         case .estudio: return "book.fill"
         case .descanso: return "cup.and.saucer.fill"
         case .reminder: return "bell.fill"

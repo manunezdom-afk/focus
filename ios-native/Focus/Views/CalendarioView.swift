@@ -424,8 +424,14 @@ private struct NuevoEventoSheet: View {
                             }
                         }
 
+                        // Ubicación libre: sala, oficina, link de Meet/Zoom o dirección.
+                        // Por ahora se muestra como texto plano en la vista de evento.
+                        // FUTURO: si el texto parece dirección física, ofrecer
+                        // "Abrir en Apple Maps / Google Maps / Waze" desde el
+                        // detalle del evento. No implementar acá — solo guardar el
+                        // string crudo y dejar la decisión para la vista de detalle.
                         sheetField(label: "UBICACIÓN (OPCIONAL)") {
-                            TextField("Aula, oficina, link…", text: $location)
+                            TextField("Sala, oficina, link o dirección…", text: $location)
                                 .font(Theme.Typography.body)
                                 .foregroundStyle(Theme.Colors.textPrimary)
                                 .tint(Theme.Colors.focusAccent)

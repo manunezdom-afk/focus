@@ -410,14 +410,14 @@ struct IconBadge: View {
 
 // MARK: - Focus brand mark (logo SwiftUI consistente con AppIcon)
 
-/// Símbolo Focus V4 — F geométrica blanca + sparkle accent sobre squircle
-/// cobalto. Filosofía: estructura, sistema, IA integrada. NO floral.
+/// Símbolo Focus V5 — núcleo sólido + dos anillos concéntricos sobre squircle
+/// cobalto. Lectura: aperture / claridad mental / punto de foco. Sin letras,
+/// sin pétalos, sin chispitas. Geométrico, premium, App Store-ready.
 ///
-/// Family system:
+/// Family system (mismo símbolo, distinto gradiente):
 /// - Focus → cobalto/azul (default).
 /// - Kairos (futuro) → violeta/púrpura.
 /// - Spark (futuro) → naranja/dorado.
-/// Cambiar `gradient` para portar a otra app de la familia.
 struct FocusLogoMark: View {
     var size: CGFloat = 96
     var shadow: Bool = true
@@ -433,8 +433,8 @@ struct FocusLogoMark: View {
     )
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            // Squircle de fondo (iOS aplica esta forma al AppIcon real).
+        ZStack {
+            // Squircle cobalto — iOS aplica esta forma al AppIcon real.
             RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
                 .fill(gradient)
                 .frame(width: size, height: size)
@@ -445,56 +445,22 @@ struct FocusLogoMark: View {
                     y: shadow ? size * 0.06 : 0
                 )
 
-            // F geométrica — 3 rectángulos redondeados.
-            // Stem vertical
-            RoundedRectangle(cornerRadius: size * 0.012, style: .continuous)
-                .fill(Color.white)
-                .frame(width: size * 0.125, height: size * 0.59)
-                .offset(x: size * 0.275, y: size * 0.205)
+            // Anillo exterior — orbita amplia, leve.
+            Circle()
+                .strokeBorder(Color.white.opacity(0.55), lineWidth: max(0.8, size * 0.028))
+                .frame(width: size * 0.70, height: size * 0.70)
 
-            // Top horizontal bar
-            RoundedRectangle(cornerRadius: size * 0.012, style: .continuous)
-                .fill(Color.white)
-                .frame(width: size * 0.44, height: size * 0.125)
-                .offset(x: size * 0.275, y: size * 0.205)
+            // Anillo medio — borde del foco / aperture.
+            Circle()
+                .strokeBorder(Color.white, lineWidth: max(1, size * 0.050))
+                .frame(width: size * 0.44, height: size * 0.44)
 
-            // Middle horizontal bar (más corta)
-            RoundedRectangle(cornerRadius: size * 0.012, style: .continuous)
+            // Núcleo sólido — el punto de foco, la mente centrada.
+            Circle()
                 .fill(Color.white)
-                .frame(width: size * 0.35, height: size * 0.105)
-                .offset(x: size * 0.275, y: size * 0.44)
-
-            // Sparkle 4-point arriba-derecha — representa Nova/IA integrada.
-            SparkleMark()
-                .fill(Color.white)
-                .frame(width: size * 0.15, height: size * 0.15)
-                .offset(x: size * 0.705, y: size * 0.125)
+                .frame(width: size * 0.18, height: size * 0.18)
         }
         .frame(width: size, height: size)
-    }
-}
-
-/// Polígono star de 4 puntas (8 vértices alternando outer/inner).
-struct SparkleMark: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let outerR = min(rect.width, rect.height) / 2
-        let innerR = outerR * 0.32
-
-        for i in 0..<8 {
-            let angle = CGFloat(i) * .pi / 4 - .pi / 2
-            let r = i % 2 == 0 ? outerR : innerR
-            let x = center.x + cos(angle) * r
-            let y = center.y + sin(angle) * r
-            if i == 0 {
-                path.move(to: CGPoint(x: x, y: y))
-            } else {
-                path.addLine(to: CGPoint(x: x, y: y))
-            }
-        }
-        path.closeSubpath()
-        return path
     }
 }
 

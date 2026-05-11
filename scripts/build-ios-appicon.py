@@ -2,18 +2,18 @@
 """
 scripts/build-ios-appicon.py
 
-AppIcon V4 de Focus — F geométrica blanca + sparkle accent en cobalto.
-Filosofía: estructura, sistema, inteligencia. NO floral.
+AppIcon V5 de Focus — núcleo sólido + 2 anillos concéntricos sobre cobalto.
+Lectura: aperture / claridad mental / foco. NO letras, NO pétalos, NO chispas.
 
-V4 vs V3:
-- V3 era 8 pétalos redondeados → parecía margarita/flor (mal para Focus).
-- V4 es F geométrica + sparkle → brand letter + AI/Nova accent.
-  Tipografía bold custom, rectángulos redondeados, sparkle 4-point.
+V5 vs V4:
+- V4 era F geométrica + sparkle → leía como "letra de marca", no claridad.
+- V5 son círculos concéntricos → símbolo abstracto de focus/clarity/aperture.
+  Funciona a todos los tamaños, es premium y App Store-ready.
 
-Identidad reflejada:
-- F → Focus (la marca, recognizable, premium).
-- Sparkle → Nova (asistente IA, integrado al símbolo).
-- Cobalt → familia de productividad (vs Kairos violet, Spark orange).
+Family system (mismo símbolo, distinto gradiente):
+- Focus → cobalt (#2E4FE8 → #182F82).
+- Kairos (futuro) → violeta.
+- Spark (futuro) → naranja.
 
 Reglas iOS: 1024×1024 RGB sin alpha · sin transparencia.
 
@@ -23,7 +23,6 @@ Uso: python3 scripts/build-ios-appicon.py
 from PIL import Image, ImageDraw
 from pathlib import Path
 import json
-import math
 import sys
 
 REPO = Path(__file__).resolve().parent.parent
@@ -54,74 +53,74 @@ def build_gradient(size: int) -> Image.Image:
     return img
 
 
-def draw_focus_F(draw: ImageDraw.ImageDraw, size: int) -> None:
-    """Dibuja una F geométrica blanca centrada, con esquinas redondeadas.
-    Construida con 3 rectángulos: stem vertical, top bar, middle bar.
+def draw_ring(draw: ImageDraw.ImageDraw, size: int, diameter_ratio: float,
+              thickness_ratio: float, color=WHITE) -> None:
+    """Anillo (stroke circle) centrado, sin relleno interior.
+
+    diameter_ratio: diámetro como fracción del canvas (e.g. 0.70 → 70% del size).
+    thickness_ratio: grosor del stroke como fracción del canvas.
     """
-    # Coordenadas relativas al canvas size (para mantenerse proporcional al SS).
-    # F bounding box: aprox 41% del canvas centrado (con leve shift left para
-    # dejar espacio al sparkle arriba-derecha).
-    stem_x = size * 0.275
-    stem_top = size * 0.205
-    stem_w = size * 0.125
-    stem_h = size * 0.59
-    radius = size * 0.012  # esquinas levemente redondeadas, no muy pill-shape
-
-    # Stem vertical
-    draw.rounded_rectangle(
-        [stem_x, stem_top, stem_x + stem_w, stem_top + stem_h],
-        radius=radius,
-        fill=WHITE,
+    cx = size / 2
+    cy = size / 2
+    r_outer = (size * diameter_ratio) / 2
+    r_inner = r_outer - (size * thickness_ratio)
+    # Outer disk
+    draw.ellipse(
+        [cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer],
+        fill=color,
     )
-
-    # Top horizontal bar
-    top_bar_w = size * 0.44
-    top_bar_h = size * 0.125
-    draw.rounded_rectangle(
-        [stem_x, stem_top, stem_x + top_bar_w, stem_top + top_bar_h],
-        radius=radius,
-        fill=WHITE,
-    )
-
-    # Middle horizontal bar (más corta que el top)
-    mid_bar_w = size * 0.35
-    mid_bar_h = size * 0.105
-    mid_top = stem_top + size * 0.235
-    draw.rounded_rectangle(
-        [stem_x, mid_top, stem_x + mid_bar_w, mid_top + mid_bar_h],
-        radius=radius,
-        fill=WHITE,
-    )
+    # Cut out inner disk (color del fondo NO funciona porque hay gradiente).
+    # Solución: usar máscara con composición alpha.
+    # Pillow trick: dibujamos un círculo "vacío" usando ImageDraw.ellipse con
+    # outline+width, que solo dibuja el contorno.
+    # → Reescribimos abajo.
 
 
-def draw_sparkle(draw: ImageDraw.ImageDraw, size: int) -> None:
-    """Sparkle 4-point star blanco, posicionado arriba-derecha del F.
-    Representa Nova / IA integrada al símbolo de Focus.
-    """
-    cx = size * 0.78
-    cy = size * 0.20
-    outer_r = size * 0.075
-    inner_r = size * 0.024
+def draw_stroked_ring(img: Image.Image, size: int, diameter_ratio: float,
+                       thickness_ratio: float, color=WHITE, alpha: int = 255) -> None:
+    """Anillo (contorno hueco) compositado sobre `img` con alpha exacto."""
+    cx = size / 2
+    cy = size / 2
+    diameter = size * diameter_ratio
+    thickness = max(1, int(size * thickness_ratio))
+    bbox = [cx - diameter / 2, cy - diameter / 2,
+            cx + diameter / 2, cy + diameter / 2]
 
-    # 8 vértices: alternando outer (4 cardinal) e inner (4 diagonal).
-    pts = []
-    for i in range(8):
-        angle = i * math.pi / 4 - math.pi / 2
-        r = outer_r if i % 2 == 0 else inner_r
-        pts.append((
-            cx + math.cos(angle) * r,
-            cy + math.sin(angle) * r,
-        ))
-    draw.polygon(pts, fill=WHITE)
+    overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ov_draw = ImageDraw.Draw(overlay)
+    ring_color = (color[0], color[1], color[2], alpha)
+    ov_draw.ellipse(bbox, outline=ring_color, width=thickness)
+    img.paste(overlay, (0, 0), overlay)
+
+
+def draw_disk(img: Image.Image, size: int, diameter_ratio: float,
+              color=WHITE) -> None:
+    """Disco sólido centrado."""
+    cx = size / 2
+    cy = size / 2
+    diameter = size * diameter_ratio
+    bbox = [cx - diameter / 2, cy - diameter / 2,
+            cx + diameter / 2, cy + diameter / 2]
+    overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ov_draw = ImageDraw.Draw(overlay)
+    ov_draw.ellipse(bbox, fill=(color[0], color[1], color[2], 255))
+    img.paste(overlay, (0, 0), overlay)
 
 
 def main() -> int:
     big = SIZE * SS
-    img = build_gradient(big)
-    draw = ImageDraw.Draw(img)
-    draw_focus_F(draw, big)
-    draw_sparkle(draw, big)
-    img = img.resize((SIZE, SIZE), Image.LANCZOS)
+    img = build_gradient(big).convert("RGBA")
+
+    # Anillo exterior — sutil, alpha ~140/255 (~0.55).
+    draw_stroked_ring(img, big, diameter_ratio=0.70, thickness_ratio=0.028,
+                      color=WHITE, alpha=140)
+    # Anillo medio — borde del foco (sólido).
+    draw_stroked_ring(img, big, diameter_ratio=0.44, thickness_ratio=0.050,
+                      color=WHITE, alpha=255)
+    # Núcleo sólido.
+    draw_disk(img, big, diameter_ratio=0.18, color=WHITE)
+
+    img = img.convert("RGB").resize((SIZE, SIZE), Image.LANCZOS)
 
     assert img.size == (SIZE, SIZE) and img.mode == "RGB"
 
@@ -143,7 +142,7 @@ def main() -> int:
         json.dump(contents, f, indent=2)
         f.write("\n")
 
-    print(f"✓ AppIcon V4 (F + sparkle): {OUT_APPICON.relative_to(REPO)}")
+    print(f"✓ AppIcon V5 (núcleo + anillos): {OUT_APPICON.relative_to(REPO)}")
     print(f"  {SIZE}×{SIZE} RGB · sin alpha · {OUT_APPICON.stat().st_size // 1024}KB")
     print(f"✓ Preview: {OUT_PREVIEW.relative_to(REPO)}")
     return 0

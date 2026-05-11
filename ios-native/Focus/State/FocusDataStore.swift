@@ -6,19 +6,15 @@ import Foundation
 enum NovaQuickAction: String, CaseIterable, Identifiable {
     case organizar
     case crearTarea
-    case crearEvento
     case revisarPendientes
-    case resumenSemana
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .organizar: return "Organiza mi día"
+        case .organizar: return "Organizar mi día"
         case .crearTarea: return "Crear tarea"
-        case .crearEvento: return "Crear evento"
         case .revisarPendientes: return "Revisar pendientes"
-        case .resumenSemana: return "Resumen semana"
         }
     }
 
@@ -26,9 +22,7 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
         switch self {
         case .organizar: return "sparkles"
         case .crearTarea: return "checkmark.circle"
-        case .crearEvento: return "calendar.badge.plus"
         case .revisarPendientes: return "tray.full"
-        case .resumenSemana: return "chart.bar"
         }
     }
 
@@ -40,12 +34,8 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
             return "Listo. Dejé tu mañana para foco profundo (10:00–11:30), una pausa real al mediodía y la sesión de estudio para Bases de Datos por la tarde. Te aviso cuando empiece cada bloque."
         case .crearTarea:
             return "Dime qué tarea quieres crear. Le pongo prioridad y categoría según el contexto. Ej: \"Entregar TP de Programación el viernes\"."
-        case .crearEvento:
-            return "Cuéntame qué evento, día y hora. Si quieres, también te bloqueo 10 minutos antes para prepararte."
         case .revisarPendientes:
             return "Tus 3 pendientes de mayor prioridad: repasar fórmulas del parcial, preparar la presentación de Acme y responder al profe. ¿Las acomodo en bloques de hoy o las muevo a mañana?"
-        case .resumenSemana:
-            return "Esta semana tienes 2 parciales, 1 entrega de TP y 3 reuniones de trabajo. El jueves es el día más cargado. Si quieres, paso una reunión al viernes."
         }
     }
 }

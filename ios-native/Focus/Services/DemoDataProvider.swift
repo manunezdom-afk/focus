@@ -301,7 +301,7 @@ final class DemoDataProvider {
         [
             NovaMessage(
                 role: .nova,
-                content: "Hola. Soy Nova.\n\nSi me cuentas qué tienes esta semana — clases, exámenes, trabajo, gym — yo te armo tu agenda y te recuerdo lo importante.\n\n¿Por dónde empezamos?"
+                content: "Soy Nova. Puedo ordenar tu día, crear tareas y proponerte cambios."
             )
         ]
     }

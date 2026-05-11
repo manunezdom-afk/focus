@@ -10,8 +10,7 @@ struct NovaView: View {
     @State private var segment: Segment = .chat
     @State private var draft: String = ""
     @State private var didAutoSubmit: Bool = false
-    @State private var sparkleScale: CGFloat = 1.0
-    @State private var sparkleHue: Double = 0
+    @FocusState private var inputFocused: Bool
 
     let initialPrompt: String?
 
@@ -27,7 +26,8 @@ struct NovaView: View {
                 VStack(spacing: 0) {
                     segmentedControl
                         .padding(.horizontal, Theme.Spacing.xl)
-                        .padding(.vertical, Theme.Spacing.md)
+                        .padding(.top, Theme.Spacing.sm)
+                        .padding(.bottom, Theme.Spacing.md)
                         .background(Theme.Colors.background)
 
                     Group {
@@ -51,20 +51,10 @@ struct NovaView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     HStack(spacing: 6) {
-                        ZStack {
-                            Circle()
-                                .fill(Theme.Colors.novaGradient)
-                                .frame(width: 24, height: 24)
-                                .shadow(color: Theme.Colors.novaAccent.opacity(0.45), radius: 6, y: 1)
-                            Image(systemName: "sparkle")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
-                                .scaleEffect(sparkleScale)
-                                .animation(
-                                    .easeInOut(duration: 1.4).repeatForever(autoreverses: true),
-                                    value: sparkleScale
-                                )
-                        }
+                        // Identidad mínima: solo el punto Nova, sin pulse animado.
+                        Circle()
+                            .fill(Theme.Colors.novaGradient)
+                            .frame(width: 10, height: 10)
                         Text("Nova")
                             .font(Theme.Typography.bodyBold)
                             .foregroundStyle(Theme.Colors.textPrimary)
@@ -80,9 +70,6 @@ struct NovaView: View {
             }
         }
         .onAppear {
-            // Sparkle pulse continuo — identidad Nova viva.
-            sparkleScale = 1.20
-
             // Auto-submit del prompt inicial si llegó desde Mi Día.
             guard !didAutoSubmit,
                   let prompt = initialPrompt,
@@ -153,14 +140,14 @@ struct NovaView: View {
     private var chatScroll: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
-                VStack(spacing: Theme.Spacing.md) {
+                VStack(spacing: Theme.Spacing.sm) {
                     ForEach(store.novaMessages) { msg in
                         NovaMessageBubble(message: msg).id(msg.id)
                     }
                 }
-                .padding(.horizontal, Theme.Spacing.xl)
-                .padding(.top, Theme.Spacing.md)
-                .padding(.bottom, Theme.Spacing.md)
+                .padding(.horizontal, Theme.Spacing.lg)
+                .padding(.top, Theme.Spacing.sm)
+                .padding(.bottom, Theme.Spacing.sm)
             }
             .onChange(of: store.novaMessages.count) { _, _ in
                 if let last = store.novaMessages.last {
@@ -174,20 +161,20 @@ struct NovaView: View {
 
     private var quickActionsRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Theme.Spacing.sm) {
+            HStack(spacing: Theme.Spacing.xs + 2) {
                 ForEach(NovaQuickAction.allCases) { action in
                     Button {
                         store.runQuickAction(action)
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 5) {
                             Image(systemName: action.symbol)
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 10, weight: .semibold))
                             Text(action.label)
                                 .font(Theme.Typography.subheadEmphasized)
                         }
-                        .foregroundStyle(Theme.Colors.textPrimary)
-                        .padding(.horizontal, Theme.Spacing.md + 2)
-                        .padding(.vertical, Theme.Spacing.sm)
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.xs + 2)
                         .background(
                             Capsule()
                                 .fill(Theme.Colors.surface)
@@ -199,33 +186,71 @@ struct NovaView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, Theme.Spacing.xl)
-            .padding(.vertical, Theme.Spacing.sm)
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.vertical, Theme.Spacing.xs + 2)
         }
     }
 
+    /// Input compacto, sin avatar Nova (ya estás en Nova) ni micrófono — solo
+    /// el campo y el botón de enviar. Reduce el feel "chat genérico".
     private var inputBar: some View {
         VStack(spacing: 0) {
             Rectangle()
                 .fill(Theme.Colors.border)
                 .frame(height: Theme.Stroke.hairline)
-                .opacity(0.6)
+                .opacity(0.5)
 
-            FocusBarInput(
-                text: $draft,
-                placeholder: "Escríbele a Nova…",
-                onSubmit: {
-                    let text = draft
-                    draft = ""
-                    store.sendNovaMessage(text)
-                },
-                onMic: { HapticManager.shared.tap() }
+            HStack(spacing: Theme.Spacing.sm) {
+                TextField("Escríbele a Nova…", text: $draft, axis: .horizontal)
+                    .focused($inputFocused)
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                    .tint(Theme.Colors.focusAccent)
+                    .submitLabel(.send)
+                    .onSubmit(submitDraft)
+
+                Button(action: submitDraft) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            Circle().fill(
+                                draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    ? Theme.Colors.focusAccent.opacity(0.35)
+                                    : Theme.Colors.focusAccent
+                            )
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal, Theme.Spacing.md + 2)
+            .padding(.vertical, Theme.Spacing.sm + 1)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
+                    .fill(Theme.Colors.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
+                            .strokeBorder(
+                                inputFocused ? Theme.Colors.focusAccent.opacity(0.4) : Theme.Colors.border,
+                                lineWidth: inputFocused ? 1.2 : Theme.Stroke.hairline
+                            )
+                    )
             )
-            .padding(.horizontal, Theme.Spacing.xl)
-            .padding(.top, Theme.Spacing.md)
-            .padding(.bottom, Theme.Spacing.md)
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.top, Theme.Spacing.sm + 2)
+            .padding(.bottom, Theme.Spacing.sm)
+            .animation(.easeInOut(duration: 0.18), value: inputFocused)
         }
         .background(Theme.Colors.background)
+    }
+
+    private func submitDraft() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        draft = ""
+        store.sendNovaMessage(text)
     }
 }
 
@@ -235,42 +260,38 @@ private struct NovaMessageBubble: View {
     let message: NovaMessage
 
     var body: some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
             if message.role == .user {
-                Spacer(minLength: Theme.Spacing.xxxl)
+                Spacer(minLength: Theme.Spacing.xxl)
             } else {
-                ZStack {
-                    Circle()
-                        .fill(Theme.Colors.novaGradient)
-                        .frame(width: 28, height: 28)
-                    Image(systemName: "sparkle")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
-                }
+                // Marker minimalista — solo un punto, sin avatar circular.
+                Circle()
+                    .fill(Theme.Colors.novaGradient)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 9)
             }
 
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
                 Text(message.content)
-                    .font(Theme.Typography.body)
+                    .font(Theme.Typography.subhead)
                     .foregroundStyle(message.role == .user ? .white : Theme.Colors.textPrimary)
                     .multilineTextAlignment(.leading)
-                    .padding(.horizontal, Theme.Spacing.md + 2)
-                    .padding(.vertical, Theme.Spacing.md - 1)
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.vertical, Theme.Spacing.sm + 1)
                     .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                        RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                             .fill(
                                 message.role == .user
                                     ? AnyShapeStyle(Theme.Colors.focusAccent)
                                     : AnyShapeStyle(Theme.Colors.surface)
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                                RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                                     .strokeBorder(
                                         message.role == .user ? Color.clear : Theme.Colors.border,
                                         lineWidth: Theme.Stroke.hairline
                                     )
                             )
-                            .focusCardShadow()
                     )
                     .fixedSize(horizontal: false, vertical: true)
                 Text(timestampLabel)
@@ -279,7 +300,7 @@ private struct NovaMessageBubble: View {
             }
 
             if message.role == .nova {
-                Spacer(minLength: Theme.Spacing.xxxl)
+                Spacer(minLength: Theme.Spacing.xxl)
             }
         }
     }
