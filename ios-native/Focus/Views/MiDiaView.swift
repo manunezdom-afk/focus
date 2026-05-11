@@ -1367,15 +1367,14 @@ private struct TimelineEventRow: View {
                 }
             }
 
-            // Card del evento — borde izquierdo coloreado por sección
-            // (señal visual rápida del tipo) + altura/padding un poco mayor
-            // para que la tarjeta respire.
+            // Card del evento — banda lateral coloreada por sección que
+            // sigue la curva del card. Truco: la banda es un Rectangle
+            // simple ancho (sin cornerRadius) y se recorta junto con todo
+            // el HStack via .clipShape con el cornerRadius del card.
             HStack(spacing: 0) {
-                // Banda lateral coloreada (4pt) — visible a la izquierda.
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                Rectangle()
                     .fill(event.section.color)
                     .frame(width: 4)
-                    .padding(.vertical, 2)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(event.title)
@@ -1405,14 +1404,21 @@ private struct TimelineEventRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                    .fill(Theme.Colors.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                    )
-                    .focusCardShadow()
+                Theme.Colors.surface
             )
+            // Recortamos TODO el HStack (banda + contenido + fondo) con el
+            // mismo cornerRadius — así la banda lateral termina en curva
+            // exactamente como la card, no recta.
+            .clipShape(
+                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+            )
+            .overlay(
+                // El border va por fuera del clip para que se vea limpio
+                // en las esquinas redondeadas.
+                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                    .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+            )
+            .focusCardShadow()
             .padding(.bottom, isLast ? 0 : Theme.Spacing.sm)
         }
     }
