@@ -773,21 +773,14 @@ struct MiDiaView: View {
             )
 
         case .clarify(let reason):
-            // Guarda título tentativo para que el siguiente turno pueda
-            // completar la acción ("a las 20" → reusa título de la pregunta).
-            switch reason {
-            case .eventNeedsTime(let title, _),
-                 .eventNeedsDateTime(let title),
-                 .ambiguousTime24OrRelative(let title, _):
-                let wantsReminder = userText.lowercased().contains("acu")
-                    || userText.lowercased().contains("recu")
-                store.setPendingNovaContext(
-                    title: title,
-                    section: NovaResponder.guessSection(for: userText),
-                    wantsReminder: wantsReminder
-                )
-            case .taskNeedsTitle, .eventNeedsTitle, .noContext, .unclear:
-                break
+            // Guarda pending clarification para que el siguiente turno corto
+            // pueda completar la acción sin perder contexto.
+            if let pending = buildPendingClarification(
+                from: reason,
+                userText: userText,
+                source: .inlineMiDia
+            ) {
+                store.setPendingClarification(pending)
             }
             return InlineNovaResponse(
                 userText: userText,
@@ -796,6 +789,48 @@ struct MiDiaView: View {
                 action: .openChat,
                 isError: true
             )
+        }
+    }
+
+    /// Convierte un `ClarifyReason` en un `PendingClarification` apto para
+    /// guardarse en `NovaContext`. Devuelve nil cuando la clarify no tiene
+    /// suficiente info para resolver follow-ups (taskNeedsTitle, noContext,
+    /// unclear) — esos casos requieren que el usuario empiece de nuevo.
+    private func buildPendingClarification(
+        from reason: NovaIntent.ClarifyReason,
+        userText: String,
+        source: PendingClarification.Source
+    ) -> PendingClarification? {
+        let lower = userText.lowercased()
+        let wantsReminder = lower.contains("acu") || lower.contains("recu")
+        let section = NovaResponder.guessSection(for: userText)
+        switch reason {
+        case .eventNeedsTime(let title, let date):
+            return PendingClarification(
+                originalInput: userText,
+                kind: wantsReminder ? .reminder : .event,
+                proposedTitle: title,
+                proposedDate: date,
+                proposedSection: section,
+                wantsReminder: wantsReminder,
+                missingFields: [.time],
+                questionAsked: "¿A qué hora?",
+                source: source
+            )
+        case .eventNeedsDateTime(let title):
+            return PendingClarification(
+                originalInput: userText,
+                kind: wantsReminder ? .reminder : .event,
+                proposedTitle: title,
+                proposedDate: nil,
+                proposedSection: section,
+                wantsReminder: wantsReminder,
+                missingFields: [.date, .time],
+                questionAsked: "¿Para qué día y hora?",
+                source: source
+            )
+        case .taskNeedsTitle, .eventNeedsTitle, .noContext, .unclear:
+            return nil
         }
     }
 
@@ -822,9 +857,6 @@ struct MiDiaView: View {
             return "Tengo «\(title)». ¿A qué hora?"
         case .eventNeedsDateTime(let title):
             return "Tengo «\(title)». ¿Cuándo?"
-        case .ambiguousTime24OrRelative(_, let value):
-            let hourPadded = String(format: "%02d:00", value)
-            return "¿Te refieres a las \(hourPadded) o en \(value) minutos?"
         case .noContext:                return "No estoy seguro a qué te refieres."
         case .unclear:                  return "No estoy seguro de qué hacer."
         }
@@ -839,8 +871,6 @@ struct MiDiaView: View {
         case .eventNeedsTime(_, let date):
             let day = DateFormatters.weekdayDay.string(from: date).lowercased()
             return "Dime una hora para el \(day). Ej: «a las 14» o «tipo 3»."
-        case .ambiguousTime24OrRelative(_, let value):
-            return "Responde «a las \(value)» (hora 24h) o «en \(value) minutos» (relativo a ahora)."
         case .noContext:
             return "Vuelve a decirme qué quieres crear. Ej: «agenda reunión mañana a las 12»."
         case .eventNeedsDateTime(let title):
@@ -1282,31 +1312,42 @@ private struct TimelineEventRow: View {
                 }
             }
 
-            // Card del evento
-            VStack(alignment: .leading, spacing: 4) {
-                Text(event.title)
-                    .font(Theme.Typography.bodyEmphasized)
-                    .foregroundStyle(Theme.Colors.textPrimary)
-                    .lineLimit(2)
+            // Card del evento — borde izquierdo coloreado por sección
+            // (señal visual rápida del tipo) + altura/padding un poco mayor
+            // para que la tarjeta respire.
+            HStack(spacing: 0) {
+                // Banda lateral coloreada (4pt) — visible a la izquierda.
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(event.section.color)
+                    .frame(width: 4)
+                    .padding(.vertical, 2)
 
-                HStack(spacing: 4) {
-                    Image(systemName: event.section.symbol)
-                        .font(.system(size: 10))
-                        .foregroundStyle(event.section.color)
-                    Text(event.section.displayName)
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.Colors.textTertiary)
-                    if let loc = event.location, !loc.isEmpty {
-                        Text("·").foregroundStyle(Theme.Colors.textQuaternary)
-                        Text(loc)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(event.title)
+                        .font(Theme.Typography.bodyBold)
+                        .foregroundStyle(Theme.Colors.textPrimary)
+                        .lineLimit(2)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: event.section.symbol)
+                            .font(.system(size: 11))
+                            .foregroundStyle(event.section.color)
+                        Text(event.section.displayName)
                             .font(Theme.Typography.caption)
                             .foregroundStyle(Theme.Colors.textTertiary)
-                            .lineLimit(1)
+                        if let loc = event.location, !loc.isEmpty {
+                            Text("·").foregroundStyle(Theme.Colors.textQuaternary)
+                            Text(loc)
+                                .font(Theme.Typography.caption)
+                                .foregroundStyle(Theme.Colors.textTertiary)
+                                .lineLimit(1)
+                        }
                     }
                 }
+                .padding(.vertical, Theme.Spacing.md)
+                .padding(.leading, Theme.Spacing.md)
+                .padding(.trailing, Theme.Spacing.md)
             }
-            .padding(.vertical, Theme.Spacing.sm)
-            .padding(.horizontal, Theme.Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
@@ -1315,6 +1356,7 @@ private struct TimelineEventRow: View {
                         RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
                             .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
                     )
+                    .focusCardShadow()
             )
             .padding(.bottom, isLast ? 0 : Theme.Spacing.sm)
         }

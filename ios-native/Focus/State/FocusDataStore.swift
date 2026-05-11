@@ -146,9 +146,6 @@ enum NovaIntent: Hashable {
         case eventNeedsTitle
         case eventNeedsTime(title: String, partialDate: Date)
         case eventNeedsDateTime(title: String)
-        /// "ir a buscar agustina en 20" — "en N" con N en 13..23 puede ser
-        /// hora 24h (20:00) o relativo (en 20 minutos). Pedimos cuál.
-        case ambiguousTime24OrRelative(title: String, value: Int)
         case noContext                  // "agéndalo" sin contexto previo
         case unclear
     }
@@ -176,13 +173,11 @@ struct NovaContext: Equatable {
     var lastIntentKind: Kind?
     var lastEventId: UUID?
     var lastTaskId: UUID?
-    /// Título tentativo cuando Nova hace una clarify y la acción NO se llegó
-    /// a ejecutar. El siguiente turno (ej. "a las 20", "en 20 minutos") puede
-    /// usarlo para completar la acción sin pedir al usuario que repita.
-    /// Se limpia al ejecutar cualquier intent real.
-    var pendingTitle: String?
-    var pendingSection: EventSection?
-    var pendingWantsReminder: Bool = false
+    /// Aclaración pendiente cuando Nova preguntó algo y la acción NO se llegó
+    /// a ejecutar. El siguiente turno corto (ej. "a las 20", "en 20 minutos",
+    /// "sí", "mañana") puede usarlo para completar la acción sin que el
+    /// usuario tenga que repetir título/contexto. Auto-expira a los 10 min.
+    var pendingClarification: PendingClarification?
     var updatedAt: Date = Date()
 
     enum Kind: Hashable {
@@ -193,6 +188,101 @@ struct NovaContext: Equatable {
     var isFresh: Bool {
         // Contexto válido por 10 minutos. Después se trata como "sin contexto".
         Date().timeIntervalSince(updatedAt) < 600
+    }
+
+    /// Helper: pending solo es "vivo" si existe, no expiró y el contexto
+    /// general es fresco. Lo usamos para decidir si resolver follow-ups.
+    var pendingIsActive: Bool {
+        guard let p = pendingClarification else { return false }
+        return Date() < p.expiresAt && isFresh
+    }
+}
+
+/// Aclaración pendiente: Nova preguntó algo y la acción no se ejecutó.
+/// Persiste durante 10 minutos para que el usuario pueda responder corto
+/// y completar la acción.
+///
+/// Ejemplo:
+///   Usuario: "tengo parcial el jueves"
+///   Nova:    "¿A qué hora?"  → save PendingClarification(kind=.event,
+///            proposedTitle="Parcial", proposedDate=jueves,
+///            missingFields=[.time])
+///   Usuario: "a las 3"      → parse detecta pending, completa con time=15:00.
+struct PendingClarification: Equatable {
+    /// Mensaje original que originó la aclaración.
+    var originalInput: String
+    /// Tipo de acción que Nova quería crear (en su mejor interpretación).
+    var kind: Kind
+    /// Título limpio listo para usar (si Nova ya lo había extraído).
+    var proposedTitle: String?
+    /// Fecha tentativa (puede ser solo el día si falta la hora).
+    var proposedDate: Date?
+    /// Sección detectada por keywords del texto original.
+    var proposedSection: EventSection?
+    /// Ubicación si Nova la había extraído.
+    var proposedLocation: String?
+    /// `true` cuando el usuario dijo "acuérdame/recuérdame": la acción
+    /// completada debe ser un recordatorio puntual, no un evento con rango.
+    var wantsReminder: Bool
+    /// Lista de campos que faltan completar para ejecutar la acción.
+    var missingFields: Set<MissingField>
+    /// La pregunta exacta que Nova hizo. Útil para debugging y UI.
+    var questionAsked: String?
+    /// Surface que originó la aclaración (inline Mi Día o chat).
+    var source: Source
+    /// Cuándo se creó.
+    var createdAt: Date
+    /// Auto-expiración: 10 minutos después de createdAt.
+    var expiresAt: Date
+
+    enum Kind: String, Hashable {
+        case event
+        case task
+        case reminder
+        /// Indeterminado: pedimos al usuario que aclare entre evento o tarea.
+        case ambiguous
+    }
+
+    enum MissingField: String, Hashable {
+        case title
+        case date
+        case time
+        case duration
+        case targetItem
+        case actionType
+    }
+
+    enum Source: String, Hashable {
+        case inlineMiDia
+        case novaChat
+    }
+
+    init(
+        originalInput: String,
+        kind: Kind,
+        proposedTitle: String? = nil,
+        proposedDate: Date? = nil,
+        proposedSection: EventSection? = nil,
+        proposedLocation: String? = nil,
+        wantsReminder: Bool = false,
+        missingFields: Set<MissingField> = [],
+        questionAsked: String? = nil,
+        source: Source = .inlineMiDia,
+        createdAt: Date = Date(),
+        expiresAt: Date? = nil
+    ) {
+        self.originalInput = originalInput
+        self.kind = kind
+        self.proposedTitle = proposedTitle
+        self.proposedDate = proposedDate
+        self.proposedSection = proposedSection
+        self.proposedLocation = proposedLocation
+        self.wantsReminder = wantsReminder
+        self.missingFields = missingFields
+        self.questionAsked = questionAsked
+        self.source = source
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt ?? createdAt.addingTimeInterval(600)
     }
 }
 
@@ -236,6 +326,32 @@ enum NovaResponder {
             "no olvides", "no te olvides",
             "que no se me olvide", "que me acuerde"
         ])
+
+        // ──────────────────────────────────────────────────────────────
+        // -1. Memoria corta: si Nova preguntó algo (pendingClarification
+        //     activo), tratamos la respuesta como follow-up para completar
+        //     la acción original.
+        //
+        //     Cubre casos:
+        //       "tengo parcial el jueves" → "¿A qué hora?" → "a las 3"
+        //       "recuérdame llamar a Juan" → "¿Cuándo?" → "mañana a las 5"
+        //       "agenda reunión con Pedro" → "¿Día y hora?" → "mañana 17:00"
+        //       "buscar agustina en 20" → "¿20:00 o +20 min?" → "+20 min"
+        //
+        //     Si el follow-up resuelve la acción, devolvemos el intent
+        //     completo. Si no resuelve (texto largo, nueva acción), caemos
+        //     al flujo normal.
+        // ──────────────────────────────────────────────────────────────
+        if context.pendingIsActive,
+           let pending = context.pendingClarification,
+           let resolved = resolvePendingFollowUp(
+               trimmed: trimmed,
+               lower: lower,
+               wantsReminder: wantsReminder,
+               pending: pending
+           ) {
+            return resolved
+        }
 
         // ──────────────────────────────────────────────────────────────
         // 0. Correcciones al último intent: "no, mañana", "ponlo como tarea",
@@ -453,11 +569,6 @@ enum NovaResponder {
                     wantsReminder: wantsReminder
                 )
             }
-            // Antes de pedir "necesito día y hora": chequear "en N" ambiguo
-            // ("ir a buscar agustina en 20"). 20:00 vs en 20 minutos → preguntar.
-            if let n = ambiguousEnNValue(in: lower) {
-                return .clarify(reason: .ambiguousTime24OrRelative(title: title, value: n))
-            }
             return .clarify(reason: .eventNeedsDateTime(title: title))
         }
 
@@ -512,15 +623,16 @@ enum NovaResponder {
             let location = extractLocation(from: trimmed)
             let section = detectSection(in: lower)
             if title.isEmpty {
-                if context.isFresh, let pending = context.pendingTitle {
+                if context.pendingIsActive, let pending = context.pendingClarification,
+                   let proposedTitle = pending.proposedTitle, !proposedTitle.isEmpty {
                     let explicitEnd = extractExplicitEndTime(from: lower, startTime: when)
                     return .createEvent(
-                        title: pending,
+                        title: proposedTitle,
                         when: when,
                         endTime: explicitEnd,
-                        location: location ?? context.lastLocation,
-                        section: section ?? context.pendingSection ?? context.lastSection,
-                        wantsReminder: wantsReminder || context.pendingWantsReminder
+                        location: location ?? pending.proposedLocation ?? context.lastLocation,
+                        section: section ?? pending.proposedSection ?? context.lastSection,
+                        wantsReminder: wantsReminder || pending.wantsReminder
                     )
                 }
                 return .clarify(reason: .eventNeedsTitle)
@@ -620,9 +732,6 @@ enum NovaResponder {
             return "Tengo «\(title)» para el \(day). ¿A qué hora?"
         case .clarify(.eventNeedsDateTime(let title)):
             return "Tengo «\(title)». ¿Para qué día y a qué hora lo agendo?"
-        case .clarify(.ambiguousTime24OrRelative(let title, let value)):
-            let hourPadded = String(format: "%02d:00", value)
-            return "Tengo «\(title)». ¿Te refieres a las \(hourPadded) o en \(value) minutos?"
         case .clarify(.noContext):
             return "No estoy seguro a qué te referís. Decime qué querés agendar o crear."
         case .clarify(.unclear):
@@ -854,6 +963,12 @@ enum NovaResponder {
         // "en N minutos" / "en N min" / "en N h" / "en N hora(s)" / "en N hrs"
         if lower.range(
             of: #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\b"#,
+            options: .regularExpression
+        ) != nil { return true }
+        // "en N" suelto (sin unidad) — coloquial. Tratado como minutos por
+        // `extractDateTime`. Si está en la frase, hay marcador de tiempo.
+        if lower.range(
+            of: #"\ben\s+\d{1,3}\b(?!\s*(?:min|hora|hr|hs|h\b))"#,
             options: .regularExpression
         ) != nil { return true }
         if matches(lower, [
@@ -1222,9 +1337,13 @@ enum NovaResponder {
         let cal = Calendar.current
         let now = Date()
 
-        // Offset relativo a "ahora": "en N minutos" / "en N min" / "en N hora(s)"
-        // / "en N h" / "en N hrs". Solo se aplica cuando hay unidad explícita —
-        // "en 20" suelto se trata como ambiguo en `parse()`.
+        // Offset relativo a "ahora". Tres patrones, en orden:
+        //   "en N minutos" / "en N min"  → +N minutos (explícito)
+        //   "en N horas"   / "en N h"    → +N horas   (explícito)
+        //   "en N"         (sin unidad)  → +N minutos (regla coloquial:
+        //     "ir a buscar agustina en 20" / "salgo en 20" / "te llamo en 5"
+        //     siempre significa minutos. Si el usuario quería 20:00 dice "a
+        //     las 20", "tipo 20", "20 hrs" o "20:00".)
         if let mins = firstCaptureInt(
             lower,
             pattern: #"\ben\s+(\d{1,3})\s+(min|minutos?)\b"#,
@@ -1238,6 +1357,15 @@ enum NovaResponder {
             group: 1
         ), hours > 0, hours <= 12 {
             return cal.date(byAdding: .hour, value: hours, to: now)
+        }
+        // "en N" suelto sin unidad. Default a minutos. Aceptamos 1..180
+        // (3h) — más allá empieza a sonar a hora del día y dudoso.
+        if let mins = firstCaptureInt(
+            lower,
+            pattern: #"\ben\s+(\d{1,3})\b(?!\s*(?:min|hora|hr|hs|h\b))"#,
+            group: 1
+        ), mins > 0, mins <= 180 {
+            return cal.date(byAdding: .minute, value: mins, to: now)
         }
 
         var dayBase: Date? = nil
@@ -1487,6 +1615,245 @@ enum NovaResponder {
         return Int(ns.substring(with: r))
     }
 
+    // MARK: - Pending clarification resolution
+
+    /// Intenta resolver el siguiente turno usando un pending guardado por
+    /// una clarify previa. Devuelve `nil` cuando el follow-up NO parece
+    /// estar respondiendo a la pregunta (el caller debe fall-through).
+    ///
+    /// Heurísticas (en orden):
+    /// 1. "no" / "cancela" / "déjalo" → cancelar pending, devolver smalltalk
+    ///    suave ("Listo, lo dejo así.").
+    /// 2. "sí" / "dale" / "confirma" → ejecutar acción si pending tiene
+    ///    título + fecha + hora. Si falta algo, pedir lo que falta.
+    /// 3. Solo hora ("a las 3" / "20:00" / "en 20 minutos"):
+    ///       - Si pending.proposedDate existe, combinar hora con esa fecha.
+    ///       - Si no, usar hoy (extractDateTime default).
+    /// 4. Solo día ("mañana", "viernes"):
+    ///       - Si pending.proposedTime ya estaba (por extractDateTime), crear.
+    ///       - Si no, actualizar pending y volver a preguntar hora.
+    /// 5. Día + hora juntos ("mañana a las 5") → crear con ambos.
+    /// 6. Si el input claramente es una acción nueva (event trigger,
+    ///    "tengo que", saludo), devolvemos nil para que el flujo normal lo
+    ///    capture y descarte el pending.
+    private static func resolvePendingFollowUp(
+        trimmed: String,
+        lower: String,
+        wantsReminder: Bool,
+        pending: PendingClarification
+    ) -> NovaIntent? {
+        // 6. Detección temprana de "nueva acción" — si el usuario claramente
+        //    quiere hacer algo distinto (event trigger explícito, "tengo que",
+        //    "crea tarea"), abandonamos el pending y dejamos que el flujo
+        //    normal procese.
+        if hasNewActionMarkers(lower) {
+            return nil
+        }
+
+        // 1. Cancelación explícita.
+        if isPendingCancel(lower) {
+            return .smallTalk(reply: "Listo, lo dejo así.")
+        }
+
+        // 2. Confirmación afirmativa.
+        if isPendingConfirm(lower) {
+            return completePendingAsEvent(
+                pending: pending,
+                when: pending.proposedDate,
+                wantsReminder: wantsReminder
+            )
+        }
+
+        // 3-5. Extraer fecha/hora del follow-up y combinarla con pending.
+        let extracted = extractDateTime(from: lower)
+        let dayExplicit = hasExplicitDayMarker(lower)
+        let timeExplicit = hasTimeMarker(lower)
+
+        // Si el follow-up no aporta hora ni día y no es confirmación, no
+        // hay forma de completar — devolvemos nil para fall-through.
+        if !timeExplicit && !dayExplicit && extracted == nil {
+            return nil
+        }
+
+        // Combinar: el día viene del input si fue explícito; si no, del
+        // pending; si tampoco, hoy. La hora viene del input si fue explícita;
+        // si no, del pending.proposedDate (sus h:m); si tampoco, default 9:00.
+        let cal = Calendar.current
+        let resolvedDate: Date? = combineDateAndTime(
+            extracted: extracted,
+            dayWasExplicit: dayExplicit,
+            timeWasExplicit: timeExplicit,
+            pendingDate: pending.proposedDate
+        )
+
+        guard let when = resolvedDate else {
+            return nil
+        }
+
+        // Si después de combinar todavía no tenemos hora real (porque el
+        // pending tampoco la tenía y el input solo aportó día), devolvemos
+        // clarify pidiendo hora.
+        if !timeExplicit && !pendingHadTime(pending: pending) {
+            // El usuario eligió día; ahora falta hora.
+            return .clarify(reason: .eventNeedsTime(title: pending.proposedTitle ?? "Tarea", partialDate: when))
+        }
+
+        _ = cal  // silenciar warning si no se usa más abajo
+        return completePendingAsEvent(
+            pending: pending,
+            when: when,
+            wantsReminder: wantsReminder
+        )
+    }
+
+    /// Combina la fecha/hora del input con la del pending según qué fue
+    /// explícito. Implementa la regla: input gana sobre pending para los
+    /// campos que el input proveyó; pending llena los huecos.
+    private static func combineDateAndTime(
+        extracted: Date?,
+        dayWasExplicit: Bool,
+        timeWasExplicit: Bool,
+        pendingDate: Date?
+    ) -> Date? {
+        let cal = Calendar.current
+        // Caso fácil: input trae día+hora explícitos → usar input tal cual.
+        if dayWasExplicit && timeWasExplicit, let extracted {
+            return extracted
+        }
+        // Caso fácil 2: input trae solo hora, pending tiene día → tomar
+        // día del pending y hora del input.
+        if timeWasExplicit, let extracted, let pendingDate {
+            let h = cal.component(.hour, from: extracted)
+            let m = cal.component(.minute, from: extracted)
+            let baseDay = cal.startOfDay(for: pendingDate)
+            return cal.date(bySettingHour: h, minute: m, second: 0, of: baseDay)
+        }
+        // Solo hora, sin pending → usar `extracted` (será hoy + h:m).
+        if timeWasExplicit, let extracted {
+            return extracted
+        }
+        // Solo día, pending tiene hora → cambiar el día del pending al nuevo.
+        if dayWasExplicit, let extracted, let pendingDate {
+            let h = cal.component(.hour, from: pendingDate)
+            let m = cal.component(.minute, from: pendingDate)
+            let baseDay = cal.startOfDay(for: extracted)
+            return cal.date(bySettingHour: h, minute: m, second: 0, of: baseDay)
+        }
+        // Solo día, sin pending o pending sin hora → devolver día (con 9:00
+        // default que viene de extractDateTime). Caller decidirá si pide hora.
+        if dayWasExplicit {
+            return extracted
+        }
+        // Ninguno explícito → no hay nada para combinar.
+        return extracted
+    }
+
+    /// True cuando el pending ya tenía una hora "real" (no el 9:00 default
+    /// que devuelve `extractDateTime` cuando solo había día).
+    private static func pendingHadTime(pending: PendingClarification) -> Bool {
+        guard let date = pending.proposedDate else { return false }
+        // Si proposedDate tiene hora distinta de 9:00 exacto, asumimos
+        // que es una hora real (no el default).
+        let cal = Calendar.current
+        let h = cal.component(.hour, from: date)
+        let m = cal.component(.minute, from: date)
+        return !(h == 9 && m == 0)
+    }
+
+    /// True si el input incluye día explícito (hoy/mañana/pasado mañana/
+    /// día de la semana).
+    private static func hasExplicitDayMarker(_ lower: String) -> Bool {
+        if lower.range(of: #"\bma(ñ|n)ana\b"#, options: .regularExpression) != nil { return true }
+        if lower.contains("hoy") { return true }
+        if lower.contains("pasado mañana") || lower.contains("pasado manana") { return true }
+        if nextWeekday(in: lower, calendar: .current, from: Date()) != nil { return true }
+        return false
+    }
+
+    /// True si el input parece arrancar una nueva acción (no completar el
+    /// pending). Detección conservadora: solo descartamos pending si el
+    /// usuario claramente empezó algo nuevo.
+    private static func hasNewActionMarkers(_ lower: String) -> Bool {
+        let eventStarters = [
+            "agenda ", "agéndame", "agendame", "agendar ",
+            "crea evento", "crea un evento", "nuevo evento",
+            "tengo reunión", "tengo reunion", "tengo clase",
+            "tengo prueba", "tengo parcial", "tengo examen", "tengo final",
+            "tengo entrega", "tengo cita", "tengo turno", "tengo médico",
+            "tengo medico", "tengo doctor", "tengo evento",
+            "salir a ", "salir con ", "ir a ", "voy a ",
+            "buscar a ", "ir a buscar ",
+            "reunión con ", "reunion con ",
+            "juntarme con ", "almuerzo con ", "cena con ",
+            "tengo que ", "crea tarea", "nueva tarea",
+            "comprar ", "llamar ", "estudiar ", "leer ", "escribir ",
+            "organiza mi día", "organiza el día",
+            "qué tengo", "que tengo", "qué sigue", "que sigue"
+        ]
+        return matchesAny(lower, eventStarters)
+    }
+
+    /// Patrones de respuesta afirmativa corta.
+    private static func isPendingConfirm(_ lower: String) -> Bool {
+        let confirm: Set<String> = [
+            "sí", "si", "sí.", "si.", "sí!", "si!",
+            "dale", "dale!",
+            "confirma", "confírma", "confírmalo", "confirmalo",
+            "ok", "okay", "vale", "perfecto", "listo",
+            "claro", "claro que sí", "claro que si",
+            "así está bien", "asi esta bien", "así es", "asi es"
+        ]
+        return confirm.contains(lower)
+    }
+
+    /// Patrones de cancelación corta.
+    private static func isPendingCancel(_ lower: String) -> Bool {
+        let cancel: Set<String> = [
+            "no", "no,", "no.",
+            "cancela", "cancelar", "cancélalo", "cancelalo",
+            "déjalo", "dejalo", "déjalo así", "dejalo asi",
+            "olvídalo", "olvidalo", "olvídate", "olvidate",
+            "no importa", "nada", "mejor no"
+        ]
+        return cancel.contains(lower)
+    }
+
+    /// Construye un `NovaIntent` usando el pending + when final.
+    /// - pending.kind == .task → createTask con dueDate=when.
+    /// - resto → createEvent (con isReminder según wantsReminder).
+    private static func completePendingAsEvent(
+        pending: PendingClarification,
+        when: Date?,
+        wantsReminder: Bool
+    ) -> NovaIntent {
+        let title = pending.proposedTitle ?? "Recordatorio"
+        let combinedReminder = wantsReminder || pending.wantsReminder
+
+        // Tarea explícita: respetar el kind original del pending.
+        if pending.kind == .task {
+            return .createTask(
+                title: title,
+                dueDate: when,
+                recurrence: nil,
+                wantsReminder: combinedReminder
+            )
+        }
+
+        // Sin fecha resuelta no podemos crear evento — pedir hora.
+        guard let when else {
+            return .clarify(reason: .eventNeedsTime(title: title, partialDate: Date()))
+        }
+
+        return .createEvent(
+            title: title,
+            when: when,
+            endTime: nil,
+            location: pending.proposedLocation,
+            section: pending.proposedSection,
+            wantsReminder: combinedReminder
+        )
+    }
+
     private static func extractLocation(from text: String) -> String? {
         // Busca " en <X>" donde X termina en fin/coma/punto/salto-de-línea.
         // Acepta tildes y mayúsculas (case-insensitive).
@@ -1512,20 +1879,6 @@ enum NovaResponder {
         return cleanupTitle(withoutPrefix)
     }
 
-    /// Detecta el patrón "en N" (N en 13..23) cuando NO viene acompañado de
-    /// unidad ("minutos", "horas", "hrs"…). En ese caso "en 20" es ambiguo:
-    /// puede significar a las 20:00 o en 20 minutos. El caller pide
-    /// clarificación al usuario.
-    fileprivate static func ambiguousEnNValue(in lower: String) -> Int? {
-        // Si ya tiene unidad explícita, NO es ambiguo (ya lo manejó extractDateTime).
-        if lower.range(
-            of: #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\b"#,
-            options: .regularExpression
-        ) != nil { return nil }
-        guard let n = firstCaptureInt(lower, pattern: #"\ben\s+(\d{1,2})\b"#, group: 1),
-              n >= 13, n <= 23 else { return nil }
-        return n
-    }
 }
 
 /// Store central de la app. Carga desde persistencia local con fallback a demo state.
@@ -1657,26 +2010,26 @@ final class FocusDataStore: ObservableObject {
             lastIntentKind: kind,
             lastEventId: eventId,
             lastTaskId: taskId,
-            pendingTitle: nil,
-            pendingSection: nil,
-            pendingWantsReminder: false,
+            pendingClarification: nil,
             updatedAt: Date()
         )
     }
 
-    /// Guarda título tentativo cuando Nova respondió con clarify (no se ejecutó
-    /// nada). El siguiente turno con solo hora ("a las 20", "en 20 minutos")
-    /// completará la acción usando este título.
-    func setPendingNovaContext(
-        title: String,
-        section: EventSection? = nil,
-        wantsReminder: Bool = false
-    ) {
+    /// Guarda una aclaración pendiente. El siguiente turno del usuario
+    /// (corto: solo hora, solo día, "sí", "no", etc.) puede usar este
+    /// pending para completar la acción sin perder contexto.
+    func setPendingClarification(_ pending: PendingClarification) {
         var ctx = novaContext
-        ctx.pendingTitle = title
-        ctx.pendingSection = section
-        ctx.pendingWantsReminder = wantsReminder
+        ctx.pendingClarification = pending
         ctx.updatedAt = Date()
+        novaContext = ctx
+    }
+
+    /// Limpia solo el pending sin tocar el resto del contexto.
+    func clearPendingClarification() {
+        guard novaContext.pendingClarification != nil else { return }
+        var ctx = novaContext
+        ctx.pendingClarification = nil
         novaContext = ctx
     }
 
@@ -2517,6 +2870,18 @@ final class FocusDataStore: ObservableObject {
         HapticManager.shared.tap()
         isNovaTyping = true
 
+        // Pre-parse local: si el parser ya detecta que el mensaje deja una
+        // clarify (Nova preguntará algo), guardamos pending ANTES de llamar
+        // al backend. Si después el backend resuelve con actions, el pending
+        // se limpia automáticamente al ejecutar `updateNovaContext`. Si el
+        // backend deja sin actions (también pregunta), el pending sobrevive
+        // y el próximo turno corto lo puede completar.
+        let preIntent = NovaResponder.parse(trimmed, context: novaContext)
+        if case .clarify(let reason) = preIntent,
+           let pending = buildChatPendingClarification(from: reason, userText: trimmed) {
+            setPendingClarification(pending)
+        }
+
         // History snapshot ANTES de meter el mensaje del usuario en el
         // history — el server espera turnos anteriores, no el actual.
         let priorHistory: [NovaService.HistoryEntry] = novaMessages
@@ -2647,6 +3012,46 @@ final class FocusDataStore: ObservableObject {
 
     /// Convierte un `NovaServiceError` recuperable en una frase humana
     /// para mostrar al final del mensaje de Nova en el chat.
+    /// Construye un PendingClarification para el chat a partir de un
+    /// ClarifyReason del parser local. Espejo de `buildPendingClarification`
+    /// de MiDiaView, pero con `source: .novaChat`.
+    private func buildChatPendingClarification(
+        from reason: NovaIntent.ClarifyReason,
+        userText: String
+    ) -> PendingClarification? {
+        let lower = userText.lowercased()
+        let wantsReminder = lower.contains("acu") || lower.contains("recu")
+        let section = NovaResponder.guessSection(for: userText)
+        switch reason {
+        case .eventNeedsTime(let title, let date):
+            return PendingClarification(
+                originalInput: userText,
+                kind: wantsReminder ? .reminder : .event,
+                proposedTitle: title,
+                proposedDate: date,
+                proposedSection: section,
+                wantsReminder: wantsReminder,
+                missingFields: [.time],
+                questionAsked: "¿A qué hora?",
+                source: .novaChat
+            )
+        case .eventNeedsDateTime(let title):
+            return PendingClarification(
+                originalInput: userText,
+                kind: wantsReminder ? .reminder : .event,
+                proposedTitle: title,
+                proposedDate: nil,
+                proposedSection: section,
+                wantsReminder: wantsReminder,
+                missingFields: [.date, .time],
+                questionAsked: "¿Para qué día y hora?",
+                source: .novaChat
+            )
+        case .taskNeedsTitle, .eventNeedsTitle, .noContext, .unclear:
+            return nil
+        }
+    }
+
     @MainActor
     private func fallbackNoteForChat(error: NovaServiceError) -> String? {
         switch error {
