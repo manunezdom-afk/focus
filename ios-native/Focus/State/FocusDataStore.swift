@@ -1387,6 +1387,28 @@ final class FocusDataStore: ObservableObject {
     /// True mientras Nova "tipea" la respuesta. Se usa en el Chat para
     /// mostrar el indicador de 3 puntos.
     @Published var isNovaTyping: Bool = false
+
+    // MARK: - Sync state (Bloque 3 — Supabase events/tasks)
+
+    /// Credenciales para sync. `FocusApp` las inyecta cada vez que cambia
+    /// `AuthStore.state`. Cuando es nil → modo demo o logged-out → NO sync.
+    /// Cuando hay valor → store dispara fetch + upserts en background.
+    struct SyncCredentials: Equatable {
+        let accessToken: String
+        let userId: UUID
+    }
+    @Published var syncCredentials: SyncCredentials? = nil
+
+    /// Estado visible para Ajustes → "Sincronización".
+    enum SyncState: Equatable {
+        case demo                       // Sin sesión → no sync
+        case loggedOut                  // Logueado pero credenciales aún no llegan
+        case idle                       // Logueado, no hay sync corriendo
+        case syncing                    // Hay fetch/upsert activo
+        case error(String)              // Última sync falló
+    }
+    @Published var syncState: SyncState = .demo
+    @Published var lastSyncAt: Date? = nil
     /// Títulos de ítems demo descartados por el usuario. **Sí persisten** a
     /// disco — si el usuario hace swipe-borrar a un ejemplo, no debe volver
     /// a aparecer al reabrir la app. Solo aplica cuando `!hasUserData`.
@@ -1477,6 +1499,153 @@ final class FocusDataStore: ObservableObject {
         novaContext = NovaContext()
     }
 
+    // MARK: - Sync coordination (called by FocusApp on auth changes)
+
+    /// Llamar desde `FocusApp` cuando cambia `AuthStore.state`. Solo si hay
+    /// `accessToken` + `userId` válidos, se sincroniza. Cualquier otra cosa
+    /// (demo, loggedOut) deja `syncCredentials = nil` → no hay sync.
+    func applyAuthChange(accessToken: String?, userId: UUID?) {
+        guard let accessToken, let userId else {
+            syncCredentials = nil
+            syncState = .demo
+            return
+        }
+        let creds = SyncCredentials(accessToken: accessToken, userId: userId)
+        let changed = syncCredentials != creds
+        syncCredentials = creds
+        if syncState == .demo || syncState == .loggedOut {
+            syncState = .idle
+        }
+        // Si cambiaron credenciales (login nuevo o refresh), traemos remoto.
+        if changed {
+            Task { [weak self] in await self?.fetchRemoteAndMerge() }
+        }
+    }
+
+    /// Fetch remoto + merge con local. Estrategia V1: server wins por
+    /// `updated_at` cuando hay conflicto. Items locales sin contraparte
+    /// remota se suben (defensa contra primer-login con datos preexistentes).
+    func fetchRemoteAndMerge() async {
+        guard let creds = syncCredentials else { return }
+        syncState = .syncing
+        do {
+            async let remoteEvents = SupabaseSyncService.fetchEvents(
+                accessToken: creds.accessToken, userId: creds.userId.uuidString
+            )
+            async let remoteTasks = SupabaseSyncService.fetchTasks(
+                accessToken: creds.accessToken, userId: creds.userId.uuidString
+            )
+            let (events, tasks) = try await (remoteEvents, remoteTasks)
+            await MainActor.run {
+                mergeRemoteEvents(events)
+                mergeRemoteTasks(tasks)
+                lastSyncAt = Date()
+                syncState = .idle
+            }
+        } catch let err as SupabaseSyncError {
+            await MainActor.run {
+                syncState = .error(err.errorDescription ?? "Sync error")
+            }
+        } catch {
+            await MainActor.run {
+                syncState = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Merge in-place: server gana por id; locales sin contraparte se
+    /// preservan (luego pasamos a uploadPendingLocals para subirlos).
+    private func mergeRemoteEvents(_ remote: [RemoteFocusEvent]) {
+        var byId = Dictionary(uniqueKeysWithValues: events.map { ($0.id, $0) })
+        for r in remote {
+            if let local = r.toLocal() { byId[local.id] = local }
+        }
+        events = byId.values.sorted { $0.startTime < $1.startTime }
+        persistEvents()
+    }
+
+    private func mergeRemoteTasks(_ remote: [RemoteFocusTask]) {
+        var byId = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
+        for r in remote {
+            byId[r.id] = r.toLocal()
+        }
+        tasks = Array(byId.values)
+        persistTasks()
+    }
+
+    /// Background upsert. Si falla, deja `syncState = .error` pero NO
+    /// reverte el cambio local — la consistencia se restaura en la próxima
+    /// sync exitosa.
+    private func uploadEvent(_ event: FocusEvent) {
+        guard let creds = syncCredentials else { return }
+        Task { [weak self] in
+            do {
+                let remote = RemoteFocusEvent(local: event, userId: creds.userId)
+                try await SupabaseSyncService.upsertEvent(remote, accessToken: creds.accessToken)
+            } catch let err as SupabaseSyncError {
+                await MainActor.run {
+                    self?.syncState = .error(err.errorDescription ?? "Sync error")
+                }
+            } catch {
+                await MainActor.run {
+                    self?.syncState = .error(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func uploadTask(_ task: FocusTask) {
+        guard let creds = syncCredentials else { return }
+        Task { [weak self] in
+            do {
+                let remote = RemoteFocusTask(local: task, userId: creds.userId)
+                try await SupabaseSyncService.upsertTask(remote, accessToken: creds.accessToken)
+            } catch let err as SupabaseSyncError {
+                await MainActor.run {
+                    self?.syncState = .error(err.errorDescription ?? "Sync error")
+                }
+            } catch {
+                await MainActor.run {
+                    self?.syncState = .error(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func softDeleteEventRemote(_ id: UUID) {
+        guard let creds = syncCredentials else { return }
+        Task { [weak self] in
+            do {
+                try await SupabaseSyncService.softDeleteEvent(id: id, accessToken: creds.accessToken)
+            } catch let err as SupabaseSyncError {
+                await MainActor.run {
+                    self?.syncState = .error(err.errorDescription ?? "Sync error")
+                }
+            } catch {
+                await MainActor.run {
+                    self?.syncState = .error(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func softDeleteTaskRemote(_ id: UUID) {
+        guard let creds = syncCredentials else { return }
+        Task { [weak self] in
+            do {
+                try await SupabaseSyncService.softDeleteTask(id: id, accessToken: creds.accessToken)
+            } catch let err as SupabaseSyncError {
+                await MainActor.run {
+                    self?.syncState = .error(err.errorDescription ?? "Sync error")
+                }
+            } catch {
+                await MainActor.run {
+                    self?.syncState = .error(error.localizedDescription)
+                }
+            }
+        }
+    }
+
     // MARK: - Persistencia (privado)
 
     private func persistEvents()       { FocusLocalStore.save(events, forKey: .events) }
@@ -1523,6 +1692,7 @@ final class FocusDataStore: ObservableObject {
         events.append(event)
         events.sort { $0.startTime < $1.startTime }
         persistEvents()
+        uploadEvent(event)
         HapticManager.shared.success()
     }
 
@@ -1530,6 +1700,7 @@ final class FocusDataStore: ObservableObject {
         events.removeAll { $0.id == id }
         persistEvents()
         cleanupStaleSuggestions()
+        softDeleteEventRemote(id)
     }
 
     /// Actualiza un evento existente. No falla silenciosamente si el id no
@@ -1539,6 +1710,7 @@ final class FocusDataStore: ObservableObject {
         events[idx] = event
         events.sort { $0.startTime < $1.startTime }
         persistEvents()
+        uploadEvent(event)
         HapticManager.shared.tick()
     }
 
@@ -1557,6 +1729,7 @@ final class FocusDataStore: ObservableObject {
         tasks[idx].done.toggle()
         tasks[idx].doneAt = tasks[idx].done ? Date() : nil
         persistTasks()
+        uploadTask(tasks[idx])
         if tasks[idx].done {
             HapticManager.shared.success()
         } else {
@@ -1569,12 +1742,14 @@ final class FocusDataStore: ObservableObject {
         guard let sIdx = tasks[tIdx].subtasks.firstIndex(where: { $0.id == subtaskId }) else { return }
         tasks[tIdx].subtasks[sIdx].isCompleted.toggle()
         persistTasks()
+        uploadTask(tasks[tIdx])
         HapticManager.shared.tick()
     }
 
     func addTask(_ task: FocusTask) {
         tasks.insert(task, at: 0)
         persistTasks()
+        uploadTask(task)
         HapticManager.shared.success()
     }
 
@@ -1582,6 +1757,7 @@ final class FocusDataStore: ObservableObject {
         tasks.removeAll { $0.id == id }
         persistTasks()
         cleanupStaleSuggestions()
+        softDeleteTaskRemote(id)
         HapticManager.shared.tick()
     }
 
@@ -1590,6 +1766,7 @@ final class FocusDataStore: ObservableObject {
         guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
         tasks[idx] = task
         persistTasks()
+        uploadTask(task)
         HapticManager.shared.tick()
     }
 

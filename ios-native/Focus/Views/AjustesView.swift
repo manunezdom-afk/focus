@@ -24,6 +24,7 @@ struct AjustesView: View {
                             .padding(.top, Theme.Spacing.lg)
 
                         cuentaSection
+                        sincronizacionSection
                         novaSection
                         calendariosSection
                         notificacionesSection
@@ -106,6 +107,97 @@ struct AjustesView: View {
                 .font(Theme.Typography.body)
                 .foregroundStyle(Theme.Colors.textSecondary)
         }
+    }
+
+    // MARK: - Sincronización (Bloque 3 — Supabase events/tasks)
+
+    private var sincronizacionSection: some View {
+        settingsSection(title: "Sincronización") {
+            VStack(spacing: 0) {
+                AjustesRow(
+                    symbol: syncSymbol,
+                    tint: syncTint,
+                    title: syncTitle,
+                    subtitle: syncSubtitle,
+                    trailing: .nothing
+                )
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+                Button {
+                    HapticManager.shared.tap()
+                    Task { await store.fetchRemoteAndMerge() }
+                } label: {
+                    AjustesRow(
+                        symbol: "arrow.triangle.2.circlepath",
+                        tint: Theme.Colors.focusAccent,
+                        title: "Sincronizar ahora",
+                        subtitle: syncActionSubtitle,
+                        trailing: .chevron
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSyncManually)
+                .opacity(canSyncManually ? 1.0 : 0.5)
+            }
+            .focusCardContainer()
+        }
+    }
+
+    private var syncSymbol: String {
+        switch store.syncState {
+        case .demo:        return "iphone.gen3"
+        case .loggedOut:   return "iphone.gen3"
+        case .idle:        return "checkmark.icloud"
+        case .syncing:     return "arrow.triangle.2.circlepath"
+        case .error:       return "exclamationmark.icloud"
+        }
+    }
+
+    private var syncTint: Color {
+        switch store.syncState {
+        case .demo, .loggedOut: return Theme.Colors.textTertiary
+        case .idle:             return Theme.Colors.success
+        case .syncing:          return Theme.Colors.focusAccent
+        case .error:            return Theme.Colors.warning
+        }
+    }
+
+    private var syncTitle: String {
+        switch store.syncState {
+        case .demo:        return "Modo demo"
+        case .loggedOut:   return "Sin sesión"
+        case .idle:        return "Sincronizado"
+        case .syncing:     return "Sincronizando…"
+        case .error:       return "No se pudo sincronizar"
+        }
+    }
+
+    private var syncSubtitle: String {
+        switch store.syncState {
+        case .demo:
+            return "Solo en este iPhone. Inicia sesión para sincronizar."
+        case .loggedOut:
+            return "Sesión cerrada. Tus datos siguen en este iPhone."
+        case .idle:
+            if let date = store.lastSyncAt {
+                return "Última sync: \(DateFormatters.hourMinute.string(from: date))"
+            }
+            return "Datos al día con Supabase."
+        case .syncing:
+            return "Subiendo cambios locales…"
+        case .error(let msg):
+            return msg
+        }
+    }
+
+    private var syncActionSubtitle: String {
+        if !canSyncManually {
+            return "Inicia sesión para sincronizar."
+        }
+        return "Fuerza fetch + upload contra Supabase."
+    }
+
+    private var canSyncManually: Bool {
+        store.syncCredentials != nil
     }
 
     // MARK: - Cuenta
