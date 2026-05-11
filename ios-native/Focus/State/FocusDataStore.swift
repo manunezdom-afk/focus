@@ -619,7 +619,16 @@ enum NovaResponder {
         //      → "a las 20" → crea «Buscar a Agustina» hoy 20:00.
         // ──────────────────────────────────────────────────────────────
         if let when = extractDateTime(from: lower), hasTimeMarker(lower) {
-            let title = cleanupTitle(stripDateTimeMarkers(stripLocationMarker(trimmed)))
+            // Limpieza completa del título: además de stripDateTime y
+            // stripLocation, también quitamos triggers de recordatorio
+            // ("acuérdame", "recuérdame", "no olvides") y fillers
+            // ("porfa", "agéndame") para que "acuérdame probar
+            // notificación en 1 minuto" devuelva título "Probar notificación"
+            // y no "Acuérdame probar notificación".
+            var titleRaw = stripDateTimeMarkers(stripLocationMarker(trimmed))
+            titleRaw = stripReminderTriggers(titleRaw)
+            titleRaw = stripFillers(titleRaw)
+            let title = cleanupTitle(titleRaw)
             let location = extractLocation(from: trimmed)
             let section = detectSection(in: lower)
             if title.isEmpty {

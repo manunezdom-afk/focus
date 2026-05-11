@@ -21,11 +21,22 @@ import UserNotifications
 /// evento + ubicación si la tiene. No incluye `id`, no incluye tokens,
 /// no incluye datos sensibles. El cuerpo cumple con la regla del usuario
 /// de mensajes cortos y útiles.
-final class LocalNotificationService {
+final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate {
 
     static let shared = LocalNotificationService()
 
-    private init() {}
+    private override init() {
+        super.init()
+        // Registramos self como delegate ANTES de que llegue ninguna
+        // notificación. Sin delegate, iOS suprime el banner cuando la app
+        // está en foreground — el usuario crearía un recordatorio, lo
+        // dejaría arriba y la notif nunca se vería.
+        //
+        // El delegate se accede vía singleton: al primer touch de
+        // `LocalNotificationService.shared` (boot bootstrap, Ajustes,
+        // addEvent), iOS recibe el binding.
+        UNUserNotificationCenter.current().delegate = self
+    }
 
     // MARK: - Identifier convention
 
@@ -158,5 +169,36 @@ final class LocalNotificationService {
     func pendingReminderCount() async -> Int {
         let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
         return pending.filter { $0.identifier.hasPrefix(Self.eventReminderPrefix) }.count
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Llamado por iOS cuando una notif está por entregarse y la app está
+    /// en FOREGROUND. Sin esto, iOS suprime el banner — el usuario nunca
+    /// vería la notificación si justo tiene la app abierta.
+    ///
+    /// Configuración V1: mostramos `banner` (alerta arriba), `sound`
+    /// (default) y agregamos a la `list` del Notification Center. No
+    /// usamos `badge` para no llenar el icon de la app con un número
+    /// que el usuario no podría limpiar fácilmente.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
+    }
+
+    /// Llamado por iOS cuando el usuario interactúa con la notificación
+    /// (tap, swipe). En V1 no hacemos deep routing — la app abre en su
+    /// último estado. El `eventId` queda disponible en `userInfo` para una
+    /// futura implementación de "navegar al item específico".
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        // No-op V1. iOS ya abre la app por default.
+        completionHandler()
     }
 }
