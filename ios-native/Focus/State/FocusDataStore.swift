@@ -107,17 +107,22 @@ enum RecurrenceHint: Hashable {
 /// (sin IA real); cuando se conecte el backend, este enum se mantiene y solo
 /// cambia el parser.
 enum NovaIntent: Hashable {
-    /// Crear tarea con título y, opcionalmente, una recurrencia detectada
-    /// (que aún no está implementada — el ejecutor avisa).
-    case createTask(title: String, recurrence: RecurrenceHint?)
+    /// Crear tarea con título, opcional recurrencia, opcional flag "acuérdame".
+    case createTask(title: String, recurrence: RecurrenceHint?, wantsReminder: Bool)
     /// Crear evento. `when` es opcional — si no lo extrajimos, Nova pide
     /// aclaración. `section` también opcional con default `.reunion`.
     case createEvent(
         title: String,
         when: Date?,
         location: String?,
-        section: EventSection?
+        section: EventSection?,
+        wantsReminder: Bool
     )
+    /// Corregir el último evento creado (cambiar día, hora, o ubicación).
+    /// Resuelto desde `NovaContext.lastEventId`.
+    case correctLastEvent(modifier: EventCorrection)
+    /// Convertir el último evento en tarea (mismo título, sin hora).
+    case convertLastToTask
     /// Organizar el día → genera sugerencias en la Bandeja.
     case organizeDay
     /// Revisar tareas pendientes → resumen inline.
@@ -137,6 +142,13 @@ enum NovaIntent: Hashable {
         case noContext                  // "agéndalo" sin contexto previo
         case unclear
     }
+}
+
+/// Modificador para `correctLastEvent`. V1: solo soporta cambiar día.
+enum EventCorrection: Hashable {
+    case shiftDays(offset: Int)            // "no, mañana" → +1; "no, ayer" → -1
+    case setTime(hour: Int, minute: Int)   // "cámbialo a las 18"
+    case setLocation(String)               // "en sala H013"
 }
 
 // MARK: - Contexto de sesión de Nova (memoria corta)
@@ -197,6 +209,49 @@ enum NovaResponder {
     static func parse(_ text: String, context: NovaContext = NovaContext()) -> NovaIntent {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
+        let wantsReminder = matches(lower, [
+            "acuérdame", "acuerdame", "acordame",
+            "recuérdame", "recuerdame", "recordame",
+            "no olvides", "que no se me olvide"
+        ])
+
+        // ──────────────────────────────────────────────────────────────
+        // 0. Correcciones al último intent: "no, mañana", "ponlo como tarea",
+        //    "cámbialo a las 18", "en sala H013". Requieren contexto fresco.
+        // ──────────────────────────────────────────────────────────────
+        if isCorrectionStart(lower), context.isFresh {
+            // "ponlo como tarea" / "pásalo a tarea" → convertir.
+            if matches(lower, ["como tarea", "ponlo como tarea", "pásalo a tarea", "pasalo a tarea", "convierte en tarea"]) {
+                return .convertLastToTask
+            }
+            // "no, mañana" / "no mañana" / "mejor mañana" / "ponlo mañana".
+            if (lower.contains("mañana") || lower.contains("manana"))
+                && !lower.contains("pasado mañana") && !lower.contains("pasado manana") {
+                return .correctLastEvent(modifier: .shiftDays(offset: 1))
+            }
+            // "no, hoy" / "mejor hoy" (cuando contexto está en otro día).
+            if lower.contains("hoy") {
+                // Compute offset: cuántos días entre lastDate y hoy.
+                if let lastDate = context.lastDate {
+                    let cal = Calendar.current
+                    let comps = cal.dateComponents([.day], from: cal.startOfDay(for: lastDate), to: cal.startOfDay(for: Date()))
+                    let offset = comps.day ?? 0
+                    if offset != 0 {
+                        return .correctLastEvent(modifier: .shiftDays(offset: offset))
+                    }
+                }
+            }
+            // "cámbialo a las 18" / "ponlo a las 18".
+            if let (h, m) = extractHourMinute(from: lower) {
+                return .correctLastEvent(modifier: .setTime(hour: h, minute: m))
+            }
+            // "en sala H013" como corrección sola.
+            if let loc = extractLocation(from: trimmed) {
+                return .correctLastEvent(modifier: .setLocation(loc))
+            }
+            // "no" sin más → clarify.
+            return .clarify(reason: .noContext)
+        }
 
         // ──────────────────────────────────────────────────────────────
         // 1. Referencias al contexto: "agéndalo", "agéndalo como tarea X",
@@ -207,7 +262,7 @@ enum NovaResponder {
             // ¿El usuario quiere CAMBIAR el tipo (a tarea) o solo confirmar?
             if matchesAny(lower, ["tarea", "como tarea", "pendiente", "anótalo"]) {
                 let recurrence = detectRecurrence(lower)
-                return .createTask(title: lastTitle, recurrence: recurrence)
+                return .createTask(title: lastTitle, recurrence: recurrence, wantsReminder: wantsReminder)
             }
             // Si menciona "evento" o no menciona tipo → tratar como evento.
             let when = extractDateTime(from: lower) ?? context.lastDate
@@ -216,7 +271,7 @@ enum NovaResponder {
             if when == nil {
                 return .clarify(reason: .eventNeedsDateTime(title: lastTitle))
             }
-            return .createEvent(title: lastTitle, when: when, location: location, section: section)
+            return .createEvent(title: lastTitle, when: when, location: location, section: section, wantsReminder: wantsReminder)
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -275,7 +330,8 @@ enum NovaResponder {
             let recurrence = detectRecurrence(lower)
             return .createTask(
                 title: cleanTaskTitle(title, when: when),
-                recurrence: recurrence
+                recurrence: recurrence,
+                wantsReminder: wantsReminder
             )
         }
 
@@ -290,7 +346,8 @@ enum NovaResponder {
             let recurrence = detectRecurrence(lower)
             return .createTask(
                 title: cleanTaskTitle(title, when: when),
-                recurrence: recurrence
+                recurrence: recurrence,
+                wantsReminder: wantsReminder
             )
         }
 
@@ -328,7 +385,7 @@ enum NovaResponder {
                 if !hasExplicitTime, isAtDayDefault(partial) {
                     return .clarify(reason: .eventNeedsTime(title: title, partialDate: partial))
                 }
-                return .createEvent(title: title, when: partial, location: location, section: section)
+                return .createEvent(title: title, when: partial, location: location, section: section, wantsReminder: wantsReminder)
             }
             return .clarify(reason: .eventNeedsDateTime(title: title))
         }
@@ -355,10 +412,10 @@ enum NovaResponder {
             )
             if hasExplicitTime, let date = when {
                 let location = extractLocation(from: trimmed)
-                return .createEvent(title: fullTitle, when: date, location: location, section: .personal)
+                return .createEvent(title: fullTitle, when: date, location: location, section: .personal, wantsReminder: wantsReminder)
             }
             let recurrence = detectRecurrence(lower)
-            return .createTask(title: fullTitle, recurrence: recurrence)
+            return .createTask(title: fullTitle, recurrence: recurrence, wantsReminder: wantsReminder)
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -372,7 +429,7 @@ enum NovaResponder {
             if title.isEmpty {
                 return .clarify(reason: .eventNeedsTitle)
             }
-            return .createEvent(title: title, when: when, location: location, section: section)
+            return .createEvent(title: title, when: when, location: location, section: section, wantsReminder: wantsReminder)
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -398,22 +455,37 @@ enum NovaResponder {
     static func reply(to text: String, context: NovaContext = NovaContext()) -> String {
         let intent = parse(text, context: context)
         switch intent {
-        case .createTask(let title, let recurrence):
+        case .createTask(let title, let recurrence, let wantsReminder):
             let recBit = recurrence.map { " (\($0.label) — la recurrencia queda preparada para más adelante)" } ?? ""
+            let remBit = wantsReminder ? " Las notificaciones automáticas todavía están en preparación." : ""
             return Self.pick([
-                "Anoto «\(title)» como tarea de hoy\(recBit).",
-                "Listo, agrego «\(title)» a tus pendientes\(recBit).",
-                "La meto como tarea de hoy\(recBit). Si querés cambiar la prioridad, decime."
+                "Anoto «\(title)» como tarea de hoy\(recBit).\(remBit)",
+                "Listo, agrego «\(title)» a tus pendientes\(recBit).\(remBit)",
+                "La meto como tarea de hoy\(recBit). Si querés cambiar la prioridad, decime.\(remBit)"
             ])
-        case .createEvent(let title, let when, let location, let section):
+        case .createEvent(let title, let when, let location, let section, let wantsReminder):
             let timeBit = when.map { "el \(DateFormatters.weekdayDay.string(from: $0).lowercased()) a las \(DateFormatters.hourMinute.string(from: $0))" } ?? "cuando me digas"
             let placeBit = location.map { " en \($0)" } ?? ""
             let sectionBit = section.map { " (\($0.displayName.lowercased()))" } ?? ""
+            let remBit = wantsReminder ? " Las notificaciones inteligentes están en preparación." : ""
             return Self.pick([
-                "Agendo «\(title)»\(placeBit) \(timeBit)\(sectionBit).",
-                "Listo, evento «\(title)» \(timeBit)\(placeBit)\(sectionBit).",
-                "Va «\(title)» \(timeBit)\(placeBit)\(sectionBit). Si querés cambiar algo, decime."
+                "Agendo «\(title)»\(placeBit) \(timeBit)\(sectionBit).\(remBit)",
+                "Listo, evento «\(title)» \(timeBit)\(placeBit)\(sectionBit).\(remBit)",
+                "Va «\(title)» \(timeBit)\(placeBit)\(sectionBit). Si querés cambiar algo, decime.\(remBit)"
             ])
+        case .correctLastEvent(let modifier):
+            switch modifier {
+            case .shiftDays(let off) where off == 1:
+                return "Perfecto, lo muevo para mañana."
+            case .shiftDays:
+                return "Listo, cambio el día."
+            case .setTime(let h, let m):
+                return "Cambio la hora a \(String(format: "%02d:%02d", h, m))."
+            case .setLocation(let loc):
+                return "Anoto la ubicación: \(loc)."
+            }
+        case .convertLastToTask:
+            return "Lo paso a tareas."
         case .organizeDay:
             return Self.pick([
                 "Te dejo tres sugerencias en la Bandeja: un bloque de foco temprano, una pausa al mediodía y revisar pendientes a la tarde.",
@@ -492,6 +564,19 @@ enum NovaResponder {
             }
         }
         return best?.0
+    }
+
+    /// True si el texto arranca como corrección del último intent
+    /// ("no, mañana", "mejor X", "ponlo X", "cámbialo X").
+    private static func isCorrectionStart(_ lower: String) -> Bool {
+        lower == "no" ||
+        lower.hasPrefix("no,") || lower.hasPrefix("no ") ||
+        lower.hasPrefix("mejor ") ||
+        lower.hasPrefix("cámbialo") || lower.hasPrefix("cambialo") ||
+        lower.hasPrefix("cámbiale") || lower.hasPrefix("cambiale") ||
+        lower.hasPrefix("ponlo ") || lower.hasPrefix("ponla ") ||
+        lower.hasPrefix("pásalo ") || lower.hasPrefix("pasalo ") ||
+        lower.hasPrefix("muévelo") || lower.hasPrefix("muevelo")
     }
 
     /// True si el texto arranca con una referencia al ítem mencionado antes
@@ -744,11 +829,19 @@ enum NovaResponder {
         if let (h, m) = hm {
             let start = cal.startOfDay(for: base)
             base = cal.date(bySettingHour: h, minute: m, second: 0, of: start) ?? start
-            // Si NO se dio día explícito y la hora ya pasó hoy → asumir mañana.
-            // Si SE dio día explícito (incluyendo "esta tarde"), respetamos
-            // aunque la hora ya pasó.
+            // Política V1: si NO se dio día explícito, mantenemos **HOY** aun
+            // si la hora ya pasó. Es más predecible que adivinar
+            // (martes 12 · 03:00 era el bug). El usuario corrige con
+            // "no, mañana" usando contexto.
+            //
+            // Solo bumpeamos si la hora pasó *y* el verbo no implica algo
+            // inminente, *y* el offset es muy grande (>4h). Eso captura
+            // "a las 9" tipeado a la 1am (claramente quería 9am).
             if !dayWasExplicit, base <= now {
-                base = cal.date(byAdding: .day, value: 1, to: base) ?? base
+                let gap = now.timeIntervalSince(base)  // segundos en el pasado
+                if !isImminentActivity(lower), gap > 14_400 {  // > 4 horas
+                    base = cal.date(byAdding: .day, value: 1, to: base) ?? base
+                }
             }
             return base
         }
@@ -756,6 +849,19 @@ enum NovaResponder {
         // como "necesita hora" vía `isAtDayDefault`).
         let start = cal.startOfDay(for: base)
         return cal.date(bySettingHour: 9, minute: 0, second: 0, of: start)
+    }
+
+    /// Verbos que implican acción cercana hoy mismo. Cuando aparecen en el
+    /// texto y no hay día explícito, asumimos hoy (no bumpear a mañana).
+    private static func isImminentActivity(_ lower: String) -> Bool {
+        matches(lower, [
+            "ir a ", "voy a ", "vamos a ",
+            "salir a ", "salir con ", "salgo ",
+            "buscar a ", "ir a buscar ",
+            "pasar a ", "pasar por ",
+            "juntarme con ", "me junto",
+            "acuérdame", "acuerdame", "recuérdame", "recuerdame"
+        ])
     }
 
     private static func nextWeekday(in text: String, calendar: Calendar, from: Date) -> Date? {
@@ -786,14 +892,14 @@ enum NovaResponder {
     }
 
     private static func extractHourMinute(from text: String) -> (Int, Int)? {
-        // 1) "a las 14:30" / "a la 1:00"
-        if let h = firstCaptureInt(text, pattern: #"a la?s? (\d{1,2}):(\d{2})"#, group: 1),
-           let m = firstCaptureInt(text, pattern: #"a la?s? (\d{1,2}):(\d{2})"#, group: 2),
+        // 1) "a las 14:30" / "a la 1:00" (también "a eso de las 14:30")
+        if let h = firstCaptureInt(text, pattern: #"(?:a la?s?|eso de las?|cerca de las?|alrededor de las?) (\d{1,2}):(\d{2})"#, group: 1),
+           let m = firstCaptureInt(text, pattern: #"(?:a la?s?|eso de las?|cerca de las?|alrededor de las?) (\d{1,2}):(\d{2})"#, group: 2),
            h < 24, m < 60 {
             return (h, m)
         }
-        // 2) "a las 12" / "a la 1"
-        if let h = firstCaptureInt(text, pattern: #"a la?s? (\d{1,2})\b"#, group: 1), h < 24 {
+        // 2) "a las 12" / "a la 1" / "a eso de las 3" / "cerca de las 3"
+        if let h = firstCaptureInt(text, pattern: #"(?:a la?s?|eso de las?|cerca de las?|alrededor de las?) (\d{1,2})\b"#, group: 1), h < 24 {
             return (adjustAmPm(hour: h, in: text), 0)
         }
         // 3) "14:30" suelto
@@ -839,16 +945,35 @@ enum NovaResponder {
         return n + 12
     }
 
-    /// Ajusta hora N=1..12 si el texto trae "am"/"pm" suelto cerca.
+    /// Ajusta hora N=1..12 cuando no hay marcador AM/PM. Regla coloquial
+    /// para español chileno/latino: "a las 3" para una actividad normal de día
+    /// se interpreta como **15:00**, no 03:00.
+    ///
+    /// - Marcador explícito "am"/"de la mañana"/"madrugada" → AM (mantener hora).
+    /// - Marcador explícito "pm"/"de la tarde"/"de la noche" → PM (+12).
+    /// - Sin marcador:
+    ///   - 1..7 → PM (uso social/diurno típico: 3 = 15:00, 7 = 19:00).
+    ///   - 8..11 → AM (típico horario laboral/escolar de mañana).
+    ///   - 12 → 12:00 (mediodía).
     private static func adjustAmPm(hour: Int, in text: String) -> Int {
         guard hour <= 12 else { return hour }
-        if text.range(of: #"\b\d{1,2}\s*(pm|p\.m\.|de la tarde|de la noche)\b"#, options: .regularExpression) != nil {
-            return hour == 12 ? 12 : hour + 12
-        }
-        if text.range(of: #"\b\d{1,2}\s*(am|a\.m\.|de la mañana|de la manana)\b"#, options: .regularExpression) != nil {
+
+        // 1) AM explícito.
+        if text.range(of: #"\b\d{1,2}\s*(am|a\.m\.)\b"#, options: .regularExpression) != nil
+            || text.contains("de la mañana") || text.contains("de la manana")
+            || text.contains("madrugada") {
             return hour == 12 ? 0 : hour
         }
-        return hour
+
+        // 2) PM explícito.
+        if text.range(of: #"\b\d{1,2}\s*(pm|p\.m\.)\b"#, options: .regularExpression) != nil
+            || text.contains("de la tarde") || text.contains("de la noche") {
+            return hour == 12 ? 12 : hour + 12
+        }
+
+        // 3) Sin marcador → regla coloquial chilena/latina.
+        if hour >= 1 && hour <= 7 { return hour + 12 }   // 1→13, 3→15, 7→19
+        return hour                                        // 8..12 quedan AM
     }
 
     private static func firstCaptureInt(_ text: String, pattern: String, group: Int) -> Int? {
@@ -996,6 +1121,16 @@ final class FocusDataStore: ObservableObject {
     func deleteEvent(_ id: UUID) {
         events.removeAll { $0.id == id }
         persistEvents()
+    }
+
+    /// Actualiza un evento existente. No falla silenciosamente si el id no
+    /// existe — solo no hace nada.
+    func updateEvent(_ event: FocusEvent) {
+        guard let idx = events.firstIndex(where: { $0.id == event.id }) else { return }
+        events[idx] = event
+        events.sort { $0.startTime < $1.startTime }
+        persistEvents()
+        HapticManager.shared.tick()
     }
 
     // MARK: - Tareas

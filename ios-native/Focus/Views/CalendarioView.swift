@@ -171,7 +171,12 @@ struct CalendarioView: View {
         } else {
             VStack(spacing: Theme.Spacing.md) {
                 ForEach(displayEvents) { event in
-                    CalendarEventCard(event: event)
+                    SwipeToDelete(enabled: store.hasUserEvents) {
+                        store.deleteEvent(event.id)
+                        toast.success("Evento eliminado", symbol: "trash.fill")
+                    } content: {
+                        CalendarEventCard(event: event)
+                    }
                 }
             }
         }

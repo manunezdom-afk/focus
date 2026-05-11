@@ -159,15 +159,20 @@ struct TareasView: View {
 
             VStack(spacing: Theme.Spacing.sm) {
                 ForEach(tasks) { task in
-                    TaskRowFull(
-                        task: task,
-                        isExpanded: expandedTaskIds.contains(task.id),
-                        onToggle: { store.toggleTask(task.id) },
-                        onToggleSubtask: { subId in
-                            store.toggleSubtask(taskId: task.id, subtaskId: subId)
-                        },
-                        onExpand: { toggleExpand(task.id) }
-                    )
+                    SwipeToDelete(enabled: store.hasUserTasks) {
+                        store.deleteTask(task.id)
+                        toast.success("Tarea eliminada", symbol: "trash.fill")
+                    } content: {
+                        TaskRowFull(
+                            task: task,
+                            isExpanded: expandedTaskIds.contains(task.id),
+                            onToggle: { store.toggleTask(task.id) },
+                            onToggleSubtask: { subId in
+                                store.toggleSubtask(taskId: task.id, subtaskId: subId)
+                            },
+                            onExpand: { toggleExpand(task.id) }
+                        )
+                    }
                 }
             }
         }

@@ -232,7 +232,7 @@ struct MiDiaView: View {
 
     private func executeIntent(_ intent: NovaIntent, userText: String) -> InlineNovaResponse {
         switch intent {
-        case .createTask(let title, let recurrence):
+        case .createTask(let title, let recurrence, let wantsReminder):
             let task = FocusTask(
                 title: title,
                 priority: .media,
@@ -245,24 +245,24 @@ struct MiDiaView: View {
                 kind: .task,
                 taskId: task.id
             )
+            let reminderNote = wantsReminder ? " Las notificaciones automáticas están en preparación." : ""
             if let rec = recurrence {
                 return InlineNovaResponse(
                     userText: userText,
                     summary: "Tarea creada (sin recurrencia todavía).",
-                    details: "«\(title)» queda en pendientes. La recurrencia (\(rec.label)) la dejamos preparada para más adelante.",
+                    details: "«\(title)» queda en pendientes. La recurrencia (\(rec.label)) la dejamos preparada para más adelante.\(reminderNote)",
                     action: .openTasksList
                 )
             }
             return InlineNovaResponse(
                 userText: userText,
                 summary: "Tarea creada en pendientes de hoy.",
-                details: "«\(title)»",
+                details: "«\(title)»\(reminderNote)",
                 action: .openTasksList
             )
 
-        case .createEvent(let title, let when, let location, let section):
+        case .createEvent(let title, let when, let location, let section, let wantsReminder):
             guard let date = when else {
-                // El parser ya debería emitir .clarify acá; defensa por si no.
                 return InlineNovaResponse(
                     userText: userText,
                     summary: "Necesito saber el día y la hora.",
@@ -296,11 +296,86 @@ struct MiDiaView: View {
             )
             var detail = "\(dayLabel) · \(timeLabel) · \(effectiveSection.displayName.lowercased())"
             if let loc = location { detail += " · \(loc)" }
+            if wantsReminder { detail += "\nLas notificaciones inteligentes están en preparación." }
             return InlineNovaResponse(
                 userText: userText,
                 summary: "Evento agregado a Calendario.",
                 details: detail,
                 action: .openCalendar
+            )
+
+        case .correctLastEvent(let modifier):
+            guard let eventId = store.novaContext.lastEventId,
+                  var event = store.events.first(where: { $0.id == eventId }) else {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "No tengo nada reciente para mover.",
+                    details: "Si querés crear un nuevo evento, decime título, día y hora.",
+                    action: .dismiss,
+                    isError: true
+                )
+            }
+            let cal = Calendar.current
+            switch modifier {
+            case .shiftDays(let offset):
+                if let newStart = cal.date(byAdding: .day, value: offset, to: event.startTime) {
+                    event.startTime = newStart
+                }
+                if let oldEnd = event.endTime,
+                   let newEnd = cal.date(byAdding: .day, value: offset, to: oldEnd) {
+                    event.endTime = newEnd
+                }
+            case .setTime(let h, let m):
+                let day = cal.startOfDay(for: event.startTime)
+                if let newStart = cal.date(bySettingHour: h, minute: m, second: 0, of: day) {
+                    event.startTime = newStart
+                    event.endTime = cal.date(byAdding: .hour, value: 1, to: newStart)
+                }
+            case .setLocation(let loc):
+                event.location = loc
+            }
+            store.updateEvent(event)
+            store.updateNovaContext(
+                from: userText,
+                title: event.title,
+                date: event.startTime,
+                location: event.location,
+                section: event.section,
+                kind: .event,
+                eventId: event.id
+            )
+            let timeLabel = DateFormatters.hourMinute.string(from: event.startTime)
+            let dayLabel = DateFormatters.capitalizeFirst(
+                DateFormatters.weekdayDay.string(from: event.startTime)
+            )
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Evento actualizado.",
+                details: "«\(event.title)» · \(dayLabel) · \(timeLabel)",
+                action: .openCalendar
+            )
+
+        case .convertLastToTask:
+            // Convertir el último evento en tarea: agregar tarea con el título
+            // y borrar el evento. NO usamos contexto del lastTask porque
+            // estamos pasando un evento a tarea.
+            let title = store.novaContext.lastTitle ?? "Nueva tarea"
+            let task = FocusTask(title: title, priority: .media, category: .hoy)
+            store.addTask(task)
+            if let eventId = store.novaContext.lastEventId {
+                store.deleteEvent(eventId)
+            }
+            store.updateNovaContext(
+                from: userText,
+                title: title,
+                kind: .task,
+                taskId: task.id
+            )
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Listo, lo paso a tareas.",
+                details: "«\(title)» quedó en pendientes de hoy.",
+                action: .openTasksList
             )
 
         case .organizeDay:
@@ -465,10 +540,15 @@ struct MiDiaView: View {
 
                 VStack(spacing: 0) {
                     ForEach(Array(shown.enumerated()), id: \.element.id) { idx, event in
-                        TimelineEventRow(
-                            event: event,
-                            isLast: idx == shown.count - 1 && hiddenCount == 0
-                        )
+                        SwipeToDelete(enabled: store.hasUserEvents) {
+                            store.deleteEvent(event.id)
+                            toast.success("Evento eliminado", symbol: "trash.fill")
+                        } content: {
+                            TimelineEventRow(
+                                event: event,
+                                isLast: idx == shown.count - 1 && hiddenCount == 0
+                            )
+                        }
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
@@ -536,8 +616,13 @@ struct MiDiaView: View {
             } else {
                 VStack(spacing: Theme.Spacing.sm) {
                     ForEach(shown) { task in
-                        MiDiaTaskRow(task: task) {
-                            store.toggleTask(task.id)
+                        SwipeToDelete(enabled: store.hasUserTasks) {
+                            store.deleteTask(task.id)
+                            toast.success("Tarea eliminada", symbol: "trash.fill")
+                        } content: {
+                            MiDiaTaskRow(task: task) {
+                                store.toggleTask(task.id)
+                            }
                         }
                     }
                 }

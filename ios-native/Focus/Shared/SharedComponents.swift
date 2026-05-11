@@ -309,6 +309,102 @@ struct InlineNovaResponseView: View {
     }
 }
 
+// MARK: - SwipeToDelete (arrastrar para borrar)
+
+/// Wrapper reutilizable que permite arrastrar una fila hacia la izquierda
+/// para borrarla, estilo nativo iOS.
+///
+/// Funcionamiento:
+/// - El gesto se registra como `simultaneousGesture` para no pelear con el
+///   scroll vertical del padre.
+/// - Solo responde cuando el movimiento es **dominantemente horizontal hacia
+///   la izquierda** (`abs(width) > abs(height)` y `width < 0`).
+/// - Pasa el umbral (`commitThreshold`) → confirma el delete al soltar.
+/// - Animación de salida hacia la izquierda + callback `onDelete`.
+/// - Tap en el fondo rojo expuesto también dispara delete (atajo para iPad/uso
+///   con accesibilidad).
+struct SwipeToDelete<Content: View>: View {
+    let content: Content
+    let onDelete: () -> Void
+    var enabled: Bool = true
+
+    @State private var offset: CGFloat = 0
+    @State private var isDeleting: Bool = false
+
+    private let maxReveal: CGFloat = 92
+    private let commitThreshold: CGFloat = 70
+
+    init(enabled: Bool = true, onDelete: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.enabled = enabled
+        self.onDelete = onDelete
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            // Fondo rojo con basurero (visible cuando el usuario arrastra).
+            if enabled && offset < -2 {
+                Button(action: commitDelete) {
+                    HStack {
+                        Spacer()
+                        Image(systemName: "trash.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.trailing, 22)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                            .fill(Theme.Colors.danger)
+                    )
+                    .opacity(min(1, Double(-offset) / Double(maxReveal)))
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
+            }
+
+            // Contenido offsetteado horizontalmente.
+            content
+                .offset(x: offset)
+                .simultaneousGesture(enabled ? swipeGesture : nil)
+                .animation(.spring(response: 0.32, dampingFraction: 0.85), value: offset)
+        }
+        .clipped()
+    }
+
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                let h = value.translation.width
+                let v = value.translation.height
+                // Solo responder a drags dominantemente horizontales a la izquierda.
+                guard h < 0, abs(h) > abs(v) else { return }
+                offset = max(h, -maxReveal)
+            }
+            .onEnded { value in
+                if value.translation.width < -commitThreshold {
+                    commitDelete()
+                } else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                        offset = 0
+                    }
+                }
+            }
+    }
+
+    private func commitDelete() {
+        guard !isDeleting else { return }
+        isDeleting = true
+        HapticManager.shared.warning()
+        withAnimation(.easeIn(duration: 0.20)) {
+            offset = -UIScreen.main.bounds.width
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            onDelete()
+        }
+    }
+}
+
 // MARK: - LocationLabel (tap → sheet "Próximamente Maps")
 
 /// Etiqueta de ubicación tappable. Cuando se conecten integraciones (C5+)
