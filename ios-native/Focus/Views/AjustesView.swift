@@ -28,6 +28,9 @@ struct AjustesView: View {
                         privacidadSection
                         datosLocalesSection
                         acercaSection
+                        brandFooter
+                            .padding(.horizontal, Theme.Spacing.xl)
+                            .padding(.top, Theme.Spacing.lg)
 
                         Spacer(minLength: Theme.Spacing.bottomBarSafety)
                     }
@@ -388,6 +391,28 @@ struct AjustesView: View {
             }
             .focusCardContainer()
         }
+    }
+
+    // MARK: - Brand footer
+
+    private var brandFooter: some View {
+        VStack(spacing: Theme.Spacing.md) {
+            FocusLogoMark(size: 56)
+                .padding(.bottom, Theme.Spacing.xs)
+            Text("Focus")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Theme.Colors.textPrimary)
+                .tracking(0.2)
+            Text(AppVersion.displayString)
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.textTertiary)
+            Text("Hecho para organizar tu día con Nova.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.textTertiary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Acerca

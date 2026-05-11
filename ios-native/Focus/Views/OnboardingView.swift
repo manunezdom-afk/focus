@@ -163,23 +163,9 @@ private struct OnboardingPage: View {
     @ViewBuilder
     private var hero: some View {
         if showBrandLogo {
-            // Logo diamante grande (consistente con BootView)
-            ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Theme.Colors.novaGradient)
-                    .frame(width: 96, height: 96)
-                    .rotationEffect(.degrees(45))
-                    .shadow(
-                        color: Theme.Colors.cardShadowStrong,
-                        radius: 22,
-                        x: 0,
-                        y: 10
-                    )
-                Image(systemName: "sparkle")
-                    .font(.system(size: 36, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .padding(.bottom, Theme.Spacing.md)
+            // FocusLogoMark — mismo brand mark que el AppIcon y BootView.
+            FocusLogoMark(size: 120)
+                .padding(.bottom, Theme.Spacing.md)
         } else if let symbol {
             ZStack {
                 Circle()

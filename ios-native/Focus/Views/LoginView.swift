@@ -31,20 +31,11 @@ struct LoginView: View {
 
     private var brand: some View {
         VStack(spacing: Theme.Spacing.md) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Theme.Colors.novaGradient)
-                    .frame(width: 64, height: 64)
-                    .rotationEffect(.degrees(45))
-                    .focusCardShadow(strong: true)
-                Image(systemName: "sparkle")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .padding(.bottom, Theme.Spacing.sm)
+            FocusLogoMark(size: 78)
+                .padding(.bottom, Theme.Spacing.sm)
 
             Text("Focus")
-                .font(.system(size: 40, weight: .semibold))
+                .font(.system(size: 36, weight: .semibold))
                 .foregroundStyle(Theme.Colors.textPrimary)
                 .tracking(0.3)
 

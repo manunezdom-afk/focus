@@ -33,7 +33,7 @@ struct CalendarioView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottomTrailing) {
+            ZStack {
                 Theme.Colors.background.ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
@@ -54,10 +54,6 @@ struct CalendarioView: View {
                         Spacer(minLength: Theme.Spacing.bottomBarSafety)
                     }
                 }
-
-                floatingButton
-                    .padding(.trailing, Theme.Spacing.xl)
-                    .padding(.bottom, Theme.Spacing.bottomBarSafety - Theme.Spacing.xl)
             }
             .sheet(isPresented: $showCreateEvent) {
                 NuevoEventoSheet(initialDate: selectedDate) { newEvent in
@@ -72,15 +68,39 @@ struct CalendarioView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(monthYearLabel)
-                .font(Theme.Typography.subhead)
-                .foregroundStyle(Theme.Colors.textTertiary)
-                .tracking(0.4)
-            Text("Calendario")
-                .font(Theme.Typography.title)
-                .foregroundStyle(Theme.Colors.textPrimary)
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(monthYearLabel)
+                    .font(Theme.Typography.subhead)
+                    .foregroundStyle(Theme.Colors.textTertiary)
+                    .tracking(0.4)
+                Text("Calendario")
+                    .font(Theme.Typography.title)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+            }
+            Spacer()
+            addButton
+                .padding(.top, 6)
         }
+    }
+
+    private var addButton: some View {
+        Button {
+            HapticManager.shared.tap()
+            showCreateEvent = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(
+                    Circle()
+                        .fill(Theme.Colors.focusAccent)
+                        .shadow(color: Theme.Colors.focusAccent.opacity(0.30), radius: 10, x: 0, y: 4)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Nuevo evento")
     }
 
     private var monthYearLabel: String {
@@ -90,22 +110,13 @@ struct CalendarioView: View {
     // MARK: - Day detail
 
     private var dateDetailHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(dayName)
-                    .font(Theme.Typography.title2)
-                    .foregroundStyle(Theme.Colors.textPrimary)
-                Text(eventsCountLabel)
-                    .font(Theme.Typography.subhead)
-                    .foregroundStyle(Theme.Colors.textSecondary)
-            }
-            Spacer()
-            if !displayEvents.isEmpty {
-                StatePill(
-                    label: "\(displayEvents.count) evento\(displayEvents.count == 1 ? "" : "s")",
-                    tint: Theme.Colors.focusAccent
-                )
-            }
+        VStack(alignment: .leading, spacing: 2) {
+            Text(dayName)
+                .font(Theme.Typography.title2)
+                .foregroundStyle(Theme.Colors.textPrimary)
+            Text(dayMetadataLabel)
+                .font(Theme.Typography.subhead)
+                .foregroundStyle(Theme.Colors.textSecondary)
         }
     }
 
@@ -115,10 +126,31 @@ struct CalendarioView: View {
         return DateFormatters.capitalizeFirst(DateFormatters.weekdayDay.string(from: selectedDate))
     }
 
-    private var eventsCountLabel: String {
-        if displayEvents.isEmpty { return "Sin eventos." }
-        if displayEvents.count == 1 { return "Un evento agendado." }
-        return "\(displayEvents.count) eventos agendados."
+    /// Resumen del día: "6 eventos · 5h 30m ocupadas" — diferencia
+    /// el Calendario de Mi Día dando contexto cuantitativo.
+    private var dayMetadataLabel: String {
+        let events = displayEvents
+        if events.isEmpty { return "Sin eventos agendados." }
+        let count = events.count
+        let eventStr = "\(count) \(count == 1 ? "evento" : "eventos")"
+
+        let totalMins = events.reduce(0) { acc, e in
+            guard let end = e.endTime else { return acc }
+            return acc + Int(end.timeIntervalSince(e.startTime) / 60)
+        }
+        guard totalMins > 0 else { return eventStr }
+
+        let h = totalMins / 60
+        let m = totalMins % 60
+        let timeStr: String
+        if h > 0 && m > 0 {
+            timeStr = "\(h)h \(m)m"
+        } else if h > 0 {
+            timeStr = "\(h)h"
+        } else {
+            timeStr = "\(m) min"
+        }
+        return "\(eventStr) · \(timeStr) ocupadas"
     }
 
     @ViewBuilder
@@ -175,25 +207,6 @@ struct CalendarioView: View {
         Array(-2...11)
     }
 
-    // MARK: - FAB
-
-    private var floatingButton: some View {
-        Button {
-            HapticManager.shared.tap()
-            showCreateEvent = true
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(
-                    Circle()
-                        .fill(Theme.Colors.focusAccent)
-                        .shadow(color: Theme.Colors.focusAccent.opacity(0.35), radius: 16, x: 0, y: 6)
-                )
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 // MARK: - Day pill

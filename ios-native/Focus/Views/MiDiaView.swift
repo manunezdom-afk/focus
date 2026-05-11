@@ -35,6 +35,14 @@ struct MiDiaView: View {
                     focusBar
                         .padding(.horizontal, Theme.Spacing.xl)
 
+                    if store.pendingSuggestions.count > 0 {
+                        NovaPulseCard(count: store.pendingSuggestions.count) {
+                            pendingNovaText = nil
+                            showNova = true
+                        }
+                        .padding(.horizontal, Theme.Spacing.xl)
+                    }
+
                     if let next = nextBlock {
                         ProximoBloqueCard(event: next)
                             .padding(.horizontal, Theme.Spacing.xl)
@@ -260,6 +268,59 @@ struct MiDiaView: View {
 
     private var todayFormatted: String {
         DateFormatters.capitalizeFirst(DateFormatters.weekdayDayMonth.string(from: Date()))
+    }
+}
+
+// MARK: - Nova Pulse (banner sutil con sugerencias pendientes)
+
+private struct NovaPulseCard: View {
+    let count: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: {
+            HapticManager.shared.tap()
+            action()
+        }) {
+            HStack(spacing: Theme.Spacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(Theme.Colors.novaGradient)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(count == 1
+                         ? "Nova tiene 1 sugerencia para ti"
+                         : "Nova tiene \(count) sugerencias para ti")
+                        .font(Theme.Typography.bodyBold)
+                        .foregroundStyle(Theme.Colors.textPrimary)
+                    Text("Revísalas en la Bandeja")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.textTertiary)
+            }
+            .padding(Theme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                    .fill(Theme.Colors.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                            .strokeBorder(Theme.Colors.novaAccent.opacity(0.25), lineWidth: Theme.Stroke.hairline)
+                    )
+                    .focusCardShadow()
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

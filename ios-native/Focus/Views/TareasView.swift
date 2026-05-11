@@ -35,7 +35,7 @@ struct TareasView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottomTrailing) {
+            ZStack {
                 Theme.Colors.background.ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
@@ -64,10 +64,6 @@ struct TareasView: View {
                         Spacer(minLength: Theme.Spacing.bottomBarSafety)
                     }
                 }
-
-                floatingButton
-                    .padding(.trailing, Theme.Spacing.xl)
-                    .padding(.bottom, Theme.Spacing.bottomBarSafety - Theme.Spacing.xl)
             }
             .sheet(isPresented: $showCreate) {
                 NuevaTareaSheet { newTask in
@@ -82,14 +78,39 @@ struct TareasView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Tareas")
-                .font(Theme.Typography.title)
-                .foregroundStyle(Theme.Colors.textPrimary)
-            Text(headerSubtitle)
-                .font(Theme.Typography.body)
-                .foregroundStyle(Theme.Colors.textSecondary)
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Tareas")
+                    .font(Theme.Typography.title)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                Text(headerSubtitle)
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(Theme.Colors.textSecondary)
+                    .lineLimit(2)
+            }
+            Spacer()
+            addButton
+                .padding(.top, 4)
         }
+    }
+
+    private var addButton: some View {
+        Button {
+            HapticManager.shared.tap()
+            showCreate = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(
+                    Circle()
+                        .fill(Theme.Colors.focusAccent)
+                        .shadow(color: Theme.Colors.focusAccent.opacity(0.30), radius: 10, x: 0, y: 4)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Nueva tarea")
     }
 
     private var headerSubtitle: String {
@@ -193,25 +214,6 @@ struct TareasView: View {
         }
     }
 
-    // MARK: - FAB
-
-    private var floatingButton: some View {
-        Button {
-            HapticManager.shared.tap()
-            showCreate = true
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(
-                    Circle()
-                        .fill(Theme.Colors.focusAccent)
-                        .shadow(color: Theme.Colors.focusAccent.opacity(0.35), radius: 16, x: 0, y: 6)
-                )
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 // MARK: - Task row con subtareas
@@ -249,40 +251,47 @@ private struct TaskRowFull: View {
     }
 
     private var mainRow: some View {
-        HStack(spacing: Theme.Spacing.md) {
+        HStack(spacing: Theme.Spacing.md - 2) {
             Button(action: {
                 HapticManager.shared.tap()
                 onToggle()
             }) {
                 Image(systemName: task.done ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22, weight: .regular))
+                    .font(.system(size: 20, weight: .regular))
                     .foregroundStyle(task.done ? Theme.Colors.success : Theme.Colors.textTertiary)
                     .animation(.easeInOut(duration: 0.18), value: task.done)
             }
             .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 4) {
+            // Priority como punto (no chip) — Things 3 style.
+            Circle()
+                .fill(task.priority.color)
+                .frame(width: 7, height: 7)
+                .opacity(task.done ? 0.4 : 1)
+
+            VStack(alignment: .leading, spacing: 1) {
                 Text(task.title)
                     .font(Theme.Typography.bodyEmphasized)
                     .foregroundStyle(task.done ? Theme.Colors.textTertiary : Theme.Colors.textPrimary)
                     .strikethrough(task.done, color: Theme.Colors.textTertiary)
                     .multilineTextAlignment(.leading)
 
-                HStack(spacing: 6) {
-                    StatePill(label: task.priority.label, tint: task.priority.color)
-                    if let due = task.dueLabel {
-                        Text("·")
-                            .foregroundStyle(Theme.Colors.textQuaternary)
-                        Text(due)
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.textTertiary)
-                    }
-                    if task.hasSubtasks {
-                        Text("·")
-                            .foregroundStyle(Theme.Colors.textQuaternary)
-                        Text("\(task.completedSubtaskCount)/\(task.subtasks.count)")
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.textTertiary)
+                // Metadata solo si aplica — no ocupa altura cuando no hay nada.
+                if task.dueLabel != nil || task.hasSubtasks {
+                    HStack(spacing: 6) {
+                        if let due = task.dueLabel {
+                            Text(due)
+                                .font(Theme.Typography.caption)
+                                .foregroundStyle(Theme.Colors.textTertiary)
+                        }
+                        if task.dueLabel != nil && task.hasSubtasks {
+                            Text("·").foregroundStyle(Theme.Colors.textQuaternary)
+                        }
+                        if task.hasSubtasks {
+                            Text("\(task.completedSubtaskCount)/\(task.subtasks.count)")
+                                .font(Theme.Typography.caption)
+                                .foregroundStyle(Theme.Colors.textTertiary)
+                        }
                     }
                 }
             }
@@ -292,7 +301,7 @@ private struct TaskRowFull: View {
             if task.hasSubtasks {
                 Button(action: onExpand) {
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Theme.Colors.textTertiary)
                         .padding(8)
                 }
@@ -300,7 +309,7 @@ private struct TaskRowFull: View {
             }
         }
         .padding(.horizontal, Theme.Spacing.lg)
-        .padding(.vertical, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.sm + 2)
     }
 
     private var subtasksList: some View {
