@@ -80,51 +80,410 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
     }
 }
 
-/// Responde a texto libre con respuestas mock razonables.
-enum NovaResponder {
-    static func reply(to text: String) -> String {
-        let lower = text.lowercased()
+// MARK: - Nova intents (estructurados, mock-friendly)
 
-        if lower.contains("organiza") || lower.contains("planifica") || lower.contains("agenda mi") {
-            return "Bloqueo tu mañana para foco, dejo una pausa al mediodía y reservo la tarde para estudio. ¿Te muevo algo más?"
+/// Lo que Nova entendió del mensaje del usuario. La interpretación es local
+/// (sin IA real); cuando se conecte el backend, este enum se mantiene y solo
+/// cambia el parser.
+enum NovaIntent: Hashable {
+    /// Crear tarea con un título identificado en el texto del usuario.
+    case createTask(title: String)
+    /// Crear evento. `when` es opcional — si no lo extrajimos, Nova pide
+    /// aclaración antes de crear el evento. `location` es opcional.
+    case createEvent(title: String, when: Date?, location: String?)
+    /// Organizar el día → genera sugerencias en la Bandeja.
+    case organizeDay
+    /// Revisar tareas pendientes → resumen inline.
+    case reviewPending
+    /// Pregunta sobre cómo borrar ejemplos demo.
+    case askAboutDemo
+    /// Saludo / acuse simple. La respuesta es variada (no siempre la misma).
+    case smallTalk(reply: String)
+    /// Texto no entendible — pedimos una aclaración con razón específica.
+    case clarify(reason: ClarifyReason)
+
+    enum ClarifyReason: Hashable {
+        case taskNeedsTitle
+        case eventNeedsTitle
+        case eventNeedsDateTime(title: String)
+        case unclear
+    }
+}
+
+/// Responde a texto libre. Tiene 2 caras:
+/// - `parse(_:)` → `NovaIntent` estructurado (para Mi Día inline).
+/// - `reply(to:)` → string variado para el chat completo.
+///
+/// Reglas de parsing (heurísticas en español, sin IA):
+/// - Verbos de tarea: "crea tarea", "nueva tarea", "agrega tarea", "anota tarea".
+/// - Verbos de evento: "agenda", "crea evento", "tengo reunión", "reunión con",
+///   "tengo clase", "clase de", etc.
+/// - Tiempo: "hoy" / "mañana" / "pasado mañana" / día de la semana.
+/// - Hora: "a las HH(:MM)" o "HH:MM" suelto.
+/// - Lugar: "en <X>" al final del texto.
+enum NovaResponder {
+
+    // MARK: Public API
+
+    static func parse(_ text: String) -> NovaIntent {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+
+        // Prioridad 1: preguntas sobre datos demo (la app reemplaza demo al
+        // crear el primer item real, no hay un botón "borrar").
+        if matches(lower, [
+            "borra ejemplo", "borrar ejemplo", "quita ejemplo", "quitar ejemplo",
+            "limpia ejemplo", "limpiar ejemplo",
+            "borra demo", "quita demo", "limpia demo",
+            "borra los ejemplo", "quita los ejemplo"
+        ]) {
+            return .askAboutDemo
         }
-        if lower.contains("parcial") || lower.contains("examen") || lower.contains("final") {
-            return "Anotado. ¿Para qué día? Te armo bloques de repaso desde ahora hasta esa fecha y te recuerdo al principio de cada sesión."
+
+        // Prioridad 2: revisar / resumen.
+        if matches(lower, [
+            "revisa pendientes", "revisar pendientes",
+            "qué tengo pendiente", "que tengo pendiente",
+            "qué me falta", "que me falta",
+            "qué tengo hoy", "que tengo hoy"
+        ]) {
+            return .reviewPending
         }
-        if lower.contains("tp") || lower.contains("trabajo práctico") || lower.contains("entrega") {
-            return "Lo paso a Hoy con prioridad alta. ¿Quieres que también te bloquee 90 minutos de foco para avanzarlo?"
+
+        // Prioridad 3: organizar el día.
+        if matches(lower, [
+            "organiza mi día", "organiza mi dia",
+            "organiza el día", "organiza el dia",
+            "planifica mi día", "planifica mi dia",
+            "ordena mi día", "ordena mi dia",
+            "arma mi día", "arma mi dia",
+            "acomoda mi día", "acomoda mi dia"
+        ]) {
+            return .organizeDay
         }
-        if lower.contains("clase") {
-            return "Te agendo la clase como bloque recurrente. ¿Qué día y hora? Si tienes el horario de la cursada te lo cargo todo en bloque."
+
+        // Prioridad 4: crear tarea explícita.
+        let taskTriggers = [
+            "crea tarea", "crea una tarea",
+            "nueva tarea", "agrega tarea",
+            "agregar tarea", "anota tarea",
+            "anota:", "tarea:"
+        ]
+        if let title = extractAfter(trimmed, triggers: taskTriggers, allowedTrailingPunct: ":.") {
+            if title.isEmpty {
+                return .clarify(reason: .taskNeedsTitle)
+            }
+            return .createTask(title: cleanupTitle(title))
         }
-        if lower.contains("estudia") || lower.contains("foco") {
-            return "Reservo un bloque de foco. ¿Para qué materia o tema?"
+
+        // Prioridad 5: crear evento (verbos amplios para capturar lenguaje natural).
+        let eventTriggers = [
+            "agenda", "agéndame", "agendame", "agendar",
+            "crea evento", "crea un evento", "nuevo evento", "agrega evento",
+            "reunión con", "reunion con", "tengo reunión", "tengo reunion",
+            "tengo clase", "tengo evento",
+            "agéndalo", "agendalo"
+        ]
+        if matchesAny(lower, eventTriggers) {
+            let title = extractEventTitle(trimmed, triggers: eventTriggers)
+            let when = extractDateTime(from: lower)
+            let location = extractLocation(from: trimmed)
+            if title.isEmpty {
+                return .clarify(reason: .eventNeedsTitle)
+            }
+            // Si entendimos título pero no fecha/hora, pedimos aclaración.
+            if when == nil {
+                return .clarify(reason: .eventNeedsDateTime(title: title))
+            }
+            return .createEvent(title: title, when: when, location: location)
         }
-        if lower.contains("tarea") {
-            return "Lo agrego como tarea con prioridad media. Si quieres otra categoría, dime."
+
+        // Prioridad 6: small talk (saludos, agradecimientos).
+        if matches(lower, ["hola", "buenas", "buen día", "buen dia", "qué tal", "que tal"]) {
+            return .smallTalk(reply: randomGreeting())
         }
-        if lower.contains("evento") || lower.contains("reunión") || lower.contains("reunion") || lower.contains("llamada") {
-            return "¿A qué hora y con quién? Lo agendo y te aviso 10 minutos antes."
+        if matches(lower, ["gracias", "perfecto", "dale", "ok", "listo", "genial", "buenísimo", "buenisimo"]) {
+            return .smallTalk(reply: randomAcknowledgment())
         }
-        if lower.contains("gym") || lower.contains("entren") || lower.contains("correr") {
-            return "Bien. ¿A qué hora suele ser? Lo bloqueo todos los días en ese horario."
+
+        // No entiendo → clarify genérico.
+        return .clarify(reason: .unclear)
+    }
+
+    /// String libre para el chat. Reusa `parse` para entender el mensaje y
+    /// elige una respuesta variada en base al intent. Distinto del flujo
+    /// inline: acá no ejecutamos acciones, solo respondemos textualmente.
+    static func reply(to text: String) -> String {
+        let intent = parse(text)
+        switch intent {
+        case .createTask(let title):
+            return Self.pick([
+                "Anoto «\(title)» como tarea de hoy con prioridad media.",
+                "Listo, agrego «\(title)» a tus pendientes. ¿Le subo la prioridad?",
+                "La meto como tarea de hoy. Si querés que sea para esta semana, decime."
+            ])
+        case .createEvent(let title, let when, let location):
+            let timeBit = when.map { "el \(DateFormatters.weekdayDay.string(from: $0).lowercased()) a las \(DateFormatters.hourMinute.string(from: $0))" } ?? "cuando me digas"
+            let placeBit = location.map { " en \($0)" } ?? ""
+            return Self.pick([
+                "Agendo «\(title)»\(placeBit) \(timeBit). ¿Te bloqueo 10 min antes para prepararte?",
+                "Listo, evento «\(title)» \(timeBit)\(placeBit). Te aviso 10 min antes.",
+                "Va «\(title)» \(timeBit)\(placeBit). Si querés cambiar la hora, decime."
+            ])
+        case .organizeDay:
+            return Self.pick([
+                "Te dejo tres sugerencias en la Bandeja: un bloque de foco temprano, una pausa al mediodía y revisar pendientes a la tarde.",
+                "Acomodé tu mañana para foco profundo y dejé tareas livianas para después de la siesta. Lo dejé en Bandeja.",
+                "Plan del día listo: tres bloques principales, una pausa real y los pendientes priorizados."
+            ])
+        case .reviewPending:
+            return Self.pick([
+                "Te paso lo de hoy: revisa Mi Día arriba, los pendientes están en \"Pendientes de hoy\".",
+                "Mira «Pendientes de hoy» en Mi Día. Si querés que te los reorganice, decime «organiza mi día».",
+                "Tus pendientes de hoy están en la pantalla principal. ¿Querés que los priorice por urgencia?"
+            ])
+        case .askAboutDemo:
+            return "Los ejemplos solo aparecen mientras no tengas datos tuyos. Apenas crees tu primer evento o tarea, se reemplazan automáticamente."
+        case .smallTalk(let reply):
+            return reply
+        case .clarify(.taskNeedsTitle):
+            return "Decime qué tarea querés que anote. Ej: «crea tarea estudiar cálculo»."
+        case .clarify(.eventNeedsTitle):
+            return "¿Qué evento querés que agende? Ej: «agenda reunión con Juan mañana a las 12»."
+        case .clarify(.eventNeedsDateTime(let title)):
+            return "Tengo «\(title)». ¿Para qué día y a qué hora lo agendo?"
+        case .clarify(.unclear):
+            return Self.pick([
+                "No estoy seguro de qué hacer. ¿Querés que cree una tarea, un evento o una sugerencia?",
+                "Eso no me queda claro. Probá con «crea tarea X», «agenda Y mañana a las 12» o «organiza mi día».",
+                "Decime un poco más. Puedo crear tareas, agendar eventos u ordenar tu día."
+            ])
         }
-        if lower.contains("resumen") || lower.contains("semana") {
-            return "Esta semana tienes 2 parciales, 3 reuniones de trabajo y 1 entrega de TP. El jueves es el día más cargado."
+    }
+
+    // MARK: - Variations (chat más vivo, menos repetitivo)
+
+    private static func randomGreeting() -> String {
+        Self.pick([
+            "Hola. ¿Qué necesitás hoy?",
+            "Acá estoy. ¿En qué te ayudo?",
+            "Hola. Decime qué hacer y lo armo."
+        ])
+    }
+
+    private static func randomAcknowledgment() -> String {
+        Self.pick([
+            "Listo. Si cambiás de idea, decime.",
+            "Perfecto. Cualquier cosa estoy acá.",
+            "Bien. Lo dejo así."
+        ])
+    }
+
+    private static func pick(_ options: [String]) -> String {
+        options.randomElement() ?? options.first ?? ""
+    }
+
+    // MARK: - Heurísticas de parsing
+
+    private static func matches(_ text: String, _ keywords: [String]) -> Bool {
+        keywords.contains { text.contains($0) }
+    }
+
+    private static func matchesAny(_ text: String, _ triggers: [String]) -> Bool {
+        triggers.contains { text.contains($0) }
+    }
+
+    /// Extrae el texto después del PRIMER trigger encontrado (case-insensitive).
+    /// Devuelve `nil` si ningún trigger matchea, "" si matchea pero no hay texto
+    /// después.
+    private static func extractAfter(
+        _ text: String,
+        triggers: [String],
+        allowedTrailingPunct: String = ""
+    ) -> String? {
+        let lower = text.lowercased()
+        var bestIndex: String.Index?
+        var bestEnd: String.Index?
+        for trigger in triggers {
+            if let range = lower.range(of: trigger),
+               bestIndex == nil || range.lowerBound < bestIndex! {
+                bestIndex = range.lowerBound
+                bestEnd = range.upperBound
+            }
         }
-        if lower.contains("descans") || lower.contains("pausa") {
-            return "Reservo 20 minutos de descanso después del próximo bloque pesado."
+        guard let end = bestEnd else { return nil }
+        var after = String(text[end...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !allowedTrailingPunct.isEmpty {
+            after = after.trimmingCharacters(in: CharacterSet(charactersIn: allowedTrailingPunct))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if lower.contains("hola") || lower.contains("ayuda") {
-            return "Soy Nova. Puedo organizar tu día, crear tareas y eventos, y recordarte lo importante. ¿Qué tienes pendiente esta semana?"
+        return after
+    }
+
+    private static func extractEventTitle(_ text: String, triggers: [String]) -> String {
+        guard var raw = extractAfter(text, triggers: triggers, allowedTrailingPunct: ":.") else {
+            return ""
         }
-        if lower.contains("mañana") {
-            return "Mañana tienes clase a las 8 y un hueco libre de 10 a 12. ¿Quieres usarlo para foco o para estudio?"
+        // Limpiar marcadores temporales y de lugar para que el título sea solo
+        // el "qué" del evento.
+        raw = stripDateTimeMarkers(raw)
+        raw = stripLocationMarker(raw)
+        raw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
+        return cleanupTitle(raw)
+    }
+
+    /// Capitaliza solo la primera letra y normaliza espacios.
+    private static func cleanupTitle(_ raw: String) -> String {
+        let collapsed = raw
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard let first = collapsed.first else { return collapsed }
+        return first.uppercased() + collapsed.dropFirst()
+    }
+
+    private static let dateTimeMarkerPatterns: [String] = [
+        #"\bhoy\b"#,
+        #"\bmañana\b"#,
+        #"\bmanana\b"#,
+        #"\bpasado mañana\b"#,
+        #"\bpasado manana\b"#,
+        #"\bel (lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b"#,
+        #"\ba las? \d{1,2}(:\d{2})?(am|pm|hrs)?\b"#,
+        #"\b\d{1,2}:\d{2}\b"#
+    ]
+
+    private static func stripDateTimeMarkers(_ text: String) -> String {
+        var out = text
+        for pattern in dateTimeMarkerPatterns {
+            out = out.replacingOccurrences(
+                of: pattern,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
         }
-        if lower.contains("ok") || lower.contains("dale") || lower.contains("listo") || lower.contains("perfecto") {
-            return "Perfecto. Lo dejo así. Si cambia algo te aviso."
+        return out
+    }
+
+    private static func stripLocationMarker(_ text: String) -> String {
+        // " en <X>" hasta fin o coma/punto. Lo quitamos del título.
+        text.replacingOccurrences(
+            of: #" en [^.,;\n]+"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+    }
+
+    /// Devuelve fecha+hora si el texto incluye marcador temporal. Si solo hay
+    /// hora sin día, asume hoy (o mañana si la hora ya pasó). Si solo hay día
+    /// sin hora, asume 9:00.
+    private static func extractDateTime(from lower: String) -> Date? {
+        let cal = Calendar.current
+        let now = Date()
+        var dayBase: Date? = nil
+
+        if lower.range(of: #"\bpasado ma(ñ|n)ana\b"#, options: .regularExpression) != nil {
+            dayBase = cal.date(byAdding: .day, value: 2, to: now)
+        } else if lower.range(of: #"\bma(ñ|n)ana\b"#, options: .regularExpression) != nil {
+            dayBase = cal.date(byAdding: .day, value: 1, to: now)
+        } else if lower.contains("hoy") {
+            dayBase = now
+        } else if let target = nextWeekday(in: lower, calendar: cal, from: now) {
+            dayBase = target
         }
-        return "Lo tomo en cuenta. ¿Quieres que lo convierta en tarea, evento o lo guarde como nota?"
+
+        // Hora explícita
+        let hm = extractHourMinute(from: lower)
+
+        if dayBase == nil && hm == nil { return nil }
+
+        var base = dayBase ?? now
+        if let (h, m) = hm {
+            let start = cal.startOfDay(for: base)
+            base = cal.date(bySettingHour: h, minute: m, second: 0, of: start) ?? start
+            // Si pusieron solo hora sin día y ya pasó, asumir mañana.
+            if dayBase == nil, base <= now {
+                base = cal.date(byAdding: .day, value: 1, to: base) ?? base
+            }
+            return base
+        }
+        // Día sin hora → 9:00 default
+        let start = cal.startOfDay(for: base)
+        return cal.date(bySettingHour: 9, minute: 0, second: 0, of: start)
+    }
+
+    private static func nextWeekday(in text: String, calendar: Calendar, from: Date) -> Date? {
+        let map: [(String, Int)] = [
+            ("domingo", 1),
+            ("lunes", 2),
+            ("martes", 3),
+            ("miércoles", 4), ("miercoles", 4),
+            ("jueves", 5),
+            ("viernes", 6),
+            ("sábado", 7), ("sabado", 7)
+        ]
+        for (name, weekday) in map {
+            if text.contains(name) {
+                // Próxima ocurrencia de ese weekday desde "from".
+                var comps = DateComponents()
+                comps.weekday = weekday
+                if let next = calendar.nextDate(
+                    after: from,
+                    matching: comps,
+                    matchingPolicy: .nextTime
+                ) {
+                    return next
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func extractHourMinute(from text: String) -> (Int, Int)? {
+        // 1) "a las 14:30" / "a la 1:00"
+        if let h = firstCaptureInt(text, pattern: #"a la?s? (\d{1,2}):(\d{2})"#, group: 1),
+           let m = firstCaptureInt(text, pattern: #"a la?s? (\d{1,2}):(\d{2})"#, group: 2),
+           h < 24, m < 60 {
+            return (h, m)
+        }
+        // 2) "a las 12" / "a la 1"
+        if let h = firstCaptureInt(text, pattern: #"a la?s? (\d{1,2})\b"#, group: 1), h < 24 {
+            return (h, 0)
+        }
+        // 3) "14:30" suelto
+        if let h = firstCaptureInt(text, pattern: #"\b(\d{1,2}):(\d{2})\b"#, group: 1),
+           let m = firstCaptureInt(text, pattern: #"\b(\d{1,2}):(\d{2})\b"#, group: 2),
+           h < 24, m < 60 {
+            return (h, m)
+        }
+        return nil
+    }
+
+    private static func firstCaptureInt(_ text: String, pattern: String, group: Int) -> Int? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        guard let match = regex.firstMatch(in: text, range: range),
+              match.numberOfRanges > group else { return nil }
+        let r = match.range(at: group)
+        guard r.location != NSNotFound else { return nil }
+        return Int(ns.substring(with: r))
+    }
+
+    private static func extractLocation(from text: String) -> String? {
+        // Busca " en <X>" donde X termina en fin/coma/punto/salto-de-línea.
+        // Acepta tildes y mayúsculas (case-insensitive).
+        guard let range = text.range(
+            of: #"(?i)(^|\s)en\s+([^.,;\n]+)"#,
+            options: .regularExpression
+        ) else { return nil }
+        let chunk = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Quita el prefijo "en " (puede tener acento por ejemplo "En ")
+        let withoutPrefix = chunk
+            .replacingOccurrences(of: #"^(?i)en\s+"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return withoutPrefix.isEmpty ? nil : cleanupTitle(withoutPrefix)
     }
 }
 

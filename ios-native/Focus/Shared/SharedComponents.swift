@@ -146,6 +146,169 @@ struct ToastBanner: View {
     }
 }
 
+// MARK: - InlineNovaResponse — respuesta corta de Nova en Mi Día
+
+/// Acción opcional asociada a una respuesta inline de Nova. La interpreta el
+/// padre (Mi Día) para no acoplar este componente al `NavigationCoordinator`.
+enum InlineNovaAction: Hashable {
+    case openCalendar
+    case openTasksList
+    case openBandeja
+    case openChat
+    case dismiss
+
+    var label: String {
+        switch self {
+        case .openCalendar:  return "Ver en Calendario"
+        case .openTasksList: return "Ver tarea"
+        case .openBandeja:   return "Ver en Bandeja"
+        case .openChat:      return "Abrir chat"
+        case .dismiss:       return "Cerrar"
+        }
+    }
+}
+
+/// Respuesta inline de Nova que se muestra debajo del FocusBar en Mi Día.
+/// Es transitoria: el usuario la puede cerrar manualmente o se reemplaza al
+/// enviar otra petición. NO va al historial del chat por defecto — para eso
+/// existe el tab Nova → Chat.
+struct InlineNovaResponse: Identifiable, Equatable {
+    let id: UUID
+    var userText: String
+    var summary: String
+    var details: String?
+    var action: InlineNovaAction?
+    var createdAt: Date
+    var isLoading: Bool
+    var isError: Bool
+
+    init(
+        userText: String,
+        summary: String,
+        details: String? = nil,
+        action: InlineNovaAction? = nil,
+        isLoading: Bool = false,
+        isError: Bool = false
+    ) {
+        self.id = UUID()
+        self.userText = userText
+        self.summary = summary
+        self.details = details
+        self.action = action
+        self.createdAt = Date()
+        self.isLoading = isLoading
+        self.isError = isError
+    }
+}
+
+/// View que pinta una `InlineNovaResponse` debajo del FocusBar en Mi Día.
+/// - Muestra primero la frase del usuario tenue (contexto).
+/// - Después la respuesta de Nova con el marker rómbico cobalto.
+/// - Opcionalmente, un botón secundario para "Ver en Calendario", etc.
+/// - "Cerrar" siempre disponible — el usuario puede sacarla sin esperar.
+struct InlineNovaResponseView: View {
+    let response: InlineNovaResponse
+    let onAction: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            // Frase del usuario (eco) — tenue, para dar contexto.
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "quote.opening")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.textQuaternary)
+                Text(response.userText)
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.textTertiary)
+                    .lineLimit(3)
+                Spacer(minLength: 0)
+            }
+
+            // Respuesta de Nova.
+            HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+                Circle()
+                    .fill(novaTint)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 6)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    if response.isLoading {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(Theme.Colors.novaAccent)
+                            Text(response.summary)
+                                .font(Theme.Typography.subheadEmphasized)
+                                .foregroundStyle(Theme.Colors.textPrimary)
+                        }
+                    } else {
+                        Text(response.summary)
+                            .font(Theme.Typography.subheadEmphasized)
+                            .foregroundStyle(Theme.Colors.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let d = response.details, !d.isEmpty {
+                        Text(d)
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            // Acciones — chip secundario opcional + cerrar.
+            if !response.isLoading {
+                HStack(spacing: Theme.Spacing.sm) {
+                    if let act = response.action, act != .dismiss {
+                        Button(action: onAction) {
+                            HStack(spacing: 4) {
+                                Text(act.label)
+                                Image(systemName: "arrow.up.forward")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .font(Theme.Typography.subheadEmphasized)
+                            .foregroundStyle(Theme.Colors.focusAccent)
+                            .padding(.horizontal, Theme.Spacing.sm + 2)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule().fill(Theme.Colors.focusAccentSoft)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer()
+                    Button(action: onDismiss) {
+                        Text("Cerrar")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.textTertiary)
+                            .padding(.horizontal, Theme.Spacing.sm)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(Theme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(Theme.Colors.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                        .strokeBorder(novaTint.opacity(0.20), lineWidth: Theme.Stroke.hairline)
+                )
+                .focusCardShadow()
+        )
+    }
+
+    private var novaTint: Color {
+        if response.isError { return Theme.Colors.warning }
+        return Theme.Colors.novaAccent
+    }
+}
+
 // MARK: - LocationLabel (tap → sheet "Próximamente Maps")
 
 /// Etiqueta de ubicación tappable. Cuando se conecten integraciones (C5+)
@@ -351,20 +514,35 @@ struct EmptyStateView: View {
     }
 }
 
-// MARK: - Gemini-style FocusBar (prominente, gradient cuando focuseado)
+// MARK: - FocusBar — input multilínea expandible
 
+/// Input principal de Mi Día para hablar con Nova. Soporta de 1 a 5 líneas
+/// visibles (crece hacia abajo), después scroll interno. Botones (mic, enviar)
+/// se anclan a la base para que no salten cuando el texto crece.
+///
+/// Submit:
+/// - botón flecha o tecla "Send" del teclado;
+/// - solo se dispara con texto no-vacío;
+/// - el padre decide qué hacer con el texto (Mi Día lo procesa inline, NO
+///   navega al Chat).
+///
+/// `onTap` se dispara con cualquier tap en el área de texto. Mi Día lo usa
+/// solo cuando el campo está vacío para enfocar; no debe navegar.
 struct FocusBarInput: View {
     @Binding var text: String
     var placeholder: String = "Pregúntale a Nova…"
     var onSubmit: () -> Void
-    var onTap: (() -> Void)? = nil
     var onMic: (() -> Void)? = nil
 
     @FocusState private var isFocused: Bool
 
+    private var canSubmit: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
-        HStack(spacing: Theme.Spacing.md) {
-            // Marca de Nova (rombo) sobre gradiente cobalto.
+        HStack(alignment: .bottom, spacing: Theme.Spacing.md) {
+            // Marca de Nova — anclada a la base junto a los botones.
             ZStack {
                 Circle()
                     .fill(Theme.Colors.novaGradient)
@@ -372,20 +550,24 @@ struct FocusBarInput: View {
                 NovaSparkMark(size: 13)
             }
 
-            TextField(placeholder, text: $text, axis: .horizontal)
+            TextField(placeholder, text: $text, axis: .vertical)
                 .focused($isFocused)
                 .font(Theme.Typography.body)
                 .foregroundStyle(Theme.Colors.textPrimary)
                 .tint(Theme.Colors.focusAccent)
+                // 1 a 5 líneas visibles; pasado eso TextField hace scroll
+                // interno y conserva el cursor visible.
+                .lineLimit(1...5)
                 .submitLabel(.send)
+                // Enter en multiline manda submit (no inserta newline) cuando
+                // hay texto. Si el usuario quiere salto de línea explícito
+                // puede mantener Shift+Enter (lo respeta el sistema).
                 .onSubmit {
-                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        onSubmit()
-                    }
+                    if canSubmit { onSubmit() }
                 }
-                .onTapGesture {
-                    onTap?()
-                }
+                // padding vertical mínimo para que el área de toque sea
+                // cómoda incluso con 1 línea.
+                .padding(.vertical, 4)
 
             if let onMic {
                 Button(action: onMic) {
@@ -400,30 +582,35 @@ struct FocusBarInput: View {
                 .buttonStyle(.plain)
             }
 
-            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button {
-                    onSubmit()
-                } label: {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 32, height: 32)
-                        .background(
-                            Circle().fill(Theme.Colors.focusAccent)
+            // Botón enviar siempre visible para no romper el layout al teclear;
+            // se desactiva cuando no hay texto.
+            Button {
+                if canSubmit { onSubmit() }
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle().fill(
+                            canSubmit
+                                ? Theme.Colors.focusAccent
+                                : Theme.Colors.focusAccent.opacity(0.30)
                         )
-                }
-                .buttonStyle(.plain)
-                .transition(.scale.combined(with: .opacity))
+                    )
             }
+            .buttonStyle(.plain)
+            .disabled(!canSubmit)
+            .animation(.easeInOut(duration: 0.15), value: canSubmit)
         }
         .padding(.horizontal, Theme.Spacing.md + 2)
-        .padding(.vertical, Theme.Spacing.md - 1)
+        .padding(.vertical, Theme.Spacing.sm + 2)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                 .fill(Theme.Colors.surface)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                 .strokeBorder(
                     isFocused
                         ? AnyShapeStyle(Theme.Colors.novaGradient)
@@ -433,7 +620,6 @@ struct FocusBarInput: View {
         )
         .focusCardShadow()
         .animation(.easeInOut(duration: 0.2), value: isFocused)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: text.isEmpty)
     }
 }
 

@@ -7,6 +7,9 @@ struct MiDiaView: View {
     @State private var focusBarText: String = ""
     @State private var showAllEvents: Bool = false
     @State private var showVoiceComingSoon: Bool = false
+    /// Última respuesta inline de Nova. Se reemplaza al enviar otra petición
+    /// y se puede cerrar manualmente. NO está en el store; es estado de UI.
+    @State private var inlineResponse: InlineNovaResponse? = nil
 
     /// 3 bloques visibles por defecto — más allá de eso es ruido.
     private let visibleEventsLimit: Int = 3
@@ -64,6 +67,23 @@ struct MiDiaView: View {
 
                     focusBar
                         .padding(.horizontal, Theme.Spacing.xl)
+
+                    // Respuesta inline de Nova: aparece DEBAJO del FocusBar al
+                    // procesar una petición. Mi Día NO navega al Chat — toda
+                    // la confirmación de acciones queda visible acá.
+                    if let resp = inlineResponse {
+                        InlineNovaResponseView(
+                            response: resp,
+                            onAction: { handleInlineAction(resp.action) },
+                            onDismiss: {
+                                withAnimation(.easeOut(duration: 0.20)) {
+                                    inlineResponse = nil
+                                }
+                            }
+                        )
+                        .padding(.horizontal, Theme.Spacing.xl)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
 
                     if let next = nextBlock {
                         ProximoBloqueCard(event: next)
@@ -168,18 +188,214 @@ struct MiDiaView: View {
             onSubmit: {
                 let text = focusBarText
                 focusBarText = ""
-                nav.openNova(prompt: text)
-            },
-            onTap: {
-                if focusBarText.isEmpty {
-                    nav.openNova(segment: .bandeja)
-                }
+                processNovaInline(text: text)
             },
             onMic: {
                 HapticManager.shared.tap()
                 showVoiceComingSoon = true
             }
         )
+    }
+
+    // MARK: - Nova inline (interacción principal desde Mi Día)
+
+    /// Procesa la petición del usuario localmente con `NovaResponder.parse`,
+    /// ejecuta el intent (crear tarea/evento, etc.) y muestra la respuesta
+    /// inline DEBAJO del FocusBar. No navega al chat — Mi Día es el flujo
+    /// principal para acciones rápidas.
+    private func processNovaInline(text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        HapticManager.shared.tap()
+
+        // Loading inmediato — Nova "procesando" se ve aunque el parse sea sync.
+        withAnimation(.easeInOut(duration: 0.18)) {
+            inlineResponse = InlineNovaResponse(
+                userText: trimmed,
+                summary: "Procesando…",
+                isLoading: true
+            )
+        }
+
+        // Pequeño delay para que el usuario vea el loading aunque la
+        // respuesta sea instantánea. Cuando se conecte LLM real, este Task
+        // se reemplaza por la llamada HTTP.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            let intent = NovaResponder.parse(trimmed)
+            let response = executeIntent(intent, userText: trimmed)
+            withAnimation(.easeInOut(duration: 0.20)) {
+                inlineResponse = response
+            }
+        }
+    }
+
+    private func executeIntent(_ intent: NovaIntent, userText: String) -> InlineNovaResponse {
+        switch intent {
+        case .createTask(let title):
+            let task = FocusTask(
+                title: title,
+                priority: .media,
+                category: .hoy
+            )
+            store.addTask(task)
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Tarea creada.",
+                details: "«\(title)» quedó en pendientes de hoy.",
+                action: .openTasksList
+            )
+
+        case .createEvent(let title, let when, let location):
+            guard let date = when else {
+                // El parser no debería llegar acá (ya generaría .clarify) pero
+                // por defensa.
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "Necesito saber el día y la hora.",
+                    details: "Probá: «agenda \(title) mañana a las 12».",
+                    isError: true
+                )
+            }
+            let cal = Calendar.current
+            let end = cal.date(byAdding: .hour, value: 1, to: date) ?? date
+            let event = FocusEvent(
+                title: title,
+                startTime: date,
+                endTime: end,
+                section: .reunion,
+                location: location
+            )
+            store.addEvent(event)
+            let timeLabel = DateFormatters.hourMinute.string(from: date)
+            let dayLabel = DateFormatters.capitalizeFirst(
+                DateFormatters.weekdayDay.string(from: date)
+            )
+            var detail = "\(dayLabel) · \(timeLabel)"
+            if let loc = location { detail += " · \(loc)" }
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Evento agregado a Calendario.",
+                details: detail,
+                action: .openCalendar
+            )
+
+        case .organizeDay:
+            store.addSuggestion(NovaSuggestion(
+                title: "Plan del día actualizado",
+                detail: "Bloqueé tu mañana para foco profundo y dejé pendientes para después del mediodía. Aprueba para aplicar.",
+                kind: .rebalance,
+                priority: .high,
+                suggestedAction: "Aplicar plan del día"
+            ))
+            store.addSuggestion(NovaSuggestion(
+                title: "Pausa al mediodía",
+                detail: "Te reservo 20 min sin notificaciones entre clases.",
+                kind: .break_,
+                priority: .normal,
+                suggestedAction: "Reservar pausa 13:00"
+            ))
+            store.addSuggestion(NovaSuggestion(
+                title: "Repaso para mañana",
+                detail: "Te dejo un bloque de 60 min antes de tu próxima entrega.",
+                kind: .prep,
+                priority: .normal,
+                suggestedAction: "Bloquear repaso"
+            ))
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Te dejé 3 sugerencias en la Bandeja.",
+                details: "Aprueba las que te sirvan; las demás se descartan.",
+                action: .openBandeja
+            )
+
+        case .reviewPending:
+            let pending = store.pendingTodayTasks
+            if pending.isEmpty {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "No tienes pendientes de hoy. Disfrutalo."
+                )
+            }
+            let preview = pending.prefix(3).map { "• \($0.title)" }.joined(separator: "\n")
+            return InlineNovaResponse(
+                userText: userText,
+                summary: pending.count == 1
+                    ? "Tienes 1 pendiente hoy."
+                    : "Tienes \(pending.count) pendientes hoy.",
+                details: preview,
+                action: pending.count > 3 ? .openTasksList : nil
+            )
+
+        case .askAboutDemo:
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Los ejemplos desaparecen automáticamente.",
+                details: "Solo aparecen mientras no tengas datos tuyos. Apenas crees tu primer evento o tarea, se reemplazan.",
+                action: nil
+            )
+
+        case .smallTalk(let reply):
+            return InlineNovaResponse(
+                userText: userText,
+                summary: reply
+            )
+
+        case .clarify(let reason):
+            return InlineNovaResponse(
+                userText: userText,
+                summary: clarifyHeadline(reason),
+                details: clarifyDetail(reason),
+                action: .openChat,
+                isError: true
+            )
+        }
+    }
+
+    private func clarifyHeadline(_ reason: NovaIntent.ClarifyReason) -> String {
+        switch reason {
+        case .taskNeedsTitle:           return "¿Qué tarea querés que anote?"
+        case .eventNeedsTitle:          return "¿Qué evento querés agendar?"
+        case .eventNeedsDateTime:       return "Necesito el día y la hora."
+        case .unclear:                  return "No estoy seguro de qué hacer."
+        }
+    }
+
+    private func clarifyDetail(_ reason: NovaIntent.ClarifyReason) -> String {
+        switch reason {
+        case .taskNeedsTitle:
+            return "Probá: «crea tarea estudiar cálculo»."
+        case .eventNeedsTitle:
+            return "Probá: «agenda reunión con Juan mañana a las 12»."
+        case .eventNeedsDateTime(let title):
+            return "Decime cuándo. Ej: «\(title) mañana a las 12»."
+        case .unclear:
+            return "Puedo crear tareas, agendar eventos u ordenar tu día. Decime con más detalle."
+        }
+    }
+
+    private func handleInlineAction(_ action: InlineNovaAction?) {
+        guard let action else { return }
+        HapticManager.shared.tap()
+        switch action {
+        case .openCalendar:
+            withAnimation(.easeInOut(duration: 0.28)) {
+                nav.selectedTab = .calendario
+            }
+        case .openTasksList:
+            // Por ahora salta a Nova → Acciones donde está el link "Todas las
+            // tareas". Cuando exista una vista de pendientes dedicada, se
+            // ajusta acá.
+            nav.openNova(segment: .acciones)
+        case .openBandeja:
+            nav.openNova(segment: .bandeja)
+        case .openChat:
+            nav.openNova(segment: .chat)
+        case .dismiss:
+            withAnimation(.easeOut(duration: 0.20)) {
+                inlineResponse = nil
+            }
+        }
     }
 
     // MARK: - Timeline
