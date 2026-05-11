@@ -36,7 +36,7 @@ struct MiDiaView: View {
                         .padding(.horizontal, Theme.Spacing.xl)
 
                     if let next = nextBlock {
-                        ProximoBloqueCard(event: next, isExample: showingExamples)
+                        ProximoBloqueCard(event: next)
                             .padding(.horizontal, Theme.Spacing.xl)
                     }
 
@@ -169,30 +169,11 @@ struct MiDiaView: View {
             }
             .padding(.horizontal, Theme.Spacing.xl)
 
-            if showingExamples {
-                VStack(spacing: Theme.Spacing.md) {
-                    ExampleBanner(
-                        title: "Así se vería tu día",
-                        message: "Esto es solo un ejemplo. Cuando agregues tu primer evento, desaparece."
-                    )
-                    .padding(.horizontal, Theme.Spacing.xl)
-
-                    VStack(spacing: 0) {
-                        ForEach(Array(displayEvents.enumerated()), id: \.element.id) { idx, event in
-                            TimelineEventRow(
-                                event: event,
-                                isLast: idx == displayEvents.count - 1,
-                                isExample: true
-                            )
-                        }
-                    }
-                    .padding(.horizontal, Theme.Spacing.xl)
-                }
-            } else if displayEvents.isEmpty {
+            if displayEvents.isEmpty {
                 EmptyStateView(
                     symbol: "sun.max",
-                    title: "Día libre",
-                    message: "No tienes nada agendado hoy. Buen momento para descansar o pedirle a Nova que arme algo.",
+                    title: "Tu día está libre",
+                    message: "Agrega un bloque o pídele a Nova que lo organice.",
                     actionLabel: "Hablar con Nova",
                     action: {
                         pendingNovaText = nil
@@ -206,8 +187,7 @@ struct MiDiaView: View {
                     ForEach(Array(displayEvents.enumerated()), id: \.element.id) { idx, event in
                         TimelineEventRow(
                             event: event,
-                            isLast: idx == displayEvents.count - 1,
-                            isExample: false
+                            isLast: idx == displayEvents.count - 1
                         )
                     }
                 }
@@ -220,7 +200,7 @@ struct MiDiaView: View {
 
     private var emptyDayPromptsSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            SectionHeader(title: "Empieza con un ejemplo")
+            SectionHeader(title: "Pídele a Nova")
                 .padding(.horizontal, Theme.Spacing.xl)
 
             VStack(spacing: Theme.Spacing.sm) {
@@ -287,7 +267,6 @@ struct MiDiaView: View {
 
 private struct ProximoBloqueCard: View {
     let event: FocusEvent
-    let isExample: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
@@ -296,9 +275,6 @@ private struct ProximoBloqueCard: View {
                     .font(Theme.Typography.captionEmphasized)
                     .foregroundStyle(event.isNow ? Theme.Colors.success : Theme.Colors.focusAccent)
                     .tracking(1.2)
-                if isExample {
-                    ExampleBadge()
-                }
                 Spacer()
                 Text(event.timeRangeLabel)
                     .font(Theme.Typography.timestamp)
@@ -365,7 +341,6 @@ private struct ProximoBloqueCard: View {
 private struct TimelineEventRow: View {
     let event: FocusEvent
     let isLast: Bool
-    let isExample: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
@@ -401,16 +376,11 @@ private struct TimelineEventRow: View {
                 .frame(width: 3)
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                HStack(spacing: 6) {
-                    Text(event.title)
-                        .font(Theme.Typography.bodyEmphasized)
-                        .foregroundStyle(Theme.Colors.textPrimary)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
-                    if isExample {
-                        ExampleBadge()
-                    }
-                }
+                Text(event.title)
+                    .font(Theme.Typography.bodyEmphasized)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
                 if let notes = event.notes, !notes.isEmpty {
                     Text(notes)
                         .font(Theme.Typography.subhead)
@@ -448,13 +418,7 @@ private struct TimelineEventRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                .strokeBorder(
-                    isExample ? Theme.Colors.novaAccent.opacity(0.20) : Theme.Colors.border,
-                    style: StrokeStyle(
-                        lineWidth: Theme.Stroke.hairline,
-                        dash: isExample ? [4, 3] : []
-                    )
-                )
+                .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
         )
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
         .focusCardShadow()

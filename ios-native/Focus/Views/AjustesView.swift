@@ -3,6 +3,7 @@ import SwiftUI
 struct AjustesView: View {
     @EnvironmentObject private var store: FocusDataStore
     @EnvironmentObject private var auth: AuthStore
+    @AppStorage("focus.v1.hasSeenOnboarding") private var hasSeenOnboarding = false
     @State private var showPersonalitySheet = false
     @State private var showResetConfirm = false
     @State private var showClearConfirm = false
@@ -154,17 +155,11 @@ struct AjustesView: View {
                 AjustesRow(
                     symbol: "sparkles",
                     tint: Theme.Colors.novaAccent,
-                    title: store.settings.plan.displayName,
-                    subtitle: "Nova ilimitada y prioridad en sugerencias.",
-                    trailing: .badge("Activo", Theme.Colors.success)
-                )
-                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
-                AjustesRow(
-                    symbol: "chart.bar.fill",
-                    tint: Theme.Colors.focusAccent,
-                    title: "Uso de Nova",
-                    subtitle: "12 mensajes hoy · sin límite",
-                    trailing: .chevron
+                    title: auth.isLoggedIn ? "Early Access" : "Modo demo",
+                    subtitle: auth.isLoggedIn
+                        ? "Estás probando Focus pre-lanzamiento."
+                        : "Tus datos viven solo en este iPhone.",
+                    trailing: .nothing
                 )
             }
             .focusCardContainer()
@@ -400,11 +395,27 @@ struct AjustesView: View {
     private var acercaSection: some View {
         settingsSection(title: "Acerca de") {
             VStack(spacing: 0) {
+                Button {
+                    HapticManager.shared.tap()
+                    hasSeenOnboarding = false
+                } label: {
+                    AjustesRow(
+                        symbol: "play.rectangle",
+                        tint: Theme.Colors.focusAccent,
+                        title: "Ver tutorial otra vez",
+                        subtitle: "Repasá el onboarding de bienvenida.",
+                        trailing: .chevron
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+
                 AjustesRow(
                     symbol: "info.circle",
                     tint: Theme.Colors.textSecondary,
-                    title: "Versión",
-                    subtitle: AppVersion.displayString,
+                    title: "Focus",
+                    subtitle: "\(AppVersion.displayString) · Hecho para organizar tu día con Nova.",
                     trailing: .nothing
                 )
             }

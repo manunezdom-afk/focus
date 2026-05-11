@@ -44,14 +44,6 @@ struct TareasView: View {
                             .padding(.horizontal, Theme.Spacing.xl)
                             .padding(.top, Theme.Spacing.md)
 
-                        if showingExamples {
-                            ExampleBanner(
-                                title: "Ejemplo de tus tareas",
-                                message: "Estas son tareas de muestra. Cuando crees la tuya, desaparecen."
-                            )
-                            .padding(.horizontal, Theme.Spacing.xl)
-                        }
-
                         filtersRow
                             .padding(.horizontal, Theme.Spacing.xl)
 
@@ -146,19 +138,10 @@ struct TareasView: View {
                 ForEach(tasks) { task in
                     TaskRowFull(
                         task: task,
-                        isExample: showingExamples,
                         isExpanded: expandedTaskIds.contains(task.id),
-                        onToggle: {
-                            if !showingExamples {
-                                store.toggleTask(task.id)
-                            } else {
-                                HapticManager.shared.warning()
-                            }
-                        },
+                        onToggle: { store.toggleTask(task.id) },
                         onToggleSubtask: { subId in
-                            if !showingExamples {
-                                store.toggleSubtask(taskId: task.id, subtaskId: subId)
-                            }
+                            store.toggleSubtask(taskId: task.id, subtaskId: subId)
                         },
                         onExpand: { toggleExpand(task.id) }
                     )
@@ -235,7 +218,6 @@ struct TareasView: View {
 
 private struct TaskRowFull: View {
     let task: FocusTask
-    let isExample: Bool
     let isExpanded: Bool
     let onToggle: () -> Void
     let onToggleSubtask: (UUID) -> Void
@@ -259,13 +241,7 @@ private struct TaskRowFull: View {
                 .fill(Theme.Colors.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                        .strokeBorder(
-                            isExample ? Theme.Colors.novaAccent.opacity(0.18) : Theme.Colors.border,
-                            style: StrokeStyle(
-                                lineWidth: Theme.Stroke.hairline,
-                                dash: isExample ? [4, 3] : []
-                            )
-                        )
+                        .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
                 )
                 .focusCardShadow()
         )
@@ -286,16 +262,11 @@ private struct TaskRowFull: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(task.title)
-                        .font(Theme.Typography.bodyEmphasized)
-                        .foregroundStyle(task.done ? Theme.Colors.textTertiary : Theme.Colors.textPrimary)
-                        .strikethrough(task.done, color: Theme.Colors.textTertiary)
-                        .multilineTextAlignment(.leading)
-                    if isExample {
-                        ExampleBadge()
-                    }
-                }
+                Text(task.title)
+                    .font(Theme.Typography.bodyEmphasized)
+                    .foregroundStyle(task.done ? Theme.Colors.textTertiary : Theme.Colors.textPrimary)
+                    .strikethrough(task.done, color: Theme.Colors.textTertiary)
+                    .multilineTextAlignment(.leading)
 
                 HStack(spacing: 6) {
                     StatePill(label: task.priority.label, tint: task.priority.color)

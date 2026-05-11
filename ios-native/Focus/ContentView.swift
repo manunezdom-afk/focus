@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var auth: AuthStore
+    @AppStorage("focus.v1.hasSeenOnboarding") private var hasSeenOnboarding = false
     @State private var isBooting = true
 
     var body: some View {
@@ -9,7 +10,7 @@ struct ContentView: View {
             if isBooting {
                 BootView()
                     .transition(.opacity)
-                    .zIndex(1)
+                    .zIndex(2)
             } else {
                 routedContent
                     .transition(.opacity)
@@ -17,6 +18,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.4), value: isBooting)
+        .animation(.easeOut(duration: 0.25), value: hasSeenOnboarding)
         .animation(.easeOut(duration: 0.25), value: auth.isAuthenticatedOrDemo)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
@@ -27,7 +29,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private var routedContent: some View {
-        if auth.isAuthenticatedOrDemo {
+        if !hasSeenOnboarding {
+            OnboardingView()
+        } else if auth.isAuthenticatedOrDemo {
             MainTabView()
         } else {
             LoginView()

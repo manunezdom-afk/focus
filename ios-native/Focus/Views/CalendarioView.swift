@@ -42,14 +42,6 @@ struct CalendarioView: View {
                             .padding(.horizontal, Theme.Spacing.xl)
                             .padding(.top, Theme.Spacing.md)
 
-                        if showingExamples {
-                            ExampleBanner(
-                                title: "Así se vería tu semana",
-                                message: "Estos son eventos de ejemplo. Cuando crees el tuyo, desaparecen."
-                            )
-                            .padding(.horizontal, Theme.Spacing.xl)
-                        }
-
                         weekSelector
                             .padding(.horizontal, Theme.Spacing.xl)
 
@@ -143,7 +135,7 @@ struct CalendarioView: View {
         } else {
             VStack(spacing: Theme.Spacing.md) {
                 ForEach(displayEvents) { event in
-                    CalendarEventCard(event: event, isExample: showingExamples)
+                    CalendarEventCard(event: event)
                 }
             }
         }
@@ -258,7 +250,6 @@ private struct DayPill: View {
 
 private struct CalendarEventCard: View {
     let event: FocusEvent
-    let isExample: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
@@ -280,16 +271,11 @@ private struct CalendarEventCard: View {
                 .clipShape(Capsule())
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                HStack(spacing: 6) {
-                    Text(event.title)
-                        .font(Theme.Typography.bodyEmphasized)
-                        .foregroundStyle(Theme.Colors.textPrimary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    if isExample {
-                        ExampleBadge()
-                    }
-                }
+                Text(event.title)
+                    .font(Theme.Typography.bodyEmphasized)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
                 if let notes = event.notes, !notes.isEmpty {
                     Text(notes)
                         .font(Theme.Typography.subhead)
@@ -319,13 +305,7 @@ private struct CalendarEventCard: View {
                 .fill(Theme.Colors.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                        .strokeBorder(
-                            isExample ? Theme.Colors.novaAccent.opacity(0.18) : Theme.Colors.border,
-                            style: StrokeStyle(
-                                lineWidth: Theme.Stroke.hairline,
-                                dash: isExample ? [4, 3] : []
-                            )
-                        )
+                        .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
                 )
                 .focusCardShadow()
         )
