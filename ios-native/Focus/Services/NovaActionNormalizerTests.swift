@@ -66,6 +66,58 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
+        // Sanity: la frase "X minutos antes" se va del título.
+        check(
+            label: "cleanTitle: 'salir a buscar a mi hermano a las 10 acuérdame 5 minutos antes' → 'Buscar a mi hermano'",
+            actual: NovaActionNormalizer.cleanTitle("salir a buscar a mi hermano a las 10 acuérdame 5 minutos antes"),
+            expected: "Buscar a mi hermano",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'reunión con Juan a las 3 recuérdame media hora antes' → 'Reunión con Juan'",
+            actual: NovaActionNormalizer.cleanTitle("reunión con Juan a las 3 recuérdame media hora antes"),
+            expected: "Reunión con Juan",
+            failures: &failures
+        )
+
+        // ───── extractReminderOffset ───────────────────────────────────
+
+        check(
+            label: "extractReminderOffset: 'acuérdame 5 minutos antes' → 5",
+            actual: NovaActionNormalizer.extractReminderOffset(from: "acuérdame 5 minutos antes"),
+            expected: 5,
+            failures: &failures
+        )
+
+        check(
+            label: "extractReminderOffset: 'recuérdame cinco minutos antes' → 5",
+            actual: NovaActionNormalizer.extractReminderOffset(from: "recuérdame cinco minutos antes"),
+            expected: 5,
+            failures: &failures
+        )
+
+        check(
+            label: "extractReminderOffset: 'avísame media hora antes' → 30",
+            actual: NovaActionNormalizer.extractReminderOffset(from: "avísame media hora antes"),
+            expected: 30,
+            failures: &failures
+        )
+
+        check(
+            label: "extractReminderOffset: 'una hora antes' → 60",
+            actual: NovaActionNormalizer.extractReminderOffset(from: "una hora antes"),
+            expected: 60,
+            failures: &failures
+        )
+
+        check(
+            label: "extractReminderOffset: 'tengo reunión mañana' → nil",
+            actual: NovaActionNormalizer.extractReminderOffset(from: "tengo reunión mañana"),
+            expected: nil as Int?,
+            failures: &failures
+        )
+
         // ───── isReminderTrigger ───────────────────────────────────────
 
         check(

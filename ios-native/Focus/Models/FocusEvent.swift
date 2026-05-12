@@ -97,6 +97,11 @@ struct FocusEvent: Identifiable, Codable, Hashable {
     /// muestra solo la hora puntual aunque internamente el evento tenga
     /// duración mínima para mantener orden en el timeline.
     var inferredDuration: Bool?
+    /// Minutos antes del `startTime` en los que el usuario quiere ser
+    /// notificado (ej. "acuérdame 5 minutos antes" → `[5]`). Si está vacío
+    /// o nil y `isReminder == true`, se notifica al `startTime`. Permite
+    /// múltiples avisos en el futuro (ej. `[60, 10]`) sin romper API.
+    var reminderOffsets: [Int]?
 
     /// Origen efectivo del evento. Si `source` es nil (data legacy) lo
     /// tratamos como `.local`.
@@ -126,7 +131,8 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         url: String? = nil,
         lastSyncedAt: Date? = nil,
         isReminder: Bool? = nil,
-        inferredDuration: Bool? = nil
+        inferredDuration: Bool? = nil,
+        reminderOffsets: [Int]? = nil
     ) {
         self.id = id
         self.title = title
@@ -145,6 +151,7 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         self.lastSyncedAt = lastSyncedAt
         self.isReminder = isReminder
         self.inferredDuration = inferredDuration
+        self.reminderOffsets = reminderOffsets
     }
 
     var timeRangeLabel: String {

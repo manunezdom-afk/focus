@@ -127,6 +127,23 @@ enum NovaActionNormalizer {
             )
         }
 
+        // 3b. Strip frases de "X minutos antes" / "media hora antes" /
+        //     "una hora antes" / "cinco min antes" — son metadata de
+        //     notificación, no parte del título.
+        let offsetPatterns: [String] = [
+            #"\b(con|y)?\s*(acu(é|e)rdame|recu(é|e)rdame|av(í|i)same|recordame|recu(é|e)rdate|acu(é|e)rdate)\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#,
+            #"\b(con|y)?\s*(acu(é|e)rdame|recu(é|e)rdame|av(í|i)same|recordame|recu(é|e)rdate|acu(é|e)rdate)\s+(un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|media|medio)\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#,
+            #"\b\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#,
+            #"\b(un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|media|medio)\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#
+        ]
+        for pattern in offsetPatterns {
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+
         // 4. Strip fillers comunes.
         let fillerPatterns: [String] = [
             #"\bporfa(vor)?\b"#,
@@ -247,6 +264,70 @@ enum NovaActionNormalizer {
             return (end, false)
         }
         return (nil, true)  // duración inferida, mostrar como punto
+    }
+
+    // MARK: - Reminder offsets ("X minutos antes")
+
+    /// Extrae los minutos de offset que el usuario dijo en frases tipo:
+    ///   - "acuérdame 5 minutos antes" → 5
+    ///   - "recuérdame cinco min antes" → 5
+    ///   - "avísame media hora antes" → 30
+    ///   - "una hora antes" → 60
+    ///   - "10 min antes" → 10
+    ///
+    /// Devuelve `nil` si no encuentra patrón explícito. Limita el rango a
+    /// [1, 24*60] minutos para evitar offsets absurdos. Si el usuario dice
+    /// varias frases, se queda con la primera (no soportamos múltiples
+    /// avisos por ahora).
+    static func extractReminderOffset(from text: String) -> Int? {
+        let lower = text.lowercased()
+
+        // 1. Patrón numérico: "5 minutos antes", "10 min antes", "2 horas antes"
+        let numericPattern = #"(\d{1,3})\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#
+        if let regex = try? NSRegularExpression(pattern: numericPattern, options: [.caseInsensitive]) {
+            let ns = lower as NSString
+            if let match = regex.firstMatch(in: lower, range: NSRange(location: 0, length: ns.length)),
+               match.numberOfRanges >= 3 {
+                let valueStr = ns.substring(with: match.range(at: 1))
+                let unit = ns.substring(with: match.range(at: 2))
+                if let value = Int(valueStr) {
+                    let mins = unit.hasPrefix("h") ? value * 60 : value
+                    if mins >= 1 && mins <= 24 * 60 { return mins }
+                }
+            }
+        }
+
+        // 2. Patrón con número escrito: "media hora antes", "cinco minutos antes",
+        //    "una hora antes", "quince min antes".
+        let wordToNumber: [String: Int] = [
+            "un": 1, "una": 1,
+            "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+            "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
+            "once": 11, "doce": 12, "quince": 15, "veinte": 20, "treinta": 30,
+            "media": 30, "medio": 30
+        ]
+        let wordPattern = #"(un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|media|medio)\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#
+        if let regex = try? NSRegularExpression(pattern: wordPattern, options: [.caseInsensitive]) {
+            let ns = lower as NSString
+            if let match = regex.firstMatch(in: lower, range: NSRange(location: 0, length: ns.length)),
+               match.numberOfRanges >= 3 {
+                let word = ns.substring(with: match.range(at: 1))
+                let unit = ns.substring(with: match.range(at: 2))
+                if let value = wordToNumber[word] {
+                    // Caso especial: "media hora" / "medio hora" = 30 min, no 30 horas.
+                    let isHalfHour = (word == "media" || word == "medio")
+                    let mins: Int
+                    if isHalfHour {
+                        mins = 30
+                    } else {
+                        mins = unit.hasPrefix("h") ? value * 60 : value
+                    }
+                    if mins >= 1 && mins <= 24 * 60 { return mins }
+                }
+            }
+        }
+
+        return nil
     }
 
     // MARK: - Validation

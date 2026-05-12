@@ -285,16 +285,19 @@ struct CalendarioView: View {
         } else {
             VStack(spacing: Theme.Spacing.md) {
                 ForEach(displayEvents) { event in
-                    SwipeToDelete(enabled: store.hasUserEvents) {
+                    let isDemoEvent = !store.hasUserEvents
+                    SwipeToDelete(enabled: !isDemoEvent) {
                         store.deleteEvent(event.id)
                         toast.success("Evento eliminado", symbol: "trash.fill")
                     } content: {
                         CalendarEventCard(event: event)
                     }
-                    // Long-press → Editar / Eliminar. Solo en eventos reales
-                    // del usuario (no en demo).
+                    // Long-press → Editar / Eliminar. Igual que Mi Día,
+                    // funciona en cualquier vista (Día/Semana/Mes) porque
+                    // todas comparten `dayContent`. Solo se desactiva
+                    // cuando estamos mostrando eventos de demostración.
                     .contextMenu {
-                        if store.hasUserEvents {
+                        if !isDemoEvent {
                             Button {
                                 editingEvent = event
                             } label: {

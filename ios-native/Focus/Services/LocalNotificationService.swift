@@ -102,52 +102,116 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
             return
         }
 
+        // Antes de programar la nueva, cancelamos cualquier pendiente de
+        // este evento (puede haber múltiples si tiene varios offsets).
+        cancelReminder(eventId: event.id)
+
+        // Calculamos las fechas en que dispararán las notificaciones.
+        // - Si hay `reminderOffsets`, programamos uno por cada offset
+        //   (startTime - offset). Filtramos los que ya pasaron.
+        // - Si no hay offsets, programamos una sola al startTime.
+        let fireDates = computeFireDates(for: event)
+        guard !fireDates.isEmpty else { return }
+
         let center = UNUserNotificationCenter.current()
-        let content = UNMutableNotificationContent()
-        // Title fijo "Focus" para que el usuario reconozca rápido la fuente.
-        // El detalle real va en el body para que iOS lo muestre prominente.
-        content.title = "Focus"
-        // Subtitle "Recordatorio" agrega contexto sin saturar.
-        content.subtitle = "Recordatorio"
-        if let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !location.isEmpty {
-            content.body = "\(event.title) · \(location)"
-        } else {
-            content.body = event.title
+        let cleanTitle = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for (index, fireDate) in fireDates.enumerated() {
+            let content = UNMutableNotificationContent()
+            // Title = título del evento (limpio). Es lo más prominente que
+            // muestra iOS en la lock screen / banner.
+            content.title = cleanTitle.isEmpty ? "Focus" : cleanTitle
+            // Subtitle dinámico: "En X min" si la notif dispara antes del
+            // evento; "Empieza a las HH:MM" si dispara al mismo tiempo.
+            content.subtitle = subtitle(forFireDate: fireDate, eventStart: event.startTime)
+            // Body = ubicación (si la hay) o vacío. NO repetimos el título
+            // porque ya está en `content.title`.
+            if let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !location.isEmpty {
+                content.body = location
+            } else {
+                content.body = ""
+            }
+            content.sound = .default
+            content.userInfo = ["eventId": event.id.uuidString]
+
+            let components = Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute],
+                from: fireDate
+            )
+            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+
+            // Identifier por offset para poder cancelar individualmente.
+            // El primer fire usa el id base (compatibilidad con cancelReminder).
+            let identifier = fireDates.count == 1
+                ? Self.identifier(for: event.id)
+                : "\(Self.identifier(for: event.id))-\(index)"
+
+            let request = UNNotificationRequest(
+                identifier: identifier,
+                content: content,
+                trigger: trigger
+            )
+
+            do {
+                try await center.add(request)
+            } catch {
+                print("[LocalNotificationService] schedule failed: \(error.localizedDescription)")
+            }
         }
-        content.sound = .default
-        // userInfo permite que el handler de tap sepa qué evento abrir.
-        // Se sanitiza al string (UUID) — no metemos el FocusEvent completo.
-        content.userInfo = ["eventId": event.id.uuidString]
+    }
 
-        let components = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute],
-            from: event.startTime
-        )
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-
-        let request = UNNotificationRequest(
-            identifier: Self.identifier(for: event.id),
-            content: content,
-            trigger: trigger
-        )
-
-        do {
-            try await center.add(request)
-        } catch {
-            // Si add falla (ej. cuota llena, permiso revocado entre el
-            // chequeo y el call), no hay manera limpia de avisarle al
-            // usuario en este punto. Loggeamos sin datos sensibles.
-            print("[LocalNotificationService] schedule failed: \(error.localizedDescription)")
+    /// Calcula las fechas reales en las que se van a disparar las notifs
+    /// del evento. Aplica los offsets pidiendo `startTime - offset minutos`.
+    /// Filtra las que quedaron en el pasado (ej. usuario crea evento para
+    /// dentro de 3 min con offset de 10 min → la notif ya pasó, no la
+    /// programamos pero sí seguimos con el resto).
+    private func computeFireDates(for event: FocusEvent) -> [Date] {
+        let now = Date()
+        let offsets = event.reminderOffsets ?? []
+        if offsets.isEmpty {
+            return event.startTime > now ? [event.startTime] : []
         }
+        return offsets
+            .compactMap { offset in
+                event.startTime.addingTimeInterval(-Double(offset) * 60)
+            }
+            .filter { $0 > now }
+            .sorted()
+    }
+
+    /// Genera el subtitle según la relación entre el fireDate y el startTime
+    /// del evento. Si la diferencia es ≥ 1 min, decimos "En N min".
+    /// Si es 0 (o casi), decimos "Empieza a las HH:MM".
+    private func subtitle(forFireDate fireDate: Date, eventStart: Date) -> String {
+        let deltaMinutes = Int(round(eventStart.timeIntervalSince(fireDate) / 60))
+        if deltaMinutes >= 1 {
+            if deltaMinutes >= 60 && deltaMinutes % 60 == 0 {
+                let h = deltaMinutes / 60
+                return h == 1 ? "En 1 hora" : "En \(h) horas"
+            }
+            return deltaMinutes == 1 ? "En 1 min" : "En \(deltaMinutes) min"
+        }
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "es_CL")
+        fmt.dateFormat = "HH:mm"
+        return "Empieza a las \(fmt.string(from: eventStart))"
     }
 
     // MARK: - Cancellation
 
-    /// Cancela una notificación pendiente. Silencioso si no existía.
+    /// Cancela TODAS las notifs pendientes asociadas al evento — la base
+    /// (`focus-reminder-event-<id>`) y todas las variantes con sufijo
+    /// `-0`, `-1`, etc. cuando hay múltiples offsets. Silencioso si no
+    /// había nada pendiente.
     func cancelReminder(eventId: UUID) {
-        let identifier = Self.identifier(for: eventId)
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
+        let center = UNUserNotificationCenter.current()
+        let base = Self.identifier(for: eventId)
+        // Variantes posibles. 6 es defensivo: hoy soportamos máximo 1 offset
+        // pero dejamos espacio si en el futuro queremos múltiples avisos.
+        var candidates: [String] = [base]
+        for i in 0..<6 { candidates.append("\(base)-\(i)") }
+        center.removePendingNotificationRequests(withIdentifiers: candidates)
     }
 
     /// Limpia TODAS las notificaciones de recordatorio (las que comienzan

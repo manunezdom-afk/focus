@@ -61,17 +61,17 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
     var novaReply: String {
         switch self {
         case .organizar:
-            return "Listo. Dejé tu mañana para foco profundo (10:00–11:30), una pausa real al mediodía y la sesión de estudio para Bases de Datos por la tarde. Te aviso cuando empiece cada bloque."
+            return "Cuéntame qué quieres priorizar y revisamos tu día juntos."
         case .crearTarea:
-            return "Dime qué tarea quieres crear. Le pongo prioridad y categoría según el contexto. Ej: \"Entregar TP de Programación el viernes\"."
+            return "Dime qué tarea quieres crear y la agendo con prioridad y categoría. Ej: \"Entregar TP de Programación el viernes\"."
         case .crearEvento:
-            return "Cuéntame qué evento, día y hora. Si quieres, también te bloqueo 10 minutos antes para prepararte."
+            return "Cuéntame qué evento, qué día y a qué hora. Puedes decirme \"acuérdame 10 minutos antes\" si quieres aviso."
         case .revisarPendientes:
-            return "Tus 3 pendientes de mayor prioridad: repasar fórmulas del parcial, preparar la presentación de Acme y responder al profe. ¿Las acomodo en bloques de hoy o las muevo a mañana?"
+            return "Cuéntame qué pendientes te están pesando hoy y los priorizamos."
         case .prepararManana:
-            return "Mañana tienes clase a las 8 y tu jefa te marcó review a las 12. Te dejo un bloque de foco entre 10 y 12, y reservo 15 min antes para prepararte. ¿Te parece?"
+            return "Cuéntame qué quieres dejar listo para mañana y armamos un plan corto."
         case .cerrarDia:
-            return "Hoy completaste 3 tareas y avanzaste 2 bloques de foco. Quedaron 2 sin terminar. ¿Las paso a mañana o las dejo sin horario en pendientes?"
+            return "Cuéntame cómo te fue hoy y revisamos qué dejar listo para mañana."
         case .importarCalendario:
             return "Puedo ayudarte a traer tus eventos desde Google Calendar, Apple Calendar o un archivo .ics. Cuando conectemos la integración, revisaré conflictos, tareas sin horario y bloques disponibles."
         case .exportarCalendario:
@@ -718,9 +718,9 @@ enum NovaResponder {
             return "Listo, lo elimino."
         case .organizeDay:
             return Self.pick([
-                "Te dejo tres sugerencias en la Bandeja: un bloque de foco temprano, una pausa al mediodía y revisar pendientes a la tarde.",
-                "Acomodé tu mañana para foco profundo y dejé tareas livianas para después de la siesta. Está en Bandeja.",
-                "Plan del día listo: tres bloques principales, una pausa real y los pendientes priorizados."
+                "Cuéntame qué quieres lograr hoy y armamos el día juntos.",
+                "Dime tus 2 o 3 prioridades de hoy y las acomodamos.",
+                "¿Qué tienes pendiente y qué te urge? Lo ordenamos."
             ])
         case .reviewPending:
             return Self.pick([
@@ -2802,6 +2802,23 @@ final class FocusDataStore: ObservableObject {
             inferredFlag = endResolution.inferredDuration
         }
 
+        // PASO 6: Offsets de aviso. Prioridad:
+        //   1. Si el backend devolvió `reminderOffsets`, usamos esos.
+        //   2. Si no, intentamos extraer del userText con el normalizer
+        //      ("X minutos antes" → [X]).
+        //   3. Si tampoco, queda nil → notif al startTime (comportamiento
+        //      legacy).
+        // Solo aplica cuando isReminder=true; para eventos comunes no
+        // programamos notif local todavía.
+        let resolvedOffsets: [Int]?
+        if let fromBackend = payload.reminderOffsets, !fromBackend.isEmpty {
+            resolvedOffsets = fromBackend
+        } else if isReminderHint, let extracted = NovaActionNormalizer.extractReminderOffset(from: userText) {
+            resolvedOffsets = [extracted]
+        } else {
+            resolvedOffsets = nil
+        }
+
         return FocusEvent(
             title: cleanedTitle,
             notes: payload.notes,
@@ -2810,7 +2827,8 @@ final class FocusDataStore: ObservableObject {
             section: section,
             location: payload.location,
             isReminder: isReminderFlag,
-            inferredDuration: inferredFlag
+            inferredDuration: inferredFlag,
+            reminderOffsets: resolvedOffsets
         )
     }
 
@@ -2876,6 +2894,9 @@ final class FocusDataStore: ObservableObject {
         }
         if let loc = updates.location?.trimmingCharacters(in: .whitespacesAndNewlines), !loc.isEmpty {
             event.location = loc
+        }
+        if let newOffsets = updates.reminderOffsets, !newOffsets.isEmpty {
+            event.reminderOffsets = newOffsets
         }
     }
 
@@ -3236,19 +3257,21 @@ final class FocusDataStore: ObservableObject {
             ))
             summaryLines.append("Dejé una sugerencia en la Bandeja para que respires entre bloques.")
         } else if let gap = firstBigGap, gap.minutes >= 90 {
-            // Sugerir bloque de foco en el hueco grande.
+            // Avisar del hueco libre sin imponer un "bloque de foco" — el
+            // usuario decide qué hacer. Mantenemos la detección pero el
+            // copy es neutral.
             let when = DateFormatters.hourMinute.string(from: gap.start)
             let hours = gap.minutes / 60
             let mins = gap.minutes % 60
             let durLabel = hours > 0 ? "\(hours)h\(mins > 0 ? " \(mins)m" : "")" : "\(mins) min"
             addSuggestion(NovaSuggestion(
-                title: "Bloque de foco",
-                detail: "Tienes \(durLabel) libres desde las \(when). Buen rato para algo que necesite concentración real.",
+                title: "Tienes un hueco libre",
+                detail: "Quedan \(durLabel) sin nada agendado desde las \(when). Si quieres aprovecharlo, dime qué hacer.",
                 kind: .schedule,
                 priority: .normal,
-                suggestedAction: "Bloquear foco \(when)"
+                suggestedAction: "Usar el hueco de \(when)"
             ))
-            summaryLines.append("Dejé una sugerencia en la Bandeja para aprovechar ese hueco.")
+            summaryLines.append("Dejé un aviso en la Bandeja sobre ese hueco.")
         }
         // Si no detectamos nada accionable, NO creamos sugerencia — solo
         // damos el resumen. Eso preserva la credibilidad de la Bandeja.
@@ -3338,6 +3361,15 @@ final class FocusDataStore: ObservableObject {
                 return "Ya tenía «\(title)» agendado a esa hora — no lo duplico."
             }
 
+            // PASO 5: Offsets ("X minutos antes") desde userText. Solo
+            // tiene sentido si es recordatorio.
+            let extractedOffsets: [Int]?
+            if isReminderHint, let mins = NovaActionNormalizer.extractReminderOffset(from: userText) {
+                extractedOffsets = [mins]
+            } else {
+                extractedOffsets = nil
+            }
+
             let event = FocusEvent(
                 title: title,
                 startTime: date,
@@ -3345,7 +3377,8 @@ final class FocusDataStore: ObservableObject {
                 section: effectiveSection,
                 location: location,
                 isReminder: isReminderFlag,
-                inferredDuration: inferredFlag
+                inferredDuration: inferredFlag,
+                reminderOffsets: extractedOffsets
             )
             addEvent(event)
             updateNovaContext(

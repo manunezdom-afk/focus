@@ -1716,6 +1716,21 @@ private struct TimelineEventRow: View {
                                 .lineLimit(1)
                         }
                     }
+
+                    // Contador live solo si: evento EN CURSO o empieza en
+                    // < 60 min. Más allá de eso, el tick por segundo es
+                    // ruido visual sin valor.
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        if let label = inlineCountdownLabel(now: context.date) {
+                            Text(label)
+                                .font(density.metaFont)
+                                .foregroundStyle(event.isNow
+                                    ? Theme.Colors.success
+                                    : Theme.Colors.focusAccent)
+                                .monospacedDigit()
+                                .contentTransition(.numericText(countsDown: true))
+                        }
+                    }
                 }
                 .padding(.vertical, density.verticalPadding)
                 .padding(.leading, Theme.Spacing.md)
@@ -1761,6 +1776,43 @@ private struct TimelineEventRow: View {
             .focusCardShadow()
             .padding(.bottom, isLast ? 0 : Theme.Spacing.sm)
         }
+    }
+
+    /// Genera la etiqueta de countdown SOLO para eventos relevantes:
+    /// - EN CURSO (entre startTime y endTime): "Termina en MM min SS s".
+    /// - PRÓXIMO IMINENTE (start futuro, < 60 min): "Empieza en MM min SS s".
+    /// - Más lejano o pasado: devuelve nil → no se renderiza la línea.
+    /// Esto evita que TODOS los eventos del día parpadeen cada segundo.
+    private func inlineCountdownLabel(now: Date) -> String? {
+        // En curso: contamos lo que falta hasta endTime (si hay).
+        if !event.displayAsPointInTime,
+           let end = event.endTime,
+           event.startTime <= now && end >= now {
+            let s = max(0, Int(end.timeIntervalSince(now)))
+            if s == 0 { return "Termina ahora" }
+            return "Termina en " + Self.formatMS(seconds: s)
+        }
+        // Próximo en menos de una hora: minutos + segundos.
+        let diff = event.startTime.timeIntervalSince(now)
+        if diff > 0 && diff <= 3600 {
+            let s = Int(diff)
+            if event.displayAsPointInTime {
+                return "En " + Self.formatMS(seconds: s)
+            }
+            return "Empieza en " + Self.formatMS(seconds: s)
+        }
+        return nil
+    }
+
+    private static func formatMS(seconds: Int) -> String {
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        let s = seconds % 60
+        var parts: [String] = []
+        if h > 0 { parts.append("\(h) h") }
+        if h > 0 || m > 0 { parts.append("\(m) min") }
+        parts.append("\(s) s")
+        return parts.joined(separator: " ")
     }
 }
 
