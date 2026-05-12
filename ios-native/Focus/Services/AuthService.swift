@@ -1,4 +1,5 @@
 import Foundation
+import AuthenticationServices
 
 // MARK: - Errors
 
@@ -10,6 +11,9 @@ enum AuthError: Error, LocalizedError {
     case emailSendFailed
     case invalidCode
     case otpExpired
+    case oauthCanceled
+    case oauthProviderNotConfigured
+    case oauthCallbackInvalid
     case network(String)
     case unknown(String)
 
@@ -29,6 +33,12 @@ enum AuthError: Error, LocalizedError {
             return "El código es incorrecto. Revísalo o pide uno nuevo."
         case .otpExpired:
             return "El código expiró. Pide uno nuevo."
+        case .oauthCanceled:
+            return "Inicio de sesión cancelado."
+        case .oauthProviderNotConfigured:
+            return "Google sign-in todavía no está configurado en Supabase. Avísanos."
+        case .oauthCallbackInvalid:
+            return "Recibimos una respuesta inválida de Google. Vuelve a intentar."
         case .network(let msg):
             return "Error de red: \(msg)"
         case .unknown(let msg):
@@ -286,6 +296,173 @@ enum AuthService {
     /// `/auth/v1/logout` con el bearer para invalidar el refresh token server-side.
     static func signOut() {
         KeychainStore.clearAllAuth()
+    }
+
+    // MARK: - OAuth (Google)
+
+    /// URL scheme custom registrado en pbxproj (`CFBundleURLTypes`). Tiene
+    /// que matchear EXACTAMENTE el "Redirect URL" configurado en Supabase
+    /// Dashboard → Authentication → URL Configuration.
+    static let oauthCallbackScheme = "focus"
+    static let oauthCallbackHost = "auth-callback"
+    static var oauthRedirectURL: String { "\(oauthCallbackScheme)://\(oauthCallbackHost)" }
+
+    /// Inicia el flujo OAuth de Google usando ASWebAuthenticationSession.
+    /// El sistema abre Safari "in-app" (sin salir de Focus), el usuario se
+    /// autentica con Google, Supabase devuelve `focus://auth-callback#access_token=...`
+    /// y este método parsea los tokens y construye la `SupabaseSession`.
+    ///
+    /// Requisitos de configuración:
+    /// 1. `CFBundleURLTypes` registra `focus` en pbxproj (hecho en esta sesión).
+    /// 2. Supabase Dashboard → Authentication → URL Configuration:
+    ///    agregar `focus://auth-callback` a "Redirect URLs".
+    /// 3. Supabase Dashboard → Authentication → Providers → Google: enabled
+    ///    con Client ID / Secret del proyecto Google Cloud.
+    ///
+    /// Si (2) o (3) faltan, Supabase devolverá error en la URL de callback;
+    /// detectamos esos casos y devolvemos `.oauthProviderNotConfigured`.
+    @MainActor
+    static func signInWithGoogle(presentationAnchor: ASPresentationAnchor) async throws -> SupabaseSession {
+        // 1. Construir la URL de inicio OAuth contra Supabase.
+        var comps = URLComponents(
+            url: FocusConfig.supabaseURL.appendingPathComponent("auth/v1/authorize"),
+            resolvingAgainstBaseURL: false
+        )!
+        comps.queryItems = [
+            URLQueryItem(name: "provider", value: "google"),
+            URLQueryItem(name: "redirect_to", value: oauthRedirectURL)
+        ]
+        guard let startURL = comps.url else {
+            throw AuthError.unknown("No se pudo armar la URL de OAuth.")
+        }
+
+        // 2. Lanzar ASWebAuthenticationSession y esperar callback.
+        let callbackURL: URL = try await withCheckedThrowingContinuation { cont in
+            let presenter = OAuthPresenter(anchor: presentationAnchor)
+            let session = ASWebAuthenticationSession(
+                url: startURL,
+                callbackURLScheme: oauthCallbackScheme
+            ) { callbackURL, error in
+                if let nsErr = error as? ASWebAuthenticationSessionError, nsErr.code == .canceledLogin {
+                    cont.resume(throwing: AuthError.oauthCanceled)
+                    return
+                }
+                if let error {
+                    cont.resume(throwing: AuthError.network(error.localizedDescription))
+                    return
+                }
+                guard let callbackURL else {
+                    cont.resume(throwing: AuthError.oauthCallbackInvalid)
+                    return
+                }
+                cont.resume(returning: callbackURL)
+            }
+            session.presentationContextProvider = presenter
+            session.prefersEphemeralWebBrowserSession = false
+            // Retener el presenter mientras la sesión está viva. La closure
+            // captura `presenter`; cuando ASWebAuthenticationSession invoque
+            // su completion, se libera.
+            _ = presenter
+            session.start()
+        }
+
+        // 3. Supabase devuelve tokens en el FRAGMENT, no en query string.
+        //    Ej: focus://auth-callback#access_token=...&refresh_token=...&expires_at=...
+        //    El URLComponents nativo no parsea fragments con &, lo hacemos a mano.
+        let fragment = callbackURL.fragment ?? ""
+        let pairs = fragment.split(separator: "&").reduce(into: [String: String]()) { acc, item in
+            let kv = item.split(separator: "=", maxSplits: 1).map(String.init)
+            if kv.count == 2 {
+                acc[kv[0]] = kv[1].removingPercentEncoding ?? kv[1]
+            }
+        }
+
+        // Si Supabase respondió con error (provider no habilitado, etc.).
+        if let errorCode = pairs["error"] {
+            // Errores típicos: "server_error" cuando Google provider no está
+            // configurado, "access_denied" si el usuario rechazó permisos.
+            if errorCode == "access_denied" {
+                throw AuthError.oauthCanceled
+            }
+            throw AuthError.oauthProviderNotConfigured
+        }
+
+        guard let accessToken = pairs["access_token"],
+              let refreshToken = pairs["refresh_token"]
+        else {
+            throw AuthError.oauthCallbackInvalid
+        }
+
+        // expires_at viene como Unix timestamp; si no viene, calculamos
+        // 1 hora desde ahora como fallback razonable.
+        let expiresAt: Date = {
+            if let ts = pairs["expires_at"], let v = Double(ts) {
+                return Date(timeIntervalSince1970: v)
+            }
+            if let inStr = pairs["expires_in"], let secs = Double(inStr) {
+                return Date(timeIntervalSinceNow: secs)
+            }
+            return Date(timeIntervalSinceNow: 3600)
+        }()
+
+        // 4. Obtener el user (id + email) a partir del access token. El
+        //    fragment no incluye user data; consultamos /auth/v1/user.
+        let (userId, email) = try await fetchUserInfo(accessToken: accessToken)
+
+        return SupabaseSession(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: expiresAt,
+            userId: userId,
+            email: email
+        )
+    }
+
+    /// GET /auth/v1/user con bearer token. Devuelve (userId, email).
+    private static func fetchUserInfo(accessToken: String) async throws -> (String, String) {
+        let url = FocusConfig.supabaseURL.appendingPathComponent("auth/v1/user")
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue(FocusConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw AuthError.network(error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw AuthError.oauthCallbackInvalid
+        }
+
+        struct UserPayload: Decodable {
+            let id: String
+            let email: String?
+        }
+        guard let payload = try? decoder.decode(UserPayload.self, from: data) else {
+            throw AuthError.oauthCallbackInvalid
+        }
+        return (payload.id, payload.email ?? "")
+    }
+}
+
+// MARK: - ASWebAuthenticationSession presentation
+
+/// Helper que provee el anchor de presentación para
+/// `ASWebAuthenticationSession`. Necesario en iOS — sin un anchor válido
+/// el flujo no arranca.
+private final class OAuthPresenter: NSObject, ASWebAuthenticationPresentationContextProviding {
+    let anchor: ASPresentationAnchor
+
+    init(anchor: ASPresentationAnchor) {
+        self.anchor = anchor
+        super.init()
+    }
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        anchor
     }
 }
 

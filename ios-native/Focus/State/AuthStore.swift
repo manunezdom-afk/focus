@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import AuthenticationServices
 
 /// Estado actual de la autenticación.
 enum AuthState: Equatable {
@@ -150,6 +151,35 @@ final class AuthStore: ObservableObject {
         guard case .codeSent(let email) = state else { return }
         await sendOTP(email: email)
         // sendOTP setea state = .codeSent(email) de nuevo, lo que es correcto.
+    }
+
+    /// Inicia el flujo OAuth de Google. Lanza `ASWebAuthenticationSession`
+    /// (Safari in-app), espera el callback `focus://auth-callback#…tokens…`,
+    /// y persiste la sesión igual que el OTP path.
+    ///
+    /// `anchor` lo provee la vista (LoginView) — sin anchor válido la
+    /// presentación falla en iOS 13+.
+    func signInWithGoogle(presentationAnchor: ASPresentationAnchor) async {
+        lastError = nil
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            let session = try await AuthService.signInWithGoogle(
+                presentationAnchor: presentationAnchor
+            )
+            persistSession(session)
+            state = .loggedIn(session)
+            HapticManager.shared.success()
+        } catch AuthError.oauthCanceled {
+            // El usuario cerró el Safari sheet — silencioso, no mostramos
+            // banner agresivo. El estado se mantiene como está (.loggedOut).
+        } catch let err as AuthError {
+            lastError = err.errorDescription
+            HapticManager.shared.warning()
+        } catch {
+            lastError = error.localizedDescription
+            HapticManager.shared.warning()
+        }
     }
 
     /// Entra en modo demo (sin login).

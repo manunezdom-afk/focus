@@ -1,4 +1,6 @@
 import SwiftUI
+import AuthenticationServices
+import UIKit
 
 /// Pantalla de autenticación con OTP por email.
 /// Sigue el estado de `AuthStore`: `.loggedOut` → email step; `.codeSent` → code step.
@@ -13,6 +15,10 @@ struct LoginView: View {
     @State private var resendTimer: Task<Void, Never>? = nil
     @FocusState private var emailFocused: Bool
     @FocusState private var codeFocused: Bool
+    /// Fade-in interno cuando la vista aparece (después de BootView u
+    /// onboarding). NO usa transition de root — eso causaba el bug de
+    /// pantallas duplicadas. Cada view raíz hace su propio fade.
+    @State private var contentVisible: Bool = false
 
     /// Regex razonable: algo@algo.dominio. Bloquea casos básicos como
     /// "a@", "@b.com", "no-arroba". No es RFC 5322 completo a propósito.
@@ -25,7 +31,15 @@ struct LoginView: View {
 
     var body: some View {
         rootContent
+            .opacity(contentVisible ? 1 : 0)
             .onAppear {
+                // Fade-in inmediato al montarse — la transición suave la
+                // hace la propia view, NO el root. Si lo hiciera el root,
+                // SwiftUI crossfadeaba con BootView/Onboarding y se veían
+                // capas duplicadas (bug del pase 48).
+                withAnimation(.easeOut(duration: 0.28)) {
+                    contentVisible = true
+                }
                 // Auto-focus en email al entrar a la pantalla.
                 if case .codeSent = auth.state { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -220,10 +234,17 @@ struct LoginView: View {
     private var googleButton: some View {
         Button {
             HapticManager.shared.tap()
-            showGoogleNotice()
+            startGoogleSignIn()
         } label: {
             HStack(spacing: Theme.Spacing.md) {
-                GoogleGMark(size: 18)
+                if auth.isWorking {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                        .tint(Color(red: 0.231, green: 0.247, blue: 0.275))
+                } else {
+                    GoogleGMark(size: 18)
+                }
                 Text("Continuar con Google")
                     .font(Theme.Typography.bodyBold)
                     .foregroundStyle(Color(red: 0.231, green: 0.247, blue: 0.275))
@@ -249,14 +270,32 @@ struct LoginView: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(auth.isWorking)
     }
 
-    private func showGoogleNotice() {
-        googleNotice = "Próximamente disponible"
-        Task {
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            await MainActor.run { googleNotice = nil }
+    /// Lanza el flujo OAuth real de Google. Necesita un `presentationAnchor`
+    /// — la `UIWindow` activa de la escena actual. Si por alguna razón no
+    /// hay window, devolvemos un mensaje claro en vez de quedarnos colgados.
+    private func startGoogleSignIn() {
+        dismissKeyboard()
+        guard let anchor = resolvePresentationAnchor() else {
+            googleNotice = "No pudimos abrir el login de Google. Vuelve a intentar."
+            return
         }
+        googleNotice = nil
+        Task { await auth.signInWithGoogle(presentationAnchor: anchor) }
+    }
+
+    /// Toma la `UIWindow` activa para presentar `ASWebAuthenticationSession`.
+    /// Sin esto el flujo OAuth falla con `presentationContextNotProvided`.
+    private func resolvePresentationAnchor() -> ASPresentationAnchor? {
+        let scenes = UIApplication.shared.connectedScenes
+        for case let scene as UIWindowScene in scenes where scene.activationState == .foregroundActive {
+            if let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first {
+                return window
+            }
+        }
+        return nil
     }
 
     private func noticeBanner(_ message: String) -> some View {
