@@ -310,14 +310,17 @@ struct MiDiaView: View {
     // MARK: - FocusBar (entry point omnipresente a Nova)
 
     private var focusBar: some View {
+        // El placeholder cambia a "Habla ahora…" durante el dictado para
+        // dar feedback semántico sin ocupar espacio extra en pantalla.
+        // El diamante de Nova en sí pulsa (glow gradient) cuando isDictating
+        // = true — eso reemplaza el label flotante "Escuchando…" que antes
+        // chocaba con el diseño.
         FocusBarInput(
             text: $focusBarText,
-            placeholder: "Pregúntale a Nova…",
+            placeholder: isDictating ? "Habla ahora…" : "Pregúntale a Nova…",
             onSubmit: {
                 let text = focusBarText
                 focusBarText = ""
-                // Cerrar teclado tras enviar — el usuario ve la respuesta
-                // inline sin que el teclado tape Mi Día.
                 UIApplication.shared.sendAction(
                     #selector(UIResponder.resignFirstResponder),
                     to: nil, from: nil, for: nil
@@ -327,45 +330,12 @@ struct MiDiaView: View {
             onMic: {
                 HapticManager.shared.tap()
                 // Mic del FocusBar = DICTADO INLINE. NO abre Nova Live,
-                // NO abre sheet, NO cambia de pantalla. El texto se llena
-                // en la barra mientras hablas; al tocar mic otra vez (que
-                // ahora es stop), termina y queda listo para revisar y
-                // mandar con el botón enviar.
+                // NO abre sheet, NO cambia de pantalla.
                 Task { await toggleInlineDictation() }
             },
-            isDictating: isDictating
+            isDictating: isDictating,
+            audioLevel: CGFloat(dictationService.audioLevel)
         )
-        .overlay(alignment: .bottomLeading) {
-            // Indicador "Escuchando…" con waveform de decibeles. Las barras
-            // suben/bajan en tiempo real según `audioLevel`, dando feedback
-            // claro de que el mic está capturando voz (vs estar pegado en
-            // estado "escuchando" sin captar nada).
-            //
-            // **Posición**: `.bottomLeading` con offset hacia abajo. Antes
-            // estaba en `.topLeading` con `padding(.top, -10)` que lo
-            // ponía ENCIMA del FocusBar y chocaba contra el diamante de
-            // Nova (NovaSparkMark del placeholder). Ahora cuelga DEBAJO
-            // del FocusBar, sin tapar nada y sin colisión.
-            if isDictating {
-                HStack(spacing: 6) {
-                    AudioLevelBars(level: dictationService.audioLevel)
-                        .frame(width: 22, height: 14)
-                    Text("Escuchando…")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.focusAccent)
-                        .tracking(0.5)
-                        .textCase(.uppercase)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule().fill(Theme.Colors.focusAccentSoft)
-                )
-                .padding(.leading, Theme.Spacing.md)
-                .offset(y: 28)   // cuelga debajo del FocusBar
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-        }
     }
 
     // MARK: - Nova inline (interacción principal desde Mi Día)
@@ -606,48 +576,148 @@ struct MiDiaView: View {
             return response
         }
 
-        // Multi-intent: ejecutar cada uno, juntar summaries. Si TODOS
-        // fallan (clarify/error), devolvemos un mensaje útil pidiendo
-        // separación manual — sin crear basura.
-        var summaryParts: [String] = []
-        var detailParts: [String] = []
-        var anyMutated = false
+        // Multi-intent: ejecutar cada intent (side effects: addEvent/addTask)
+        // y luego componer UN SOLO summary humano que enumere lo que se hizo.
+        // El resumen anterior ("Evento agregado a Calendario · Evento agregado a
+        // Calendario") era confuso — no decía qué se creó, repetía info, y
+        // tenía clasificación errónea.
+        var createdItems: [CreatedItem] = []
         var lastAction: InlineNovaAction? = nil
 
-        for (idx, intent) in intents.enumerated() {
+        for intent in intents {
             let resp = executeIntent(intent, userText: trimmed)
-            // Considerar mutación cuando NO es error explícito.
-            if !resp.isError {
-                anyMutated = true
-                summaryParts.append(resp.summary)
-                if let d = resp.details, !d.isEmpty {
-                    detailParts.append("\(idx + 1). \(d)")
-                }
-                if lastAction == nil { lastAction = resp.action }
+            guard !resp.isError else { continue }
+            if lastAction == nil { lastAction = resp.action }
+            if let item = CreatedItem(intent: intent) {
+                createdItems.append(item)
             }
         }
 
-        if !anyMutated {
+        if createdItems.isEmpty {
             // Nada se creó — no guardar basura. Pedir separación manual.
             return InlineNovaResponse(
                 userText: trimmed,
                 summary: "Entendí varias cosas pero no logré separarlas con confianza.",
-                details: "Probá enviarlas por separado, por ejemplo primero el recordatorio y después la salida.",
+                details: "Prueba enviándolas por separado.",
                 isError: true
             )
         }
 
-        let summary = summaryParts.joined(separator: " · ")
-        var combinedDetails = detailParts.joined(separator: "\n")
-        if let note {
-            combinedDetails = [combinedDetails, note].filter { !$0.isEmpty }.joined(separator: "\n\n")
-        }
+        let (summary, details) = composeMultiIntentMessage(items: createdItems)
+        let combinedDetails: String? = {
+            let parts = [details, note].compactMap { $0 }.filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+        }()
         return InlineNovaResponse(
             userText: trimmed,
             summary: summary,
-            details: combinedDetails.isEmpty ? nil : combinedDetails,
+            details: combinedDetails,
             action: lastAction
         )
+    }
+
+    /// Estructura interna para describir lo que se creó tras ejecutar cada
+    /// intent del multi-intent. Nos permite componer un resumen humano
+    /// agrupando por tipo y día.
+    private struct CreatedItem {
+        enum Kind { case reminder, event, task }
+        let kind: Kind
+        let title: String
+        let date: Date?
+
+        init?(intent: NovaIntent) {
+            switch intent {
+            case let .createEvent(rawTitle, when, _, _, _, wantsReminder):
+                let cleaned = NovaActionNormalizer.cleanTitle(rawTitle)
+                guard !cleaned.isEmpty else { return nil }
+                self.kind = wantsReminder ? .reminder : .event
+                self.title = cleaned
+                self.date = when
+            case let .createTask(rawTitle, dueDate, _, _):
+                let cleaned = NovaActionNormalizer.cleanTitle(rawTitle)
+                guard !cleaned.isEmpty else { return nil }
+                self.kind = .task
+                self.title = cleaned
+                self.date = dueDate
+            default:
+                return nil
+            }
+        }
+    }
+
+    /// Convierte los items creados en (summary, details) humanos.
+    /// Ejemplos:
+    /// - 2 recordatorios mismo día → "Listo. Te dejé 2 recordatorios para hoy."
+    ///   + bullets en details.
+    /// - 1 evento + 1 recordatorio → "Listo. Te dejé 1 evento y 1 recordatorio."
+    /// - 1 tarea → no debería pasar (count == 1 va por path simple).
+    private func composeMultiIntentMessage(items: [CreatedItem]) -> (String, String?) {
+        let reminders = items.filter { $0.kind == .reminder }
+        let events    = items.filter { $0.kind == .event }
+        let tasks     = items.filter { $0.kind == .task }
+
+        // Detectar si todos los items con fecha caen en el mismo día → "para hoy/mañana/...".
+        let allDates = items.compactMap { $0.date }
+        let cal = Calendar.current
+        let sameDay: Bool = {
+            guard let first = allDates.first else { return false }
+            return allDates.allSatisfy { cal.isDate($0, inSameDayAs: first) }
+        }()
+        let dayLabel: String? = {
+            guard sameDay, let date = allDates.first else { return nil }
+            if cal.isDateInToday(date) { return "hoy" }
+            if cal.isDateInTomorrow(date) { return "mañana" }
+            return DateFormatters.weekdayDay.string(from: date).lowercased()
+        }()
+
+        // Summary: header humano.
+        let header: String
+        let dayBit = dayLabel.map { " para \($0)" } ?? ""
+        switch (reminders.count, events.count, tasks.count) {
+        case (let r, 0, 0) where r >= 2:
+            header = "Listo. Te dejé \(r) recordatorios\(dayBit)."
+        case (0, let e, 0) where e >= 2:
+            header = "Listo. Te dejé \(e) eventos\(dayBit)."
+        case (0, 0, let t) where t >= 2:
+            header = "Listo. Anoté \(t) tareas\(dayBit)."
+        default:
+            // Mixed.
+            var parts: [String] = []
+            if events.count > 0    { parts.append("\(events.count) evento\(events.count == 1 ? "" : "s")") }
+            if reminders.count > 0 { parts.append("\(reminders.count) recordatorio\(reminders.count == 1 ? "" : "s")") }
+            if tasks.count > 0     { parts.append("\(tasks.count) tarea\(tasks.count == 1 ? "" : "s")") }
+            let combined = parts.joined(separator: " y ")
+            header = "Listo. Te dejé \(combined)\(dayBit)."
+        }
+
+        // Details: bullets ordenados por hora si aplica.
+        let sorted = items.sorted { a, b in
+            switch (a.date, b.date) {
+            case let (l?, r?): return l < r
+            case (_?, nil):    return true
+            case (nil, _?):    return false
+            default:           return false
+            }
+        }
+        let bullets = sorted.map { item -> String in
+            let hh = item.date.map { DateFormatters.hourMinute.string(from: $0) }
+            switch (hh, sameDay) {
+            case let (.some(time), true):
+                return "• \(item.title) — \(time)"
+            case let (.some(time), false):
+                if let d = item.date {
+                    let day = cal.isDateInToday(d) ? "hoy"
+                        : cal.isDateInTomorrow(d) ? "mañana"
+                        : DateFormatters.weekdayDay.string(from: d).lowercased()
+                    return "• \(item.title) — \(day) \(time)"
+                }
+                return "• \(item.title) — \(time)"
+            case (.none, _):
+                return "• \(item.title)"
+            }
+        }
+        let details = bullets.isEmpty ? nil : bullets.joined(separator: "\n")
+        return (header, details)
     }
 
     /// Eventos que vamos a enviar como contexto al backend. Limita a hoy
@@ -851,7 +921,14 @@ struct MiDiaView: View {
             if wantsReminder {
                 effectiveSection = section ?? .reminder
             } else {
-                effectiveSection = section ?? .reunion
+                // Default .personal (no .reunion) — la heurística previa
+                // marcaba TODO lo desconocido como "Reunión", que confundía
+                // al usuario para verbos como "seguir trabajando" o "comer".
+                // Si la sección del intent es nil, volvemos a intentar
+                // detectarla desde el título limpio antes de caer al neutral.
+                effectiveSection = section
+                    ?? NovaResponder.guessSection(for: title)
+                    ?? .personal
             }
             let event = FocusEvent(
                 title: title,

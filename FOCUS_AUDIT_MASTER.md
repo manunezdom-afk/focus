@@ -16,6 +16,7 @@ Documento central de auditoría continua del proyecto Focus.
 
 | # | Fecha | Tipo | Resumen |
 |---|---|---|---|
+| 60 | 2026-05-12 | Nova parser hardening — bug "seguir trabajando/comer" | Ver sección "Nova parser hardening" más abajo. Fix root-cause: HH:MM no aplicaba AM/PM, default section caía a Reunión, "tengo que" + hora no se trataba como recordatorio, label flotante "Escuchando…" rompía diseño, FocusBar de Nova chat desaparecía con keyboard. 8 tests obligatorios + edges → ✓ ALL TESTS PASSED. |
 | 1 | 2026-05-11 | Fase 1 read-only | Inventario de tools, audit de código Swift, schema Supabase desde repo, vercel.json, secrets básicos. Sin instalaciones. Sin cambios de código. |
 | 2 | 2026-05-11 | Audit completo + fixes Swift safe | Audit en 15 áreas. Aplicados 5 fixes seguros: Bundle.main version, lineLimit en cards de evento, DateFormatters cacheados, picker .dark deshabilitado, Nova onAppear simplificado. Sin tocar backend ni Supabase. |
 | 3 | 2026-05-11 | Resolver C1 — persistencia local V1 | Implementado `FocusLocalStore` (UserDefaults + JSON ISO-8601 + keys versionadas `focus.v1.*`). Carga al boot con fallback a demo, guarda en cada mutación. Sección "Datos locales" en Ajustes con confirmationDialogs para reset / clear. App ya recuerda datos entre sesiones. Fix de falso positivo en regex `audit-quick.sh` (word boundary). |
@@ -74,6 +75,114 @@ Documento central de auditoría continua del proyecto Focus.
 | 28 | 2026-05-11 | **Bloque 3 — CERRADO 100%** (Sync V1 e2e validado en iPhone real) | Martin corrió la prueba end-to-end en iPhone físico con cuenta logueada y todos los checkpoints pasaron: **Ajustes → Sincronización**: "Sincronizado" (no "Tabla no encontrada", no "Permiso rechazado por RLS", no "Error de red", no "Modo demo" estando logueado). **Crear evento desde iPhone**: row aparece en `public.focus_events` con `user_id` correcto, `deleted_at IS NULL`. **Editar evento**: cambia local + remoto, `updated_at` se actualiza (trigger `focus_events_set_updated_at`) y persiste al cerrar/reabrir. **Borrar evento**: desaparece local, no vuelve al reabrir, soft delete en Supabase (`deleted_at` set). **Crear tarea**: row aparece en `public.focus_tasks` con `user_id` correcto, `is_completed = false`. **Completar tarea**: cambia local + remoto y persiste. **Modo demo**: con `syncCredentials == nil` la app NO escribe a Supabase — confirmado, no aparecen rows fantasma. **Resumen de cierre Bloque 3**: Supabase tablas OK ✅ · RLS owner-only OK ✅ · Vercel Ready ✅ · Sync eventos OK ✅ · Sync tareas OK ✅ · Modo demo no sync OK ✅ · Backend producción 100% funcional con app nativa iOS. **Limitaciones V1 conocidas y aceptadas para esta versión** (no son blockers, se atacan en Bloque 4+): (a) **No realtime** — sync se dispara en mutación local + botón "Sincronizar ahora" en Ajustes, no hay subscripción Postgres Changes; (b) **Sin queue offline avanzada** — si la red falla durante una mutación, el local queda correcto pero el upstream se pierde hasta el próximo `fetchRemoteAndMerge` exitoso (last-write-wins por id, no journaling); (c) **`nova_suggestions` / `nova_messages` / `settings` no sincronizan** — viven solo en `FocusLocalStore` (UserDefaults) en cada device; (d) **Migración demo→cuenta pendiente** — al loguearse después de crear datos en modo demo, esos datos quedan locales y NO se suben automáticamente (decisión consciente para evitar duplicar rows si la cuenta ya tiene datos); (e) **`last_synced_at` no se setea** — campo creado en schema pero el cliente no lo escribe en V1 (no lo necesita para el flujo actual). **Bloque 4 NO se abre en este commit** — esto es solo el cierre formal de B3. |
 | 27 | 2026-05-11 | Bloque 3 Sync V1 — migración aplicada + verificada en producción | **Migración 018 aplicada** en proyecto Supabase `hvwqeemtfoyvfmongwzo` vía SQL Editor del Dashboard (Claude lo manejó con Chrome MCP, inyectando el SQL al editor Monaco y ejecutando con `⌘+Enter`). Supabase pidió confirmación por "destructive operations" (causa: `DROP TRIGGER IF EXISTS` idempotentes — los triggers no existían aún, los creamos a continuación), Claude confirmó "Run this query" y la query devolvió **"Success. No rows returned"** (~3 s). **Verificación post-migración** corrida en 5 queries en el mismo Editor: (1) `information_schema.tables` → 2 rows (`focus_events`, `focus_tasks` existen); (2) `pg_policies` → 8 rows (4 policies × 2 tablas: `focus_*_owner_select/insert/update/delete`); (3) `pg_class.relrowsecurity` → ambos `rls_enabled = true`; (4) `pg_policies (qual, with_check)` → todas `PERMISSIVE` con `qual = (auth.uid() = user_id)` para SELECT/UPDATE/DELETE y `with_check = (auth.uid() = user_id)` para INSERT/UPDATE (INSERT con qual NULL como debe ser, **ninguna policy abierta tipo `true`**); (5) `information_schema.columns` para legacy `events`/`tasks` → 12 rows, schema intacto (TEXT date/time, sin tocar). **Vercel verificado** via Chrome MCP en https://vercel.com/manunezdom-9658s-projects/focus-app: último deploy `feat(ios-native): add Supabase sync foundation for events and tasks` (commit 2228cab), Status **Ready**, dominio `www.usefocus.me` vivo. **Build iOS local OK**: `xcodebuild -scheme Focus -destination "platform=iOS Simulator,name=iPhone 17,OS=26.4.1" -configuration Debug build` → `** BUILD SUCCEEDED **` sin warnings. **Estado del lado servidor**: tablas paralelas creadas, RLS habilitado, policies owner-only activas (auth.uid() = user_id), triggers `focus_*_set_updated_at` instalados, índices `(user_id, start_time DESC)`, `(user_id, deleted_at)`, `(user_id, due_date NULLS LAST)`, `(user_id, is_completed)`. **Cierre Bloque 3 — checklist**: Migración 018 aplicada ✅ · `focus_events` verificada ✅ · `focus_tasks` verificada ✅ · RLS owner-only verificado ✅ · Legacy `events`/`tasks` intactas ✅ · Build iOS Debug OK ✅ · Vercel Ready ✅ · Sync eventos probado e2e ⏳ (pendiente prueba manual desde iPhone con cuenta real) · Sync tareas probado e2e ⏳ · Modo demo no sincroniza ⏳ (gated en código por `syncCredentials == nil`, falta confirmación visual desde device). **Limitaciones V1 conocidas y aceptadas**: no realtime (sync trigger en mutación + manual desde Ajustes); no queue offline avanzada (errores no revierten local, próximo merge corrige); `nova_suggestions`/`nova_messages`/`settings` fuera de scope; migración demo→cuenta pendiente. **Cómo cerrar el e2e (instrucciones para Martin)**: abrir app en iPhone → si está logueado, ir a Ajustes → Sincronización (debería mostrar "Sincronizado" o "Sincronizando…", nunca "Tabla no encontrada"); crear evento "Reunión test mañana a las 10" → en Dashboard `focus_events` aparece row con tu `user_id` y `deleted_at IS NULL`; editar evento → en Dashboard `updated_at` cambia; borrar evento → en Dashboard `deleted_at` se setea (soft delete); crear tarea "Estudiar cálculo mañana" → row en `focus_tasks` con `is_completed = false`; completar → `is_completed = true` y `done_at` con timestamp; en modo demo (botón "Continuar sin cuenta") las mutaciones NO deben generar rows en Supabase. **NO se hizo en esta sesión**: prueba e2e con device físico (requiere Martin + iPhone presente), sync de `nova_*`/`settings`, Nova LLM, notificaciones, micrófono, widgets. |
 | 26 | 2026-05-11 | Bloque 3 Sync V1 — foundation events/tasks | **Diagnóstico**: refresh token ya implementado (pass 16, validado). Supabase tiene `public.events`/`public.tasks` legacy con shape web (TEXT date/time) — intactas para no romper producción. Vercel: sin CLI/auth en sesión Claude, instrucciones de diagnóstico ya documentadas en §14.7. **Migración `018_focus_native_v1.sql`** nueva: crea `public.focus_events` y `public.focus_tasks` paralelas con TIMESTAMPTZ + campos nativos (isReminder, inferredDuration, location, source, external_*, deleted_at). RLS owner-only (4 policies × tabla: SELECT/INSERT/UPDATE/DELETE con `auth.uid() = user_id`). Triggers de `updated_at` auto. Índices por user_id + start/due/completed. **Pendiente**: aplicar la migración en producción vía Supabase Dashboard SQL Editor o `supabase db push`. La iOS app ya envía requests, pero hasta que la migración esté aplicada, retorna `tableNotFound` (gracefully). **`SupabaseSyncService.swift`** nuevo (`ios-native/Focus/Services/`): cliente REST stateless para `/rest/v1/focus_events` y `/rest/v1/focus_tasks`. Métodos: `fetchEvents/Tasks`, `upsertEvent/Task` (con `Prefer: resolution=merge-duplicates`), `softDeleteEvent/Task` (PATCH `deleted_at = now()`). Headers: `apikey` (publishable anon) + `Authorization: Bearer <access_token>` (del usuario). Errores tipados: `tableNotFound`, `rlsRejected`, `network`, `server`, `decoding`, `notAuthenticated`. **NUNCA loguea tokens completos**. DTOs `RemoteFocusEvent`/`RemoteFocusTask` con `init(local:userId:)` y `toLocal()` — conversión bidireccional. **`FocusDataStore` extendido**: nuevos `@Published`: `syncCredentials: SyncCredentials?`, `syncState: SyncState` (.demo/.loggedOut/.idle/.syncing/.error), `lastSyncAt: Date?`. Método `applyAuthChange(accessToken:userId:)` que `FocusApp` llama vía `.task(id:)` cuando el `AuthState` cambia. Al recibir credenciales nuevas, dispara `fetchRemoteAndMerge()` que trae remoto y mergea por id. **Sync en cada mutación**: `addEvent`/`updateEvent`/`deleteEvent` y sus análogos de tarea ahora también disparan `uploadEvent/Task` o `softDeleteEventRemote/Task` en background. Modo demo: no llega a sync (`syncCredentials == nil`). Si la red o RLS falla, sync registra error pero no revierte local — consistencia se restaura en próximo merge exitoso. **Ajustes → "Sincronización"**: nueva sección que muestra `syncState` (demo/idle/syncing/error) + última hora de sync + botón "Sincronizar ahora" (deshabilitado en demo/logout). **`FocusApp`** observa `authStore.state` vía `.task(id:)` con identidad derivada (loggedIn:userId / demo / loggedOut). **Seguridad**: tokens viven en Keychain (auth) + memoria (RAM via `SyncCredentials`). No service_role en cliente. No tokens en logs. RLS rechaza writes con user_id ajeno (probado vía interpretError 401/403). **Build OK** simulador + device. **Pendiente para cerrar Bloque 3**: aplicar `018_focus_native_v1.sql` en Supabase producción, probar fetch real con cuenta logueada en iPhone, verificar que datos creados en device aparecen en Supabase Dashboard. **NO se hizo**: migración demo→cuenta (riesgoso), sync de `nova_suggestions`/`nova_messages`/`settings` (fuera de scope V1), conflict resolution avanzado (last-write-wins por ahora), Nova LLM real, notificaciones, micrófono, widgets. |
+
+## Nova parser hardening — 2026-05-12
+
+### Bug real reportado en iPhone
+
+Input: "tengo que seguir trabajando a las 3:30 y comer a las 4"
+
+Resultado **incorrecto**:
+- "Evento agregado a Calendario · Evento agregado a Calendario" (mensaje técnico, doble).
+- 1. Miércoles 13 · 03:30 · **reunión**.
+- 2. Martes 12 · 16:00 · **reunión**.
+- Mi Día solo mostraba "Comer" 16:00 (el otro caía mañana, fuera del día).
+
+Resultado **esperado**:
+- "Listo. Te dejé 2 recordatorios para hoy:\n• Seguir trabajando — 15:30\n• Comer — 16:00".
+- Ambos hoy, sin reunión, sin duración falsa, sin clasificación errónea.
+
+### Causas raíz
+
+| # | Causa | Archivo / función | Fix |
+|---|---|---|---|
+| 1 | `extractHourMinute` case 1 (regex con minutos `HH:MM`) no aplicaba `adjustAmPm`. "3:30" se devolvía literal → 03:30. Como 03:30 hoy ya pasó hace >4h, el bumpea-a-mañana mandaba el evento al miércoles. | `FocusDataStore.swift` :: `extractHourMinute` | Aplicar `adjustAmPm` también para hours ≤ 12 con minutos. "trabajar a las 3:30" → 15:30 (verbo PM fuerza), cae hoy futuro, no bumpea. |
+| 2 | `detectSection` no reconocía verbos comunes: "trabajar/comer/almorzar/cenar/desayunar/entrenar". Devolvía `nil`. | `FocusDataStore.swift` :: `detectSection` | Extendido el set. "trabajo de mi papá" → `.personal` (visita familia); "trabajar"/"trabajando" → `.foco`; comidas → `.personal`; gym → `.descanso`. |
+| 3 | Default section `nil` → `.reunion` en ambos paths (executeIntent + applyLocalNovaIntent). Cualquier intent sin sección detectada salía como Reunión visualmente. | `MiDiaView.swift` :: `executeIntent`, `FocusDataStore.swift` :: `applyLocalNovaIntent` | Default → `.personal`, con re-detección por título limpio antes (`NovaResponder.guessSection(for: title)`). |
+| 4 | "tengo que X a las N" caía a sección 8 como evento con `wantsReminder=false` → evento de 1h, no recordatorio puntual. | `FocusDataStore.swift` :: `parse` | `isObligationWithTime = hasTimeMarker && contains("tengo que/necesito/debo")` se suma a `wantsReminder`. |
+| 5 | `impliesPunctualReminder` solo cubría despertar/levantar/amanecer. Comidas no eran recordatorios → mostraban inferredDuration sin notificación. | `NovaActionNormalizer.swift` :: `punctualVerbPattern` | Pattern ampliado con `comer\|cenar\|almorzar\|desayunar\|merendar\|tomar once`. |
+| 6 | Respuesta multi-intent juntaba summaries con " · " → "Evento agregado a Calendario · Evento agregado a Calendario", repetitivo y técnico. | `MiDiaView.swift` :: `runLocalFallback` | Nueva composición humana: cuenta items por tipo (reminder/event/task), detecta mismo día → "Listo. Te dejé N {kind}s para {hoy/mañana/...}.\n• Title — HH:MM…". Mixed: "1 evento y 1 recordatorio…". |
+| 7 | Label flotante "Escuchando…" en `bottomLeading` con `offset(y: 28)` quedaba colgando bajo el FocusBar y chocaba con el diseño en iPhone real. | `MiDiaView.swift` :: `focusBar` | Removido. El diamante de Nova ahora pulsa con halo gradient (escala+opacidad infinite loop) + escala según `audioLevel` del dictation service, y el placeholder cambia a "Habla ahora…". |
+| 8 | FocusBar de chat Nova desaparecía cuando aparecía el teclado — el usuario no veía lo que escribía. Causa: `.ignoresSafeArea(.keyboard)` en el VStack de MainTabView impedía que el `safeAreaInset(.bottom)` del inputBar del chat se anclase sobre el teclado. | `MainTabView.swift` :: `body` | Removido el ignore. La tab bar ahora se desliza un poco con el teclado, tradeoff aceptable — los inputs internos quedan visibles. |
+
+### Reglas AM/PM (post-fix)
+
+Orden de prioridad en `adjustAmPm`:
+1. **Marcador explícito** ("am/pm", "de la mañana/tarde/noche", "madrugada") → siempre gana.
+2. **Verbos AM fuertes** (despertar/levantar/amanecer/desayunar) → AM.
+3. **Desplazamiento matinal** (salir/ir/entrar + universidad/colegio/escuela/clase/facultad) → AM. NO incluye trabajo/oficina.
+4. **Verbos PM fuertes** (cenar/comer/almorzar/comida/tomar once) → PM.
+5. **Sin contexto** → coloquial: 1-7 → PM, 8-12 → AM.
+
+Aplica también en `extractHourMinute` case 1 (HH:MM) y case 3 (HH:MM suelto).
+
+### Clasificación recordatorio / evento / tarea
+
+| Frase | Tipo | Por qué |
+|---|---|---|
+| "tengo que X a las N" | recordatorio puntual | obligación + hora |
+| "necesito X a las N" / "debo X a las N" | recordatorio puntual | obligación + hora |
+| "tengo que X" (sin hora) | tarea | obligación sin hora |
+| "despertarme/levantarme a las N" | recordatorio puntual | verbo puntual |
+| "comer/cenar/almorzar/desayunar a las N" | recordatorio puntual + section personal | verbo de comida |
+| "acuérdame/recuérdame X a las N" | recordatorio puntual | trigger explícito |
+| "reunión con X a las N" | evento con duración | trigger reunión |
+| "de N a M" / "hasta N" / "por X horas" | evento con duración real | rango explícito |
+| Frase libre con hora pero sin verbo conocido | evento con `inferredDuration` (punto en UI) | fallback neutral |
+
+### UX del micrófono / "Escuchando…"
+
+- **Removido**: label flotante "Escuchando…" bajo el FocusBar.
+- **Reemplazo**: el diamante de Nova (NovaSparkMark dentro de FocusBarInput) cobra vida:
+  - Halo gradient violeta que se expande hacia afuera en loop infinito.
+  - Shadow más intenso.
+  - Escala 1.0 → 1.25 según `audioLevel` (breathing siguiendo la voz).
+  - Placeholder de la TextField cambia a "Habla ahora…".
+- Estados conceptuales:
+  - **idle**: diamante normal.
+  - **listening**: diamante pulsa + audio breathing + mic = stop.
+  - **transcribing**: el texto va llenando `focusBarText` en vivo.
+  - **ready**: usuario detiene mic → texto queda en barra editable.
+  - **error**: alert de permisos vía `dictationDeniedMessage`.
+
+### Tests (FASE 8 obligatorios — ✓ ALL PASSED)
+
+En `NovaActionNormalizerTests.runAll()`. Para correr en simulator:
+```bash
+xcrun simctl install <UDID> Focus.app
+SIMCTL_CHILD_FOCUS_RUN_TESTS=1 xcrun simctl launch --terminate-running-process <UDID> me.usefocus.app
+cat <Documents>/focus-tests.log
+```
+
+| # | Input | Esperado | Estado |
+|---|---|---|---|
+| 1 | "tengo que seguir trabajando a las 3:30 y comer a las 4" | 2 intents, hoy, 15:30 + 16:00, no reunión, titles "Seguir trabajando" / "Comer", ambos isReminder=true | ✓ |
+| 2 | "seguir trabajo de mi papá a la 1 y comer a las 7" | 13:00 + 19:00, no reunión | ✓ |
+| 3 | "mañana despertarme a las 7 y salir a las 8" | mañana 07:00 + 08:00 | ✓ |
+| 4 | "comprar pan y leche" | 1 tarea (no split, no event) | ✓ |
+| 5 | "reunión con Juan y Pedro a las 5" | 1 evento, section = reunión | ✓ |
+| 6 | "comer a las 4" | 16:00, no reunión | ✓ |
+| 7 | "despertarme a las 7" | 07:00 | ✓ |
+| 8 | "trabajar a las 3:30" | 15:30, no reunión | ✓ |
+| 8b | "trabajar a las 3:30 de la mañana" | 03:30 (override AM explícito) | ✓ |
+
+Suite completa: ~70 checks cubriendo cleanTitle, extractReminderOffset, isReminderTrigger, resolveEndTime, shouldScheduleNotification, parseAll multi-intent, smart " y " split, AM/PM contextual por verbo, casos del bug report.
+
+### QA en iPhone — pendiente del usuario
+
+1. **Bug original**: dictar "tengo que seguir trabajando a las 3:30 y comer a las 4" → 2 recordatorios hoy 15:30 + 16:00, respuesta humana.
+2. **Mic UX**: tocar el mic → diamante pulsa con halo + breathing, sin label "Escuchando…" flotante. Hablar → texto va llenando la barra. Tocar stop → texto queda editable.
+3. **Chat Nova**: abrir tab Nova, ir a chat, escribir → la barra de texto NO desaparece, el cursor/texto siempre visibles arriba del teclado.
+4. **Borrar ambos ítems creados y cerrar/reabrir**: no deben volver.
+5. **Despertador**: "despertarme a las 7" → 07:00 como recordatorio puntual.
+6. **Cena nocturna**: "cenar a las 8" → 20:00.
+7. **Reunión sigue siendo reunión**: "reunión con Juan a las 5" → 1 evento, section reunión (no se rompió esto).
+
+### No tocado (por instrucción explícita)
+
+- Google login, OTP, sync Supabase, onboarding, AppIcon, notificaciones (salvo las que ya disparaban con isReminder=true), TestFlight, widgets, App Store, APNs remoto.
+
+---
 
 ## Cierre de día — 2026-05-11
 

@@ -511,7 +511,7 @@ enum NovaResponder {
     static func parse(_ text: String, context: NovaContext = NovaContext()) -> NovaIntent {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
-        let wantsReminder = matches(lower, [
+        let baseWantsReminder = matches(lower, [
             "acuérdame", "acuerdame", "acordame",
             "acuérdate", "acuerdate",
             "acuérdalo", "acuerdalo",
@@ -520,6 +520,15 @@ enum NovaResponder {
             "no olvides", "no te olvides",
             "que no se me olvide", "que me acuerde"
         ])
+        // Obligación con hora puntual ("tengo que X a las N", "necesito X
+        // a las N", "debo X a las N") → recordatorio, no evento de 1h.
+        // Sin hora, "tengo que X" sigue siendo task (sección 5).
+        let isObligationWithTime = hasTimeMarker(lower)
+            && matchesAny(lower, ["tengo que ", "necesito ", "debo "])
+        // Verbos puntuales (despertar/levantar/amanecer) — implican momento,
+        // no duración. Centralizado en NovaActionNormalizer.
+        let isPunctualVerb = NovaActionNormalizer.impliesPunctualReminder(in: lower)
+        let wantsReminder = baseWantsReminder || isObligationWithTime || isPunctualVerb
 
         // ──────────────────────────────────────────────────────────────
         // -1. Memoria corta: si Nova preguntó algo (pendingClarification
@@ -1087,13 +1096,18 @@ enum NovaResponder {
         if matches(lower, [
             "parcial", "examen", "final", "prueba",
             "clase", "estudiar", "estudio", "tp ", "tarea de ",
-            "entrega", "presentación", "presentacion", "tesis"
+            "entrega", "presentación", "presentacion", "tesis",
+            "universidad", "colegio", "facultad", "liceo"
         ]) {
             return .estudio
         }
+        // "reunión/reunion" SOLO match al inicio de palabra para no atrapar
+        // frases tangenciales. Antes el match era substring → "comer en la
+        // reunión" caía acá. Ahora usamos `matchesAny` con espacio explícito
+        // o anclas.
         if matches(lower, [
             "reunión", "reunion", "review", "1:1", "1on1",
-            "meet", "llamada", "call", "stand up", "standup", "stand-up",
+            "meet", " call ", "llamada", "stand up", "standup", "stand-up",
             "demo"
         ]) {
             return .reunion
@@ -1101,17 +1115,41 @@ enum NovaResponder {
         if matches(lower, [
             "amigo", "amiga", "amigas", "amigos",
             "familia", "mamá", "papá", "mama", "papa",
+            "hermano", "hermana", "hijo", "hija",
             "salir ", "buscar a ", "buscar al ", "buscar la ", "buscar el ",
             "juntarme", "juntarnos", "junta con", "me junto",
-            "almuerzo", "cena", "desayuno", "café con", "cafe con",
+            // Comidas — "comer/almorzar/cenar/desayunar/once" siempre son
+            // personal salvo que mencionen "reunión" (ya manejado arriba).
+            "comer", "comida", "comerme",
+            "almuerzo", "almorzar",
+            "cena", "cenar",
+            "desayuno", "desayunar",
+            "tomar once", " once ",
+            "café con", "cafe con", "merendar",
             "novia", "novio", "pareja"
         ]) {
             return .personal
         }
-        if matches(lower, ["foco profundo", "deep work", "concentrar", "concentrarme"]) {
+        // "Foco" cubre bloques de trabajo profundo. "trabajar/trabajo/
+        // trabajando" sin reunión → foco (es un bloque dedicado de trabajo
+        // del usuario). Excluye "trabajo de mi papá/mamá" → personal (visita
+        // a familia).
+        if lower.contains("trabajo de mi ") || lower.contains("trabajo de mama")
+            || lower.contains("trabajo de papa") || lower.contains("trabajo de mamá")
+            || lower.contains("trabajo de papá") {
+            return .personal
+        }
+        if matches(lower, [
+            "foco profundo", "deep work", "concentrar", "concentrarme",
+            "trabajar", "trabajando", " trabajo", "pega ", "oficina",
+            "responder mail", "revisar mail", "preparar entrega"
+        ]) {
             return .foco
         }
-        if matches(lower, ["gym", "correr", "yoga", "pilates", "running", "siesta", "pausa", "descanso"]) {
+        if matches(lower, [
+            "gym", "correr", "yoga", "pilates", "running", "siesta", "pausa", "descanso",
+            "entrenar", "entreno", "spinning", "crossfit", "natación", "natacion"
+        ]) {
             return .descanso
         }
         return nil
@@ -1725,21 +1763,31 @@ enum NovaResponder {
     }
 
     private static func extractHourMinute(from text: String) -> (Int, Int)? {
-        // 1) "a las 14:30" / "a la 1:00" (también "a eso de las 14:30")
+        // 1) "a las 14:30" / "a la 1:00" (también "a eso de las 14:30").
+        //    Cuando la hora está en 1..12 SIN modificador (am/pm, "de la tarde",
+        //    etc.) hay que aplicar `adjustAmPm` también — antes "a las 3:30"
+        //    se devolvía como (3, 30) literal y caía a 03:30 aunque el contexto
+        //    (verbo "trabajar/comer/etc") dijera tarde. Para hours 13..23 el
+        //    valor es 24h y se mantiene literal.
         if let h = firstCaptureInt(text, pattern: #"(?:a la?s?|eso de las?|cerca de las?|alrededor de las?) (\d{1,2}):(\d{2})"#, group: 1),
            let m = firstCaptureInt(text, pattern: #"(?:a la?s?|eso de las?|cerca de las?|alrededor de las?) (\d{1,2}):(\d{2})"#, group: 2),
            h < 24, m < 60 {
-            return (h, m)
+            let resolvedH = h <= 12 ? adjustAmPm(hour: h, in: text) : h
+            return (resolvedH, m)
         }
         // 2) "a las 12" / "a la 1" / "a eso de las 3" / "cerca de las 3"
         if let h = firstCaptureInt(text, pattern: #"(?:a la?s?|eso de las?|cerca de las?|alrededor de las?) (\d{1,2})\b"#, group: 1), h < 24 {
             return (adjustAmPm(hour: h, in: text), 0)
         }
-        // 3) "14:30" suelto
+        // 3) "14:30" suelto. Igual que (1): si h <= 12, contexto puede
+        //    moverlo a PM. "salir a las 7:00" sin "am" → si el contexto dice
+        //    mañana queda 07:00, si dice tarde queda 19:00, sino regla
+        //    coloquial 1-7 → PM.
         if let h = firstCaptureInt(text, pattern: #"\b(\d{1,2}):(\d{2})\b"#, group: 1),
            let m = firstCaptureInt(text, pattern: #"\b(\d{1,2}):(\d{2})\b"#, group: 2),
            h < 24, m < 60 {
-            return (h, m)
+            let resolvedH = h <= 12 ? adjustAmPm(hour: h, in: text) : h
+            return (resolvedH, m)
         }
         // 4) "tipo N" / "tipo las N" — colloquial Chilean.
         //    Default a PM para N=1..11 (uso social diurno), salvo que el
@@ -3806,9 +3854,14 @@ final class FocusDataStore: ObservableObject {
                 isReminderFlag = nil
                 inferredFlag = endResolution.inferredDuration
             }
+            // Section default neutral (.personal) en vez de .reunion — antes
+            // todo lo que no tenía sección detectada caía como "Reunión"
+            // visualmente, lo que era engañoso para "seguir trabajando" o
+            // "comer". Si no hay nada en el título que detecte sección,
+            // .personal es honesto y neutro.
             let effectiveSection: EventSection = isReminderHint
                 ? (section ?? .reminder)
-                : (section ?? .reunion)
+                : (section ?? NovaResponder.guessSection(for: title) ?? .personal)
 
             // PASO 4: anti-duplicado — si ya hay un evento casi igual,
             // no crear nuevo. Evita basura cuando el usuario repite un

@@ -641,6 +641,11 @@ struct FocusBarInput: View {
     /// convierte en un "stop" pulsante para indicar que está escuchando.
     /// El padre maneja el ciclo on/off via `onMic`.
     var isDictating: Bool = false
+    /// Nivel de audio normalizado (0..1) del dictation service. Se usa para
+    /// hacer breathing del diamante de Nova: la escala oscila siguiendo la
+    /// voz, dando feedback inmediato de que el mic está captando audio
+    /// (vs estar pegado en "escuchando" sin captar nada).
+    var audioLevel: CGFloat = 0
 
     @FocusState private var isFocused: Bool
     @State private var dictationPulse: Bool = false
@@ -649,15 +654,51 @@ struct FocusBarInput: View {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Escala base del diamante: 1.0 normal, +0..25% según audioLevel cuando
+    /// está dictando. Smooth con `.animation` en el caller para sentir
+    /// breathing en vez de cambios bruscos.
+    private var diamondScale: CGFloat {
+        guard isDictating else { return 1.0 }
+        let clamped = max(0, min(1, audioLevel))
+        return 1.0 + clamped * 0.25
+    }
+
     var body: some View {
         HStack(alignment: .bottom, spacing: Theme.Spacing.md) {
-            // Marca de Nova — anclada a la base junto a los botones.
+            // Marca de Nova — anclada a la base junto a los botones. Cuando
+            // está dictando, el diamante "cobra vida":
+            //   - escala según audioLevel (breathing siguiendo la voz)
+            //   - halo gradient pulsando que irradia hacia afuera
+            //   - glow + shadow más intensos
+            // Reemplaza el viejo label flotante "Escuchando…" que estorbaba.
             ZStack {
+                // Halo expansivo cuando dicta — irradia gradient violeta.
+                if isDictating {
+                    Circle()
+                        .strokeBorder(
+                            Theme.Colors.novaAccent.opacity(0.55),
+                            lineWidth: 2
+                        )
+                        .frame(width: 30, height: 30)
+                        .scaleEffect(dictationPulse ? 2.0 : 1.0)
+                        .opacity(dictationPulse ? 0 : 0.9)
+                        .animation(
+                            .easeOut(duration: 1.4).repeatForever(autoreverses: false),
+                            value: dictationPulse
+                        )
+                }
                 Circle()
                     .fill(Theme.Colors.novaGradient)
                     .frame(width: 30, height: 30)
+                    .shadow(
+                        color: Theme.Colors.novaAccent.opacity(isDictating ? 0.7 : 0.35),
+                        radius: isDictating ? 12 : 6,
+                        y: 0
+                    )
                 NovaSparkMark(size: 13)
             }
+            .scaleEffect(diamondScale)
+            .animation(.easeOut(duration: 0.12), value: diamondScale)
 
             TextField(placeholder, text: $text, axis: .vertical)
                 .focused($isFocused)

@@ -58,16 +58,24 @@ enum NovaActionNormalizer {
     /// Verbos que implican una **acción puntual** y se tratan como
     /// recordatorio (sin duración + notificación si toggle activo)
     /// aunque el usuario no haya dicho "acuérdame".
-    /// "Despertarme a las 7" = recordatorio puntual a las 07:00.
-    /// "Levantarme a las 7" = ídem.
+    ///
+    /// Dos familias:
+    ///   - **Despertar / levantar / amanecer**: momento de inicio del día.
+    ///   - **Comidas** (comer, cenar, almorzar, desayunar, merendar, once):
+    ///     "comer a las 7" es un evento puntual ("voy a comer a esa hora"),
+    ///     no un bloque de 1 hora que el usuario quiera reservar. La
+    ///     duración real es variable y el usuario rara vez la specifica;
+    ///     mostrarlo como punto con notificación es más útil que un rango
+    ///     inventado. Si el usuario quiere bloquear "almuerzo con Pedro de
+    ///     1 a 3" puede usar "de N a M" y se respeta el endTime explícito.
     private static let punctualVerbPattern: String =
-        #"\b(despertar(me|te|se|nos|los)?|despertame|despertarnos|despierto|despierta|levantar(me|te|se|nos|los)?|levantame|levantarnos|levanto|levanta|amanecer|amanezca|amanezco)\b"#
+        #"\b(despertar(me|te|se|nos|los)?|despertame|despertarnos|despierto|despierta|levantar(me|te|se|nos|los)?|levantame|levantarnos|levanto|levanta|amanecer|amanezca|amanezco|comer|comerme|comida|cenar|cena|cenamos|almorzar|almuerzo|almorzamos|desayunar|desayuno|desayunamos|merendar|merienda|tomar\s+once)\b"#
 
     /// True cuando el texto contiene un verbo puntual (despertar/levantar/
-    /// amanecer). Estos verbos describen un momento, no un intervalo —
-    /// se tratan como recordatorios para que: (a) no aparezcan con rango
-    /// falso en el calendario, (b) disparen notificación si el toggle de
-    /// recordatorios está activo.
+    /// amanecer/comer/cenar/almorzar/desayunar/merendar). Estos verbos
+    /// describen un momento, no un intervalo — se tratan como recordatorios
+    /// para que: (a) no aparezcan con rango falso en el calendario,
+    /// (b) disparen notificación si el toggle de recordatorios está activo.
     static func impliesPunctualReminder(in userText: String) -> Bool {
         return userText.range(
             of: punctualVerbPattern,

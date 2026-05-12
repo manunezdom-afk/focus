@@ -5,6 +5,27 @@ struct FocusApp: App {
     @StateObject private var dataStore = FocusDataStore()
     @StateObject private var authStore = AuthStore()
 
+    init() {
+        #if DEBUG
+        // Si la app se lanza con `FOCUS_RUN_TESTS=1`, corre la suite de
+        // tests del normalizer y escribe el resultado a un file en
+        // Documents — `print()` no es confiable desde GUI app, pero un
+        // file en Documents podemos leerlo desde host via `simctl
+        // get_app_container` o lo equivalente en dispositivo físico.
+        // No afecta release builds.
+        if ProcessInfo.processInfo.environment["FOCUS_RUN_TESTS"] == "1" {
+            let result = NovaActionNormalizerTests.runAll()
+            print("===== NOVA TESTS =====\n\(result)\n=====================")
+            if let docs = FileManager.default.urls(
+                for: .documentDirectory, in: .userDomainMask
+            ).first {
+                let path = docs.appendingPathComponent("focus-tests.log")
+                try? result.write(to: path, atomically: true, encoding: .utf8)
+            }
+        }
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             // Background cobalto cuya color matchea EXACTAMENTE el asset

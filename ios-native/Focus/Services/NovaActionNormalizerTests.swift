@@ -496,10 +496,94 @@ enum NovaActionNormalizerTests {
             expected: false, failures: &failures
         )
         check(
-            label: "impliesPunctualReminder: 'comer a las 7' → false",
+            label: "impliesPunctualReminder: 'comer a las 7' → true (extended)",
             actual: NovaActionNormalizer.impliesPunctualReminder(in: "comer a las 7"),
-            expected: false, failures: &failures
+            expected: true, failures: &failures
         )
+
+        // ───── FASE 8 — TESTS OBLIGATORIOS DEL BUG REPORT ─────────────
+
+        // 1. "tengo que seguir trabajando a las 3:30 y comer a las 4"
+        //    → 2 intents, HOY, 15:30 + 16:00, sin reunión, títulos limpios
+        let bug1 = runPipeline("tengo que seguir trabajando a las 3:30 y comer a las 4")
+        check(
+            label: "bug1: 2 intents",
+            actual: bug1.count, expected: 2, failures: &failures
+        )
+        if bug1.count == 2 {
+            check(label: "bug1[0] title", actual: bug1[0].title, expected: "Seguir trabajando", failures: &failures)
+            check(label: "bug1[0] hour 15", actual: bug1[0].hour, expected: 15, failures: &failures)
+            check(label: "bug1[0] HOY (no martes/miércoles)", actual: bug1[0].day, expected: .today, failures: &failures)
+            check(label: "bug1[0] no reunión", actual: bug1[0].section != .reunion, expected: true, failures: &failures)
+            check(label: "bug1[0] es recordatorio", actual: bug1[0].isReminder, expected: true, failures: &failures)
+
+            check(label: "bug1[1] title", actual: bug1[1].title, expected: "Comer", failures: &failures)
+            check(label: "bug1[1] hour 16", actual: bug1[1].hour, expected: 16, failures: &failures)
+            check(label: "bug1[1] HOY", actual: bug1[1].day, expected: .today, failures: &failures)
+            check(label: "bug1[1] no reunión", actual: bug1[1].section != .reunion, expected: true, failures: &failures)
+        }
+
+        // 2. "seguir trabajo de mi papá a la 1 y comer a las 7"
+        //    → 13:00 + 19:00
+        let bug2 = runPipeline("seguir trabajo de mi papá a la 1 y comer a las 7")
+        check(label: "bug2: 2 intents", actual: bug2.count, expected: 2, failures: &failures)
+        if bug2.count == 2 {
+            check(label: "bug2[0] hour 13", actual: bug2[0].hour, expected: 13, failures: &failures)
+            check(label: "bug2[0] no reunión", actual: bug2[0].section != .reunion, expected: true, failures: &failures)
+            check(label: "bug2[1] hour 19", actual: bug2[1].hour, expected: 19, failures: &failures)
+            check(label: "bug2[1] no reunión", actual: bug2[1].section != .reunion, expected: true, failures: &failures)
+        }
+
+        // 3. "mañana despertarme a las 7 y salir a las 8"
+        //    → mañana 07:00 + mañana 08:00
+        let bug3 = runPipeline("mañana despertarme a las 7 y salir a las 8")
+        check(label: "bug3: 2 intents", actual: bug3.count, expected: 2, failures: &failures)
+        if bug3.count == 2 {
+            check(label: "bug3[0] mañana", actual: bug3[0].day, expected: .tomorrow, failures: &failures)
+            check(label: "bug3[0] hour 7", actual: bug3[0].hour, expected: 7, failures: &failures)
+            check(label: "bug3[1] mañana", actual: bug3[1].day, expected: .tomorrow, failures: &failures)
+            check(label: "bug3[1] hour 8", actual: bug3[1].hour, expected: 8, failures: &failures)
+        }
+
+        // 4. "comprar pan y leche" → 1 tarea
+        let bug4 = runPipeline("comprar pan y leche")
+        check(label: "bug4: 1 intent", actual: bug4.count, expected: 1, failures: &failures)
+        if let first = bug4.first {
+            check(label: "bug4 kind = task", actual: first.kind, expected: .task, failures: &failures)
+        }
+
+        // 5. "reunión con Juan y Pedro a las 5" → 1 evento/reunión
+        let bug5 = runPipeline("reunión con Juan y Pedro a las 5")
+        check(label: "bug5: 1 intent", actual: bug5.count, expected: 1, failures: &failures)
+        if let first = bug5.first {
+            check(label: "bug5 section = reunión", actual: first.section, expected: .reunion, failures: &failures)
+        }
+
+        // 6. "comer a las 4" → 16:00, no reunión
+        let bug6 = runPipeline("comer a las 4")
+        if let first = bug6.first {
+            check(label: "bug6 hour 16", actual: first.hour, expected: 16, failures: &failures)
+            check(label: "bug6 no reunión", actual: first.section != .reunion, expected: true, failures: &failures)
+        }
+
+        // 7. "despertarme a las 7" → 07:00
+        let bug7 = runPipeline("despertarme a las 7")
+        if let first = bug7.first {
+            check(label: "bug7 hour 7", actual: first.hour, expected: 7, failures: &failures)
+        }
+
+        // 8. "trabajar a las 3:30" → 15:30 (no reunión)
+        let bug8 = runPipeline("trabajar a las 3:30")
+        if let first = bug8.first {
+            check(label: "bug8 hour 15", actual: first.hour, expected: 15, failures: &failures)
+            check(label: "bug8 no reunión", actual: first.section != .reunion, expected: true, failures: &failures)
+        }
+
+        // Bonus: 'trabajar a las 3:30 de la mañana' → 03:30 (override AM)
+        let bug8am = runPipeline("trabajar a las 3:30 de la mañana")
+        if let first = bug8am.first {
+            check(label: "bug8 AM override hour 3", actual: first.hour, expected: 3, failures: &failures)
+        }
 
         // ───── Resultado ───────────────────────────────────────────────
 
@@ -511,38 +595,85 @@ enum NovaActionNormalizerTests {
 
     // MARK: - Helpers para tests de pipeline completo
 
+    /// Tipo de intent ejecutado. Útil para chequear que "comprar pan y
+    /// leche" devuelve `.task` (no event, no split) y que multi-intent
+    /// con horas devuelve `.event` o `.reminder` según corresponda.
+    enum ParsedKind: String, Equatable {
+        case event
+        case reminder
+        case task
+        case clarify
+        case other
+    }
+
     /// Resultado de pasar un texto por `parseAll` + `cleanTitle`. Replica
     /// lo que hace `applyLocalNovaIntent` antes de guardar el evento.
     private struct ParsedAction: Equatable {
+        let kind: ParsedKind
         let title: String
         let hour: Int?
+        let day: DayLabel
+        let section: EventSection?
         let isReminder: Bool
+    }
+
+    enum DayLabel: String, Equatable {
+        case today, tomorrow, otherDay, none
     }
 
     /// Pasa el texto por el pipeline completo (parseAll → cleanTitle) y
     /// devuelve una lista de `ParsedAction`, uno por intent generado.
+    /// Si el intent es `.clarify`, devuelve una acción tipo `.clarify` para
+    /// que el test pueda chequear ese resultado también.
     private static func runPipeline(_ text: String) -> [ParsedAction] {
         let intents = NovaResponder.parseAll(text)
         return intents.compactMap { intent -> ParsedAction? in
             switch intent {
-            case let .createEvent(rawTitle, when, _, _, _, wantsReminder):
+            case let .createEvent(rawTitle, when, _, _, section, wantsReminder):
                 let title = NovaActionNormalizer.cleanTitle(rawTitle)
                 let hour = when.map { Calendar.current.component(.hour, from: $0) }
+                let day = dayLabel(for: when)
                 let reminder = wantsReminder
                     || NovaActionNormalizer.isReminderTrigger(in: text)
                     || NovaActionNormalizer.impliesPunctualReminder(in: text)
-                return ParsedAction(title: title, hour: hour, isReminder: reminder)
+                return ParsedAction(
+                    kind: reminder ? .reminder : .event,
+                    title: title, hour: hour, day: day,
+                    section: section, isReminder: reminder
+                )
             case let .createTask(rawTitle, dueDate, _, wantsReminder):
                 let title = NovaActionNormalizer.cleanTitle(rawTitle)
                 let hour = dueDate.map { Calendar.current.component(.hour, from: $0) }
+                let day = dayLabel(for: dueDate)
                 let reminder = wantsReminder
                     || NovaActionNormalizer.isReminderTrigger(in: text)
                     || NovaActionNormalizer.impliesPunctualReminder(in: text)
-                return ParsedAction(title: title, hour: hour, isReminder: reminder)
+                return ParsedAction(
+                    kind: .task, title: title, hour: hour, day: day,
+                    section: nil, isReminder: reminder
+                )
+            case .clarify:
+                return ParsedAction(
+                    kind: .clarify, title: "", hour: nil, day: .none,
+                    section: nil, isReminder: false
+                )
             default:
-                return nil
+                return ParsedAction(
+                    kind: .other, title: "", hour: nil, day: .none,
+                    section: nil, isReminder: false
+                )
             }
         }
+    }
+
+    /// Devuelve una etiqueta legible (today/tomorrow/otherDay/none) según
+    /// la fecha dada. Hace los tests más fáciles de leer.
+    private static func dayLabel(for date: Date?) -> DayLabel {
+        guard let date else { return .none }
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return .today }
+        if cal.isDateInTomorrow(date) { return .tomorrow }
+        return .otherDay
     }
 
     /// Comprueba que un texto produce exactamente 1 intent con título / hora /

@@ -95,9 +95,17 @@ struct MainTabView: View {
         .background(Theme.Colors.background.ignoresSafeArea())
         .environmentObject(nav)
         .environmentObject(toast)
-        // El teclado no desplaza la tab bar — los inputs internos manejan su
-        // propio padding bottom-safe.
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        // NO usamos `.ignoresSafeArea(.keyboard)` global: rompía el chat de
+        // Nova. El TextField del chat usa `safeAreaInset(edge: .bottom)`,
+        // que necesita que la jerarquía padre RESPETE el inset del teclado
+        // para anclar la barra de input arriba del teclado. Con el ignore
+        // global activo, la barra quedaba escondida debajo del teclado y
+        // el usuario no veía lo que escribía.
+        //
+        // Tradeoff: la tab bar se desliza un poco cuando aparece el teclado.
+        // Aceptable — Mi Día y Calendario rara vez necesitan teclado, y
+        // cuando aparece (FocusBar en Mi Día, edición de eventos), prefirimos
+        // que el usuario vea su input antes de que la tab bar quede fija.
         .overlay(alignment: .top) {
             if let current = toast.current {
                 ToastBanner(toast: current)
