@@ -336,13 +336,14 @@ struct MiDiaView: View {
             isDictating: isDictating
         )
         .overlay(alignment: .topLeading) {
-            // Indicador discreto de "Escuchando…" cuando dicta — flota
-            // sobre el FocusBar sin tapar nada.
+            // Indicador "Escuchando…" con waveform de decibeles. Las barras
+            // suben/bajan en tiempo real según `audioLevel`, dando feedback
+            // claro de que el mic está capturando voz (vs estar pegado en
+            // estado "escuchando" sin captar nada).
             if isDictating {
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(Theme.Colors.focusAccent)
-                        .frame(width: 6, height: 6)
+                    AudioLevelBars(level: dictationService.audioLevel)
+                        .frame(width: 22, height: 14)
                     Text("Escuchando…")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Theme.Colors.focusAccent)

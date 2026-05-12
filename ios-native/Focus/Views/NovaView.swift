@@ -22,6 +22,21 @@ struct NovaView: View {
     @State private var showVoiceDictation: Bool = false
     @FocusState private var inputFocused: Bool
 
+    /// **Feature flag Nova Live**. La V1 actual (Speech framework + STT
+    /// + envío a Nova) NO es la experiencia conversacional tipo
+    /// ChatGPT/Gemini Live que querríamos para beta — es esencialmente
+    /// dictado + procesamiento posterior. Para no enviar una experiencia
+    /// de voz que se sienta a medias, ocultamos la entrada por chip en
+    /// el empty state del chat. El código de `NovaLiveView` +
+    /// `NovaLiveService` Live mode queda compilado pero inalcanzable
+    /// desde la UI.
+    ///
+    /// Para reactivar cuando se implemente realtime real (OpenAI Realtime
+    /// API o equivalente con backend seguro para mintear ephemeral
+    /// tokens), flipear este flag a `true`. El roadmap está documentado
+    /// en FOCUS_AUDIT_MASTER.md.
+    private static let isNovaLiveEnabled = false
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -443,7 +458,9 @@ struct NovaView: View {
                     .padding(.bottom, Theme.Spacing.lg)
 
                 VStack(spacing: Theme.Spacing.sm + 2) {
-                    novaLiveChip
+                    if Self.isNovaLiveEnabled {
+                        novaLiveChip
+                    }
                     emptyStateChip(.organizar, symbol: "sparkles", label: "Organizar mi día")
                     emptyStateChip(.crearTarea, symbol: "checkmark.circle", label: "Crear tarea")
                     emptyStateChip(.crearEvento, symbol: "calendar.badge.plus", label: "Agendar evento")

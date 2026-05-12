@@ -35,6 +35,17 @@ final class NovaLiveService: ObservableObject {
 
     @Published var state: State = .idle
     @Published var transcript: String = ""
+    /// Nivel de audio en vivo (0.0…1.0). Calculado en cada audio buffer
+    /// del tap, normalizado a partir del RMS en dB. La UI usa este valor
+    /// para waveform/barras animadas que dan feedback "estoy oyéndote".
+    @Published private(set) var audioLevel: Float = 0
+    /// `true` cuando hay habla actualmente (energía por encima del piso de
+    /// ruido). Calculado en el mismo loop del tap. Sirve para distinguir
+    /// "pausa para pensar" vs "terminé de hablar":
+    /// - habla → reset del timer
+    /// - silencio breve + última habla reciente → pausa para pensar
+    /// - silencio sostenido + sin energía sostenida → fin
+    @Published private(set) var isSpeaking: Bool = false
 
     // MARK: - Internals
 
@@ -46,14 +57,40 @@ final class NovaLiveService: ObservableObject {
     /// Locale efectivo que usamos (para diagnóstico/UI). Resuelto en init.
     let activeLocaleIdentifier: String
 
-    /// Cuántos segundos de silencio toleramos antes de auto-detener.
-    /// 8s es generoso para alguien que piensa entre frases.
-    private static let silenceTimeoutSeconds: Int = 8
+    /// **VAD (Voice Activity Detection) con doble timeout**:
+    /// - `silenceShortSeconds` aplica cuando el usuario aún no dijo nada
+    ///   (transcript vacío). Si arranca el mic pero no habla, paramos
+    ///   rápido para no dejar pegado.
+    /// - `silenceLongSeconds` aplica cuando ya hay transcript. Le damos
+    ///   más tiempo para que pueda pausar y pensar en medio de una frase
+    ///   sin que se corte.
+    /// Ambos son condicionados a que ADEMÁS el audio level esté bajo
+    /// sostenido (gateado por `lowEnergyHoldSeconds`), porque a veces el
+    /// recognizer demora en emitir texto aunque el usuario esté hablando
+    /// — usar solo timer de transcript causaba cortes prematuros.
+    private static let silenceShortSeconds: Double = 2.0
+    private static let silenceLongSeconds: Double = 3.5
+    private static let lowEnergyHoldSeconds: Double = 0.6
+    /// Umbral de energía debajo del cual consideramos "silencio". 0.05 en
+    /// el rango 0…1 (-46dB aprox post-normalize). Más bajo = más
+    /// estricto, más alto = corta antes con ruido ambiente.
+    private static let speechEnergyThreshold: Float = 0.05
 
     /// Timer monotónico para detectar silencio. Lo reseteamos cada vez que
-    /// llega texto nuevo del reconocedor.
+    /// llega texto nuevo del reconocedor o el audio level pasa el umbral.
     private var lastSpeechAt: Date?
+    /// Última vez que el audio level estuvo por encima del threshold.
+    /// Usado por el VAD para evitar corte mientras hay energía.
+    private var lastHighEnergyAt: Date?
     private var silenceCheckTask: Task<Void, Never>?
+    /// Smoothing factor (low-pass) para el audioLevel publicado — sin
+    /// esto la UI parpadea demasiado. 0.0 = solo histórico, 1.0 = solo
+    /// nuevo. 0.35 da movimiento responsive pero estable.
+    private static let audioLevelSmoothing: Float = 0.35
+    /// Contador para throttle del publish — el tap se llama ~43 veces/seg
+    /// (buffer 1024 @ 44.1kHz). Publicar cada vez es exagerado, cada 3°
+    /// callback da ~14fps que es suficiente para animación fluida.
+    private var bufferTickCounter: Int = 0
 
     init() {
         // Preferir es-CL para entonación natural; si no está disponible,
@@ -134,6 +171,10 @@ final class NovaLiveService: ObservableObject {
     func start() async {
         // Si veníamos de un error previo, limpiar.
         transcript = ""
+        audioLevel = 0
+        isSpeaking = false
+        lastHighEnergyAt = nil
+        bufferTickCounter = 0
 
         let auth = await currentAuthorizationStatus()
         guard auth == .authorized else {
@@ -172,15 +213,21 @@ final class NovaLiveService: ObservableObject {
         let inputNode = engine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
         inputNode.removeTap(onBus: 0)  // por las dudas, evitar dobles taps
-        // Tap captura `self` weakly y lee `recognitionRequest` dinámicamente.
-        // Antes capturábamos `request` local con weak — semánticamente
-        // equivalente (porque self.recognitionRequest mantiene la
-        // referencia fuerte), pero más implícito y propenso a confusión.
-        // Esta variante hace explícito que la captura sigue al lifecycle
-        // del service: si `recognitionRequest` se nullifica en `tearDown`,
-        // los buffers dejan de appenderse limpiamente.
+        // Tap hace 2 cosas: (1) appendear audio al recognizer, (2)
+        // calcular nivel RMS del buffer para audioLevel/VAD. La captura
+        // débil de self sigue el lifecycle del service — si tearDown
+        // nullea recognitionRequest, los buffers dejan de appenderse
+        // limpiamente.
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
+            guard let self else { return }
+            self.recognitionRequest?.append(buffer)
+            // Audio level + VAD. Esta closure NO viene en MainActor —
+            // calculamos el level acá y hopeamos al main solo para
+            // publish + check del watchdog.
+            let level = Self.bufferLevel(buffer)
+            Task { @MainActor [weak self] in
+                self?.updateAudioLevel(level)
+            }
         }
 
         engine.prepare()
@@ -275,29 +322,116 @@ final class NovaLiveService: ObservableObject {
         recognitionRequest = nil
         recognitionTask = nil
         lastSpeechAt = nil
+        lastHighEnergyAt = nil
+        audioLevel = 0
+        isSpeaking = false
+        bufferTickCounter = 0
         // Liberar la sesión para que no se quede activa bloqueando otros
         // sonidos. Ignoramos el error — si falla, no es crítico.
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
-    /// Si pasan N segundos sin texto nuevo, auto-detenemos. Evita que la
-    /// pantalla quede "escuchando" para siempre si el usuario olvidó cerrar.
+    /// VAD inteligente: distingue **pausa para pensar** vs **fin de habla**
+    /// usando dos señales en combinación:
+    /// 1. **Tiempo sin transcripción nueva** del recognizer (`lastSpeechAt`).
+    /// 2. **Energía de audio sostenida baja** (`lastHighEnergyAt`).
+    ///
+    /// La diferencia con la versión anterior (timeout fijo de 8s sin
+    /// distinción) es:
+    /// - Si el usuario aún no dijo nada (transcript vacío) → corte rápido
+    ///   en `silenceShortSeconds` (2s). No le hacemos esperar si no piensa
+    ///   hablar.
+    /// - Si ya hay transcript → `silenceLongSeconds` (3.5s). Esto permite
+    ///   pausas naturales para pensar entre frases.
+    /// - Pero NUNCA cortamos si la energía de audio sigue alta — eso
+    ///   significa que el usuario sigue hablando (o murmurando) aunque el
+    ///   recognizer aún no haya emitido texto. Solo cortamos cuando
+    ///   `lastHighEnergyAt` también pasó `lowEnergyHoldSeconds` (0.6s).
     private func startSilenceWatchdog() {
         silenceCheckTask?.cancel()
         silenceCheckTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                // Check cada 200ms — más responsive para VAD que 1s.
+                try? await Task.sleep(nanoseconds: 200_000_000)
                 guard let self else { return }
                 guard self.state == .listening else { return }
-                if let last = self.lastSpeechAt,
-                   Date().timeIntervalSince(last) >= TimeInterval(Self.silenceTimeoutSeconds) {
-                    // Auto-stop por silencio. Si ya hay transcripción
-                    // acumulada, queda visible. Si no, transcript = ""
-                    // y el caller mostrará error amable.
+
+                let now = Date()
+                let hasContent = !self.transcript.isEmpty
+                let silenceTimeout = hasContent
+                    ? Self.silenceLongSeconds
+                    : Self.silenceShortSeconds
+
+                let timeSinceSpeech = self.lastSpeechAt.map {
+                    now.timeIntervalSince($0)
+                } ?? now.timeIntervalSince(Date(timeIntervalSinceNow: -100))
+
+                let timeSinceHighEnergy = self.lastHighEnergyAt.map {
+                    now.timeIntervalSince($0)
+                } ?? Self.lowEnergyHoldSeconds + 1
+
+                // Ambas condiciones deben cumplirse: timer de transcripción
+                // pasó Y energía baja sostenida. Si el usuario sigue
+                // hablando aunque el recognizer aún no haya emitido, la
+                // energía mantiene viva la sesión.
+                let transcriptIdle = timeSinceSpeech >= silenceTimeout
+                let energyIdle = timeSinceHighEnergy >= Self.lowEnergyHoldSeconds
+                if transcriptIdle && energyIdle {
                     self.stop()
                     return
                 }
             }
+        }
+    }
+
+    // MARK: - Audio level (RMS → dB → 0…1)
+
+    /// Calcula el RMS del buffer (sample values son float -1..1 ya), lo
+    /// convierte a dB y normaliza a un rango 0..1 con piso en -55dB
+    /// (silencio) y techo en -5dB (habla fuerte). Resultado: el usuario
+    /// hablando normal mueve la barra en ~0.4-0.7, silencio queda en ~0.
+    private static func bufferLevel(_ buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData else { return 0 }
+        let channel = channelData.pointee
+        let length = Int(buffer.frameLength)
+        guard length > 0 else { return 0 }
+        var sumSquares: Float = 0
+        for i in 0..<length {
+            let s = channel[i]
+            sumSquares += s * s
+        }
+        let rms = sqrt(sumSquares / Float(length))
+        // Evitar log(0). 1e-7 corresponde a ~-140dB, sub-silencio absoluto.
+        let dB = 20 * log10(max(rms, 1e-7))
+        // Mapear -55dB (silencio ambiente) → 0, -5dB (habla alta) → 1.
+        let normalized = (dB + 55) / 50
+        return min(max(normalized, 0), 1)
+    }
+
+    /// Aplicado en MainActor (porque @Published muta state observable).
+    /// Hace smoothing exponencial para que la UI no parpadee y throttling
+    /// para no spamear publishes. Además resetea `lastHighEnergyAt` para
+    /// el VAD.
+    private func updateAudioLevel(_ newLevel: Float) {
+        // Smoothing exponencial: nuevoValor = α·raw + (1-α)·anterior
+        let smoothed = Self.audioLevelSmoothing * newLevel
+            + (1 - Self.audioLevelSmoothing) * audioLevel
+
+        bufferTickCounter += 1
+        // Throttle publish — cada 3 ticks (~14fps), suficiente para
+        // animación fluida sin spamear @Published.
+        if bufferTickCounter % 3 == 0 {
+            audioLevel = smoothed
+        }
+
+        // VAD: track energía alta para el watchdog. Threshold inferior
+        // pequeño para captar voz suave también.
+        let speaking = newLevel >= Self.speechEnergyThreshold
+        if speaking {
+            lastHighEnergyAt = Date()
+        }
+        if speaking != isSpeaking {
+            isSpeaking = speaking
         }
     }
 }

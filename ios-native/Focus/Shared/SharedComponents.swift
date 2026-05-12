@@ -1173,3 +1173,45 @@ struct PromptChip: View {
         .buttonStyle(.plain)
     }
 }
+
+// MARK: - AudioLevelBars (decibeles en vivo)
+
+/// 5 barras verticales animadas que reflejan el nivel de audio en vivo.
+/// Las barras del centro son las "más sensibles" (responden más fuerte al
+/// nivel), las laterales atenúan — patrón "ecualizador" estándar. Animadas
+/// con spring para movimiento orgánico, no robótico.
+///
+/// `level` debe estar normalizado 0...1 (lo que `NovaLiveService.audioLevel`
+/// publica). Sin habla = barras planas. Voz normal = ~50% altura. Voz
+/// fuerte = ~80-100%.
+struct AudioLevelBars: View {
+    /// Nivel de audio actual (0...1). Cambios animados via spring.
+    let level: Float
+
+    /// Multiplicadores por barra para crear el efecto "ecualizador" —
+    /// el centro responde más, las laterales atenúan. Los valores son
+    /// arbitrarios pero coreografeados para que parezca natural.
+    private let multipliers: [CGFloat] = [0.55, 0.85, 1.0, 0.85, 0.55]
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(multipliers.indices, id: \.self) { i in
+                Capsule()
+                    .fill(Theme.Colors.focusAccent)
+                    .frame(width: 2.5, height: barHeight(at: i))
+            }
+        }
+        .animation(.spring(response: 0.18, dampingFraction: 0.65), value: level)
+    }
+
+    /// Altura por barra: piso 3pt (siempre visible aunque haya silencio
+    /// total — más profesional que barras invisibles) + porción
+    /// proporcional al level × multiplier. Tope a 14pt para no exceder
+    /// el contenedor de 14pt que usa Mi Día.
+    private func barHeight(at index: Int) -> CGFloat {
+        let floor: CGFloat = 3
+        let ceiling: CGFloat = 14
+        let dynamic = CGFloat(level) * multipliers[index] * (ceiling - floor)
+        return floor + dynamic
+    }
+}
