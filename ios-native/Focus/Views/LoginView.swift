@@ -6,6 +6,23 @@ import UIKit
 /// Sigue el estado de `AuthStore`: `.loggedOut` → email step; `.codeSent` → code step.
 /// Ofrece "Continuar en modo demo" para usuarios que no quieren registrarse.
 struct LoginView: View {
+
+    /// **Feature flag de Google Sign-In.** Cuando es `false`, el botón
+    /// "Continuar con Google" + el divider "o" NO se renderizan. Toda la
+    /// lógica subyacente (AuthService.signInWithGoogle, AuthStore action,
+    /// callback handling) sigue intacta — solo se oculta la UI.
+    ///
+    /// **Por qué está en false para beta**: ASWebAuthenticationSession
+    /// muestra el host técnico de Supabase (`hvwqeemtfoyvfmongwzo...`) en
+    /// el prompt "Focus quiere utilizar...". Eso genera desconfianza tipo
+    /// phishing en testers nuevos. Soluciones reales (documentadas en
+    /// FOCUS_AUDIT_MASTER.md pase 55):
+    /// - **Path A**: GoogleSignIn SDK nativo (iOS client + Supabase
+    ///   signInWithIdToken). Requiere ~4-6h de trabajo + test en device.
+    /// - **Path B**: Supabase Custom Auth Domain (Pro plan $25/mes).
+    ///   Cambio mínimo de código (solo FocusConfig.supabaseURL).
+    /// Cuando Martin elija un path y termine la migración → flip a `true`.
+    private static let isGoogleSignInEnabled = false
     @EnvironmentObject private var auth: AuthStore
     @State private var email: String = ""
     @State private var code: String = ""
@@ -205,12 +222,15 @@ struct LoginView: View {
                 errorBanner(local)
             }
 
-            orDivider
-
-            googleButton
-
-            if let notice = googleNotice {
-                noticeBanner(notice)
+            // Google Sign-In gated por feature flag. Hidden para beta —
+            // ver comment en `isGoogleSignInEnabled` arriba para por qué
+            // y cómo re-habilitar.
+            if Self.isGoogleSignInEnabled {
+                orDivider
+                googleButton
+                if let notice = googleNotice {
+                    noticeBanner(notice)
+                }
             }
 
             if let err = auth.lastError {
