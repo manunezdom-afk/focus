@@ -301,27 +301,37 @@ struct LoginView: View {
         .disabled(auth.isWorking)
     }
 
-    /// Lanza el flujo OAuth real de Google. Necesita un `presentationAnchor`
-    /// — la `UIWindow` activa de la escena actual. Si por alguna razón no
-    /// hay window, devolvemos un mensaje claro en vez de quedarnos colgados.
+    /// Lanza el flujo de Google Sign-In. Prefiere el SDK NATIVO (no muestra
+    /// host técnico de Supabase). Cuando el flag `isGoogleSignInEnabled`
+    /// esté true Y el SDK GoogleSignIn esté instalado en el target, este
+    /// método ejecuta el flow nativo. La rama ASWebAuthenticationSession
+    /// queda como fallback histórico (deprecated, mantener hasta validar
+    /// nativo en device).
     private func startGoogleSignIn() {
         dismissKeyboard()
-        guard let anchor = resolvePresentationAnchor() else {
+        guard let topVC = resolveTopViewController() else {
             googleNotice = "No pudimos abrir el login de Google. Vuelve a intentar."
             return
         }
         googleNotice = nil
-        Task { await auth.signInWithGoogle(presentationAnchor: anchor) }
+        Task { await auth.signInWithGoogleNative(presenter: topVC) }
     }
 
-    /// Toma la `UIWindow` activa para presentar `ASWebAuthenticationSession`.
-    /// Sin esto el flujo OAuth falla con `presentationContextNotProvided`.
-    private func resolvePresentationAnchor() -> ASPresentationAnchor? {
+    /// Resuelve el `UIViewController` activo en la escena foreground.
+    /// El SDK de GoogleSignIn necesita un presenter — no un anchor de
+    /// window. Buscamos la topmost VC (cubre casos con sheets, alerts,
+    /// nav stacks anidados).
+    private func resolveTopViewController() -> UIViewController? {
         let scenes = UIApplication.shared.connectedScenes
-        for case let scene as UIWindowScene in scenes where scene.activationState == .foregroundActive {
-            if let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first {
-                return window
+        for case let scene as UIWindowScene in scenes
+            where scene.activationState == .foregroundActive {
+            guard let window = scene.windows.first(where: { $0.isKeyWindow })
+                ?? scene.windows.first else { continue }
+            var current = window.rootViewController
+            while let presented = current?.presentedViewController {
+                current = presented
             }
+            return current
         }
         return nil
     }

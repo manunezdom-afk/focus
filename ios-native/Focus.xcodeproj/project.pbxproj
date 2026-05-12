@@ -30,6 +30,7 @@
 		FA0000000000000000000085 /* FocusConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000075 /* FocusConfig.swift */; };
 		FA0000000000000000000086 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000076 /* KeychainStore.swift */; };
 		FA0000000000000000000087 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000077 /* AuthService.swift */; };
+		FA00000000000000000000A2 /* AuthService+GoogleNative.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA00000000000000000000A1 /* AuthService+GoogleNative.swift */; };
 		FA0000000000000000000088 /* AuthStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000078 /* AuthStore.swift */; };
 		FA0000000000000000000089 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000079 /* LoginView.swift */; };
 		FA0000000000000000000090 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007A /* OnboardingView.swift */; };
@@ -69,6 +70,7 @@
 		FA0000000000000000000075 /* FocusConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusConfig.swift; sourceTree = "<group>"; };
 		FA0000000000000000000076 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		FA0000000000000000000077 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		FA00000000000000000000A1 /* AuthService+GoogleNative.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AuthService+GoogleNative.swift"; sourceTree = "<group>"; };
 		FA0000000000000000000078 /* AuthStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStore.swift; sourceTree = "<group>"; };
 		FA0000000000000000000079 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		FA000000000000000000007A /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
@@ -172,6 +174,7 @@
 				FA0000000000000000000055 /* DemoDataProvider.swift */,
 				FA0000000000000000000076 /* KeychainStore.swift */,
 				FA0000000000000000000077 /* AuthService.swift */,
+				FA00000000000000000000A1 /* AuthService+GoogleNative.swift */,
 				FA000000000000000000007B /* SupabaseSyncService.swift */,
 				FA000000000000000000007C /* NovaService.swift */,
 				FA000000000000000000007D /* LocalNotificationService.swift */,
@@ -275,6 +278,7 @@
 				FA0000000000000000000045 /* DemoDataProvider.swift in Sources */,
 				FA0000000000000000000086 /* KeychainStore.swift in Sources */,
 				FA0000000000000000000087 /* AuthService.swift in Sources */,
+				FA00000000000000000000A2 /* AuthService+GoogleNative.swift in Sources */,
 				FA0000000000000000000091 /* SupabaseSyncService.swift in Sources */,
 				FA0000000000000000000092 /* NovaService.swift in Sources */,
 				FA0000000000000000000093 /* LocalNotificationService.swift in Sources */,

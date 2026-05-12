@@ -27,4 +27,23 @@ enum FocusConfig {
     static var isAuthConfigured: Bool {
         !supabaseAnonKey.isEmpty
     }
+
+    // MARK: - Google Sign-In (nativo iOS)
+
+    /// OAuth Client ID de tipo **iOS** del proyecto Google Cloud
+    /// `veo3-premium`. Creado vía Chrome MCP el 2026-05-12 (pase 56) con
+    /// Bundle ID `me.usefocus.app` + Team ID `D8UM897B2T`. Va al Info.plist
+    /// como `GIDClientID` Y configurado en Supabase Authentication →
+    /// Providers → Google "Client IDs" allowlist (junto al Web client).
+    /// Público: NO es secreto — el reversed scheme está en el binario
+    /// igualmente.
+    static let googleIOSClientID =
+        "587696845191-f1fh55ukaaqtk7odfb8stntmeoqlglglub.apps.googleusercontent.com"
+
+    /// URL scheme que Info.plist debe registrar como `CFBundleURLTypes`
+    /// para que iOS rute el callback de Google al app. Es el iOS Client
+    /// ID con orden invertido. Sin esto registrado en Xcode UI, el flow
+    /// OAuth no completa.
+    static let googleReversedClientID =
+        "com.googleusercontent.apps.587696845191-f1fh55ukaaqtk7odfb8stntmeoqlglglub"
 }

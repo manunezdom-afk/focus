@@ -157,6 +157,12 @@ final class AuthStore: ObservableObject {
     /// (Safari in-app), espera el callback `focus://auth-callback#…tokens…`,
     /// y persiste la sesión igual que el OTP path.
     ///
+    /// **Status**: deprecated en favor de `signInWithGoogleNative()`.
+    /// Lo dejamos para fallback temporal si el SDK nativo falla en
+    /// runtime. Cuando confirmemos que el native flow es estable post-beta,
+    /// se puede eliminar. iOS muestra "hvwqeemt..." en el prompt — por eso
+    /// `LoginView.isGoogleSignInEnabled` controla qué flow ejecutar.
+    ///
     /// `anchor` lo provee la vista (LoginView) — sin anchor válido la
     /// presentación falla en iOS 13+.
     func signInWithGoogle(presentationAnchor: ASPresentationAnchor) async {
@@ -182,6 +188,39 @@ final class AuthStore: ObservableObject {
         }
     }
 
+    /// Inicia el flow nativo de Google Sign-In via el SDK GoogleSignIn-iOS.
+    /// Genera nonce, lanza la UI nativa de Google, obtiene `idToken`, lo
+    /// intercambia con Supabase por una sesión. iOS NO muestra el host de
+    /// Supabase — solo la pantalla oficial de Google.
+    ///
+    /// Requiere el package `GoogleSignIn-iOS` agregado al target (paso
+    /// manual via Xcode). Sin SPM, el método throws error claro.
+    ///
+    /// `presenter` es el `UIViewController` activo. La vista lo resuelve
+    /// con `resolveTopViewController()` igual que como hace el OAuth web.
+    @MainActor
+    func signInWithGoogleNative(presenter: UIViewController) async {
+        lastError = nil
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            let session = try await AuthService.signInWithGoogleNative(
+                presenter: presenter
+            )
+            persistSession(session)
+            state = .loggedIn(session)
+            HapticManager.shared.success()
+        } catch AuthError.oauthCanceled {
+            // Usuario tocó cancelar en la UI de Google — silencioso.
+        } catch let err as AuthError {
+            lastError = err.errorDescription
+            HapticManager.shared.warning()
+        } catch {
+            lastError = error.localizedDescription
+            HapticManager.shared.warning()
+        }
+    }
+
     /// Entra en modo demo (sin login).
     func enterDemo() {
         lastError = nil
@@ -194,6 +233,11 @@ final class AuthStore: ObservableObject {
     /// como acción manual del usuario.
     func signOut() {
         AuthService.signOut()
+        // También limpia la sesión local de Google SDK (si el package
+        // está instalado). Sin esto, GIDSignIn.sharedInstance.currentUser
+        // queda con el usuario anterior y el próximo signIn podría
+        // auto-completar sin selector. No afecta a Supabase ni Keychain.
+        AuthService.signOutGoogleNative()
         UserDefaults.standard.removeObject(forKey: expiresAtKey)
         lastError = nil
         state = .loggedOut
