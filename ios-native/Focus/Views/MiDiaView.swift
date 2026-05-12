@@ -92,10 +92,14 @@ struct MiDiaView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     header
                         .padding(.horizontal, Theme.Spacing.xl)
-                        // Padding superior generoso para que el header no
-                        // quede pegado al notch/Dynamic Island. iOS ya respeta
-                        // safeArea, pero +12pt extra da aire para la marca.
-                        .padding(.top, Theme.Spacing.lg)
+                        // Padding superior MÁS generoso (xxl=24pt en vez de
+                        // lg=16pt) más `safeAreaPadding(.top, sm)` abajo en el
+                        // ScrollView para garantizar que el título "Mi Día"
+                        // jamás quede bajo el Dynamic Island. El paging
+                        // container horizontal de MainTabView puede no
+                        // propagar safeArea correctamente a los children,
+                        // por eso paddeamos defensivamente.
+                        .padding(.top, Theme.Spacing.xxl)
 
                     focusBar
                         .padding(.horizontal, Theme.Spacing.xl)

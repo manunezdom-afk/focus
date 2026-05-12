@@ -16,20 +16,38 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
+            // Fondo base — mantenemos textPrimary oscuro para legibilidad,
+            // pero PINTAMOS el frame inicial con un tinte cobalto MÁS
+            // intenso que el anterior (0.12 → ~0.20 en la parte superior)
+            // para que la primera impresión sea Focus brand y no blanco
+            // plano. El bottom sigue siendo background para no romper la
+            // legibilidad de los botones.
             Theme.Colors.background.ignoresSafeArea()
 
-            // Hero gradient sutil cobalt al top — identidad consistente con
-            // BootView/Login (todo el "entry flow" comparte tinte azul).
+            LinearGradient(
+                colors: [
+                    Theme.Colors.focusAccent.opacity(0.22),
+                    Theme.Colors.focusAccent.opacity(0.08),
+                    Theme.Colors.background
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            // Halo radial sutil arriba — refuerza la sensación spotlight
+            // sobre el logo en page 1.
             VStack(spacing: 0) {
-                LinearGradient(
+                RadialGradient(
                     colors: [
-                        Theme.Colors.focusAccent.opacity(0.12),
-                        Theme.Colors.background
+                        Theme.Colors.focusAccent.opacity(0.18),
+                        Theme.Colors.focusAccent.opacity(0.0)
                     ],
-                    startPoint: .top,
-                    endPoint: .bottom
+                    center: .top,
+                    startRadius: 60,
+                    endRadius: 360
                 )
-                .frame(height: 420)
+                .frame(height: 520)
                 Spacer()
             }
             .ignoresSafeArea()
