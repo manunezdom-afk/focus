@@ -297,12 +297,28 @@ final class NovaLiveService: ObservableObject {
     }
 
     /// Cancelación inmediata: descarta lo que haya y vuelve a idle. La UI
-    /// llama esto cuando el usuario toca "Cancelar".
+    /// llama esto cuando el usuario toca "Cancelar" o cuando el contexto
+    /// requiere parar todo (cambio de tab, app va a background, logout).
     func cancel() {
         recognitionTask?.cancel()
         tearDown()
         transcript = ""
         state = .idle
+    }
+
+    /// Cleanup defensivo cuando el service se desinstancia (ej. logout
+    /// destruye MiDiaView). Sin esto, el audio engine podría quedar
+    /// activo en memoria hasta que iOS lo recicle. `tearDown` libera el
+    /// inputNode, el audioEngine, el recognitionRequest y la audio session.
+    deinit {
+        // No podemos usar @MainActor desde deinit; las propiedades que
+        // tocamos son thread-safe (audioEngine sync) o solo metadata.
+        recognitionTask?.cancel()
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        try? AVAudioSession.sharedInstance().setActive(
+            false, options: .notifyOthersOnDeactivation
+        )
     }
 
     // MARK: - Internals

@@ -4,6 +4,9 @@ struct MiDiaView: View {
     @EnvironmentObject private var store: FocusDataStore
     @EnvironmentObject private var nav: NavigationCoordinator
     @EnvironmentObject private var toast: ToastManager
+    // ScenePhase — para cancelar dictado cuando la app va a background
+    // (privacy: no dejar mic activo cuando el usuario sale de la app).
+    @Environment(\.scenePhase) private var scenePhase
     @State private var focusBarText: String = ""
     @State private var showAllEvents: Bool = false
     /// Servicio de dictado inline en el FocusBar. NO es Nova Live.
@@ -211,6 +214,24 @@ struct MiDiaView: View {
                 dictationDeniedMessage = msg
             case .requestingPermissions:
                 isDictating = false
+            }
+        }
+        // Si el usuario cambia de tab mientras está dictando, cancelar
+        // inmediatamente el mic. Sin esto el audio engine quedaba activo
+        // grabando audio que el usuario no vería + audio session bloqueada
+        // para otros sonidos (música, llamadas). Privacy + UX fix.
+        .onChange(of: nav.selectedTab) { _, newTab in
+            if isDictating && newTab != .miDia {
+                dictationService.cancel()
+            }
+        }
+        // Mismo cleanup cuando la app va a background — sin esto el mic
+        // sigue activo (técnicamente iOS lo permite breve, pero es un
+        // mal patrón). El scenePhase change captura background, inactive
+        // y active de forma consistente.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background && isDictating {
+                dictationService.cancel()
             }
         }
         .alert("Sin permiso de voz", isPresented: .constant(dictationDeniedMessage != nil), actions: {
@@ -1206,7 +1227,13 @@ struct MiDiaView: View {
         source: PendingClarification.Source
     ) -> PendingClarification? {
         let lower = userText.lowercased()
-        let wantsReminder = lower.contains("acu") || lower.contains("recu")
+        // Detección de "quiero recordatorio" — usaba `contains("acu")` que
+        // generaba falsos positivos en palabras como "acudir", "acumular",
+        // "acuse". Ahora se delega a la utilidad central que chequea
+        // triggers explícitos ("acuérdame", "recuérdame", "avísame", etc.)
+        // con word boundaries.
+        let wantsReminder = NovaActionNormalizer.isReminderTrigger(in: userText)
+            || NovaActionNormalizer.impliesPunctualReminder(in: userText)
         let section = NovaResponder.guessSection(for: userText)
         switch reason {
         case .eventNeedsTime(let title, let date):
