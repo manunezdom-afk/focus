@@ -502,7 +502,11 @@ struct MiDiaView: View {
 
     /// Aplica el `NovaService.Result` al store y arma el inline response.
     /// Si el backend solo devolvió `reply` sin actions (clarify o smalltalk),
-    /// mostramos solo el texto.
+    /// mostramos solo el texto. ADEMÁS: si el reply termina con "?", lo
+    /// tratamos como pregunta del backend y guardamos un pending
+    /// clarification basado en el texto del usuario — así el siguiente
+    /// turno corto ("a las 3", "mañana", "en 20") puede completar la
+    /// acción aunque el local parser no haya detectado clarify.
     private func applyBackendResult(_ result: NovaService.Result, userText: String) async -> InlineNovaResponse {
         let outcome = store.applyBackendActions(result.actions, userText: userText)
 
@@ -511,6 +515,17 @@ struct MiDiaView: View {
         let blockedNote: String? = result.smartActionsBlocked
             ? (result.smartActionsMessage ?? "Llegaste al límite diario de acciones de Nova.")
             : nil
+
+        // Si el backend NO mutó nada y su reply es una pregunta, guardar
+        // pending basado en el original userText. Esto cubre casos como
+        // "tengo parcial el jueves" donde el local parser sí entiende y
+        // armó pending, pero también casos donde el backend hace una
+        // pregunta no anticipada por el local. Idempotente: si el local
+        // ya guardó un pending, este no lo sobreescribe a peor.
+        if !outcome.didMutate, replyText.hasSuffix("?")
+            && !store.novaContext.pendingIsActive {
+            persistBackendQuestionAsPending(userText: userText, question: replyText)
+        }
 
         if outcome.didMutate {
             // Hubo mutación: usamos el resumen del outcome como cabecera +
@@ -617,6 +632,47 @@ struct MiDiaView: View {
 
     /// Split del reply del backend en (summary, details). El backend ya
     /// devuelve máx 2 oraciones; si hay punto final, lo partimos ahí.
+    /// Llamado cuando el backend retorna una pregunta sin actions. Re-parsea
+    /// el `userText` localmente para extraer título/fecha tentativos y los
+    /// guarda en `pendingClarification`. Así el siguiente turno corto puede
+    /// completar la acción usando memoria local — aunque el backend nunca
+    /// emita un "clarify" estructurado.
+    private func persistBackendQuestionAsPending(userText: String, question: String) {
+        // Re-parsear local para obtener intent y construir pending.
+        let preIntent = NovaResponder.parse(userText, context: store.novaContext)
+        if case .clarify(let reason) = preIntent,
+           let pending = buildPendingClarification(
+               from: reason,
+               userText: userText,
+               source: .inlineMiDia
+           ) {
+            // Sobreescribir el questionAsked con la pregunta REAL del
+            // backend para que sea coherente con lo que el usuario está
+            // viendo.
+            var updated = pending
+            updated.questionAsked = question
+            store.setPendingClarification(updated)
+            return
+        }
+        // Si el local parser no detectó clarify, hacemos un pending
+        // genérico con title=userText (limpio) — el follow-up tendrá
+        // que aportar la hora. Mejor algo que nada.
+        let cleanedTitle = NovaActionNormalizer.cleanTitle(userText)
+        guard !cleanedTitle.isEmpty else { return }
+        let wantsReminder = NovaActionNormalizer.isReminderTrigger(in: userText)
+        store.setPendingClarification(PendingClarification(
+            originalInput: userText,
+            kind: wantsReminder ? .reminder : .event,
+            proposedTitle: cleanedTitle,
+            proposedDate: nil,
+            proposedSection: NovaResponder.guessSection(for: userText),
+            wantsReminder: wantsReminder,
+            missingFields: [.date, .time],
+            questionAsked: question,
+            source: .inlineMiDia
+        ))
+    }
+
     private func splitReplyForUI(_ raw: String) -> (summary: String, details: String?) {
         let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         // Buscar primer punto seguido de espacio o fin de string.

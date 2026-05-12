@@ -1,0 +1,209 @@
+import Foundation
+
+#if DEBUG
+
+/// Tests internos del `NovaActionNormalizer`. Como el proyecto no tiene
+/// target de XCTest separado todavía, estos tests son funciones puras que
+/// se pueden llamar desde un debugger o desde un breakpoint para validar
+/// que los casos críticos del usuario siguen funcionando.
+///
+/// **Cómo correr manualmente desde LLDB en Xcode**:
+///   `po NovaActionNormalizerTests.runAll()`
+///
+/// Imprime en consola los casos que pasan/fallan. Si todos pasan, devuelve
+/// "ALL TESTS PASSED ✓". Si alguno falla, devuelve la lista de fallidos.
+///
+/// Casos basados directamente en la sección "TEST SUITE MANUAL Y/O
+/// AUTOMATIZABLE" del prompt de Martin — son los inputs reales que él
+/// dice que deben funcionar.
+enum NovaActionNormalizerTests {
+
+    @discardableResult
+    static func runAll() -> String {
+        var failures: [String] = []
+
+        // ───── cleanTitle ──────────────────────────────────────────────
+
+        check(
+            label: "cleanTitle: 'ir a buscar a la agustina tipo 3 acuérdate' → 'Buscar a Agustina'",
+            actual: NovaActionNormalizer.cleanTitle("ir a buscar a la agustina tipo 3 acuérdate"),
+            expected: "Buscar a Agustina",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'salir a buscar a mi hermano en 5 min' → 'Buscar a mi hermano'",
+            actual: NovaActionNormalizer.cleanTitle("salir a buscar a mi hermano en 5 min"),
+            expected: "Buscar a mi hermano",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'acuérdame llamar a Juan' → 'Llamar a Juan'",
+            actual: NovaActionNormalizer.cleanTitle("acuérdame llamar a Juan"),
+            expected: "Llamar a Juan",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'recuérdame pagar internet mañana' → 'Pagar internet'",
+            actual: NovaActionNormalizer.cleanTitle("recuérdame pagar internet mañana"),
+            expected: "Pagar internet",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'Recordatorio: comprar pan' → 'Comprar pan'",
+            actual: NovaActionNormalizer.cleanTitle("Recordatorio: comprar pan"),
+            expected: "Comprar pan",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'reunión con Juan a las 3' → 'Reunión con Juan'",
+            actual: NovaActionNormalizer.cleanTitle("reunión con Juan a las 3"),
+            expected: "Reunión con Juan",
+            failures: &failures
+        )
+
+        // ───── isReminderTrigger ───────────────────────────────────────
+
+        check(
+            label: "isReminderTrigger: 'acuérdame llamar' → true",
+            actual: NovaActionNormalizer.isReminderTrigger(in: "acuérdame llamar"),
+            expected: true,
+            failures: &failures
+        )
+
+        check(
+            label: "isReminderTrigger: 'avísame en 5 minutos' → true",
+            actual: NovaActionNormalizer.isReminderTrigger(in: "avísame en 5 minutos"),
+            expected: true,
+            failures: &failures
+        )
+
+        check(
+            label: "isReminderTrigger: 'que no se me olvide pagar' → true",
+            actual: NovaActionNormalizer.isReminderTrigger(in: "que no se me olvide pagar"),
+            expected: true,
+            failures: &failures
+        )
+
+        check(
+            label: "isReminderTrigger: 'tengo reunión mañana' → false",
+            actual: NovaActionNormalizer.isReminderTrigger(in: "tengo reunión mañana"),
+            expected: false,
+            failures: &failures
+        )
+
+        check(
+            label: "isReminderTrigger: 'agenda dentista' → false",
+            actual: NovaActionNormalizer.isReminderTrigger(in: "agenda dentista"),
+            expected: false,
+            failures: &failures
+        )
+
+        // ───── resolveEndTime ──────────────────────────────────────────
+
+        let now = Date()
+        let oneHour = now.addingTimeInterval(3600)
+
+        let reminderEnd = NovaActionNormalizer.resolveEndTime(
+            startTime: now, providedEndTime: oneHour,
+            hasExplicitEndTime: true, isReminder: true
+        )
+        check(
+            label: "resolveEndTime: isReminder=true ignora endTime explícito",
+            actual: reminderEnd.endTime,
+            expected: nil as Date?,
+            failures: &failures
+        )
+
+        let explicitRange = NovaActionNormalizer.resolveEndTime(
+            startTime: now, providedEndTime: oneHour,
+            hasExplicitEndTime: true, isReminder: false
+        )
+        check(
+            label: "resolveEndTime: rango explícito se respeta",
+            actual: explicitRange.endTime != nil,
+            expected: true,
+            failures: &failures
+        )
+
+        let noEnd = NovaActionNormalizer.resolveEndTime(
+            startTime: now, providedEndTime: nil,
+            hasExplicitEndTime: false, isReminder: false
+        )
+        check(
+            label: "resolveEndTime: sin rango explícito → inferred",
+            actual: noEnd.inferredDuration,
+            expected: true,
+            failures: &failures
+        )
+
+        // ───── shouldScheduleNotification ──────────────────────────────
+
+        let future = Date().addingTimeInterval(60)
+        let past = Date().addingTimeInterval(-60)
+
+        check(
+            label: "shouldSchedule: reminder + futuro + toggle ON → true",
+            actual: NovaActionNormalizer.shouldScheduleNotification(
+                isReminder: true, startTime: future, remindersEnabledInSettings: true
+            ),
+            expected: true,
+            failures: &failures
+        )
+
+        check(
+            label: "shouldSchedule: reminder + pasado → false",
+            actual: NovaActionNormalizer.shouldScheduleNotification(
+                isReminder: true, startTime: past, remindersEnabledInSettings: true
+            ),
+            expected: false,
+            failures: &failures
+        )
+
+        check(
+            label: "shouldSchedule: no-reminder + futuro → false",
+            actual: NovaActionNormalizer.shouldScheduleNotification(
+                isReminder: false, startTime: future, remindersEnabledInSettings: true
+            ),
+            expected: false,
+            failures: &failures
+        )
+
+        check(
+            label: "shouldSchedule: toggle OFF → false aunque sea reminder futuro",
+            actual: NovaActionNormalizer.shouldScheduleNotification(
+                isReminder: true, startTime: future, remindersEnabledInSettings: false
+            ),
+            expected: false,
+            failures: &failures
+        )
+
+        // ───── Resultado ───────────────────────────────────────────────
+
+        if failures.isEmpty {
+            return "✓ ALL TESTS PASSED (\(failures.count == 0 ? "16" : "\(16 - failures.count)") cases)"
+        }
+        return "✗ FAILURES (\(failures.count)):\n" + failures.joined(separator: "\n")
+    }
+
+    private static func check<T: Equatable>(
+        label: String,
+        actual: T,
+        expected: T,
+        failures: inout [String]
+    ) {
+        if actual == expected {
+            print("  ✓ \(label)")
+        } else {
+            let msg = "  ✗ \(label) — got \(actual), expected \(expected)"
+            print(msg)
+            failures.append(msg)
+        }
+    }
+}
+
+#endif

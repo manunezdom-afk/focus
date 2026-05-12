@@ -2725,8 +2725,14 @@ final class FocusDataStore: ObservableObject {
     /// section, isReminder, inferredDuration. Devuelve nil si no se puede
     /// armar una hora válida.
     private func makeEvent(from payload: BackendEventCreate, userText: String) -> FocusEvent? {
-        let title = payload.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return nil }
+        // PASO 1: Limpiar título via normalizer (centralizado).
+        // El backend puede devolver "Acuérdame buscar a Juan" sin limpiar
+        // — el normalizer quita reminder triggers, fillers, marcadores
+        // temporales sueltos, normaliza nombres propios, y simplifica
+        // "Ir a buscar X" → "Buscar a X".
+        let rawTitle = payload.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedTitle = NovaActionNormalizer.cleanTitle(rawTitle)
+        guard !cleanedTitle.isEmpty else { return nil }
 
         let cal = Calendar.current
         guard let startTime = NovaTimeFormatter.resolveDate(
@@ -2734,34 +2740,17 @@ final class FocusDataStore: ObservableObject {
             timeString: payload.timeString
         ) else { return nil }
 
-        // Reglas:
-        // - Si endTime null → es punto en el tiempo. Lo marcamos como
-        //   inferredDuration o isReminder según contexto.
-        // - Si título empieza con "Recordatorio:" o icon es "alarm" → reminder.
-        // - Si el userText original contiene un trigger explícito de
-        //   recordatorio ("acuérdame", "recuérdame", "avísame", "que no
-        //   se me olvide"), también marcar como recordatorio. Esto cubre
-        //   el caso donde el backend devuelve un add_event normal sin
-        //   icon=alarm para una frase como "acuérdame buscar a la
-        //   Agustina" — sin esto, la notificación local nunca se
-        //   programaba.
-        // - Si endTime explícita → rango real.
+        // PASO 2: Decidir isReminder via normalizer. Si el `userText`
+        // contiene cualquier trigger de recordatorio explícito ("acuérdame",
+        // "recuérdame", "avísame", etc.), forzar isReminder=true sin
+        // importar lo que dijo el backend. También aceptamos icon=alarm
+        // o título original con prefijo "Recordatorio:" como señales.
         let backendIcon = payload.icon ?? ""
-        let userTextLower = userText.lowercased()
-        let userAskedReminder = userTextLower.contains("acuérdame")
-            || userTextLower.contains("acuerdame")
-            || userTextLower.contains("acuérdate")
-            || userTextLower.contains("acuerdate")
-            || userTextLower.contains("recuérdame")
-            || userTextLower.contains("recuerdame")
-            || userTextLower.contains("avísame")
-            || userTextLower.contains("avisame")
-            || userTextLower.contains("que no se me olvide")
-            || userTextLower.contains("no te olvides")
-        let isReminderHint = title.lowercased().hasPrefix("recordatorio")
+        let isReminderHint = NovaActionNormalizer.isReminderTrigger(in: userText)
+            || rawTitle.lowercased().hasPrefix("recordatorio")
             || backendIcon.lowercased() == "alarm"
-            || userAskedReminder
 
+        // PASO 3: Resolver endTime explícito si el backend lo dio.
         var explicitEnd: Date? = nil
         if let endStr = payload.endTimeString,
            !endStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -2773,38 +2762,48 @@ final class FocusDataStore: ObservableObject {
             explicitEnd = end
         }
 
-        // Sección: si isReminder → .reminder. Si no, primero icon, luego
-        // detectSection del título.
+        // PASO 4: Sección. Si isReminder → .reminder. Si no, primero icon
+        // del backend, luego heurística sobre el TÍTULO LIMPIO.
         let section: EventSection
         if isReminderHint {
             section = .reminder
         } else if let iconBased = sectionFromIcon(backendIcon) {
             section = iconBased
         } else {
-            section = NovaResponder.guessSection(for: title) ?? .reunion
+            section = NovaResponder.guessSection(for: cleanedTitle) ?? .reunion
         }
 
-        // endTime: si recordatorio o sin endTime explícito → 5 min interno
-        // (la UI muestra como punto). Si endTime explícito → rango real.
+        // PASO 5: endTime via normalizer. Centralizado para que el visible
+        // endTime sea consistente con el local path.
+        let endResolution = NovaActionNormalizer.resolveEndTime(
+            startTime: startTime,
+            providedEndTime: explicitEnd,
+            hasExplicitEndTime: explicitEnd != nil,
+            isReminder: isReminderHint
+        )
+        // Para storage interno: si endTime es nil, ponemos start+5min
+        // como padding para que el evento ordene bien en el calendario.
+        // La UI usa `inferredDuration`/`isReminder` para decidir si
+        // mostrar rango o punto.
         let endTime: Date
         let isReminderFlag: Bool?
         let inferredFlag: Bool?
-        if isReminderHint {
+        if let resolved = endResolution.endTime {
+            endTime = resolved
+            isReminderFlag = nil
+            inferredFlag = false
+        } else if isReminderHint {
             endTime = cal.date(byAdding: .minute, value: 5, to: startTime) ?? startTime
             isReminderFlag = true
             inferredFlag = nil
-        } else if let explicit = explicitEnd {
-            endTime = explicit
-            isReminderFlag = nil
-            inferredFlag = false
         } else {
             endTime = cal.date(byAdding: .minute, value: 5, to: startTime) ?? startTime
             isReminderFlag = nil
-            inferredFlag = true
+            inferredFlag = endResolution.inferredDuration
         }
 
         return FocusEvent(
-            title: title,
+            title: cleanedTitle,
             notes: payload.notes,
             startTime: startTime,
             endTime: endTime,
@@ -2817,14 +2816,17 @@ final class FocusDataStore: ObservableObject {
 
     /// Crea un `FocusTask` desde el payload del backend.
     private func makeTask(from payload: BackendTaskCreate) -> FocusTask? {
-        let title = payload.label.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return nil }
+        // Limpiar el label via normalizer — backend puede devolver
+        // "tengo que estudiar cálculo" sin strip de "tengo que".
+        let rawLabel = payload.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedTitle = NovaActionNormalizer.cleanTitle(rawLabel)
+        guard !cleanedTitle.isEmpty else { return nil }
         let priority = TaskPriority.fromBackendLabel(payload.priority)
         let category = TaskCategory.fromBackendLabel(payload.category)
         let linkedEventId = payload.linkedEventId.flatMap(parseEventId(_:))
         let parentTaskId = payload.parentTaskId.flatMap(parseEventId(_:))
         return FocusTask(
-            title: title,
+            title: cleanedTitle,
             priority: priority,
             category: category,
             linkedEventId: linkedEventId,
@@ -3282,28 +3284,60 @@ final class FocusDataStore: ObservableObject {
     /// Devuelve nil si el intent no debería ejecutarse acá (caller fall-through).
     func applyLocalNovaIntent(_ intent: NovaIntent, userText: String) -> String? {
         switch intent {
-        case .createEvent(let title, let when, let explicitEnd, let location, let section, let wantsReminder):
+        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder):
             guard let date = when else { return nil }
+            // PASO 1: Limpiar título via normalizer (mismo pipeline que
+            // backend path → consistencia 100%).
+            let title = NovaActionNormalizer.cleanTitle(rawTitle)
+            guard !title.isEmpty else { return nil }
+
+            // PASO 2: isReminder unificado — del intent (wantsReminder)
+            // O detectado en userText. Por las dudas, normalizer también.
+            let isReminderHint = wantsReminder
+                || NovaActionNormalizer.isReminderTrigger(in: userText)
+
+            // PASO 3: endTime via normalizer (centralizado).
+            let endResolution = NovaActionNormalizer.resolveEndTime(
+                startTime: date,
+                providedEndTime: explicitEnd,
+                hasExplicitEndTime: explicitEnd != nil && (explicitEnd ?? date) > date,
+                isReminder: isReminderHint
+            )
+
+            // Internamente padeamos endTime 5min para ordenamiento;
+            // flags decide qué muestra la UI.
             let cal = Calendar.current
             let end: Date
             let isReminderFlag: Bool?
             let inferredFlag: Bool?
-            if wantsReminder {
+            if let resolved = endResolution.endTime {
+                end = resolved
+                isReminderFlag = nil
+                inferredFlag = false
+            } else if isReminderHint {
                 end = cal.date(byAdding: .minute, value: 5, to: date) ?? date
                 isReminderFlag = true
                 inferredFlag = nil
-            } else if let explicit = explicitEnd, explicit > date {
-                end = explicit
-                isReminderFlag = nil
-                inferredFlag = false
             } else {
                 end = cal.date(byAdding: .minute, value: 5, to: date) ?? date
                 isReminderFlag = nil
-                inferredFlag = true
+                inferredFlag = endResolution.inferredDuration
             }
-            let effectiveSection: EventSection = wantsReminder
+            let effectiveSection: EventSection = isReminderHint
                 ? (section ?? .reminder)
                 : (section ?? .reunion)
+
+            // PASO 4: anti-duplicado — si ya hay un evento casi igual,
+            // no crear nuevo. Evita basura cuando el usuario repite un
+            // comando.
+            if NovaActionNormalizer.isLikelyDuplicate(
+                title: title,
+                startTime: date,
+                existingEvents: events
+            ) {
+                return "Ya tenía «\(title)» agendado a esa hora — no lo duplico."
+            }
+
             let event = FocusEvent(
                 title: title,
                 startTime: date,
@@ -3325,11 +3359,14 @@ final class FocusDataStore: ObservableObject {
             )
             let timeLabel = DateFormatters.hourMinute.string(from: date)
             let dayLabel = DateFormatters.weekdayDay.string(from: date).lowercased()
-            return wantsReminder
-                ? "Listo, te lo recuerdo «\(title)» el \(dayLabel) a las \(timeLabel)."
+            return isReminderHint
+                ? "Listo, te lo recuerdo: «\(title)» el \(dayLabel) a las \(timeLabel)."
                 : "Agendé «\(title)» el \(dayLabel) a las \(timeLabel)."
 
-        case .createTask(let title, let dueDate, _, let wantsReminder):
+        case .createTask(let rawTitle, let dueDate, _, let wantsReminder):
+            // Mismo pipeline de limpieza para tareas.
+            let title = NovaActionNormalizer.cleanTitle(rawTitle)
+            guard !title.isEmpty else { return nil }
             let category: TaskCategory = {
                 guard let dueDate else { return .hoy }
                 let cal = Calendar.current
