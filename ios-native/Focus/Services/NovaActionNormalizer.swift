@@ -122,12 +122,18 @@ enum NovaActionNormalizer {
 
         // 3. Strip marcadores temporales sueltos.
         let temporalPatterns: [String] = [
-            // Horas
+            // Horas en dígitos.
             #"\ba la?s? \d{1,2}(:\d{2})?\s*(am|pm|hrs?|de la (mañana|manana|tarde|noche))?\b"#,
             #"\b\d{1,2}:\d{2}\b"#,
             #"\btipo (las? )?\d{1,2}(:\d{2})?\b"#,
             #"\bcomo a la?s? \d{1,2}(:\d{2})?\b"#,
             #"\b(a eso de|cerca de|alrededor de|por) la?s? \d{1,2}(:\d{2})?\b"#,
+            // Horas en PALABRAS — "a las tres", "a la una", "a las tres y
+            // media", "a las tres y cuarto", "tres y treinta", "tipo cuatro",
+            // "como a las seis de la tarde". Sin este patrón el cleanTitle
+            // dejaba "Ir a buscar a mi hermano a las tres" intacto y el step
+            // 7 (artículos+nombres propios) capitalizaba "tres" → "a Tres".
+            #"\b(a la?s?|tipo (las? )?|como a la?s?|a eso de la?s?|cerca de la?s?|alrededor de la?s?)\s+(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)(\s+y\s+(media|cuarto|diez|quince|veinte|veinticinco|treinta))?(\s+(treinta|quince))?(\s+de la (mañana|manana|tarde|noche))?\b"#,
             // Relativos
             #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\b"#,
             #"\ben\s+\d{1,2}\b"#,
@@ -264,37 +270,32 @@ enum NovaActionNormalizer {
     }
 
     /// Strip "ir a buscar [a la/a el/a los/a las] X" / "salir a buscar ..."
-    /// → "Buscar a X". Tres caminos:
-    /// 1. Con artículo ("a la agustina") → consume artículo + capitaliza
-    ///    noun (uso natural latino: "la Agustina" = nombre propio).
-    /// 2. Sin artículo y rest empieza con "a " (preposición original del
-    ///    usuario, ej. "a mi hermano") → preserva como "Buscar a mi
-    ///    hermano" sin duplicar "a".
-    /// 3. Sin artículo y rest no empieza con "a " → prepend "Buscar a ".
+    /// Comportamiento:
+    /// 1. CON artículo definido ("a la Agustina") → consume artículo,
+    ///    capitaliza noun y devuelve "Buscar a Agustina" (idiomático: "la X"
+    ///    en español familiar es nombre propio, decir "Ir a" resulta
+    ///    redundante).
+    /// 2. SIN artículo definido (ej. "a mi hermano", "pan", "a Juan") → NO
+    ///    acortamos. Devolvemos el input tal cual para que "Ir a buscar a
+    ///    mi hermano" se conserve. Antes lo cortábamos a "Buscar a mi
+    ///    hermano" que sonaba seco.
     private static func stripVerboseGoVerb(_ input: String, verb: String) -> String {
-        let pattern = "^\\s*\(NSRegularExpression.escapedPattern(for: verb))\\s+(?:a\\s+(la|el|los|las)\\s+)?"
+        let pattern = "^\\s*\(NSRegularExpression.escapedPattern(for: verb))\\s+a\\s+(la|el|los|las)\\s+"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return input
         }
         let ns = input as NSString
         guard let match = regex.firstMatch(in: input, range: NSRange(location: 0, length: ns.length)) else {
+            // No matched "verb a (la|el|los|las)" → no shortening. Mantener
+            // verbo original. Caller seguirá con su limpieza normal.
             return input
         }
-        let hadArticle = match.range(at: 1).location != NSNotFound
+        // hadArticle = true. Capitalize primera palabra después del artículo.
         var rest = ns.substring(from: match.range.length)
-
-        if hadArticle {
-            // Capitalize primera palabra — es nombre propio.
-            if let firstChar = rest.first, firstChar.isLowercase {
-                rest = firstChar.uppercased() + rest.dropFirst()
-            }
-            return "Buscar a " + rest
-        } else if rest.lowercased().hasPrefix("a ") {
-            // El usuario ya escribió "a mi hermano" — no duplicamos la "a".
-            return "Buscar " + rest
-        } else {
-            return "Buscar a " + rest
+        if let firstChar = rest.first, firstChar.isLowercase {
+            rest = firstChar.uppercased() + rest.dropFirst()
         }
+        return "Buscar a " + rest
     }
 
     // MARK: - endTime rules

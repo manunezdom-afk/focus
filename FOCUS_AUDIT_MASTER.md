@@ -16,6 +16,7 @@ Documento central de auditoría continua del proyecto Focus.
 
 | # | Fecha | Tipo | Resumen |
 |---|---|---|---|
+| 61 | 2026-05-12 | Nova horas en palabras + NovaCard premium | Bug iPhone: "necesito ir a buscar a mi hermano a las tres" → Nova preguntaba "¿Cuándo?" con título "Buscar a Mi hermano a Tres". Causa: parser solo aceptaba dígitos. Fix: nuevo `extractWordHourMinute` reconoce "a la una", "a las tres", "tipo cuatro", "como a las cinco", "a las tres y media", "tres y cuarto", "tres treinta", etc. Aplica `adjustAmPm` con verbo-contexto. `hasTimeMarker` también las reconoce → no más preguntas innecesarias. `stripDateTimeMarkers` (ambos paths) las quita del título — antes "a las tres" → "a Tres" capitalizado raro. `capitalizeFirstNounIfLower` ahora skipea posesivos (mi/tu/su/...). "Necesito"/"debo" añadidos a fillerPatterns. "Ir a buscar" se conserva intacto cuando NO hay artículo definido (preserva "Buscar a Agustina" idiomático pero deja "Ir a buscar a mi hermano"). Smart " y " split extendido con palabras + negative lookahead anti-split en "tres y media". NovaCard rediseñada premium: tonos success/clarify/error/processing, diamante animado con halo + glyph (✓/!), wash de color sutil, quick chips de respuesta rápida para clarify (Hoy 12:00, Mañana 9:00, etc), close × discreto, copy humano "Nova está ordenando esto…" en vez de "Procesando…". 9 tests nuevos cubriendo bug case + horas en palabras + neg case "comprar pan y leche" → ✓ ALL TESTS PASSED. |
 | 60 | 2026-05-12 | Nova parser hardening — bug "seguir trabajando/comer" | Ver sección "Nova parser hardening" más abajo. Fix root-cause: HH:MM no aplicaba AM/PM, default section caía a Reunión, "tengo que" + hora no se trataba como recordatorio, label flotante "Escuchando…" rompía diseño, FocusBar de Nova chat desaparecía con keyboard. 8 tests obligatorios + edges → ✓ ALL TESTS PASSED. |
 | 1 | 2026-05-11 | Fase 1 read-only | Inventario de tools, audit de código Swift, schema Supabase desde repo, vercel.json, secrets básicos. Sin instalaciones. Sin cambios de código. |
 | 2 | 2026-05-11 | Audit completo + fixes Swift safe | Audit en 15 áreas. Aplicados 5 fixes seguros: Bundle.main version, lineLimit en cards de evento, DateFormatters cacheados, picker .dark deshabilitado, Nova onAppear simplificado. Sin tocar backend ni Supabase. |
@@ -75,6 +76,105 @@ Documento central de auditoría continua del proyecto Focus.
 | 28 | 2026-05-11 | **Bloque 3 — CERRADO 100%** (Sync V1 e2e validado en iPhone real) | Martin corrió la prueba end-to-end en iPhone físico con cuenta logueada y todos los checkpoints pasaron: **Ajustes → Sincronización**: "Sincronizado" (no "Tabla no encontrada", no "Permiso rechazado por RLS", no "Error de red", no "Modo demo" estando logueado). **Crear evento desde iPhone**: row aparece en `public.focus_events` con `user_id` correcto, `deleted_at IS NULL`. **Editar evento**: cambia local + remoto, `updated_at` se actualiza (trigger `focus_events_set_updated_at`) y persiste al cerrar/reabrir. **Borrar evento**: desaparece local, no vuelve al reabrir, soft delete en Supabase (`deleted_at` set). **Crear tarea**: row aparece en `public.focus_tasks` con `user_id` correcto, `is_completed = false`. **Completar tarea**: cambia local + remoto y persiste. **Modo demo**: con `syncCredentials == nil` la app NO escribe a Supabase — confirmado, no aparecen rows fantasma. **Resumen de cierre Bloque 3**: Supabase tablas OK ✅ · RLS owner-only OK ✅ · Vercel Ready ✅ · Sync eventos OK ✅ · Sync tareas OK ✅ · Modo demo no sync OK ✅ · Backend producción 100% funcional con app nativa iOS. **Limitaciones V1 conocidas y aceptadas para esta versión** (no son blockers, se atacan en Bloque 4+): (a) **No realtime** — sync se dispara en mutación local + botón "Sincronizar ahora" en Ajustes, no hay subscripción Postgres Changes; (b) **Sin queue offline avanzada** — si la red falla durante una mutación, el local queda correcto pero el upstream se pierde hasta el próximo `fetchRemoteAndMerge` exitoso (last-write-wins por id, no journaling); (c) **`nova_suggestions` / `nova_messages` / `settings` no sincronizan** — viven solo en `FocusLocalStore` (UserDefaults) en cada device; (d) **Migración demo→cuenta pendiente** — al loguearse después de crear datos en modo demo, esos datos quedan locales y NO se suben automáticamente (decisión consciente para evitar duplicar rows si la cuenta ya tiene datos); (e) **`last_synced_at` no se setea** — campo creado en schema pero el cliente no lo escribe en V1 (no lo necesita para el flujo actual). **Bloque 4 NO se abre en este commit** — esto es solo el cierre formal de B3. |
 | 27 | 2026-05-11 | Bloque 3 Sync V1 — migración aplicada + verificada en producción | **Migración 018 aplicada** en proyecto Supabase `hvwqeemtfoyvfmongwzo` vía SQL Editor del Dashboard (Claude lo manejó con Chrome MCP, inyectando el SQL al editor Monaco y ejecutando con `⌘+Enter`). Supabase pidió confirmación por "destructive operations" (causa: `DROP TRIGGER IF EXISTS` idempotentes — los triggers no existían aún, los creamos a continuación), Claude confirmó "Run this query" y la query devolvió **"Success. No rows returned"** (~3 s). **Verificación post-migración** corrida en 5 queries en el mismo Editor: (1) `information_schema.tables` → 2 rows (`focus_events`, `focus_tasks` existen); (2) `pg_policies` → 8 rows (4 policies × 2 tablas: `focus_*_owner_select/insert/update/delete`); (3) `pg_class.relrowsecurity` → ambos `rls_enabled = true`; (4) `pg_policies (qual, with_check)` → todas `PERMISSIVE` con `qual = (auth.uid() = user_id)` para SELECT/UPDATE/DELETE y `with_check = (auth.uid() = user_id)` para INSERT/UPDATE (INSERT con qual NULL como debe ser, **ninguna policy abierta tipo `true`**); (5) `information_schema.columns` para legacy `events`/`tasks` → 12 rows, schema intacto (TEXT date/time, sin tocar). **Vercel verificado** via Chrome MCP en https://vercel.com/manunezdom-9658s-projects/focus-app: último deploy `feat(ios-native): add Supabase sync foundation for events and tasks` (commit 2228cab), Status **Ready**, dominio `www.usefocus.me` vivo. **Build iOS local OK**: `xcodebuild -scheme Focus -destination "platform=iOS Simulator,name=iPhone 17,OS=26.4.1" -configuration Debug build` → `** BUILD SUCCEEDED **` sin warnings. **Estado del lado servidor**: tablas paralelas creadas, RLS habilitado, policies owner-only activas (auth.uid() = user_id), triggers `focus_*_set_updated_at` instalados, índices `(user_id, start_time DESC)`, `(user_id, deleted_at)`, `(user_id, due_date NULLS LAST)`, `(user_id, is_completed)`. **Cierre Bloque 3 — checklist**: Migración 018 aplicada ✅ · `focus_events` verificada ✅ · `focus_tasks` verificada ✅ · RLS owner-only verificado ✅ · Legacy `events`/`tasks` intactas ✅ · Build iOS Debug OK ✅ · Vercel Ready ✅ · Sync eventos probado e2e ⏳ (pendiente prueba manual desde iPhone con cuenta real) · Sync tareas probado e2e ⏳ · Modo demo no sincroniza ⏳ (gated en código por `syncCredentials == nil`, falta confirmación visual desde device). **Limitaciones V1 conocidas y aceptadas**: no realtime (sync trigger en mutación + manual desde Ajustes); no queue offline avanzada (errores no revierten local, próximo merge corrige); `nova_suggestions`/`nova_messages`/`settings` fuera de scope; migración demo→cuenta pendiente. **Cómo cerrar el e2e (instrucciones para Martin)**: abrir app en iPhone → si está logueado, ir a Ajustes → Sincronización (debería mostrar "Sincronizado" o "Sincronizando…", nunca "Tabla no encontrada"); crear evento "Reunión test mañana a las 10" → en Dashboard `focus_events` aparece row con tu `user_id` y `deleted_at IS NULL`; editar evento → en Dashboard `updated_at` cambia; borrar evento → en Dashboard `deleted_at` se setea (soft delete); crear tarea "Estudiar cálculo mañana" → row en `focus_tasks` con `is_completed = false`; completar → `is_completed = true` y `done_at` con timestamp; en modo demo (botón "Continuar sin cuenta") las mutaciones NO deben generar rows en Supabase. **NO se hizo en esta sesión**: prueba e2e con device físico (requiere Martin + iPhone presente), sync de `nova_*`/`settings`, Nova LLM, notificaciones, micrófono, widgets. |
 | 26 | 2026-05-11 | Bloque 3 Sync V1 — foundation events/tasks | **Diagnóstico**: refresh token ya implementado (pass 16, validado). Supabase tiene `public.events`/`public.tasks` legacy con shape web (TEXT date/time) — intactas para no romper producción. Vercel: sin CLI/auth en sesión Claude, instrucciones de diagnóstico ya documentadas en §14.7. **Migración `018_focus_native_v1.sql`** nueva: crea `public.focus_events` y `public.focus_tasks` paralelas con TIMESTAMPTZ + campos nativos (isReminder, inferredDuration, location, source, external_*, deleted_at). RLS owner-only (4 policies × tabla: SELECT/INSERT/UPDATE/DELETE con `auth.uid() = user_id`). Triggers de `updated_at` auto. Índices por user_id + start/due/completed. **Pendiente**: aplicar la migración en producción vía Supabase Dashboard SQL Editor o `supabase db push`. La iOS app ya envía requests, pero hasta que la migración esté aplicada, retorna `tableNotFound` (gracefully). **`SupabaseSyncService.swift`** nuevo (`ios-native/Focus/Services/`): cliente REST stateless para `/rest/v1/focus_events` y `/rest/v1/focus_tasks`. Métodos: `fetchEvents/Tasks`, `upsertEvent/Task` (con `Prefer: resolution=merge-duplicates`), `softDeleteEvent/Task` (PATCH `deleted_at = now()`). Headers: `apikey` (publishable anon) + `Authorization: Bearer <access_token>` (del usuario). Errores tipados: `tableNotFound`, `rlsRejected`, `network`, `server`, `decoding`, `notAuthenticated`. **NUNCA loguea tokens completos**. DTOs `RemoteFocusEvent`/`RemoteFocusTask` con `init(local:userId:)` y `toLocal()` — conversión bidireccional. **`FocusDataStore` extendido**: nuevos `@Published`: `syncCredentials: SyncCredentials?`, `syncState: SyncState` (.demo/.loggedOut/.idle/.syncing/.error), `lastSyncAt: Date?`. Método `applyAuthChange(accessToken:userId:)` que `FocusApp` llama vía `.task(id:)` cuando el `AuthState` cambia. Al recibir credenciales nuevas, dispara `fetchRemoteAndMerge()` que trae remoto y mergea por id. **Sync en cada mutación**: `addEvent`/`updateEvent`/`deleteEvent` y sus análogos de tarea ahora también disparan `uploadEvent/Task` o `softDeleteEventRemote/Task` en background. Modo demo: no llega a sync (`syncCredentials == nil`). Si la red o RLS falla, sync registra error pero no revierte local — consistencia se restaura en próximo merge exitoso. **Ajustes → "Sincronización"**: nueva sección que muestra `syncState` (demo/idle/syncing/error) + última hora de sync + botón "Sincronizar ahora" (deshabilitado en demo/logout). **`FocusApp`** observa `authStore.state` vía `.task(id:)` con identidad derivada (loggedIn:userId / demo / loggedOut). **Seguridad**: tokens viven en Keychain (auth) + memoria (RAM via `SyncCredentials`). No service_role en cliente. No tokens en logs. RLS rechaza writes con user_id ajeno (probado vía interpretError 401/403). **Build OK** simulador + device. **Pendiente para cerrar Bloque 3**: aplicar `018_focus_native_v1.sql` en Supabase producción, probar fetch real con cuenta logueada en iPhone, verificar que datos creados en device aparecen en Supabase Dashboard. **NO se hizo**: migración demo→cuenta (riesgoso), sync de `nova_suggestions`/`nova_messages`/`settings` (fuera de scope V1), conflict resolution avanzado (last-write-wins por ahora), Nova LLM real, notificaciones, micrófono, widgets. |
+
+## Nova horas en palabras + NovaCard premium — 2026-05-12
+
+### Bug real reportado en iPhone
+
+Input dictado: "necesito ir a buscar a mi hermano a las tres"
+
+Resultado **incorrecto**:
+- "Tengo «buscar a Mi hermano a Tres». ¿Cuándo?"
+- Nova ignoraba "a las tres" como hora.
+- Capitalizaba "mi" → "Mi" raro.
+- "tres" quedaba como noun "a Tres".
+- Pedía "¿Cuándo?" innecesariamente.
+
+Resultado **esperado**:
+- "Ir a buscar a mi hermano" hoy 15:00, recordatorio puntual.
+- Sin preguntar nada (la hora está clara: "a las tres" + contexto coloquial diurno = 15:00).
+
+### Reglas nuevas
+
+**Horas en palabras** (FocusDataStore.swift :: `extractWordHourMinute`):
+
+| Patrón | Ejemplo | Resultado |
+|---|---|---|
+| `a la una` | "almorzar a la una" | (1, 0) |
+| `a las {dos..doce}` | "comer a las siete" | (7, 0) |
+| `tipo {N}` | "tipo cuatro" | (4, 0) |
+| `como a las {N}` | "como a las tres" | (3, 0) |
+| `a eso de las {N}` | "a eso de las cinco" | (5, 0) |
+| `... y media` | "a las tres y media" | (3, 30) |
+| `... y cuarto` | "a las tres y cuarto" | (3, 15) |
+| `... y diez/quince/veinte/veinticinco` | "tres y veinte" | (3, 20) |
+| `... treinta` | "a las tres treinta" | (3, 30) |
+| `... de la mañana/tarde/noche` | "a las tres de la tarde" | (15, 0) explícito |
+
+Aplican las mismas reglas AM/PM contextuales (verbos + coloquial) que para dígitos.
+
+**`hasTimeMarker`** ahora reconoce esas mismas frases — el parser ya no manda a clarify cuando hay hora en palabras.
+
+**`stripDateTimeMarkers` / `cleanTitle`** strippean las frases del título antes del paso de "artículos+nombres propios" que antes capitalizaba "tres" → "Tres".
+
+**`capitalizeFirstNounIfLower`** ahora skipea posesivos: `mi`, `tu`, `su`, `nuestro/a/os/as`, `vuestro/a/os/as`, plus plurales. Antes "mi hermano" → "Mi hermano".
+
+**`fillerPatterns`** suma `\bnecesito\b` y `\bdebo\b`. Antes el título conservaba "Necesito ir a buscar a mi hermano".
+
+**`ir a buscar`** verb handling:
+- "ir a buscar a la Agustina" → "Buscar a Agustina" (idiomático cuando hay artículo definido).
+- "ir a buscar a mi hermano" → "Ir a buscar a mi hermano" (conserva el verbo cuando NO hay artículo definido).
+- "ir a buscar pan" → "Ir a buscar pan" (bare noun, mantiene verbo).
+
+Misma lógica en `cleanTitle` (`stripVerboseGoVerb`) → solo acorta cuando hay artículo en el original.
+
+**Smart " y " split**: el `hourMarkerPattern` ahora incluye palabras-hora. Negative lookahead `\s+y\s+(?!media|cuarto|diez|...)` evita romper "a las tres y media" en dos. "estudiar a las cinco y llamar a las ocho" → 2 intents.
+
+### NovaCard premium UI
+
+`InlineNovaResponseView` rediseñado. Cuatro estados:
+
+| Estado | Tinte | Diamante | Caso |
+|---|---|---|---|
+| `.success` | verde (`Theme.Colors.success`) | gradient + ✓ | Acción ejecutada (evento/tarea/recordatorio creado). |
+| `.clarify` | violeta (`Theme.Colors.novaAccent`) | gradient + chips | Nova preguntando, con quick chips ("Hoy 12:00", "Mañana 9:00"). |
+| `.error` | ámbar (`Theme.Colors.warning`) | gradient + ! | Error gentil, NO rojo, copy humano. |
+| `.processing` | violeta | gradient + halo pulsante | "Nova está ordenando esto…" |
+
+Detalles visuales:
+- Card con `surface` + tint wash 5% del color de tono.
+- Stroke `toneColor.opacity(0.22)`.
+- Diamante 24×24 con shadow del tono.
+- Glyph 14×14 con badge offset.
+- Quick chips violeta soft (solo en `.clarify`) — al tocar, envían su `sendText` a Nova como si el usuario hubiera escrito.
+- Close `×` discreto en `topTrailing`.
+- Animación de aparición: spring scale 0.94 → 1.0, opacity 0 → 1.
+- `tone` se puede setear explícito o derivar de `isLoading`/`isError`/`action` para mantener compat con call sites antiguos.
+
+### Tests nuevos
+
+| Input | Esperado | Estado |
+|---|---|---|
+| "necesito ir a buscar a mi hermano a las tres" | "Ir a buscar a mi hermano" hoy 15:00 | ✓ |
+| "despertarme a las siete" | 07:00 | ✓ |
+| "comer a las siete" | 19:00 | ✓ |
+| "clase a las ocho" | 08:00 | ✓ |
+| "reunión a las tres de la tarde" | 15:00 | ✓ |
+| "levantarme a las seis y media" | 06:30 | ✓ |
+| "seguir trabajando a las tres y media y comer a las siete" | 2 intents: 15:30 + 19:00 | ✓ |
+| "comprar pan y leche" | 1 tarea (no split, no hora falsa) | ✓ |
+| "ir a buscar a la Agustina a las tres" | "Buscar a Agustina" hoy 15:00 | ✓ |
+
+### QA en iPhone pendiente del usuario
+
+1. Dictar por mic: "necesito ir a buscar a mi hermano a las tres" → "Ir a buscar a mi hermano" hoy 15:00, sin preguntar, recordatorio.
+2. Escribir manualmente la misma frase → mismo resultado.
+3. Dictar "seguir trabajando a las tres y media y comer a las siete" → 2 ítems: 15:30 + 19:00.
+4. Pedir algo ambiguo ("agenda algo") → NovaCard `.clarify` violeta con chips "Hoy 12:00", "Mañana 9:00", etc. Tocar un chip → se envía y crea.
+5. Mientras Nova procesa: NovaCard `.processing` con diamante breathing y copy "Nova está ordenando esto…".
+6. Disparar un error de backend (offline) → NovaCard `.error` ámbar (no rojo) con copy humano.
+
+---
 
 ## Nova parser hardening — 2026-05-12
 

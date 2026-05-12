@@ -447,8 +447,19 @@ enum NovaResponder {
         let bare = #"(\b\d{1,2}:\d{2}\b)"#
         let tipo = #"(\btipo\s+(la(s)?\s+)?\d{1,2}(:\d{2})?\b)"#
         let relative = #"(\ben\s+\d{1,3}\s*(min|minutos?|h|hs|hrs?|horas?)\b)"#
-        return "(\(core)|\(bare)|\(tipo)|\(relative))"
+        // Horas en PALABRAS — "a las tres", "a la una", "tipo cuatro". El
+        // smart " y " split necesita reconocerlas para que
+        // "estudiar a las cinco y llamar a las ocho" splittee correctamente.
+        let words = #"(\b(?:a la?s?|tipo (?:las? )?|como a la?s?|a eso de la?s?)\s+(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\b)"#
+        return "(\(core)|\(bare)|\(tipo)|\(relative)|\(words))"
     }()
+
+    /// Palabras de minuto que pueden seguir a "[hora-palabra] y" para formar
+    /// expresiones como "a las tres y media", "cinco y cuarto", "siete y
+    /// treinta". Cuando el smart " y " split encuentra una " y " seguida por
+    /// alguna de estas palabras, NO debe splittear — la " y " forma parte
+    /// de la expresión de tiempo, no es un conector entre acciones.
+    private static let minuteFollowupWords = "(?:media|cuarto|diez|quince|veinte|veinticinco|treinta)"
 
     /// Split por " y " inteligente. Pasa por TODAS las ocurrencias de
     /// `\b y \b` del texto y, para cada una, evalúa si ambos lados tienen
@@ -462,9 +473,13 @@ enum NovaResponder {
     /// - "despertarme a las 7 y salir a las 8" → SPLIT
     private static func applySmartYSplit(_ text: String, marker: String) -> String {
         let lower = text.lowercased()
-        // Buscar TODAS las ocurrencias de " y " (con espacios).
+        // Buscar TODAS las ocurrencias de " y " (con espacios). EXCLUYE las
+        // que son parte de expresión de hora ("tres y media", "cinco y cuarto",
+        // "siete y veinte") usando negative lookahead — ese " y " no separa
+        // acciones, es parte del time fragment.
+        let yConnectorPattern = "\\s+y\\s+(?!\(minuteFollowupWords)\\b)"
         guard let regex = try? NSRegularExpression(
-            pattern: #"\s+y\s+"#, options: [.caseInsensitive]
+            pattern: yConnectorPattern, options: [.caseInsensitive]
         ) else { return text }
 
         let ns = text as NSString
@@ -1201,6 +1216,14 @@ enum NovaResponder {
         if firstCaptureInt(lower, pattern: #"\b(\d{1,2}):(\d{2})\b"#, group: 1) != nil { return true }
         if firstCaptureInt(lower, pattern: #"\btipo\s+(?:las?\s+)?(\d{1,2})"#, group: 1) != nil { return true }
         if firstCaptureInt(lower, pattern: #"\b(\d{1,2})\s*(am|pm|hs|hrs?)\b"#, group: 1) != nil { return true }
+        // Horas en PALABRAS — "a las tres", "a la una", "tipo tres", "como a
+        // las cuatro", "a las tres y media", etc. Antes hasTimeMarker
+        // ignoraba estas frases y por eso "necesito ir a buscar a mi
+        // hermano a las tres" caía a `clarify(¿Cuándo?)`.
+        let wordHourPattern = #"\b(?:a la?s?|tipo (?:las? )?|como a la?s?|a eso de la?s?|cerca de la?s?|alrededor de la?s?)\s+"# + hourWordsRegex + #"\b"#
+        if lower.range(of: wordHourPattern, options: [.regularExpression, .caseInsensitive]) != nil {
+            return true
+        }
         // "en N minutos" / "en N min" / "en N h" / "en N hora(s)" / "en N hrs"
         if lower.range(
             of: #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\b"#,
@@ -1339,14 +1362,37 @@ enum NovaResponder {
             rest = rest.trimmingCharacters(in: .whitespacesAndNewlines)
                 .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
 
-            // Normalización de verbo: "ir a buscar X" en español natural es
-            // simplemente "Buscar a X" (decir "Ir a buscar a X" es redundante).
-            // Cuando el trigger fue "ir a buscar " consumimos su "a" leading
-            // del rest si quedó, para evitar "Buscar a a Agustina".
+            // Normalización de verbo "ir a buscar":
+            //   - "ir a buscar a la Agustina" → "Buscar a Agustina" (idiomático;
+            //     "la X" es nombre propio en español familiar, decir "ir a"
+            //     resulta redundante).
+            //   - "ir a buscar a mi hermano" → "Ir a buscar a mi hermano"
+            //     (mantenemos el verbo; "Buscar a mi hermano" suena seco).
+            //   - "ir a buscar pan" → "Ir a buscar pan" (sin nombre propio,
+            //     mantenemos el verbo).
+            //
+            // Heurística: solo acortamos a "Buscar a" cuando el rest empieza
+            // con artículo definido (la/las/el/los/al) — eso señala nombre
+            // propio en español familiar.
             let trimmedTriggerLower = matchedLower.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedVerb: String
-            if trimmedTriggerLower == "ir a buscar" {
+            // Check based on AFTER-RAW (no después de la limpieza). Si el
+            // usuario dijo "a la Agustina", afterRaw conserva "a la" aun cuando
+            // normalizeProperNounsAfterArticles ya haya quitado el "la" de
+            // `rest`. Eso preserva la lógica de acortamiento solo cuando hubo
+            // artículo definido en el original.
+            let afterRawHasDefiniteArticle = afterRaw.lowercased().range(
+                of: #"^\s*a\s+(la|las|el|los)\s+"#,
+                options: .regularExpression
+            ) != nil
+            let afterRawStartsWithAl = afterRaw.lowercased().hasPrefix("al ")
+            if trimmedTriggerLower == "ir a buscar"
+                && (afterRawHasDefiniteArticle || afterRawStartsWithAl) {
                 normalizedVerb = "Buscar a"
+                // Strip leading "a (la/las/el/los) " — caso normal antes de
+                // normalizeProperNounsAfterArticles. También strip simplemente
+                // "a " — caso post-normalize (la X → X queda como "a X").
+                // Sin esto el concat queda "Buscar a a Agustina".
                 let leadingPrefixes = ["a la ", "a las ", "a el ", "a los ", "al ", "a "]
                 for p in leadingPrefixes where rest.lowercased().hasPrefix(p) {
                     rest = String(rest.dropFirst(p.count))
@@ -1459,7 +1505,12 @@ enum NovaResponder {
         let prepositionsAndArticles: Set<String> = [
             "a", "con", "de", "del", "para", "por", "en", "y", "o",
             "el", "la", "los", "las", "un", "una", "unos", "unas",
-            "al"
+            "al",
+            // Posesivos — "mi hermano" no debe quedar "Mi hermano". "Mi/Tu/
+            // Su" capitalizado se ve raro en mitad de un título.
+            "mi", "mis", "tu", "tus", "su", "sus",
+            "nuestro", "nuestra", "nuestros", "nuestras",
+            "vuestro", "vuestra", "vuestros", "vuestras"
         ]
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return trimmed }
@@ -1496,6 +1547,12 @@ enum NovaResponder {
         #"\btipo (las? )?\d{1,2}(:\d{2})?\b"#,
         #"\bcomo a la?s? \d{1,2}(:\d{2})?\b"#,
         #"\b(a eso de|cerca de|alrededor de|por) la?s? \d{1,2}(:\d{2})?\b"#,
+        // Hora en PALABRAS — "a las tres", "a la una", "a las tres y media",
+        // "a las tres y cuarto", "a las tres treinta", "tipo tres", "como a
+        // las tres". Va junto con sus sufijos opcionales ("de la mañana/tarde"
+        // y minutos como palabra). El orden importa: ANTES que el patrón
+        // genérico de artículos para que "a las tres" no quede como "a Tres".
+        #"\b(a la?s?|tipo (las? )?|como a la?s?|a eso de la?s?|cerca de la?s?|alrededor de la?s?)\s+(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)(\s+y\s+(media|cuarto|diez|quince|veinte|veinticinco|treinta))?(\s+(treinta|quince))?(\s+de la (mañana|manana|tarde|noche))?\b"#,
         // Relativo "en N minutos" / "en N horas" — orden importa: va ANTES
         // que "en N" suelto para que se consuma con la unidad.
         #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\b"#,
@@ -1528,6 +1585,9 @@ enum NovaResponder {
 
     /// Fillers que se quitan del título por amabilidad ("porfa", "oye"…).
     /// También verbos de "agenda" que solo añaden ruido al título real.
+    /// "Necesito"/"debo" son obligación → no son parte de la acción, se
+    /// quitan para que el título quede limpio ("necesito ir a buscar a mi
+    /// hermano" → "Ir a buscar a mi hermano").
     private static let fillerPatterns: [String] = [
         #"\bporfa(vor)?\b"#,
         #"\bpor favor\b"#,
@@ -1536,6 +1596,8 @@ enum NovaResponder {
         #"\bdale\b"#,
         #"\bponme\b"#,
         #"\btengo que\b"#,
+        #"\bnecesito\b"#,
+        #"\bdebo\b"#,
         #"\bagéndame\b"#, #"\bagendame\b"#,
         #"\bagéndalo\b"#, #"\bagendalo\b"#,
         // "antes del viernes" → marcador de deadline, lo quitamos del título
@@ -1775,6 +1837,16 @@ enum NovaResponder {
             let resolvedH = h <= 12 ? adjustAmPm(hour: h, in: text) : h
             return (resolvedH, m)
         }
+        // 1b) Horas en PALABRAS — "a las tres", "a la una", "a las siete y media",
+        //     "a las tres y cuarto", "a las tres treinta", "tipo tres", "como a
+        //     las tres", "a eso de las cuatro". Usuario habla por voz y
+        //     transcripción mete los números como palabras → el parser los
+        //     ignoraba antes y mandaba a `clarify(¿Cuándo?)`. Soporta también
+        //     "y media" (+30), "y cuarto" (+15), "y treinta", "y quince".
+        if let (h, m) = extractWordHourMinute(from: text) {
+            let resolvedH = h <= 12 ? adjustAmPm(hour: h, in: text) : h
+            return (resolvedH, m)
+        }
         // 2) "a las 12" / "a la 1" / "a eso de las 3" / "cerca de las 3"
         if let h = firstCaptureInt(text, pattern: #"(?:a la?s?|eso de las?|cerca de las?|alrededor de las?) (\d{1,2})\b"#, group: 1), h < 24 {
             return (adjustAmPm(hour: h, in: text), 0)
@@ -1840,6 +1912,85 @@ enum NovaResponder {
         if text.contains("al final del día") || text.contains("al final del dia") { return (18, 0) }
         if text.contains("al amanecer") { return (7, 0) }
         return nil
+    }
+
+    /// Mapa de palabras de hora en español a entero (1..12). El usuario
+    /// dicta "a las tres" por voz y la transcripción mete números como
+    /// palabras — antes el parser ignoraba estas frases y caía a
+    /// `clarify(¿Cuándo?)`. Soporta los 12 numerales + variantes "una/uno".
+    private static let hourWords: [String: Int] = [
+        "una": 1, "uno": 1,
+        "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+        "seis": 6, "siete": 7, "ocho": 8, "nueve": 9,
+        "diez": 10, "once": 11, "doce": 12
+    ]
+
+    /// Regex pattern union de las palabras-hora (1..12). Se usa en varios
+    /// lugares: extractHourMinute, hasTimeMarker, stripDateTimeMarkers.
+    private static let hourWordsRegex: String =
+        "(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)"
+
+    /// Extrae (hora, minuto) de frases con NÚMERO ESCRITO EN PALABRAS.
+    /// Soporta:
+    ///   - "a las tres" → (3, 0)
+    ///   - "a la una" → (1, 0)
+    ///   - "tipo tres" → (3, 0)
+    ///   - "como a las tres" → (3, 0)
+    ///   - "a eso de las cuatro" → (4, 0)
+    ///   - "a las tres y media" → (3, 30)
+    ///   - "a las tres y cuarto" → (3, 15)
+    ///   - "a las tres treinta" → (3, 30)
+    ///   - "a las tres quince" → (3, 15)
+    ///   - "a las tres y diez" → (3, 10)  (minutos como palabra cardinal)
+    private static func extractWordHourMinute(from text: String) -> (Int, Int)? {
+        // Prefijos: "a la(s)", "tipo (las)", "como a las", "a eso de las",
+        // "cerca de las", "alrededor de las".
+        let prefix = #"(?:a la?s?|tipo (?:las? )?|como a la?s?|a eso de la?s?|cerca de la?s?|alrededor de la?s?)"#
+
+        // Patrón completo: prefijo + hour-word + (opcional " y media/cuarto"
+        // | " y diez/quince/veinte/veinticinco/treinta" | " treinta/quince").
+        let combined = "\(prefix)\\s+\(hourWordsRegex)" +
+            #"(?:\s+y\s+(media|cuarto|diez|quince|veinte|veinticinco|treinta))?"# +
+            #"(?:\s+(treinta|quince))?"# +
+            #"\b"#
+
+        guard let regex = try? NSRegularExpression(
+            pattern: combined,
+            options: [.caseInsensitive]
+        ) else { return nil }
+
+        let ns = text as NSString
+        guard let match = regex.firstMatch(
+            in: text,
+            range: NSRange(location: 0, length: ns.length)
+        ) else { return nil }
+
+        let hourWord = ns.substring(with: match.range(at: 1)).lowercased()
+        guard let h = hourWords[hourWord] else { return nil }
+
+        var m = 0
+        if match.range(at: 2).location != NSNotFound {
+            let minuteWord = ns.substring(with: match.range(at: 2)).lowercased()
+            m = minuteWordToInt(minuteWord) ?? 0
+        } else if match.range(at: 3).location != NSNotFound {
+            let minuteWord = ns.substring(with: match.range(at: 3)).lowercased()
+            m = minuteWordToInt(minuteWord) ?? 0
+        }
+        return (h, m)
+    }
+
+    /// Convierte "media"/"cuarto"/cardinales-de-minutos → entero.
+    private static func minuteWordToInt(_ word: String) -> Int? {
+        switch word {
+        case "media": return 30
+        case "cuarto": return 15
+        case "diez": return 10
+        case "quince": return 15
+        case "veinte": return 20
+        case "veinticinco": return 25
+        case "treinta": return 30
+        default: return nil
+        }
     }
 
     /// "tipo 3" → 15. "tipo 8 de la mañana" → 8. "tipo 12" → 12.

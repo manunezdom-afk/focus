@@ -168,6 +168,42 @@ enum InlineNovaAction: Hashable {
     }
 }
 
+/// Tono visual de una respuesta inline. Determina el color del acento, el
+/// icono del diamante y la animación. Si se deja `nil`, se deriva de
+/// `isLoading`/`isError` para mantener compat con call sites antiguos.
+enum NovaResponseTone: Equatable {
+    /// Acción ejecutada exitosamente (recordatorio/tarea/evento creado).
+    /// Tinte verde sutil + ícono ✓ pequeño junto al diamante.
+    case success
+    /// Nova entendió pero necesita confirmar (típicamente clarify con título
+    /// y/o fecha tentativos). Tinte violeta — color de marca. Acompaña con
+    /// quick chips si hay.
+    case clarify
+    /// Algo no salió como esperado y queremos avisar sin alarmar (errores de
+    /// red, ambigüedad fuerte, etc). Tinte ámbar cálido, NO rojo.
+    case error
+    /// Nova está procesando la petición (spinner reemplazado por diamante
+    /// breathing).
+    case processing
+}
+
+/// Chip de respuesta rápida que aparece en estado `.clarify`. Permite al
+/// usuario completar un dato faltante sin escribir.
+struct NovaQuickChip: Equatable {
+    let id: UUID
+    let label: String
+    /// Texto que se envía a Nova como si el usuario lo hubiera escrito.
+    /// Si es `nil`, el chip solo dispara un callback custom (manejado por
+    /// el caller que setea el chip).
+    let sendText: String?
+
+    init(label: String, sendText: String? = nil) {
+        self.id = UUID()
+        self.label = label
+        self.sendText = sendText
+    }
+}
+
 /// Respuesta inline de Nova que se muestra debajo del FocusBar en Mi Día.
 /// Es transitoria: el usuario la puede cerrar manualmente o se reemplaza al
 /// enviar otra petición. NO va al historial del chat por defecto — para eso
@@ -181,6 +217,10 @@ struct InlineNovaResponse: Identifiable, Equatable {
     var createdAt: Date
     var isLoading: Bool
     var isError: Bool
+    /// Tono visual (success/clarify/error/processing). Si nil, se deriva.
+    var tone: NovaResponseTone?
+    /// Chips de respuesta rápida — solo se muestran en estado `.clarify`.
+    var quickChips: [NovaQuickChip]
 
     init(
         userText: String,
@@ -188,7 +228,9 @@ struct InlineNovaResponse: Identifiable, Equatable {
         details: String? = nil,
         action: InlineNovaAction? = nil,
         isLoading: Bool = false,
-        isError: Bool = false
+        isError: Bool = false,
+        tone: NovaResponseTone? = nil,
+        quickChips: [NovaQuickChip] = []
     ) {
         self.id = UUID()
         self.userText = userText
@@ -198,114 +240,284 @@ struct InlineNovaResponse: Identifiable, Equatable {
         self.createdAt = Date()
         self.isLoading = isLoading
         self.isError = isError
+        self.tone = tone
+        self.quickChips = quickChips
+    }
+
+    /// Tono efectivo — usa el override si se proveyó, sino deriva de los flags.
+    var effectiveTone: NovaResponseTone {
+        if let tone { return tone }
+        if isLoading { return .processing }
+        if isError { return .error }
+        // Si tiene acción de "abrir" algo creado (calendario/tarea) y no es
+        // error → claramente success. Sino, asumir clarify (Nova hizo una
+        // pregunta o no creó nada).
+        switch action {
+        case .openCalendar, .openTasksList, .openBandeja:
+            return .success
+        default:
+            return .clarify
+        }
     }
 }
 
-/// View que pinta una `InlineNovaResponse` debajo del FocusBar en Mi Día.
-/// - Muestra primero la frase del usuario tenue (contexto).
-/// - Después la respuesta de Nova con el marker rómbico cobalto.
-/// - Opcionalmente, un botón secundario para "Ver en Calendario", etc.
-/// - "Cerrar" siempre disponible — el usuario puede sacarla sin esperar.
+/// View premium que pinta una `InlineNovaResponse` debajo del FocusBar en
+/// Mi Día. Tarjeta "NovaCard" con tono visual según estado:
+///   - success → tinte verde sutil + ✓ junto al diamante.
+///   - clarify → tinte violeta de marca + chips de respuesta rápida.
+///   - error   → tinte ámbar (NO rojo) — humano, no alarmante.
+///   - processing → diamante breathing + texto "Nova está ordenando esto…".
+///
+/// Acciones:
+///   - Botón primario opcional (Ver en Calendario / Ver tarea / Abrir chat).
+///   - Quick chips para `.clarify` (Hoy, Mañana, 15:00, etc).
+///   - Cerrar (×) discreto en la esquina superior derecha.
 struct InlineNovaResponseView: View {
     let response: InlineNovaResponse
     let onAction: () -> Void
     let onDismiss: () -> Void
+    /// Callback opcional cuando el usuario toca un quick chip. Si es nil,
+    /// los chips solo cierran la card.
+    var onChipTap: ((NovaQuickChip) -> Void)? = nil
+
+    @State private var processingPulse: Bool = false
+    @State private var appearScale: CGFloat = 0.94
+    @State private var appearOpacity: Double = 0
+
+    private var tone: NovaResponseTone { response.effectiveTone }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            // Frase del usuario (eco) — tenue, para dar contexto.
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "quote.opening")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.textQuaternary)
+            header
+            content
+            if !response.quickChips.isEmpty && tone == .clarify {
+                chipsRow
+            }
+            if shouldShowActionRow {
+                actionRow
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.md + 2)
+        .padding(.vertical, Theme.Spacing.md)
+        .background(cardBackground)
+        .overlay(closeButton, alignment: .topTrailing)
+        .scaleEffect(appearScale)
+        .opacity(appearOpacity)
+        .onAppear {
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                appearScale = 1.0
+                appearOpacity = 1.0
+            }
+            if tone == .processing {
+                processingPulse = true
+            }
+        }
+        .onChange(of: tone) { _, newValue in
+            processingPulse = (newValue == .processing)
+        }
+    }
+
+    // MARK: - Header (diamante + estado + frase del usuario)
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+            diamondBadge
+            // Eco del usuario como caption tenue (solo si hay texto).
+            if !response.userText.isEmpty {
                 Text(response.userText)
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.textTertiary)
-                    .lineLimit(3)
-                Spacer(minLength: 0)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            Spacer(minLength: 0)
+        }
+    }
 
-            // Respuesta de Nova.
-            HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+    /// Diamante de Nova animado según tono.
+    private var diamondBadge: some View {
+        ZStack {
+            // Halo gradient sólido cuando processing.
+            if tone == .processing {
                 Circle()
-                    .fill(novaTint)
-                    .frame(width: 8, height: 8)
-                    .padding(.top, 6)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    if response.isLoading {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(Theme.Colors.novaAccent)
-                            Text(response.summary)
-                                .font(Theme.Typography.subheadEmphasized)
-                                .foregroundStyle(Theme.Colors.textPrimary)
-                        }
-                    } else {
-                        Text(response.summary)
-                            .font(Theme.Typography.subheadEmphasized)
-                            .foregroundStyle(Theme.Colors.textPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let d = response.details, !d.isEmpty {
-                        Text(d)
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                Spacer(minLength: 0)
+                    .strokeBorder(toneColor.opacity(0.55), lineWidth: 2)
+                    .frame(width: 24, height: 24)
+                    .scaleEffect(processingPulse ? 1.7 : 1.0)
+                    .opacity(processingPulse ? 0 : 0.9)
+                    .animation(
+                        .easeOut(duration: 1.3).repeatForever(autoreverses: false),
+                        value: processingPulse
+                    )
             }
+            Circle()
+                .fill(diamondFill)
+                .frame(width: 24, height: 24)
+                .shadow(color: toneColor.opacity(0.45), radius: 6, y: 1)
+            NovaSparkMark(size: 11)
+            // Glyph del estado superpuesto (small).
+            if let glyph = toneGlyph {
+                Image(systemName: glyph)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 14, height: 14)
+                    .background(Circle().fill(toneColor))
+                    .offset(x: 10, y: 10)
+            }
+        }
+        .frame(width: 28, height: 28)
+    }
 
-            // Acciones — chip secundario opcional + cerrar.
-            if !response.isLoading {
-                HStack(spacing: Theme.Spacing.sm) {
-                    if let act = response.action, act != .dismiss {
-                        Button(action: onAction) {
-                            HStack(spacing: 4) {
-                                Text(act.label)
-                                Image(systemName: "arrow.up.forward")
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                            .font(Theme.Typography.subheadEmphasized)
-                            .foregroundStyle(Theme.Colors.focusAccent)
+    private var diamondFill: AnyShapeStyle {
+        switch tone {
+        case .success:
+            return AnyShapeStyle(LinearGradient(
+                colors: [Theme.Colors.success.opacity(0.85), Theme.Colors.success],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            ))
+        case .error:
+            return AnyShapeStyle(LinearGradient(
+                colors: [Theme.Colors.warning.opacity(0.85), Theme.Colors.warning],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            ))
+        case .processing, .clarify:
+            return AnyShapeStyle(Theme.Colors.novaGradient)
+        }
+    }
+
+    private var toneColor: Color {
+        switch tone {
+        case .success:    return Theme.Colors.success
+        case .clarify:    return Theme.Colors.novaAccent
+        case .error:      return Theme.Colors.warning
+        case .processing: return Theme.Colors.novaAccent
+        }
+    }
+
+    private var toneGlyph: String? {
+        switch tone {
+        case .success: return "checkmark"
+        case .error:   return "exclamationmark"
+        case .clarify, .processing: return nil
+        }
+    }
+
+    // MARK: - Content (summary + details)
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(response.summary)
+                .font(Theme.Typography.subheadEmphasized)
+                .foregroundStyle(Theme.Colors.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .lineSpacing(2)
+            if let d = response.details, !d.isEmpty {
+                Text(d)
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(2)
+            }
+        }
+    }
+
+    // MARK: - Quick chips (clarify)
+
+    private var chipsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(response.quickChips, id: \.id) { chip in
+                    Button {
+                        HapticManager.shared.tap()
+                        if let onChipTap {
+                            onChipTap(chip)
+                        } else {
+                            onDismiss()
+                        }
+                    } label: {
+                        Text(chip.label)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.novaAccent)
                             .padding(.horizontal, Theme.Spacing.sm + 2)
                             .padding(.vertical, 6)
                             .background(
-                                Capsule().fill(Theme.Colors.focusAccentSoft)
+                                Capsule().fill(Theme.Colors.novaAccentSoft)
                             )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    Spacer()
-                    Button(action: onDismiss) {
-                        Text("Cerrar")
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.textTertiary)
-                            .padding(.horizontal, Theme.Spacing.sm)
-                            .padding(.vertical, 6)
+                            .overlay(
+                                Capsule().strokeBorder(
+                                    Theme.Colors.novaAccent.opacity(0.25),
+                                    lineWidth: Theme.Stroke.hairline
+                                )
+                            )
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(Theme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                .fill(Theme.Colors.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                        .strokeBorder(novaTint.opacity(0.20), lineWidth: Theme.Stroke.hairline)
-                )
-                .focusCardShadow()
-        )
+        .padding(.top, 2)
     }
 
-    private var novaTint: Color {
-        if response.isError { return Theme.Colors.warning }
-        return Theme.Colors.novaAccent
+    // MARK: - Action row (botón primario solo)
+
+    private var shouldShowActionRow: Bool {
+        guard !response.isLoading else { return false }
+        guard let act = response.action, act != .dismiss else { return false }
+        return true
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            if let act = response.action, act != .dismiss {
+                Button(action: onAction) {
+                    HStack(spacing: 4) {
+                        Text(act.label)
+                        Image(systemName: "arrow.up.forward")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .font(Theme.Typography.subheadEmphasized)
+                    .foregroundStyle(toneColor)
+                    .padding(.horizontal, Theme.Spacing.sm + 2)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule().fill(toneColor.opacity(0.12))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: - Close button (×)
+
+    private var closeButton: some View {
+        Button(action: onDismiss) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Theme.Colors.textTertiary)
+                .frame(width: 22, height: 22)
+                .background(
+                    Circle().fill(Theme.Colors.surfaceHigh.opacity(0.7))
+                )
+        }
+        .buttonStyle(.plain)
+        .padding(8)
+        .accessibilityLabel("Cerrar")
+    }
+
+    // MARK: - Background
+
+    private var cardBackground: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(Theme.Colors.surface)
+            // Wash de color sutil según tono — solo perceptible, no agresivo.
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(toneColor.opacity(0.05))
+            // Stroke con tono.
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .strokeBorder(toneColor.opacity(0.22), lineWidth: 1)
+        }
+        .focusCardShadow()
     }
 }
 

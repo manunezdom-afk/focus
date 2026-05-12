@@ -115,6 +115,16 @@ struct MiDiaView: View {
                                 withAnimation(.easeOut(duration: 0.20)) {
                                     inlineResponse = nil
                                 }
+                            },
+                            onChipTap: { chip in
+                                // El chip envía su texto como si el usuario
+                                // hubiera escrito. Cierra la card y procesa.
+                                if let send = chip.sendText {
+                                    withAnimation(.easeOut(duration: 0.18)) {
+                                        inlineResponse = nil
+                                    }
+                                    processNovaInline(text: send)
+                                }
                             }
                         )
                         .padding(.horizontal, Theme.Spacing.xl)
@@ -379,13 +389,14 @@ struct MiDiaView: View {
         guard !trimmed.isEmpty else { return }
         HapticManager.shared.tap()
 
-        // Loading inmediato — el usuario ve "procesando" mientras se decide
-        // el path (local o remoto).
+        // Loading inmediato — el usuario ve la card "processing" mientras se
+        // decide el path (local o remoto). Copy humano, no técnico.
         withAnimation(.easeInOut(duration: 0.18)) {
             inlineResponse = InlineNovaResponse(
                 userText: trimmed,
-                summary: "Procesando…",
-                isLoading: true
+                summary: "Nova está ordenando esto…",
+                isLoading: true,
+                tone: .processing
             )
         }
 
@@ -1146,13 +1157,42 @@ struct MiDiaView: View {
             ) {
                 store.setPendingClarification(pending)
             }
+            // Quick chips por razón — el usuario puede completar con un tap
+            // en lugar de escribir. Solo se muestran en estado `.clarify`.
             return InlineNovaResponse(
                 userText: userText,
                 summary: clarifyHeadline(reason),
                 details: clarifyDetail(reason),
-                action: .openChat,
-                isError: true
+                action: nil,
+                isError: false,
+                tone: .clarify,
+                quickChips: chipsFor(reason: reason)
             )
+        }
+    }
+
+    /// Devuelve chips de respuesta rápida sugeridos según el motivo del
+    /// clarify. Diseñados para que el usuario complete con un tap:
+    ///   - eventNeedsTime: "9:00", "12:00", "15:00", "Editar".
+    ///   - eventNeedsDateTime: "Hoy 12:00", "Mañana 9:00", "Editar".
+    ///   - taskNeedsTitle / eventNeedsTitle / noContext / unclear: ninguno.
+    private func chipsFor(reason: NovaIntent.ClarifyReason) -> [NovaQuickChip] {
+        switch reason {
+        case .eventNeedsTime:
+            return [
+                NovaQuickChip(label: "9:00", sendText: "a las 9"),
+                NovaQuickChip(label: "12:00", sendText: "a las 12"),
+                NovaQuickChip(label: "15:00", sendText: "a las 15"),
+                NovaQuickChip(label: "18:00", sendText: "a las 18")
+            ]
+        case .eventNeedsDateTime:
+            return [
+                NovaQuickChip(label: "Hoy 12:00", sendText: "hoy a las 12"),
+                NovaQuickChip(label: "Hoy 18:00", sendText: "hoy a las 18"),
+                NovaQuickChip(label: "Mañana 9:00", sendText: "mañana a las 9")
+            ]
+        default:
+            return []
         }
     }
 

@@ -32,9 +32,9 @@ enum NovaActionNormalizerTests {
         )
 
         check(
-            label: "cleanTitle: 'salir a buscar a mi hermano en 5 min' → 'Buscar a mi hermano'",
+            label: "cleanTitle: 'salir a buscar a mi hermano en 5 min' → 'Salir a buscar a mi hermano'",
             actual: NovaActionNormalizer.cleanTitle("salir a buscar a mi hermano en 5 min"),
-            expected: "Buscar a mi hermano",
+            expected: "Salir a buscar a mi hermano",
             failures: &failures
         )
 
@@ -68,9 +68,9 @@ enum NovaActionNormalizerTests {
 
         // Sanity: la frase "X minutos antes" se va del título.
         check(
-            label: "cleanTitle: 'salir a buscar a mi hermano a las 10 acuérdame 5 minutos antes' → 'Buscar a mi hermano'",
+            label: "cleanTitle: 'salir a buscar a mi hermano a las 10 acuérdame 5 minutos antes' → 'Salir a buscar a mi hermano'",
             actual: NovaActionNormalizer.cleanTitle("salir a buscar a mi hermano a las 10 acuérdame 5 minutos antes"),
-            expected: "Buscar a mi hermano",
+            expected: "Salir a buscar a mi hermano",
             failures: &failures
         )
 
@@ -584,6 +584,80 @@ enum NovaActionNormalizerTests {
         if let first = bug8am.first {
             check(label: "bug8 AM override hour 3", actual: first.hour, expected: 3, failures: &failures)
         }
+
+        // ───── BUG REPORT 2026-05-12 — HORAS EN PALABRAS ──────────────
+
+        // Caso real iPhone: "necesito ir a buscar a mi hermano a las tres"
+        // Antes: Nova preguntaba "¿Cuándo?" con título "Buscar a Mi hermano a Tres".
+        // Esperado: "Ir a buscar a mi hermano" hoy 15:00, sin preguntar.
+        let wordBug = runPipeline("necesito ir a buscar a mi hermano a las tres")
+        check(
+            label: "wordBug: 1 intent (no clarify)",
+            actual: wordBug.count, expected: 1, failures: &failures
+        )
+        if let first = wordBug.first {
+            check(label: "wordBug kind ≠ clarify", actual: first.kind != .clarify, expected: true, failures: &failures)
+            check(label: "wordBug title = 'Ir a buscar a mi hermano'", actual: first.title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "wordBug hour 15", actual: first.hour, expected: 15, failures: &failures)
+            check(label: "wordBug HOY", actual: first.day, expected: .today, failures: &failures)
+        }
+
+        // "despertarme a las siete" → 07:00
+        let w1 = runPipeline("despertarme a las siete")
+        if let first = w1.first {
+            check(label: "word: despertarme a las siete → 7", actual: first.hour, expected: 7, failures: &failures)
+        }
+
+        // "comer a las siete" → 19:00
+        let w2 = runPipeline("comer a las siete")
+        if let first = w2.first {
+            check(label: "word: comer a las siete → 19", actual: first.hour, expected: 19, failures: &failures)
+        }
+
+        // "clase a las ocho" → 08:00
+        let w3 = runPipeline("clase a las ocho")
+        if let first = w3.first {
+            check(label: "word: clase a las ocho → 8", actual: first.hour, expected: 8, failures: &failures)
+        }
+
+        // "reunión a las tres de la tarde" → 15:00 (PM explícito)
+        let w4 = runPipeline("reunión a las tres de la tarde")
+        if let first = w4.first {
+            check(label: "word: reunión a las tres de la tarde → 15", actual: first.hour, expected: 15, failures: &failures)
+        }
+
+        // "levantarme a las seis y media" → 06:30
+        let w5 = runPipeline("levantarme a las seis y media")
+        if let first = w5.first {
+            check(label: "word: levantarme a las seis y media → hora 6", actual: first.hour, expected: 6, failures: &failures)
+        }
+
+        // "seguir trabajando a las tres y media y comer a las siete" → 2 intents
+        // El " y " entre "tres" y "media" NO debe splittear (es time fragment).
+        // El " y " entre "media" y "comer" SÍ debe splittear.
+        let w6 = runPipeline("seguir trabajando a las tres y media y comer a las siete")
+        check(label: "word multi: 2 intents", actual: w6.count, expected: 2, failures: &failures)
+        if w6.count == 2 {
+            check(label: "word multi[0] hour 15", actual: w6[0].hour, expected: 15, failures: &failures)
+            check(label: "word multi[1] hour 19", actual: w6[1].hour, expected: 19, failures: &failures)
+        }
+
+        // "comprar pan y leche" → 1 tarea, no hora
+        let w7 = runPipeline("comprar pan y leche")
+        check(label: "word neg: 'comprar pan y leche' → 1 intent", actual: w7.count, expected: 1, failures: &failures)
+
+        // "ir a buscar a la Agustina a las tres" → "Buscar a Agustina" (idiomático)
+        // Para preservar el comportamiento idiomático cuando hay "la NombrePropio".
+        let w8 = runPipeline("ir a buscar a la Agustina a las tres")
+        if let first = w8.first {
+            check(label: "word: 'ir a buscar a la Agustina' → 'Buscar a Agustina'", actual: first.title, expected: "Buscar a Agustina", failures: &failures)
+            check(label: "word: hora 15", actual: first.hour, expected: 15, failures: &failures)
+        }
+
+        // hasTimeMarker para horas en palabras (sanity unit).
+        // Necesitamos exponer esto para test — chequear via runPipeline si
+        // detecta hora. Si no detecta, kind sería clarify o el intent no
+        // tendría hour. Ya cubierto por wordBug arriba.
 
         // ───── Resultado ───────────────────────────────────────────────
 
