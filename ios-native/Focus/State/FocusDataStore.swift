@@ -1943,6 +1943,14 @@ final class FocusDataStore: ObservableObject {
     @Published var dismissedDemoEventTitles: Set<String>
     @Published var dismissedDemoTaskTitles: Set<String>
 
+    /// IDs de items que el usuario borró localmente pero cuya soft-delete
+    /// remota puede haber fallado (sin red, error transitorio). Persiste a
+    /// disco; en cada `fetchRemoteAndMerge` reintentamos la soft-delete y,
+    /// si el remoto todavía devuelve el ítem, lo excluimos del merge así
+    /// no "revive" en la UI.
+    @Published private(set) var pendingDeleteEventIds: Set<UUID>
+    @Published private(set) var pendingDeleteTaskIds: Set<UUID>
+
     init() {
         self.events = FocusLocalStore.load([FocusEvent].self, forKey: .events) ?? []
         self.tasks = FocusLocalStore.load([FocusTask].self, forKey: .tasks) ?? []
@@ -1977,6 +1985,21 @@ final class FocusDataStore: ObservableObject {
         let storedDismissedTasks = FocusLocalStore.load([String].self, forKey: .dismissedDemoTasks) ?? []
         self.dismissedDemoEventTitles = Set(storedDismissedEvents)
         self.dismissedDemoTaskTitles = Set(storedDismissedTasks)
+
+        // Cola persistente de soft-deletes pendientes. Si la app se mata
+        // antes de confirmar el delete remoto, lo retomamos en el próximo
+        // fetch+merge.
+        let pendingEvtIds = FocusLocalStore.load([UUID].self, forKey: .pendingDeleteEvents) ?? []
+        let pendingTaskIds = FocusLocalStore.load([UUID].self, forKey: .pendingDeleteTasks) ?? []
+        self.pendingDeleteEventIds = Set(pendingEvtIds)
+        self.pendingDeleteTaskIds = Set(pendingTaskIds)
+    }
+
+    private func persistPendingDeleteEvents() {
+        FocusLocalStore.save(Array(pendingDeleteEventIds), forKey: .pendingDeleteEvents)
+    }
+    private func persistPendingDeleteTasks() {
+        FocusLocalStore.save(Array(pendingDeleteTaskIds), forKey: .pendingDeleteTasks)
     }
 
     private func persistDismissedDemoEvents() {
@@ -2102,10 +2125,23 @@ final class FocusDataStore: ObservableObject {
 
     /// Merge in-place: server gana por id; locales sin contraparte se
     /// preservan (luego pasamos a uploadPendingLocals para subirlos).
+    /// Excluye items que estén en `pendingDeleteEventIds` — el usuario los
+    /// borró pero el remoto puede no haberse confirmado todavía. Si el
+    /// remoto aún los devuelve, reintentamos la soft-delete asíncronamente.
     private func mergeRemoteEvents(_ remote: [RemoteFocusEvent]) {
         var byId = Dictionary(uniqueKeysWithValues: events.map { ($0.id, $0) })
+        // Quitar primero los que el usuario ya borró localmente — defensa
+        // contra "revivir" eventos cuando el delete remoto falló por red.
+        for id in pendingDeleteEventIds { byId.removeValue(forKey: id) }
+
+        var idsToRetryDelete: [UUID] = []
         for r in remote {
-            if let local = r.toLocal() { byId[local.id] = local }
+            guard let local = r.toLocal() else { continue }
+            if pendingDeleteEventIds.contains(local.id) {
+                idsToRetryDelete.append(local.id)
+                continue
+            }
+            byId[local.id] = local
         }
         events = byId.values.sorted { $0.startTime < $1.startTime }
         persistEvents()
@@ -2113,15 +2149,26 @@ final class FocusDataStore: ObservableObject {
         // recordatorio futuro nuevo, lo programamos. Identifiers estables
         // por id → no duplica para los que ya estaban programados.
         resyncAllLocalNotifications()
+        // Reintentar soft-deletes pendientes que el servidor todavía
+        // muestra (probablemente el primer intento falló por red).
+        for id in idsToRetryDelete { softDeleteEventRemote(id) }
     }
 
     private func mergeRemoteTasks(_ remote: [RemoteFocusTask]) {
         var byId = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
+        for id in pendingDeleteTaskIds { byId.removeValue(forKey: id) }
+
+        var idsToRetryDelete: [UUID] = []
         for r in remote {
+            if pendingDeleteTaskIds.contains(r.id) {
+                idsToRetryDelete.append(r.id)
+                continue
+            }
             byId[r.id] = r.toLocal()
         }
         tasks = Array(byId.values)
         persistTasks()
+        for id in idsToRetryDelete { softDeleteTaskRemote(id) }
     }
 
     /// Background upsert. Si falla, deja `syncState = .error` pero NO
@@ -2133,6 +2180,11 @@ final class FocusDataStore: ObservableObject {
             do {
                 let remote = RemoteFocusEvent(local: event, userId: creds.userId)
                 try await SupabaseSyncService.upsertEvent(remote, accessToken: creds.accessToken)
+                await MainActor.run {
+                    // Si veníamos arrastrando un .error transitorio, lo
+                    // normalizamos en cuanto vuelve un upload exitoso.
+                    if case .error = self?.syncState { self?.syncState = .idle }
+                }
             } catch let err as SupabaseSyncError {
                 await MainActor.run {
                     self?.syncState = .error(err.errorDescription ?? "Sync error")
@@ -2151,6 +2203,9 @@ final class FocusDataStore: ObservableObject {
             do {
                 let remote = RemoteFocusTask(local: task, userId: creds.userId)
                 try await SupabaseSyncService.upsertTask(remote, accessToken: creds.accessToken)
+                await MainActor.run {
+                    if case .error = self?.syncState { self?.syncState = .idle }
+                }
             } catch let err as SupabaseSyncError {
                 await MainActor.run {
                     self?.syncState = .error(err.errorDescription ?? "Sync error")
@@ -2168,6 +2223,13 @@ final class FocusDataStore: ObservableObject {
         Task { [weak self] in
             do {
                 try await SupabaseSyncService.softDeleteEvent(id: id, accessToken: creds.accessToken)
+                await MainActor.run {
+                    // Confirmado en remoto: lo sacamos de la cola pendiente
+                    // y, si era el último error, normalizamos el estado.
+                    self?.pendingDeleteEventIds.remove(id)
+                    self?.persistPendingDeleteEvents()
+                    if case .error = self?.syncState { self?.syncState = .idle }
+                }
             } catch let err as SupabaseSyncError {
                 await MainActor.run {
                     self?.syncState = .error(err.errorDescription ?? "Sync error")
@@ -2185,6 +2247,11 @@ final class FocusDataStore: ObservableObject {
         Task { [weak self] in
             do {
                 try await SupabaseSyncService.softDeleteTask(id: id, accessToken: creds.accessToken)
+                await MainActor.run {
+                    self?.pendingDeleteTaskIds.remove(id)
+                    self?.persistPendingDeleteTasks()
+                    if case .error = self?.syncState { self?.syncState = .idle }
+                }
             } catch let err as SupabaseSyncError {
                 await MainActor.run {
                     self?.syncState = .error(err.errorDescription ?? "Sync error")
@@ -2282,6 +2349,14 @@ final class FocusDataStore: ObservableObject {
         events.removeAll { $0.id == id }
         persistEvents()
         cleanupStaleSuggestions()
+        // Marcar como pendiente de borrado remoto ANTES de disparar el
+        // request. Si la red falla, queda en cola; en cada fetch siguiente
+        // reintentamos y, mientras tanto, el merge lo ignora para que no
+        // vuelva a aparecer.
+        if syncCredentials != nil {
+            pendingDeleteEventIds.insert(id)
+            persistPendingDeleteEvents()
+        }
         softDeleteEventRemote(id)
         // Cancelar notificación local SIEMPRE — si no existía, no-op.
         LocalNotificationService.shared.cancelReminder(eventId: id)
@@ -2405,6 +2480,10 @@ final class FocusDataStore: ObservableObject {
         tasks.removeAll { $0.id == id }
         persistTasks()
         cleanupStaleSuggestions()
+        if syncCredentials != nil {
+            pendingDeleteTaskIds.insert(id)
+            persistPendingDeleteTasks()
+        }
         softDeleteTaskRemote(id)
         HapticManager.shared.tick()
     }
@@ -2599,20 +2678,34 @@ final class FocusDataStore: ObservableObject {
             switch action {
             case .addEvent(let payload):
                 if let event = makeEvent(from: payload, userText: userText) {
-                    addEvent(event)
-                    outcome.didMutate = true
-                    outcome.summary = summaryForCreatedEvent(event)
-                    outcome.primaryEventId = event.id
-                    outcome.primaryIsReminder = event.isReminder == true
-                    updateNovaContext(
-                        from: userText,
+                    // Anti-duplicado en el path del backend. El local path
+                    // ya tenía esta defensa; ahora la centralizamos también
+                    // acá para casos donde el backend genere la acción
+                    // (retry, doble tap, sesión recuperada).
+                    if NovaActionNormalizer.isLikelyDuplicate(
                         title: event.title,
-                        date: event.startTime,
-                        location: event.location,
-                        section: event.section,
-                        kind: .event,
-                        eventId: event.id
-                    )
+                        startTime: event.startTime,
+                        existingEvents: events
+                    ) {
+                        outcome.didMutate = false
+                        outcome.summary = "Ya tenías «\(event.title)» a esa hora — no lo dupliqué."
+                        outcome.ignored.append("add_event(duplicate)")
+                    } else {
+                        addEvent(event)
+                        outcome.didMutate = true
+                        outcome.summary = summaryForCreatedEvent(event)
+                        outcome.primaryEventId = event.id
+                        outcome.primaryIsReminder = event.isReminder == true
+                        updateNovaContext(
+                            from: userText,
+                            title: event.title,
+                            date: event.startTime,
+                            location: event.location,
+                            section: event.section,
+                            kind: .event,
+                            eventId: event.id
+                        )
+                    }
                 } else {
                     outcome.ignored.append("add_event(invalid)")
                 }

@@ -23,6 +23,13 @@ enum FocusLocalStore {
         /// al cerrar la app — los ejemplos descartados NO vuelven a aparecer.
         case dismissedDemoEvents    = "focus.v1.dismissedDemoEvents"
         case dismissedDemoTasks     = "focus.v1.dismissedDemoTasks"
+        /// IDs de items que el usuario borró localmente pero cuya
+        /// confirmación remota (soft delete en Supabase) puede haber
+        /// fallado por red. Sobreviven a cierres y se reintentan en cada
+        /// `fetchRemoteAndMerge`. Sin esto, un evento borrado offline
+        /// podía "revivir" al volver a tener internet.
+        case pendingDeleteEvents    = "focus.v1.pendingDeleteEvents"
+        case pendingDeleteTasks     = "focus.v1.pendingDeleteTasks"
     }
 
     // MARK: - Encoders cacheados (mismo motivo que DateFormatters)

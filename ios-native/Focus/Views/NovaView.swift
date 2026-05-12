@@ -656,13 +656,12 @@ struct NovaView: View {
             .padding(.bottom, Theme.Spacing.sm)
             .animation(.easeInOut(duration: 0.18), value: inputFocused)
         }
-        // Background sólido sobre el área inferior, pintando también el
-        // safe-area cuando el teclado está cerrado para que no se vea el
-        // fondo del scroll por debajo.
-        .background(
-            Theme.Colors.background
-                .ignoresSafeArea(edges: .bottom)
-        )
+        // Background SÓLIDO sin `ignoresSafeArea` — SwiftUI maneja la
+        // keyboard avoidance automáticamente vía `safeAreaInset`. Si
+        // dejábamos `ignoresSafeArea(.bottom)` el background trataba de
+        // extenderse "bajo" el teclado y el bloque blanco del input
+        // desaparecía detrás del teclado en el empty state del chat.
+        .background(Theme.Colors.background)
     }
 
     private func submitDraft() {
