@@ -63,6 +63,121 @@ Documento central de auditoría continua del proyecto Focus.
 | 27 | 2026-05-11 | Bloque 3 Sync V1 — migración aplicada + verificada en producción | **Migración 018 aplicada** en proyecto Supabase `hvwqeemtfoyvfmongwzo` vía SQL Editor del Dashboard (Claude lo manejó con Chrome MCP, inyectando el SQL al editor Monaco y ejecutando con `⌘+Enter`). Supabase pidió confirmación por "destructive operations" (causa: `DROP TRIGGER IF EXISTS` idempotentes — los triggers no existían aún, los creamos a continuación), Claude confirmó "Run this query" y la query devolvió **"Success. No rows returned"** (~3 s). **Verificación post-migración** corrida en 5 queries en el mismo Editor: (1) `information_schema.tables` → 2 rows (`focus_events`, `focus_tasks` existen); (2) `pg_policies` → 8 rows (4 policies × 2 tablas: `focus_*_owner_select/insert/update/delete`); (3) `pg_class.relrowsecurity` → ambos `rls_enabled = true`; (4) `pg_policies (qual, with_check)` → todas `PERMISSIVE` con `qual = (auth.uid() = user_id)` para SELECT/UPDATE/DELETE y `with_check = (auth.uid() = user_id)` para INSERT/UPDATE (INSERT con qual NULL como debe ser, **ninguna policy abierta tipo `true`**); (5) `information_schema.columns` para legacy `events`/`tasks` → 12 rows, schema intacto (TEXT date/time, sin tocar). **Vercel verificado** via Chrome MCP en https://vercel.com/manunezdom-9658s-projects/focus-app: último deploy `feat(ios-native): add Supabase sync foundation for events and tasks` (commit 2228cab), Status **Ready**, dominio `www.usefocus.me` vivo. **Build iOS local OK**: `xcodebuild -scheme Focus -destination "platform=iOS Simulator,name=iPhone 17,OS=26.4.1" -configuration Debug build` → `** BUILD SUCCEEDED **` sin warnings. **Estado del lado servidor**: tablas paralelas creadas, RLS habilitado, policies owner-only activas (auth.uid() = user_id), triggers `focus_*_set_updated_at` instalados, índices `(user_id, start_time DESC)`, `(user_id, deleted_at)`, `(user_id, due_date NULLS LAST)`, `(user_id, is_completed)`. **Cierre Bloque 3 — checklist**: Migración 018 aplicada ✅ · `focus_events` verificada ✅ · `focus_tasks` verificada ✅ · RLS owner-only verificado ✅ · Legacy `events`/`tasks` intactas ✅ · Build iOS Debug OK ✅ · Vercel Ready ✅ · Sync eventos probado e2e ⏳ (pendiente prueba manual desde iPhone con cuenta real) · Sync tareas probado e2e ⏳ · Modo demo no sincroniza ⏳ (gated en código por `syncCredentials == nil`, falta confirmación visual desde device). **Limitaciones V1 conocidas y aceptadas**: no realtime (sync trigger en mutación + manual desde Ajustes); no queue offline avanzada (errores no revierten local, próximo merge corrige); `nova_suggestions`/`nova_messages`/`settings` fuera de scope; migración demo→cuenta pendiente. **Cómo cerrar el e2e (instrucciones para Martin)**: abrir app en iPhone → si está logueado, ir a Ajustes → Sincronización (debería mostrar "Sincronizado" o "Sincronizando…", nunca "Tabla no encontrada"); crear evento "Reunión test mañana a las 10" → en Dashboard `focus_events` aparece row con tu `user_id` y `deleted_at IS NULL`; editar evento → en Dashboard `updated_at` cambia; borrar evento → en Dashboard `deleted_at` se setea (soft delete); crear tarea "Estudiar cálculo mañana" → row en `focus_tasks` con `is_completed = false`; completar → `is_completed = true` y `done_at` con timestamp; en modo demo (botón "Continuar sin cuenta") las mutaciones NO deben generar rows en Supabase. **NO se hizo en esta sesión**: prueba e2e con device físico (requiere Martin + iPhone presente), sync de `nova_*`/`settings`, Nova LLM, notificaciones, micrófono, widgets. |
 | 26 | 2026-05-11 | Bloque 3 Sync V1 — foundation events/tasks | **Diagnóstico**: refresh token ya implementado (pass 16, validado). Supabase tiene `public.events`/`public.tasks` legacy con shape web (TEXT date/time) — intactas para no romper producción. Vercel: sin CLI/auth en sesión Claude, instrucciones de diagnóstico ya documentadas en §14.7. **Migración `018_focus_native_v1.sql`** nueva: crea `public.focus_events` y `public.focus_tasks` paralelas con TIMESTAMPTZ + campos nativos (isReminder, inferredDuration, location, source, external_*, deleted_at). RLS owner-only (4 policies × tabla: SELECT/INSERT/UPDATE/DELETE con `auth.uid() = user_id`). Triggers de `updated_at` auto. Índices por user_id + start/due/completed. **Pendiente**: aplicar la migración en producción vía Supabase Dashboard SQL Editor o `supabase db push`. La iOS app ya envía requests, pero hasta que la migración esté aplicada, retorna `tableNotFound` (gracefully). **`SupabaseSyncService.swift`** nuevo (`ios-native/Focus/Services/`): cliente REST stateless para `/rest/v1/focus_events` y `/rest/v1/focus_tasks`. Métodos: `fetchEvents/Tasks`, `upsertEvent/Task` (con `Prefer: resolution=merge-duplicates`), `softDeleteEvent/Task` (PATCH `deleted_at = now()`). Headers: `apikey` (publishable anon) + `Authorization: Bearer <access_token>` (del usuario). Errores tipados: `tableNotFound`, `rlsRejected`, `network`, `server`, `decoding`, `notAuthenticated`. **NUNCA loguea tokens completos**. DTOs `RemoteFocusEvent`/`RemoteFocusTask` con `init(local:userId:)` y `toLocal()` — conversión bidireccional. **`FocusDataStore` extendido**: nuevos `@Published`: `syncCredentials: SyncCredentials?`, `syncState: SyncState` (.demo/.loggedOut/.idle/.syncing/.error), `lastSyncAt: Date?`. Método `applyAuthChange(accessToken:userId:)` que `FocusApp` llama vía `.task(id:)` cuando el `AuthState` cambia. Al recibir credenciales nuevas, dispara `fetchRemoteAndMerge()` que trae remoto y mergea por id. **Sync en cada mutación**: `addEvent`/`updateEvent`/`deleteEvent` y sus análogos de tarea ahora también disparan `uploadEvent/Task` o `softDeleteEventRemote/Task` en background. Modo demo: no llega a sync (`syncCredentials == nil`). Si la red o RLS falla, sync registra error pero no revierte local — consistencia se restaura en próximo merge exitoso. **Ajustes → "Sincronización"**: nueva sección que muestra `syncState` (demo/idle/syncing/error) + última hora de sync + botón "Sincronizar ahora" (deshabilitado en demo/logout). **`FocusApp`** observa `authStore.state` vía `.task(id:)` con identidad derivada (loggedIn:userId / demo / loggedOut). **Seguridad**: tokens viven en Keychain (auth) + memoria (RAM via `SyncCredentials`). No service_role en cliente. No tokens en logs. RLS rechaza writes con user_id ajeno (probado vía interpretError 401/403). **Build OK** simulador + device. **Pendiente para cerrar Bloque 3**: aplicar `018_focus_native_v1.sql` en Supabase producción, probar fetch real con cuenta logueada en iPhone, verificar que datos creados en device aparecen en Supabase Dashboard. **NO se hizo**: migración demo→cuenta (riesgoso), sync de `nova_suggestions`/`nova_messages`/`settings` (fuera de scope V1), conflict resolution avanzado (last-write-wins por ahora), Nova LLM real, notificaciones, micrófono, widgets. |
 
+## Cierre de día — 2026-05-11
+
+**Estado**: build OK, repo limpio, push completo, app lista para probar mañana en iPhone físico.
+
+### Último commit activo
+
+`65e5581` — `fix(ios-native): make Nova resilient to backend failures and compound requests`
+
+### Commits importantes del día (orden cronológico)
+
+| Commit | Resumen |
+|---|---|
+| `e0a137a` | Nova actions con normalizer único + tests 8/8 |
+| `4814e47` | Reminder offsets + notif body limpio + countdown timeline |
+| `7520a66` | Daily driver hardening: pending-delete queue + anti-dup backend |
+| `1baa1e4` | Demo data aislada a demo mode + AppIcon V6 (F + dot) + chat toolbar Listo |
+| `65e5581` | Nova resiliente: fallback en 500 + multi-intent (frases compuestas) |
+
+### Qué quedó corregido hoy
+
+- **Nova "cerebro"**: cleanTitle / isReminderTrigger / resolveEndTime / shouldScheduleNotification / extractReminderOffset / isLikelyDuplicate centralizados en `NovaActionNormalizer`. Backend y local pasan por el mismo pipeline.
+- **Reminder offsets**: "X minutos antes" parseado y stripeado del título; notif programada al `startTime - offset`; subtitle dinámico; body limpio.
+- **Countdown live en timeline**: solo eventos EN CURSO o que empiezan en < 60 min ven el contador segundo a segundo.
+- **Pending-delete queue**: deletes sobreviven a fallos de red; merge remoto excluye items en cola y reintenta el soft-delete.
+- **Anti-duplicate en backend path**: `applyBackendActions` ahora chequea `isLikelyDuplicate` (el local ya lo hacía).
+- **syncState resetea a .idle**: uploads exitosos después de un fail limpian el `.error`.
+- **Demo data aislada**: `store.isInDemoMode = syncCredentials == nil`. Cuenta real con 0 ítems → vacío real, NO "Clase de Cálculo II"/"Foco profundo"/"Reunión con jefa".
+- **Calendar delete consistente**: como consecuencia del fix anterior, los eventos en cuenta real son reales y swipe + long-press funcionan en Día/Semana/Mes.
+- **Chat Nova keyboard**: toolbar "Listo" para cerrar; `scrollDismissesKeyboard(.immediately)`; sin loop tap→focus→reopen.
+- **AppIcon V6**: F geométrica blanca + dot cyan en cobalto (no más target/crosshair).
+- **Nova fallback en error**: `canFallbackToLocal` ahora cubre `.server`/`.invalidResponse`/`.encoding`/`.decoding`. Mensaje técnico solo en console.log; usuario ve nota humana.
+- **Multi-intent**: `NovaResponder.parseAll` separa por " y luego / luego / después / también / además " con herencia de marcador temporal entre segmentos.
+
+### Limitaciones conocidas que NO se atacan hoy (decisiones explícitas)
+
+- **Demo → login**: ítems creados en demo se quedan locales y al editar luego se suben a la cuenta. Workaround: "Restablecer demo" en Ajustes antes de loguearse. Solución limpia (sheet de migración) queda fuera del scope de estabilidad.
+- **Sin queue offline para uploads**: si addEvent/updateEvent falla por red, el local persiste, pero el upload queda perdido hasta el próximo merge exitoso.
+- **No realtime**: segundo device sync por pull manual / mutación + manual desde Ajustes.
+- **FocusLogoMark in-app sigue siendo anillos** del pase anterior — el AppIcon launcher cambió pero el mark de los headers no. Consistencia brand completa queda para futura ronda.
+- **Conector " y " solo NO splittea** en parseAll — demasiado ambiguo. Solo conectores que en español siempre indican nueva acción.
+- **Segundo intent no propaga contexto del primero** — referencias como "10 min antes" sin más detalle no resuelven entre segmentos.
+
+### QA de mañana (probar en iPhone físico)
+
+Antes de empezar:
+1. Borrar Focus del iPhone (long-press → Eliminar app) **importante para ver el AppIcon V6**
+2. Xcode → Product → Clean Build Folder (⌘⇧K)
+3. Reinstalar desde Xcode
+4. Si el icono sigue siendo el viejo: reboot del iPhone
+
+**A. App limpia / datos demo**
+- [ ] Launcher muestra el AppIcon V6 (F blanca + dot cyan), no el target viejo
+- [ ] Login con cuenta real → Calendario NO muestra "Clase de Cálculo II"
+- [ ] Mi Día NO muestra "Foco profundo: TP final de Programación"
+- [ ] NO aparece "Reunión con jefa — review semanal"
+- [ ] Sin eventos creados, las pantallas muestran vacío real
+
+**B. Calendario (delete)**
+- [ ] Crear un evento real desde Mi Día o Calendario
+- [ ] Calendario → swipe-left en la card → trash icon → eliminar
+- [ ] Calendario → long-press en card → menú "Eliminar"
+- [ ] Cerrar app y reabrir → el evento NO vuelve
+- [ ] Si logueado, verificar en Supabase Dashboard `focus_events` que `deleted_at` quedó seteado
+
+**C. Nova fallback + multi-intent**
+Escribir en Mi Día o chat de Nova:
+> "mañana despertarme a las 7:10 y luego tipo 8 salir de mi casa a mi clase llamada contenidos digitales"
+
+Esperado:
+- [ ] **NO** aparece "Error del servidor (500)" como única respuesta
+- [ ] Se crean **dos ítems** en Calendario para mañana
+- [ ] Ítem 1: título **"Despertarme"** mañana **07:10**, recordatorio puntual
+- [ ] Ítem 2: título **"Salir de mi casa"** mañana **08:00**, recordatorio puntual
+- [ ] Ningún ítem tiene la frase completa sucia como título
+- [ ] Ningún ítem tiene un rango falso 07:10-08:10
+
+**D. Notificaciones**
+Escribir:
+> "acuérdame comprar pan en 1 minuto"
+
+Esperado:
+- [ ] Se crea recordatorio "Comprar pan" en 1 min
+- [ ] La notificación llega ~1 min después
+- [ ] Título de la notif limpio (no incluye "acuérdame X minutos antes")
+- [ ] Subtitle dinámico ("En 1 min" o "Empieza a las HH:MM")
+
+**E. Micrófono**
+- [ ] Tocar el mic del FocusBar en Mi Día → indicador "Escuchando…" arriba del bar
+- [ ] El dictado NO abre Nova Live ni cambia de pantalla
+- [ ] Tocar el mic otra vez → texto queda en la barra, el usuario lo manda con send
+- [ ] Si el permiso está denegado, mensaje claro con botón a Ajustes
+- [ ] Chat de Nova: chip "Hablar con Nova" sí abre Nova Live (fullScreen oscuro)
+
+**F. Borrado offline (pending-delete queue)**
+- [ ] Crear un evento estando online (queda subido a Supabase)
+- [ ] Activar modo avión
+- [ ] Borrar el evento desde Calendario → desaparece local
+- [ ] Cerrar y reabrir la app → el evento NO vuelve
+- [ ] Desactivar modo avión → al rato, en Supabase el `deleted_at` queda seteado
+
+### Si TODO pasa: empezar la prueba de 3 días
+
+Usar Focus como app real día a día. Anotar:
+- Cualquier evento/tarea que aparezca duplicado
+- Cualquier evento borrado que reaparezca
+- Cualquier notificación rara (texto sucio, hora incorrecta)
+- Cualquier crash o pantalla congelada
+- Cualquier momento donde Nova diga "Error" sin más contexto
+
+### Bloque siguiente al QA (si todo pasa)
+
+**Bloque 8 — Polish visual avanzado** (a definir): icono Nova más distintivo, animaciones más cercanas a Gemini, consistencia FocusLogoMark con AppIcon V6. NO se abre hasta que el daily driver esté validado por ≥ 3 días sin pérdida de datos.
+
+---
+
 ## Audit Pass 2 — Findings completos (2026-05-11)
 
 > Auditoría exhaustiva en 15 áreas, classificada por severidad. ✅ = fix aplicado en este pass · 🔜 = pendiente para futura sesión.
