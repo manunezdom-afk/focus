@@ -55,6 +55,26 @@ enum NovaActionNormalizer {
         return reminderTriggers.contains { lower.contains($0) }
     }
 
+    /// Verbos que implican una **acción puntual** y se tratan como
+    /// recordatorio (sin duración + notificación si toggle activo)
+    /// aunque el usuario no haya dicho "acuérdame".
+    /// "Despertarme a las 7" = recordatorio puntual a las 07:00.
+    /// "Levantarme a las 7" = ídem.
+    private static let punctualVerbPattern: String =
+        #"\b(despertar(me|te|se|nos|los)?|despertame|despertarnos|despierto|despierta|levantar(me|te|se|nos|los)?|levantame|levantarnos|levanto|levanta|amanecer|amanezca|amanezco)\b"#
+
+    /// True cuando el texto contiene un verbo puntual (despertar/levantar/
+    /// amanecer). Estos verbos describen un momento, no un intervalo —
+    /// se tratan como recordatorios para que: (a) no aparezcan con rango
+    /// falso en el calendario, (b) disparen notificación si el toggle de
+    /// recordatorios está activo.
+    static func impliesPunctualReminder(in userText: String) -> Bool {
+        return userText.range(
+            of: punctualVerbPattern,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
+
     // MARK: - Limpieza de título
 
     /// Quita ruido del título — triggers de recordatorio, marcadores
@@ -125,6 +145,36 @@ enum NovaActionNormalizer {
                 with: " ",
                 options: [.regularExpression, .caseInsensitive]
             )
+        }
+
+        // 3a. Strip destinos educacionales trailing tipo "para la universidad".
+        //     "salir de mi casa a las 8 para la universidad" → tras strip
+        //     temporal queda "salir de mi casa para la universidad" — el
+        //     destino es contexto, no parte del título visible. Solo cuando
+        //     la frase ESTÁ DOMINADA por un verbo de desplazamiento ("salir",
+        //     "ir", "voy") + "para/a la X" donde X es ámbito educacional.
+        //     No tocar "para el examen" / "para mi mamá" (no son destinos
+        //     físicos, son objetivos personales).
+        let lowerForDest = result.lowercased()
+        let hasMoveVerb = lowerForDest.range(
+            of: #"\b(salir|salgo|ir|voy|vamos|me voy|me salgo|entrar)\b"#,
+            options: .regularExpression
+        ) != nil
+        if hasMoveVerb {
+            // Artículo / posesivo opcional — la normalización previa puede haber
+            // capitalizado "la universidad" → "Universidad" dejando "para
+            // Universidad" sin artículo, pero también puede llegar tal cual.
+            let destinationPatterns: [String] = [
+                #"\s+para\s+(?:(?:la|el|las|los|mi|tu|su)\s+)?(?:universidad|colegio|escuela|clase|clases|facultad|liceo|preescolar|gimnasio|gym)\b"#,
+                #"\s+a\s+(?:(?:la|el|las|los|mi|tu|su)\s+)?(?:universidad|colegio|escuela|facultad|liceo|preescolar|gimnasio|gym)\b"#
+            ]
+            for pattern in destinationPatterns {
+                result = result.replacingOccurrences(
+                    of: pattern,
+                    with: " ",
+                    options: [.regularExpression, .caseInsensitive]
+                )
+            }
         }
 
         // 3b. Strip frases de "X minutos antes" / "media hora antes" /

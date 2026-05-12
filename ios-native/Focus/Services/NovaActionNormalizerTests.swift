@@ -329,12 +329,252 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
+        // ───── AM/PM contextual por verbo (los 10 casos del usuario) ──
+
+        // 1. "despertarme a las 7" → "Despertarme" 07:00, recordatorio puntual
+        checkAction(
+            "case 1: despertarme a las 7",
+            text: "despertarme a las 7",
+            expectedTitle: "Despertarme",
+            expectedHour: 7,
+            expectedReminder: true,
+            failures: &failures
+        )
+
+        // 2. "levantarme a las 7" → "Levantarme" 07:00
+        checkAction(
+            "case 2: levantarme a las 7",
+            text: "levantarme a las 7",
+            expectedTitle: "Levantarme",
+            expectedHour: 7,
+            expectedReminder: true,
+            failures: &failures
+        )
+
+        // 3. "salir de mi casa a las 8 para la universidad" → "Salir de mi casa" 08:00
+        checkAction(
+            "case 3: salir de mi casa a las 8 para la universidad",
+            text: "salir de mi casa a las 8 para la universidad",
+            expectedTitle: "Salir de mi casa",
+            expectedHour: 8,
+            expectedReminder: nil,  // no chequeamos — el destino escolar fuerza AM, no reminder
+            failures: &failures
+        )
+
+        // 4. "clase a las 8" → 08:00 (no 20:00)
+        checkAction(
+            "case 4: clase a las 8",
+            text: "clase a las 8",
+            expectedTitle: nil,
+            expectedHour: 8,
+            expectedReminder: nil,
+            failures: &failures
+        )
+
+        // 5. "comer a las 7" → "Comer" 19:00
+        checkAction(
+            "case 5: comer a las 7",
+            text: "comer a las 7",
+            expectedTitle: "Comer",
+            expectedHour: 19,
+            expectedReminder: nil,
+            failures: &failures
+        )
+
+        // 6. "cenar a las 8" → 20:00
+        checkAction(
+            "case 6: cenar a las 8",
+            text: "cenar a las 8",
+            expectedTitle: "Cenar",
+            expectedHour: 20,
+            expectedReminder: nil,
+            failures: &failures
+        )
+
+        // 7. "almorzar a la 1" → 13:00
+        checkAction(
+            "case 7: almorzar a la 1",
+            text: "almorzar a la 1",
+            expectedTitle: "Almorzar",
+            expectedHour: 13,
+            expectedReminder: nil,
+            failures: &failures
+        )
+
+        // 8. "seguir trabajo de mi papá a la 1 y comer a las 7" → 2 intents
+        //    "Seguir trabajo de mi papá" 13:00 + "Comer" 19:00
+        let case8 = runPipeline("seguir trabajo de mi papá a la 1 y comer a las 7")
+        check(
+            label: "case 8: 'seguir...a la 1 y comer a las 7' → 2 intents",
+            actual: case8.count, expected: 2, failures: &failures
+        )
+        if case8.count == 2 {
+            check(label: "case 8a: hora intent 1", actual: case8[0].hour, expected: 13, failures: &failures)
+            check(label: "case 8b: hora intent 2", actual: case8[1].hour, expected: 19, failures: &failures)
+        }
+
+        // 9. "mañana despertarme a las 7 y salir a las 8" → 2 intents
+        //    "Despertarme" mañana 07:00 + "Salir" mañana 08:00
+        let case9 = runPipeline("mañana despertarme a las 7 y salir a las 8")
+        check(
+            label: "case 9: 'mañana despertarme...y salir...' → 2 intents",
+            actual: case9.count, expected: 2, failures: &failures
+        )
+        if case9.count == 2 {
+            check(label: "case 9a: hora intent 1 (despertarme)", actual: case9[0].hour, expected: 7, failures: &failures)
+            check(label: "case 9b: hora intent 2 (salir)", actual: case9[1].hour, expected: 8, failures: &failures)
+            check(label: "case 9a: intent 1 es recordatorio", actual: case9[0].isReminder, expected: true, failures: &failures)
+        }
+
+        // 10. "reunión a las 7" → 19:00 (regla coloquial 1-7 PM como safe default).
+        checkAction(
+            "case 10: reunión a las 7 (safe default)",
+            text: "reunión a las 7",
+            expectedTitle: nil,
+            expectedHour: 19,
+            expectedReminder: nil,
+            failures: &failures
+        )
+
+        // ───── Overrides explícitos AM/PM ─────────────────────────────
+
+        checkAction(
+            "override AM: 'comer a las 7 de la mañana' → 07:00",
+            text: "comer a las 7 de la mañana",
+            expectedTitle: nil,
+            expectedHour: 7,
+            expectedReminder: nil,
+            failures: &failures
+        )
+
+        checkAction(
+            "override PM: 'despertarme a las 7 de la tarde' → 19:00",
+            text: "despertarme a las 7 de la tarde",
+            expectedTitle: nil,
+            expectedHour: 19,
+            expectedReminder: nil,
+            failures: &failures
+        )
+
+        // ───── Edge: 'salir' SIN destino escolar no fuerza AM ────────
+
+        checkAction(
+            "edge: 'salir a las 6' sin contexto → 18:00 (colloquial PM)",
+            text: "salir a las 6",
+            expectedTitle: nil,
+            expectedHour: 18,
+            expectedReminder: nil,
+            failures: &failures
+        )
+
+        // ───── Edge: 'salir' + universidad fuerza AM aunque sea hora 1-7 ──
+
+        checkAction(
+            "edge: 'salir a las 6 para la universidad' → 06:00",
+            text: "salir a las 6 para la universidad",
+            expectedTitle: "Salir",
+            expectedHour: 6,
+            expectedReminder: nil,
+            failures: &failures
+        )
+
+        // ───── impliesPunctualReminder unit tests ─────────────────────
+
+        check(
+            label: "impliesPunctualReminder: 'despertarme a las 7' → true",
+            actual: NovaActionNormalizer.impliesPunctualReminder(in: "despertarme a las 7"),
+            expected: true, failures: &failures
+        )
+        check(
+            label: "impliesPunctualReminder: 'levantarme mañana' → true",
+            actual: NovaActionNormalizer.impliesPunctualReminder(in: "levantarme mañana"),
+            expected: true, failures: &failures
+        )
+        check(
+            label: "impliesPunctualReminder: 'reunión a las 7' → false",
+            actual: NovaActionNormalizer.impliesPunctualReminder(in: "reunión a las 7"),
+            expected: false, failures: &failures
+        )
+        check(
+            label: "impliesPunctualReminder: 'comer a las 7' → false",
+            actual: NovaActionNormalizer.impliesPunctualReminder(in: "comer a las 7"),
+            expected: false, failures: &failures
+        )
+
         // ───── Resultado ───────────────────────────────────────────────
 
         if failures.isEmpty {
             return "✓ ALL TESTS PASSED"
         }
         return "✗ FAILURES (\(failures.count)):\n" + failures.joined(separator: "\n")
+    }
+
+    // MARK: - Helpers para tests de pipeline completo
+
+    /// Resultado de pasar un texto por `parseAll` + `cleanTitle`. Replica
+    /// lo que hace `applyLocalNovaIntent` antes de guardar el evento.
+    private struct ParsedAction: Equatable {
+        let title: String
+        let hour: Int?
+        let isReminder: Bool
+    }
+
+    /// Pasa el texto por el pipeline completo (parseAll → cleanTitle) y
+    /// devuelve una lista de `ParsedAction`, uno por intent generado.
+    private static func runPipeline(_ text: String) -> [ParsedAction] {
+        let intents = NovaResponder.parseAll(text)
+        return intents.compactMap { intent -> ParsedAction? in
+            switch intent {
+            case let .createEvent(rawTitle, when, _, _, _, wantsReminder):
+                let title = NovaActionNormalizer.cleanTitle(rawTitle)
+                let hour = when.map { Calendar.current.component(.hour, from: $0) }
+                let reminder = wantsReminder
+                    || NovaActionNormalizer.isReminderTrigger(in: text)
+                    || NovaActionNormalizer.impliesPunctualReminder(in: text)
+                return ParsedAction(title: title, hour: hour, isReminder: reminder)
+            case let .createTask(rawTitle, dueDate, _, wantsReminder):
+                let title = NovaActionNormalizer.cleanTitle(rawTitle)
+                let hour = dueDate.map { Calendar.current.component(.hour, from: $0) }
+                let reminder = wantsReminder
+                    || NovaActionNormalizer.isReminderTrigger(in: text)
+                    || NovaActionNormalizer.impliesPunctualReminder(in: text)
+                return ParsedAction(title: title, hour: hour, isReminder: reminder)
+            default:
+                return nil
+            }
+        }
+    }
+
+    /// Comprueba que un texto produce exactamente 1 intent con título / hora /
+    /// flag de recordatorio esperados. Si `expectedTitle` o `expectedReminder`
+    /// son `nil`, no se chequean.
+    private static func checkAction(
+        _ label: String,
+        text: String,
+        expectedTitle: String?,
+        expectedHour: Int?,
+        expectedReminder: Bool?,
+        failures: inout [String]
+    ) {
+        let actions = runPipeline(text)
+        guard let first = actions.first else {
+            let msg = "  ✗ \(label) — pipeline devolvió 0 intents"
+            print(msg); failures.append(msg)
+            return
+        }
+        if actions.count != 1 {
+            let msg = "  ⚠ \(label) — pipeline devolvió \(actions.count) intents (esperaba 1)"
+            print(msg); failures.append(msg)
+        }
+        if let expectedTitle {
+            check(label: "\(label) — title", actual: first.title, expected: expectedTitle, failures: &failures)
+        }
+        if let expectedHour {
+            check(label: "\(label) — hour", actual: first.hour, expected: expectedHour, failures: &failures)
+        }
+        if let expectedReminder {
+            check(label: "\(label) — isReminder", actual: first.isReminder, expected: expectedReminder, failures: &failures)
+        }
     }
 
     private static func check<T: Equatable>(

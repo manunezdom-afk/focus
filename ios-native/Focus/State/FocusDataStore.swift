@@ -1325,6 +1325,37 @@ enum NovaResponder {
             rest = capitalizeFirstNounIfLower(rest)
 
             if rest.isEmpty { return normalizedVerb }
+
+            // Edge: si el trigger termina en " a" (ej. "salir a", "ir a") y
+            // el `rest` arranca con un número, el "a" del trigger era parte
+            // de "a las N" (hora), no preposición de destino. Reparamos:
+            //
+            //   - "salir a las 8"                 → "Salir"
+            //   - "ir a las 7"                    → "Ir"
+            //   - "salir a las 6 para la universidad" → "Salir para Universidad"
+            //
+            // (la limpieza de destino final corre en NovaActionNormalizer.cleanTitle).
+            let restStartsWithHour = rest.range(
+                of: #"^\d{1,2}(:\d{2})?\b"#,
+                options: .regularExpression
+            ) != nil
+            if restStartsWithHour && trimmedTriggerLower.hasSuffix(" a") {
+                let verbOnly = String(trimmedTriggerLower.dropLast(2))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let verbCap = capitalizeFirst(verbOnly)
+                // Strip el número (la hora) del comienzo del rest, lo que
+                // quede es el destino/contexto real.
+                let withoutHour = rest.replacingOccurrences(
+                    of: #"^\d{1,2}(:\d{2})?\s*"#,
+                    with: "",
+                    options: .regularExpression
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+                if withoutHour.isEmpty {
+                    return verbCap
+                }
+                return "\(verbCap) \(withoutHour)"
+            }
+
             return "\(normalizedVerb) \(rest)"
         }
 
@@ -1767,8 +1798,21 @@ enum NovaResponder {
     private static func resolveTipoHour(_ n: Int, in text: String) -> Int {
         let isMorning = text.contains("de la mañana") || text.contains("de la manana") || text.contains(" am")
         let isAfternoon = text.contains("de la tarde") || text.contains("de la noche") || text.contains(" pm")
-        if isMorning { return n }
+        if isMorning { return n == 12 ? 0 : n }
         if isAfternoon, n < 12 { return n + 12 }
+
+        // Verb context override antes de la regla coloquial (igual que adjustAmPm).
+        switch detectHourContext(in: text) {
+        case .forceAM:
+            return n == 12 ? 0 : n
+        case .forcePM:
+            if n == 0 { return 12 }
+            if n == 12 { return 12 }
+            return n < 12 ? n + 12 : n
+        case .neutral:
+            break
+        }
+
         if n == 0 { return 12 }
         if n == 12 { return 12 }
         if n >= 13 { return n }  // ya en formato 24h
@@ -1777,13 +1821,18 @@ enum NovaResponder {
     }
 
     /// Ajusta hora N=1..12 cuando no hay marcador AM/PM. Regla coloquial
-    /// para español chileno/latino: "a las 3" para una actividad normal de día
-    /// se interpreta como **15:00**, no 03:00.
+    /// para español chileno/latino, refinada con **contexto de verbo**:
     ///
     /// - Marcador explícito "am"/"de la mañana"/"madrugada" → AM (mantener hora).
     /// - Marcador explícito "pm"/"de la tarde"/"de la noche" → PM (+12).
-    /// - Sin marcador:
-    ///   - 1..7 → PM (uso social/diurno típico: 3 = 15:00, 7 = 19:00).
+    /// - **Verbo de mañana** (despertar, levantar, amanecer, desayunar) →
+    ///   forzar AM ("despertarme a las 7" = 07:00, no 19:00).
+    /// - **Verbo de comida/noche** (cenar, comer, almorzar, once) → forzar PM
+    ///   ("cenar a las 8" = 20:00, "comer a las 7" = 19:00).
+    /// - **Acción matinal** ("salir/ir/entrar" + universidad/colegio/escuela
+    ///   /clase/facultad) → forzar AM ("salir a las 6 para la universidad" = 06:00).
+    /// - Sin contexto:
+    ///   - 1..7 → PM (uso social/diurno típico).
     ///   - 8..11 → AM (típico horario laboral/escolar de mañana).
     ///   - 12 → 12:00 (mediodía).
     private static func adjustAmPm(hour: Int, in text: String) -> Int {
@@ -1802,9 +1851,73 @@ enum NovaResponder {
             return hour == 12 ? 12 : hour + 12
         }
 
-        // 3) Sin marcador → regla coloquial chilena/latina.
+        // 3) Verb context override antes de la regla coloquial.
+        switch detectHourContext(in: text) {
+        case .forceAM:
+            return hour == 12 ? 0 : hour
+        case .forcePM:
+            return hour == 12 ? 12 : hour + 12
+        case .neutral:
+            break
+        }
+
+        // 4) Sin marcador → regla coloquial chilena/latina.
         if hour >= 1 && hour <= 7 { return hour + 12 }   // 1→13, 3→15, 7→19
         return hour                                        // 8..12 quedan AM
+    }
+
+    /// Resultado de inspeccionar el segmento de texto buscando verbos /
+    /// contextos que fuercen la hora a AM o PM cuando no hay marcador
+    /// explícito ("am"/"pm"/"de la mañana"/"de la tarde").
+    private enum HourContext {
+        case forceAM
+        case forcePM
+        case neutral
+    }
+
+    /// Detecta verbos y contextos que desambiguan horas 1..12 cuando no hay
+    /// marcador AM/PM explícito. Mantener conservador — solo verbos cuyo
+    /// significado temporal es claro y no se solapa con otros usos.
+    ///
+    /// - **AM**: despertar, levantar, amanecer, desayunar.
+    /// - **AM por destino**: "salir/ir/entrar" + clase/universidad/colegio/
+    ///   escuela/facultad. NO incluye "trabajo/oficina" porque "salir del
+    ///   trabajo a las 5" debe leerse como 17:00, no 05:00.
+    /// - **PM**: cenar, comer, almorzar, once (la comida chilena, no el
+    ///   número).
+    private static func detectHourContext(in text: String) -> HourContext {
+        let lower = text.lowercased()
+
+        // 1) Verbos AM fuertes (despertar / levantar / amanecer / desayunar).
+        let amVerbPattern = #"\b(despertar(me|te|se|nos|los)?|despertame|despertarnos|despierto|despierta|levantar(me|te|se|nos|los)?|levantame|levantarnos|levanto|levanta|amanecer|amanezca|amanezco|desayunar|desayuno|desayunamos)\b"#
+        if lower.range(of: amVerbPattern, options: .regularExpression) != nil {
+            return .forceAM
+        }
+
+        // 2) Acción matinal de desplazamiento + destino educacional.
+        //    "salir a la universidad" / "ir a clase" / "entrar al colegio".
+        let hasMorningAction = lower.range(
+            of: #"\b(salir|salgo|sale|ir|voy|vamos|entrar|entro|entra)\b"#,
+            options: .regularExpression
+        ) != nil
+        let hasSchoolWord = lower.range(
+            of: #"\b(clase|clases|universidad|colegio|escuela|facultad|liceo|preescolar)\b"#,
+            options: .regularExpression
+        ) != nil
+        if hasMorningAction && hasSchoolWord {
+            return .forceAM
+        }
+
+        // 3) Verbos PM fuertes — comidas (almuerzo o cena). En español
+        //    latino "comer" se usa tanto para almuerzo como cena → siempre
+        //    PM. Excluimos formas como "como" / "come" (tercera/primera
+        //    persona indicativo) porque "como" es preposición ambigua.
+        let pmVerbPattern = #"\b(cenar|cenando|cenamos|cena|comer|comiendo|comamos|comida|almorzar|almorzando|almorzamos|almuerzo|almuerza|tomar\s+once)\b"#
+        if lower.range(of: pmVerbPattern, options: .regularExpression) != nil {
+            return .forcePM
+        }
+
+        return .neutral
     }
 
     private static func firstCaptureInt(_ text: String, pattern: String, group: Int) -> Int? {
@@ -3051,6 +3164,7 @@ final class FocusDataStore: ObservableObject {
         // o título original con prefijo "Recordatorio:" como señales.
         let backendIcon = payload.icon ?? ""
         let isReminderHint = NovaActionNormalizer.isReminderTrigger(in: userText)
+            || NovaActionNormalizer.impliesPunctualReminder(in: userText)
             || rawTitle.lowercased().hasPrefix("recordatorio")
             || backendIcon.lowercased() == "alarm"
 
@@ -3659,9 +3773,11 @@ final class FocusDataStore: ObservableObject {
             guard !title.isEmpty else { return nil }
 
             // PASO 2: isReminder unificado — del intent (wantsReminder)
-            // O detectado en userText. Por las dudas, normalizer también.
+            // O detectado en userText (trigger explícito "acuérdame" o
+            // verbo puntual implícito tipo "despertarme/levantarme").
             let isReminderHint = wantsReminder
                 || NovaActionNormalizer.isReminderTrigger(in: userText)
+                || NovaActionNormalizer.impliesPunctualReminder(in: userText)
 
             // PASO 3: endTime via normalizer (centralizado).
             let endResolution = NovaActionNormalizer.resolveEndTime(
