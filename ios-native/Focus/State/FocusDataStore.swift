@@ -2462,17 +2462,20 @@ final class FocusDataStore: ObservableObject {
     }
 
     func deleteEvent(_ id: UUID) {
-        events.removeAll { $0.id == id }
-        persistEvents()
-        cleanupStaleSuggestions()
-        // Marcar como pendiente de borrado remoto ANTES de disparar el
-        // request. Si la red falla, queda en cola; en cada fetch siguiente
-        // reintentamos y, mientras tanto, el merge lo ignora para que no
-        // vuelva a aparecer.
+        // ORDEN CRÍTICO: persistir la intención de borrar ANTES de
+        // persistir el array de eventos. Si la app se mata entre
+        // `persistEvents` y `persistPendingDeleteEvents`, al relanzarse
+        // tendríamos events.json sin el ítem PERO pendingDelete sin la
+        // id, y el próximo `fetchRemoteAndMerge` lo resucitaría desde
+        // Supabase. Persistiendo pendingDelete primero, el merge SIEMPRE
+        // lo excluye aunque crashee al medio.
         if syncCredentials != nil {
             pendingDeleteEventIds.insert(id)
             persistPendingDeleteEvents()
         }
+        events.removeAll { $0.id == id }
+        persistEvents()
+        cleanupStaleSuggestions()
         softDeleteEventRemote(id)
         // Cancelar notificación local SIEMPRE — si no existía, no-op.
         LocalNotificationService.shared.cancelReminder(eventId: id)
@@ -2593,13 +2596,16 @@ final class FocusDataStore: ObservableObject {
     }
 
     func deleteTask(_ id: UUID) {
-        tasks.removeAll { $0.id == id }
-        persistTasks()
-        cleanupStaleSuggestions()
+        // Mismo orden defensivo que deleteEvent: pendingDelete persist
+        // ANTES que tasks persist, para que un crash entre los dos no
+        // resucite la tarea al relanzar.
         if syncCredentials != nil {
             pendingDeleteTaskIds.insert(id)
             persistPendingDeleteTasks()
         }
+        tasks.removeAll { $0.id == id }
+        persistTasks()
+        cleanupStaleSuggestions()
         softDeleteTaskRemote(id)
         HapticManager.shared.tick()
     }

@@ -172,8 +172,15 @@ final class NovaLiveService: ObservableObject {
         let inputNode = engine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
         inputNode.removeTap(onBus: 0)  // por las dudas, evitar dobles taps
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak request] buffer, _ in
-            request?.append(buffer)
+        // Tap captura `self` weakly y lee `recognitionRequest` dinámicamente.
+        // Antes capturábamos `request` local con weak — semánticamente
+        // equivalente (porque self.recognitionRequest mantiene la
+        // referencia fuerte), pero más implícito y propenso a confusión.
+        // Esta variante hace explícito que la captura sigue al lifecycle
+        // del service: si `recognitionRequest` se nullifica en `tearDown`,
+        // los buffers dejan de appenderse limpiamente.
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+            self?.recognitionRequest?.append(buffer)
         }
 
         engine.prepare()

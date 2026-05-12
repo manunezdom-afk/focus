@@ -54,6 +54,14 @@ struct LoginView: View {
                     }
                     startResendCooldown()
                 }
+                // Si pasamos a loggedIn/loggedOut/demo desde codeSent
+                // (success o cancelación), limpiar ambos focus states
+                // para que al volver a aparecer LoginView el teclado
+                // NO se abra solo.
+                if case .codeSent = newState {} else {
+                    emailFocused = false
+                    codeFocused = false
+                }
             }
             .onDisappear {
                 resendTimer?.cancel()
