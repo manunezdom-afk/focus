@@ -153,17 +153,16 @@ struct NovaView: View {
             }
 
         case .organizar:
+            // Disparamos al chat con "organiza mi día" — el parser local
+            // hace el análisis REAL (eventos hoy, tareas, huecos, back-to-
+            // back) y solo crea sugerencia si hay algo accionable. NO
+            // metemos suggestion hardcoded — esta función ya no inventa
+            // un "Plan del día actualizado" cuando no hay nada que
+            // organizar.
             store.runQuickAction(.organizar)
-            store.addSuggestion(NovaSuggestion(
-                title: "Plan del día actualizado",
-                detail: "Bloqueé tu mañana para foco profundo y dejé una pausa real al mediodía. Confirma si quieres aplicarlo.",
-                kind: .rebalance,
-                priority: .high,
-                suggestedAction: "Aplicar plan del día"
-            ))
-            toast.show(.info("Plan generado", symbol: "sparkles"))
+            toast.show(.info("Analizando tu día", symbol: "sparkles"))
             withAnimation(.easeInOut(duration: 0.20)) {
-                nav.novaSegment = .bandeja
+                nav.novaSegment = .chat
             }
 
         case .prepararManana:

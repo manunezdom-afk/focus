@@ -57,6 +57,19 @@ struct NovaLiveView: View {
                 }
             }
         }
+        // Auto-deliver: cuando el service termina (state → .idle) con
+        // transcript no vacío, enviamos automáticamente sin paso
+        // intermedio. Eso preserva la "magia" Gemini Live — el usuario
+        // habla, suelta, y Nova actúa. Sin revisar texto.
+        .onChange(of: service.state) { _, newState in
+            if newState == .idle && !service.transcript.isEmpty {
+                // Delay mínimo para que el usuario alcance a ver el
+                // pulso "procesando" antes de cerrar.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    deliverTranscript()
+                }
+            }
+        }
         .onDisappear { service.cancel() }
     }
 
@@ -222,39 +235,23 @@ struct NovaLiveView: View {
         }
     }
 
-    // MARK: - Transcript + headline
+    // MARK: - Headline (sin transcript visible — preserva la magia Live)
 
+    /// En Nova Live NO mostramos lo que el usuario está diciendo. Esa
+    /// "barra con el texto en vivo" pertenece al modo Dictado (sheet
+    /// compacto), no a la experiencia Live. Aquí solo headline grande
+    /// + subtitle contextual.
     private var transcriptArea: some View {
         VStack(spacing: Theme.Spacing.md) {
             Text(stateHeadline)
-                .font(.system(size: 28, weight: .light))
+                .font(.system(size: 30, weight: .light))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
                 .lineSpacing(2)
                 .frame(maxWidth: 340)
                 .animation(.easeInOut(duration: 0.25), value: stateHeadline)
 
-            if !service.transcript.isEmpty {
-                Text(service.transcript)
-                    .font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(5)
-                    .truncationMode(.head)
-                    .padding(.horizontal, Theme.Spacing.md + 2)
-                    .padding(.vertical, Theme.Spacing.sm + 2)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(.ultraThinMaterial)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .strokeBorder(.white.opacity(0.10), lineWidth: 1)
-                            )
-                    )
-                    .padding(.horizontal, Theme.Spacing.md)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-            } else if !stateSubtitle.isEmpty {
+            if !stateSubtitle.isEmpty {
                 Text(stateSubtitle)
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(.white.opacity(0.55))
@@ -263,7 +260,6 @@ struct NovaLiveView: View {
                     .lineSpacing(2)
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: service.transcript.isEmpty)
     }
 
     // MARK: - Actions
@@ -272,14 +268,12 @@ struct NovaLiveView: View {
     private var primaryActions: some View {
         switch service.state {
         case .listening:
-            HStack(spacing: Theme.Spacing.md) {
-                ghostButton(label: "Cancelar") {
-                    service.cancel()
-                    dismiss()
-                }
-                primaryButton(label: "Detener", icon: "stop.fill") {
-                    service.stop()
-                }
+            // Mientras escucha: solo botón grande "Detener" centrado.
+            // Al tocarlo, el state pasa a .processing → .idle y auto-deliver
+            // dispara. No mostramos "Cancelar" para no distraer (el botón X
+            // de arriba ya cancela).
+            primaryButton(label: "Detener", icon: "stop.fill") {
+                service.stop()
             }
         case .processing:
             HStack {
@@ -290,15 +284,15 @@ struct NovaLiveView: View {
             .frame(height: 52)
         case .idle:
             if !service.transcript.isEmpty {
-                HStack(spacing: Theme.Spacing.md) {
-                    ghostButton(label: "Reintentar") {
-                        service.cancel()
-                        Task { await service.start() }
-                    }
-                    primaryButton(label: "Enviar", icon: "arrow.up") {
-                        deliverTranscript()
-                    }
+                // Camino raro: el auto-deliver no disparó (delay race).
+                // Damos el botón como safety net, pero ya debería estar
+                // cerrándose el sheet.
+                HStack {
+                    Spacer()
+                    ProgressView().tint(.white).scaleEffect(1.15)
+                    Spacer()
                 }
+                .frame(height: 52)
             } else {
                 primaryButton(label: "Empezar a hablar", icon: "mic.fill") {
                     Task { await service.start() }
@@ -426,11 +420,11 @@ struct NovaLiveView: View {
         case .idle:
             return service.transcript.isEmpty
                 ? "Toca para empezar"
-                : "Listo, ¿lo envío a Nova?"
+                : "Procesando…"
         case .requestingPermissions:
             return "Pidiendo permisos…"
         case .listening:
-            return "Estoy escuchando"
+            return "Te escucho"
         case .processing:
             return "Procesando…"
         case .denied:
@@ -445,13 +439,13 @@ struct NovaLiveView: View {
         case .idle:
             return service.transcript.isEmpty
                 ? "Dime qué quieres ordenar."
-                : "Toca «Enviar» o vuelve a intentar."
+                : ""
         case .requestingPermissions:
             return "Acepta el acceso al micrófono y voz."
         case .listening:
-            return "Habla con tranquilidad. Cuando termines, toca Detener."
+            return "Habla con tranquilidad."
         case .processing:
-            return "Estoy transcribiendo lo último."
+            return ""
         case .denied:
             return "Activa el micrófono y voz en Ajustes del iPhone para usar Nova Live."
         case .error:

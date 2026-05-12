@@ -3106,6 +3106,105 @@ final class FocusDataStore: ObservableObject {
 
     /// Convierte un `NovaServiceError` recuperable en una frase humana
     /// para mostrar al final del mensaje de Nova en el chat.
+    /// Analiza el día real del usuario y devuelve un resumen humano. Solo
+    /// crea una `NovaSuggestion` cuando hay una recomendación CONCRETA
+    /// (gaps largos, eventos back-to-back, día vacío sustancial). Si no
+    /// hay nada accionable, devuelve solo texto — preserva la credibilidad
+    /// de la Bandeja, que no se llena de sugerencias de relleno.
+    fileprivate func summarizeAndSuggest(forDayOrganization userText: String) -> String {
+        let cal = Calendar.current
+        let now = Date()
+        let todayStart = cal.startOfDay(for: now)
+        let todayEnd = cal.date(byAdding: .day, value: 1, to: todayStart) ?? now
+
+        let todayEvents = events
+            .filter { $0.startTime >= todayStart && $0.startTime < todayEnd }
+            .sorted { $0.startTime < $1.startTime }
+
+        let pending = tasks.filter { $0.category == .hoy && !$0.done }
+
+        // Caso 1: día completamente vacío.
+        if todayEvents.isEmpty && pending.isEmpty {
+            return "Tu día está despejado. Cuando tengas algo, dímelo y lo agendamos."
+        }
+
+        // Caso 2: solo tareas sin hora.
+        if todayEvents.isEmpty && !pending.isEmpty {
+            let topThree = pending.prefix(3).map { "• \($0.title)" }.joined(separator: "\n")
+            return "No tienes eventos hoy. Tienes \(pending.count) tarea\(pending.count == 1 ? "" : "s") pendiente\(pending.count == 1 ? "" : "s"):\n\(topThree)"
+        }
+
+        // Detectar bloques back-to-back: dos eventos con < 15 min de gap.
+        var backToBackPairs: [(FocusEvent, FocusEvent, Int)] = []
+        for i in 1..<todayEvents.count {
+            let prev = todayEvents[i - 1]
+            let curr = todayEvents[i]
+            guard let prevEnd = prev.endTime else { continue }
+            let gapMinutes = Int(curr.startTime.timeIntervalSince(prevEnd) / 60)
+            if gapMinutes >= 0, gapMinutes < 15 {
+                backToBackPairs.append((prev, curr, gapMinutes))
+            }
+        }
+
+        // Detectar primer hueco grande (≥ 90 min) tras "ahora" y antes de
+        // que termine el día — buen candidato para foco profundo.
+        var firstBigGap: (start: Date, minutes: Int)? = nil
+        var cursor = max(now, todayStart)
+        for event in todayEvents where event.startTime > cursor {
+            let gapMinutes = Int(event.startTime.timeIntervalSince(cursor) / 60)
+            if gapMinutes >= 90 {
+                firstBigGap = (cursor, gapMinutes)
+                break
+            }
+            cursor = max(cursor, event.endTime ?? event.startTime)
+        }
+
+        // Construir resumen base.
+        let firstEventLabel: String? = todayEvents
+            .first(where: { $0.startTime > now })
+            .map { ev in
+                let hh = DateFormatters.hourMinute.string(from: ev.startTime)
+                return "\(ev.title) a las \(hh)"
+            }
+        var summaryLines: [String] = []
+        summaryLines.append("Hoy tienes \(todayEvents.count) evento\(todayEvents.count == 1 ? "" : "s")\(pending.isEmpty ? "" : " y \(pending.count) tarea\(pending.count == 1 ? "" : "s")") .")
+        if let next = firstEventLabel {
+            summaryLines.append("Próximo: \(next).")
+        }
+
+        // Decidir si CREAR una sugerencia concreta:
+        if let (a, b, gap) = backToBackPairs.first {
+            // Sugerir respiro entre los dos eventos pegados.
+            let when = DateFormatters.hourMinute.string(from: a.endTime ?? a.startTime)
+            addSuggestion(NovaSuggestion(
+                title: "Respiro entre eventos",
+                detail: "«\(a.title)» y «\(b.title)» están a \(gap) min de distancia. Podemos mover el segundo 15 min o agregar un buffer corto a las \(when).",
+                kind: .break_,
+                priority: .high,
+                suggestedAction: "Mover «\(b.title)» 15 min"
+            ))
+            summaryLines.append("Dejé una sugerencia en la Bandeja para que respires entre bloques.")
+        } else if let gap = firstBigGap, gap.minutes >= 90 {
+            // Sugerir bloque de foco en el hueco grande.
+            let when = DateFormatters.hourMinute.string(from: gap.start)
+            let hours = gap.minutes / 60
+            let mins = gap.minutes % 60
+            let durLabel = hours > 0 ? "\(hours)h\(mins > 0 ? " \(mins)m" : "")" : "\(mins) min"
+            addSuggestion(NovaSuggestion(
+                title: "Bloque de foco",
+                detail: "Tienes \(durLabel) libres desde las \(when). Buen rato para algo que necesite concentración real.",
+                kind: .schedule,
+                priority: .normal,
+                suggestedAction: "Bloquear foco \(when)"
+            ))
+            summaryLines.append("Dejé una sugerencia en la Bandeja para aprovechar ese hueco.")
+        }
+        // Si no detectamos nada accionable, NO creamos sugerencia — solo
+        // damos el resumen. Eso preserva la credibilidad de la Bandeja.
+
+        return summaryLines.joined(separator: " ")
+    }
+
     /// True cuando un intent local debe short-circuit el flujo del backend.
     /// Misma lógica que `MiDiaView.shouldShortCircuit` — duplicada acá para
     /// que el chat la pueda usar sin acoplar State a SwiftUI.
@@ -3271,21 +3370,10 @@ final class FocusDataStore: ObservableObject {
             return "No tengo nada reciente para borrar."
 
         case .organizeDay:
-            addSuggestion(NovaSuggestion(
-                title: "Plan del día",
-                detail: "Te dejo bloques de foco más temprano y los pendientes pesados para después del mediodía. Aprueba para aplicar.",
-                kind: .rebalance,
-                priority: .high,
-                suggestedAction: "Aplicar plan del día"
-            ))
-            addSuggestion(NovaSuggestion(
-                title: "Pausa al mediodía",
-                detail: "Te reservo 20 min libres entre bloques.",
-                kind: .break_,
-                priority: .normal,
-                suggestedAction: "Reservar pausa 13:00"
-            ))
-            return "Dejé sugerencias en la Bandeja. Aprueba las que te sirvan."
+            // Análisis REAL del día — no inventamos sugerencias genéricas.
+            // Si no hay datos suficientes para una recomendación verdadera,
+            // contestamos con un resumen y NO ensuciamos la Bandeja.
+            return summarizeAndSuggest(forDayOrganization: userText)
 
         case .reviewPending:
             let pending = pendingTodayTasks
@@ -3373,7 +3461,18 @@ final class FocusDataStore: ObservableObject {
         HapticManager.shared.tap()
         isNovaTyping = true
 
-        let reply = action.novaReply
+        // Para "organizar mi día" usamos análisis REAL del estado del
+        // usuario (eventos hoy, tareas pendientes, huecos, back-to-back).
+        // El resto de quick actions tienen respuestas predefinidas que
+        // siguen teniendo sentido sin contexto.
+        let reply: String = {
+            switch action {
+            case .organizar:
+                return summarizeAndSuggest(forDayOrganization: action.userText)
+            default:
+                return action.novaReply
+            }
+        }()
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 700_000_000)
             await MainActor.run {

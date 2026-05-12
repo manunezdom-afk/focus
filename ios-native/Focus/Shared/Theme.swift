@@ -56,14 +56,22 @@ enum Theme {
         static let textQuaternary = Color(red: 0.796, green: 0.835, blue: 0.882)
 
         // Acento Focus (#2563EB - blue-600). Botones, selección, taps.
+        // Mantiene la dominancia azul en TODA la app.
         static let focusAccent = Color(red: 0.145, green: 0.388, blue: 0.922)
         static let focusAccentSoft = Color(red: 0.145, green: 0.388, blue: 0.922).opacity(0.10)
         static let focusAccentHover = Color(red: 0.231, green: 0.510, blue: 0.965)
 
-        // Acento Nova (#6366F1 - indigo-500). Sutilmente más violeta para "AI".
-        static let novaAccent = Color(red: 0.388, green: 0.400, blue: 0.945)
-        static let novaAccentSoft = Color(red: 0.388, green: 0.400, blue: 0.945).opacity(0.10)
-        static let novaAccentDeep = Color(red: 0.545, green: 0.361, blue: 0.965) // violet-500 #8B5CF6
+        // Acento Nova — electric indigo más vibrante (#4F46FF). Conserva
+        // el tinte "AI" pero con más vida y personalidad. El indigo-500
+        // anterior (#6366F1) se sentía pastel y "típico"; este es más
+        // saturado, más eléctrico, sin perder armonía con el azul focus.
+        static let novaAccent = Color(red: 0.310, green: 0.275, blue: 1.000)
+        static let novaAccentSoft = Color(red: 0.310, green: 0.275, blue: 1.000).opacity(0.10)
+        // Violet profundo para acentos secundarios (gradient tail, halos).
+        static let novaAccentDeep = Color(red: 0.482, green: 0.290, blue: 0.965)
+        // Electric blue muy saturado — sirve como "highlight" en glow,
+        // borders activos, dots, etc.
+        static let novaElectric = Color(red: 0.220, green: 0.510, blue: 1.000)
 
         // Estados
         static let success = Color(red: 0.063, green: 0.725, blue: 0.506)   // #10B981 emerald
@@ -87,12 +95,17 @@ enum Theme {
         static let cardShadow = Color(red: 0.145, green: 0.180, blue: 0.420).opacity(0.06)
         static let cardShadowStrong = Color(red: 0.145, green: 0.180, blue: 0.420).opacity(0.10)
 
-        // Gradiente Nova (Gemini-style: azul → violeta → azul)
+        // Gradiente Nova — predomina AZUL eléctrico (3 paradas azules
+        // antes de cualquier violet), con un toque sutil de violeta al
+        // final para identidad "AI". Sin cyan ni cambios bruscos —
+        // sensación más cohesiva que el gradient anterior, que pegaba
+        // de cobalto a cyan saltando por violet en el medio.
         static let novaGradient = LinearGradient(
-            gradient: Gradient(colors: [
-                Color(red: 0.145, green: 0.388, blue: 0.922),
-                Color(red: 0.545, green: 0.361, blue: 0.965),
-                Color(red: 0.024, green: 0.714, blue: 0.831)
+            gradient: Gradient(stops: [
+                .init(color: Color(red: 0.145, green: 0.388, blue: 0.922), location: 0.0),  // focus blue
+                .init(color: Color(red: 0.220, green: 0.510, blue: 1.000), location: 0.45), // electric blue
+                .init(color: Color(red: 0.310, green: 0.275, blue: 1.000), location: 0.80), // electric indigo
+                .init(color: Color(red: 0.482, green: 0.290, blue: 0.965), location: 1.0)   // violet tail
             ]),
             startPoint: .topLeading,
             endPoint: .bottomTrailing
