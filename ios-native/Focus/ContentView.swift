@@ -46,12 +46,17 @@ struct ContentView: View {
         }
     }
 
-    /// Termina el boot después de 1.8s. Solo se llama UNA vez (cuando
-    /// BootView aparece). El timer está acá y no en `init` para que NO
-    /// arranque si por alguna razón ya cambiamos de ruta antes.
+    /// Termina el boot rápidamente — 0.6s. Antes era 1.8s, lo que se
+    /// sentía como "delay artificial" al usuario. 0.6s alcanza para que
+    /// el splash registre como intencional sin frenar al usuario que
+    /// ya está esperando para usar la app.
+    ///
+    /// Si auth todavía está en `.loading` cuando termina este timer,
+    /// el `route` computed sigue devolviendo `.boot` automáticamente
+    /// hasta que `auth.state` resuelva — no perdemos el placeholder.
     private func scheduleBootEnd() {
         guard isBooting else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             isBooting = false
         }
     }

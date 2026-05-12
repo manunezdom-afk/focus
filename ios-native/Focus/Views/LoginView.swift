@@ -49,8 +49,17 @@ struct LoginView: View {
 
     private var rootContent: some View {
         ZStack {
-            // Background con tinte azul muy sutil en la parte superior — identidad.
-            Theme.Colors.background.ignoresSafeArea()
+            // Background con tinte azul sutil + tap-anywhere-dismiss.
+            // El Color tiene `contentShape` para hacer la zona completa
+            // tappable. Cualquier tap en zonas vacías (logo, gradient,
+            // entre input y botón, etc.) cierra el teclado sin
+            // interferir con los taps de TextField/botón (que tienen
+            // mayor prioridad de hit-test).
+            Theme.Colors.background
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { dismissKeyboard() }
+
             VStack(spacing: 0) {
                 LinearGradient(
                     colors: [
@@ -64,6 +73,7 @@ struct LoginView: View {
                 Spacer()
             }
             .ignoresSafeArea()
+            .allowsHitTesting(false)  // el gradient no debe robar taps
 
             VStack(spacing: 0) {
                 Spacer(minLength: Theme.Spacing.xxxl)
@@ -76,6 +86,14 @@ struct LoginView: View {
                     .padding(.bottom, Theme.Spacing.xxl)
             }
         }
+    }
+
+    /// Centraliza el dismiss del teclado para los dos `@FocusState` que
+    /// usa esta pantalla. Llamada desde tap-outside y desde el botón
+    /// "Listo" del toolbar.
+    private func dismissKeyboard() {
+        emailFocused = false
+        codeFocused = false
     }
 
     // MARK: - Brand header (logo + nombre + subtítulo)
@@ -129,6 +147,14 @@ struct LoginView: View {
                     .autocorrectionDisabled(true)
                     .submitLabel(.send)
                     .onSubmit { Task { await submitEmail() } }
+                    .toolbar {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("Listo") { dismissKeyboard() }
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.focusAccent)
+                        }
+                    }
             }
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.vertical, Theme.Spacing.md + 2)

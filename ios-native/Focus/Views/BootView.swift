@@ -73,11 +73,15 @@ struct BootView: View {
             }
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.8)) {
+            // Animaciones acortadas: antes eran 0.8s + 1.2s con delay,
+            // pero el BootView ahora vive 0.6s. Comprimimos a 0.35s para
+            // que el fade-in alcance a completarse y el splash se sienta
+            // intencional, no "frenado".
+            withAnimation(.easeOut(duration: 0.35)) {
                 opacity = 1
                 markScale = 1.0
             }
-            withAnimation(.easeOut(duration: 1.2).delay(0.15)) {
+            withAnimation(.easeOut(duration: 0.45).delay(0.05)) {
                 glowOpacity = 1
             }
         }
