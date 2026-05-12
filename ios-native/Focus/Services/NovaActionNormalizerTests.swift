@@ -234,10 +234,50 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
+        // ───── parseAll (multi-intent) ─────────────────────────────────
+
+        // Frase compuesta del bug report del usuario.
+        let multi = NovaResponder.parseAll(
+            "mañana despertarme a las 7:10 y luego tipo 8 salir de mi casa a mi clase llamada contenidos digitales"
+        )
+        check(
+            label: "parseAll: frase con 'y luego' → 2 intents",
+            actual: multi.count,
+            expected: 2,
+            failures: &failures
+        )
+
+        // Frase simple sin conectores → 1 intent.
+        let single = NovaResponder.parseAll("acuérdame comprar pan mañana a las 10")
+        check(
+            label: "parseAll: frase sin conectores → 1 intent",
+            actual: single.count,
+            expected: 1,
+            failures: &failures
+        )
+
+        // Conector "después" también separa.
+        let after = NovaResponder.parseAll("despiértame a las 7 después recuérdame salir a las 8")
+        check(
+            label: "parseAll: 'después' separa → 2 intents",
+            actual: after.count,
+            expected: 2,
+            failures: &failures
+        )
+
+        // Conector "también".
+        let also = NovaResponder.parseAll("agenda reunión mañana a las 10 también recuérdame llamar a Juan")
+        check(
+            label: "parseAll: 'también' separa → 2 intents",
+            actual: also.count,
+            expected: 2,
+            failures: &failures
+        )
+
         // ───── Resultado ───────────────────────────────────────────────
 
         if failures.isEmpty {
-            return "✓ ALL TESTS PASSED (\(failures.count == 0 ? "16" : "\(16 - failures.count)") cases)"
+            return "✓ ALL TESTS PASSED"
         }
         return "✗ FAILURES (\(failures.count)):\n" + failures.joined(separator: "\n")
     }

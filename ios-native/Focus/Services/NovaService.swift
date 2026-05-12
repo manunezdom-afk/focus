@@ -169,17 +169,23 @@ enum NovaServiceError: Error, LocalizedError {
     case server(status: Int)
 
     /// True cuando el error es "esperable" y la app debería usar el
-    /// `NovaResponder` local con un mensaje sutil. False cuando el error
-    /// indica que algo fundamental falló (encoding bug, server 5xx raro)
-    /// y conviene mostrar mensaje de error real.
+    /// `NovaResponder` local con un mensaje sutil.
+    ///
+    /// **Política V2 (2026-05-11)**: pragmatic fallback — un usuario que
+    /// escribe en Nova quiere su acción ejecutada, no ver "Error 500". Si
+    /// el local puede resolver, lo resolvemos. Solo `emptyMessage` y
+    /// `messageTooLong` quedan sin fallback porque son client-side y no
+    /// hay nada que el local pueda aportar.
+    ///
+    /// Antes: `.server`, `.invalidResponse`, `.encoding`, `.decoding`
+    /// mostraban un mensaje técnico directamente al usuario. Ahora caen
+    /// al parser local con una nota humana.
     var canFallbackToLocal: Bool {
         switch self {
-        case .unauthorized, .quotaExceeded, .offline, .timeout,
-             .serviceUnavailable, .badLLMOutput, .network:
-            return true
-        case .emptyMessage, .messageTooLong, .invalidResponse,
-             .encoding, .decoding, .server:
+        case .emptyMessage, .messageTooLong:
             return false
+        default:
+            return true
         }
     }
 

@@ -312,6 +312,114 @@ enum NovaResponder {
 
     // MARK: Public API
 
+    /// Parser multi-intent: separa frases compuestas por conectores
+    /// fuertes ("y luego", "luego", "después", "también", "además") y
+    /// parsea cada segmento como un intent independiente.
+    ///
+    /// Conservador: NO splittea por " y " solo — es demasiado ambiguo
+    /// ("café y té"). Solo conectores que en español neutro siempre
+    /// indican una nueva acción.
+    ///
+    /// Si el texto NO tiene conectores, devuelve `[parse(text)]` para
+    /// compatibilidad con callers que esperan un solo intent.
+    ///
+    /// Heurística clave: si el primer segmento tiene un marcador temporal
+    /// global ("mañana", "hoy", "el lunes") y un segmento posterior NO,
+    /// le prepende ese marcador antes de parsear. Así:
+    ///   "mañana despertarme a las 7:10 y luego tipo 8 salir de mi casa"
+    /// segmento 1: "mañana despertarme a las 7:10" → Despertarme mañana 07:10
+    /// segmento 2: "mañana tipo 8 salir de mi casa" → Salir de mi casa mañana 08:00
+    static func parseAll(_ text: String, context: NovaContext = NovaContext()) -> [NovaIntent] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let segments = splitOnStrongConnectors(trimmed)
+        guard segments.count > 1 else {
+            return [parse(trimmed, context: context)]
+        }
+
+        // Detectar marcador temporal global del texto completo.
+        let fullLower = trimmed.lowercased()
+        let inheritedDayMarker: String? = {
+            if fullLower.contains("pasado mañana") || fullLower.contains("pasado manana") {
+                return "pasado mañana"
+            }
+            if fullLower.range(of: #"\bmañana\b|\bmanana\b"#, options: .regularExpression) != nil {
+                return "mañana"
+            }
+            if fullLower.range(of: #"\bhoy\b"#, options: .regularExpression) != nil {
+                return "hoy"
+            }
+            // Días de la semana son más raros como global pero los soportamos.
+            let weekdays = ["lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado", "domingo"]
+            for w in weekdays {
+                if fullLower.range(of: "\\bel \(w)\\b", options: .regularExpression) != nil {
+                    return "el \(w)"
+                }
+            }
+            return nil
+        }()
+
+        var intents: [NovaIntent] = []
+        for (i, seg) in segments.enumerated() {
+            var workingSeg = seg
+            // Si el segmento 2+ no tiene su propio marcador de día pero
+            // el texto global sí, lo prependemos. Sin esto, "tipo 8" en
+            // el segmento 2 perdería el "mañana" del segmento 1.
+            if i > 0, let day = inheritedDayMarker {
+                let segLower = workingSeg.lowercased()
+                let hasOwnDay = segLower.contains("mañana") || segLower.contains("manana")
+                    || segLower.contains("hoy")
+                    || segLower.range(of: #"\b(lunes|martes|mi(é|e)rcoles|jueves|viernes|s(á|a)bado|domingo)\b"#,
+                                       options: .regularExpression) != nil
+                if !hasOwnDay {
+                    workingSeg = "\(day) \(workingSeg)"
+                }
+            }
+            intents.append(parse(workingSeg, context: context))
+        }
+        return intents
+    }
+
+    /// Conectores fuertes que indican una nueva acción dentro de la misma
+    /// frase. Ordenados por longitud descendente — los más largos primero
+    /// para que "y luego" gane sobre "luego" cuando coexisten.
+    private static let strongConnectors: [String] = [
+        " y luego ",
+        " y después ",
+        " y despues ",
+        " y además ",
+        " y ademas ",
+        " y también ",
+        " y tambien ",
+        " luego ",
+        " después de eso ",
+        " despues de eso ",
+        " después ",   // OJO: "después de" se mantiene como conector → split antes del "de"
+        " despues ",
+        " además ",
+        " ademas ",
+        " también ",
+        " tambien "
+    ]
+
+    /// Splittea el texto en segmentos por conectores fuertes. Cada conector
+    /// se reemplaza por un marker único y luego se separa por ese marker.
+    /// Devuelve segmentos no vacíos, trimeados.
+    private static func splitOnStrongConnectors(_ text: String) -> [String] {
+        let marker = "‖SEG‖"
+        var working = text
+        for connector in strongConnectors {
+            working = working.replacingOccurrences(
+                of: connector,
+                with: marker,
+                options: [.caseInsensitive]
+            )
+        }
+        return working
+            .components(separatedBy: marker)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
     /// Parser principal. `context` permite resolver referencias como
     /// "agéndalo X" o "y X" en base al último intent.
     static func parse(_ text: String, context: NovaContext = NovaContext()) -> NovaIntent {
@@ -3202,29 +3310,69 @@ final class FocusDataStore: ObservableObject {
                     smartActionsMessage = result.smartActionsMessage
                     usedFallback = false
                 } catch let err as NovaServiceError where err.canFallbackToLocal {
-                    replyText = await MainActor.run {
-                        NovaResponder.reply(to: trimmed, context: self.novaContext)
+                    // Fallback local CON ejecución: parsea + aplica intents.
+                    // Antes solo generaba texto y no creaba eventos — por eso
+                    // un 500 + "acuérdame X mañana" no creaba nada.
+                    let (replyJoined, executed) = await MainActor.run {
+                        () -> (String, Bool) in
+                        let intents = NovaResponder.parseAll(trimmed, context: self.novaContext)
+                        var parts: [String] = []
+                        var anyExecuted = false
+                        for intent in intents {
+                            if let r = self.applyLocalNovaIntent(intent, userText: trimmed) {
+                                parts.append(r)
+                                anyExecuted = true
+                            }
+                        }
+                        if parts.isEmpty {
+                            return (NovaResponder.reply(to: trimmed, context: self.novaContext), false)
+                        }
+                        return (parts.joined(separator: " · "), anyExecuted)
                     }
+                    replyText = replyJoined
                     actions = []
                     smartActionsBlocked = false
                     smartActionsMessage = await MainActor.run {
                         self.fallbackNoteForChat(error: err)
                     }
                     usedFallback = true
+                    _ = executed
                 } catch {
-                    replyText = await MainActor.run {
-                        NovaResponder.reply(to: trimmed, context: self.novaContext)
+                    let replyJoined = await MainActor.run {
+                        () -> String in
+                        let intents = NovaResponder.parseAll(trimmed, context: self.novaContext)
+                        var parts: [String] = []
+                        for intent in intents {
+                            if let r = self.applyLocalNovaIntent(intent, userText: trimmed) {
+                                parts.append(r)
+                            }
+                        }
+                        return parts.isEmpty
+                            ? NovaResponder.reply(to: trimmed, context: self.novaContext)
+                            : parts.joined(separator: " · ")
                     }
+                    replyText = replyJoined
                     actions = []
                     smartActionsBlocked = false
                     smartActionsMessage = nil
                     usedFallback = true
                 }
             } else {
-                // Demo / sin sesión → siempre parser local.
-                replyText = await MainActor.run {
-                    NovaResponder.reply(to: trimmed, context: self.novaContext)
+                // Demo / sin sesión → parser local CON ejecución multi-intent.
+                let replyJoined = await MainActor.run {
+                    () -> String in
+                    let intents = NovaResponder.parseAll(trimmed, context: self.novaContext)
+                    var parts: [String] = []
+                    for intent in intents {
+                        if let r = self.applyLocalNovaIntent(intent, userText: trimmed) {
+                            parts.append(r)
+                        }
+                    }
+                    return parts.isEmpty
+                        ? NovaResponder.reply(to: trimmed, context: self.novaContext)
+                        : parts.joined(separator: " · ")
                 }
+                replyText = replyJoined
                 actions = []
                 smartActionsBlocked = false
                 smartActionsMessage = nil
@@ -3671,8 +3819,9 @@ final class FocusDataStore: ObservableObject {
             return m.map { "(\($0))" } ?? "(Llegaste al límite diario de Nova.)"
         case .offline:
             return "(Sin conexión — usé el modo local.)"
-        case .timeout, .serviceUnavailable, .badLLMOutput, .network:
-            return "(Usé el modo local porque Nova avanzada no respondió.)"
+        case .timeout, .serviceUnavailable, .badLLMOutput, .network,
+             .server, .invalidResponse, .encoding, .decoding:
+            return "(Nova avanzada no respondió bien — lo resolví en modo local.)"
         default:
             return nil
         }

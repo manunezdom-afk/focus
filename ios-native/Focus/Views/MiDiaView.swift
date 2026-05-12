@@ -578,16 +578,65 @@ struct MiDiaView: View {
         )
     }
 
-    /// Corre el parser local y arma el inline response. Si `note` viene
-    /// dado, lo agrega al final del details para que el usuario sepa por
-    /// qué se usó fallback.
+    /// Corre el parser local y arma el inline response. Soporta frases
+    /// compuestas: si el parser detecta múltiples intents (conectores
+    /// "y luego", "luego", "después", "también"...), ejecuta cada uno y
+    /// combina los resúmenes. Si la nota viene dada, la agrega al final.
     private func runLocalFallback(for trimmed: String, withNote note: String?) -> InlineNovaResponse {
-        let intent = NovaResponder.parse(trimmed, context: store.novaContext)
-        var response = executeIntent(intent, userText: trimmed)
-        if let note {
-            response.details = [response.details, note].compactMap { $0 }.joined(separator: "\n\n")
+        let intents = NovaResponder.parseAll(trimmed, context: store.novaContext)
+
+        // Caso simple: un solo intent → comportamiento idéntico al anterior.
+        if intents.count <= 1 {
+            let intent = intents.first ?? .clarify(reason: .noContext)
+            var response = executeIntent(intent, userText: trimmed)
+            if let note {
+                response.details = [response.details, note].compactMap { $0 }.joined(separator: "\n\n")
+            }
+            return response
         }
-        return response
+
+        // Multi-intent: ejecutar cada uno, juntar summaries. Si TODOS
+        // fallan (clarify/error), devolvemos un mensaje útil pidiendo
+        // separación manual — sin crear basura.
+        var summaryParts: [String] = []
+        var detailParts: [String] = []
+        var anyMutated = false
+        var lastAction: InlineNovaAction? = nil
+
+        for (idx, intent) in intents.enumerated() {
+            let resp = executeIntent(intent, userText: trimmed)
+            // Considerar mutación cuando NO es error explícito.
+            if !resp.isError {
+                anyMutated = true
+                summaryParts.append(resp.summary)
+                if let d = resp.details, !d.isEmpty {
+                    detailParts.append("\(idx + 1). \(d)")
+                }
+                if lastAction == nil { lastAction = resp.action }
+            }
+        }
+
+        if !anyMutated {
+            // Nada se creó — no guardar basura. Pedir separación manual.
+            return InlineNovaResponse(
+                userText: trimmed,
+                summary: "Entendí varias cosas pero no logré separarlas con confianza.",
+                details: "Probá enviarlas por separado, por ejemplo primero el recordatorio y después la salida.",
+                isError: true
+            )
+        }
+
+        let summary = summaryParts.joined(separator: " · ")
+        var combinedDetails = detailParts.joined(separator: "\n")
+        if let note {
+            combinedDetails = [combinedDetails, note].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        }
+        return InlineNovaResponse(
+            userText: trimmed,
+            summary: summary,
+            details: combinedDetails.isEmpty ? nil : combinedDetails,
+            action: lastAction
+        )
     }
 
     /// Eventos que vamos a enviar como contexto al backend. Limita a hoy
@@ -618,6 +667,7 @@ struct MiDiaView: View {
     }
 
     /// Mensajes amables que mostramos cuando el backend falla y caemos a local.
+    /// Estado técnico va solo a console.log, NO a la UI principal.
     private func humanFallbackNote(for error: NovaServiceError) -> String? {
         switch error {
         case .unauthorized:
@@ -626,8 +676,12 @@ struct MiDiaView: View {
             return message ?? "Llegaste al límite diario de Nova. Estoy usando el modo local."
         case .offline:
             return "Sin conexión. Estoy usando el modo local."
-        case .timeout, .serviceUnavailable, .badLLMOutput, .network:
-            return "Usé el modo local porque Nova avanzada no respondió."
+        case .timeout, .serviceUnavailable, .badLLMOutput, .network,
+             .server, .invalidResponse, .encoding, .decoding:
+            // Cualquier error de servidor o respuesta inesperada → local
+            // fallback transparente. El usuario sabe que algo upstream
+            // falló pero NO ve códigos técnicos.
+            return "Nova avanzada no respondió bien. Lo resolví en modo local."
         default:
             return nil
         }
