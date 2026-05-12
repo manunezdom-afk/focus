@@ -22,7 +22,7 @@ struct LoginView: View {
     /// - **Path B**: Supabase Custom Auth Domain (Pro plan $25/mes).
     ///   Cambio mínimo de código (solo FocusConfig.supabaseURL).
     /// Cuando Martin elija un path y termine la migración → flip a `true`.
-    private static let isGoogleSignInEnabled = false
+    private static let isGoogleSignInEnabled = true
     @EnvironmentObject private var auth: AuthStore
     @State private var email: String = ""
     @State private var code: String = ""

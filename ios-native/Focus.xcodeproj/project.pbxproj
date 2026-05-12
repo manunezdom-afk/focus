@@ -211,6 +211,10 @@
 			dependencies = (
 			);
 			name = Focus;
+			packageProductDependencies = (
+				FA0000000000000000000C02 /* GoogleSignIn */,
+				FA0000000000000000000C03 /* GoogleSignInSwift */,
+			);
 			productName = Focus;
 			productReference = FA0000000000000000000004 /* Focus.app */;
 			productType = "com.apple.product-type.application";
@@ -240,6 +244,9 @@
 				Base,
 			);
 			mainGroup = FA0000000000000000000002;
+			packageReferences = (
+				FA0000000000000000000C01 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			productRefGroup = FA0000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -432,15 +439,8 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = D8UM897B2T;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Focus;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Focus usa el micrófono para que puedas pedirle a Nova que organice tu día con la voz.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Focus transcribe tu voz para convertirla en tareas, eventos y recordatorios.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_BackgroundColor = LaunchBackground;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Focus/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -464,15 +464,8 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = D8UM897B2T;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Focus;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Focus usa el micrófono para que puedas pedirle a Nova que organice tu día con la voz.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Focus transcribe tu voz para convertirla en tareas, eventos y recordatorios.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_BackgroundColor = LaunchBackground;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Focus/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -508,6 +501,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FA0000000000000000000C01 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FA0000000000000000000C02 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FA0000000000000000000C01 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		FA0000000000000000000C03 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FA0000000000000000000C01 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = FA0000000000000000000001 /* Project object */;

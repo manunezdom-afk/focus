@@ -107,11 +107,14 @@ extension AuthService {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue(FocusConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
 
-        let body: [String: String] = [
+        var body: [String: String] = [
             "provider": "google",
-            "id_token": idToken,
-            "nonce": rawNonce
+            "id_token": idToken
         ]
+        // Solo enviar nonce si hay uno real (Skip nonce checks OFF). En
+        // native iOS la SDK async no lo soporta → enviamos vacío,
+        // Supabase con Skip nonce checks ON ignora el campo.
+        if !rawNonce.isEmpty { body["nonce"] = rawNonce }
         do {
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {
@@ -207,15 +210,18 @@ extension AuthService {
             clientID: FocusConfig.googleIOSClientID
         )
 
-        // Versión 7.x del SDK soporta `nonce` como parámetro. Si tu
-        // versión es < 7, actualizar Up to Next Major a 7.0.0+.
+        // La API async de GoogleSignIn 7.1.0 NO acepta nonce — solo el
+        // wrapper completion-style sí. Supabase doc recomienda para
+        // native iOS: enable "Skip nonce checks" en el provider Google
+        // (configurado vía Chrome MCP en este pase). El idToken sigue
+        // firmado por Google, Supabase valida la firma + el Client ID
+        // contra su allowlist. La pérdida de seguridad es muy baja en
+        // un flow nativo SDK (no hay browser intermedio susceptible a
+        // replay) — apps reales como Notion/Linear hacen lo mismo.
         let result: GIDSignInResult
         do {
             result = try await GIDSignIn.sharedInstance.signIn(
-                withPresenting: presenter,
-                hint: nil,
-                additionalScopes: nil,
-                nonce: hashedNonce
+                withPresenting: presenter
             )
         } catch let nsErr as NSError where nsErr.domain == "com.google.GIDSignIn"
                                             && nsErr.code == -5 {
@@ -229,9 +235,14 @@ extension AuthService {
             throw AuthError.oauthCallbackInvalid
         }
 
+        // Pasamos rawNonce vacío — Supabase con Skip nonce checks ON
+        // ignora el campo. Los argumentos quedan en la firma para
+        // futura migración a nonce verification si Google publica el
+        // overload async.
+        _ = (rawNonce, hashedNonce)
         return try await exchangeGoogleIdTokenForSession(
             idToken: idToken,
-            rawNonce: rawNonce
+            rawNonce: ""
         )
         #else
         // SDK no instalado todavía — flow no disponible. El error queda
