@@ -372,34 +372,35 @@ struct NovaView: View {
         )
     }
 
-    /// Empty state estilo Gemini: logo Nova grande centrado + saludo + chips.
+    /// Empty state estilo Gemini: hero centrado con mark grande + saludo
+    /// en tipografía light + subtítulo amable + chips espaciados.
     private var emptyChatHero: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: Theme.Spacing.lg) {
-                Spacer(minLength: Theme.Spacing.xxxl)
+                Spacer(minLength: Theme.Spacing.xxxl + Theme.Spacing.md)
                 ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
                         .fill(Theme.Colors.novaGradient)
-                        .frame(width: 84, height: 84)
-                        .shadow(
-                            color: Theme.Colors.novaAccent.opacity(0.45),
-                            radius: 22, y: 8
-                        )
-                    NovaSparkMark(size: 36)
+                        .frame(width: 96, height: 96)
+                        .shadow(color: Theme.Colors.novaAccent.opacity(0.55), radius: 28, y: 10)
+                        .shadow(color: Theme.Colors.focusAccent.opacity(0.25), radius: 16, y: 4)
+                    NovaSparkMark(size: 42)
                 }
-                .padding(.bottom, Theme.Spacing.xs)
+                .padding(.bottom, Theme.Spacing.sm)
 
                 Text("¿Qué quieres ordenar?")
-                    .font(.system(size: 28, weight: .medium))
+                    .font(.system(size: 34, weight: .light))
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .multilineTextAlignment(.center)
+                    .tracking(-0.5)
 
                 Text("Pídele a Nova un evento, una tarea, o que organice tu día.")
-                    .font(Theme.Typography.subhead)
+                    .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(Theme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
-                    .padding(.bottom, Theme.Spacing.md)
+                    .lineSpacing(2)
+                    .frame(maxWidth: 320)
+                    .padding(.bottom, Theme.Spacing.lg)
 
                 VStack(spacing: Theme.Spacing.sm + 2) {
                     novaLiveChip

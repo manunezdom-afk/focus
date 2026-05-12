@@ -6,7 +6,12 @@ struct MiDiaView: View {
     @EnvironmentObject private var toast: ToastManager
     @State private var focusBarText: String = ""
     @State private var showAllEvents: Bool = false
-    @State private var showVoiceDictation: Bool = false
+    /// Servicio de dictado inline en el FocusBar. NO es Nova Live.
+    /// El transcript se va metiendo en `focusBarText` mientras el usuario
+    /// habla; al detener, queda listo en la barra para que revise y mande.
+    @StateObject private var dictationService = NovaLiveService()
+    @State private var isDictating: Bool = false
+    @State private var dictationDeniedMessage: String? = nil
     /// Evento que se está editando vía sheet. nil = sheet cerrado.
     @State private var editingEvent: FocusEvent? = nil
     /// Tarea que se está editando vía sheet. nil = sheet cerrado.
@@ -28,12 +33,22 @@ struct MiDiaView: View {
 
     /// Eventos visibles: del usuario si tiene, demo si no (excluyendo los
     /// títulos descartados — persisten a disco vía store).
+    /// Recordatorios vencidos van separados en `overdueReminders`.
     private var displayEvents: [FocusEvent] {
         if store.hasUserEvents {
-            return store.todayEvents()
+            return store.upcomingAndCurrentEventsToday()
         }
         return DemoDataProvider.shared.exampleTodayEvents()
             .filter { !store.dismissedDemoEventTitles.contains($0.title) }
+    }
+
+    /// Recordatorios cuya hora ya pasó y siguen sin "atender". Se muestran
+    /// arriba en Mi Día como una fila compacta con acciones (completar /
+    /// borrar / reprogramar). Solo aparecen si hay alguno — sino la
+    /// sección no se renderiza.
+    private var overdueReminders: [FocusEvent] {
+        guard store.hasUserEvents else { return [] }
+        return store.overdueRemindersToday()
     }
 
     /// Pendientes visibles: del usuario si tiene, demo si no (excluyendo
@@ -126,6 +141,11 @@ struct MiDiaView: View {
                         .padding(.horizontal, Theme.Spacing.xl)
                     }
 
+                    if !overdueReminders.isEmpty {
+                        overdueRemindersSection
+                            .padding(.horizontal, Theme.Spacing.xl)
+                    }
+
                     timelineSection
 
                     pendingTasksSection
@@ -149,19 +169,44 @@ struct MiDiaView: View {
                 }
             )
         }
-        .sheet(isPresented: $showVoiceDictation) {
-            VoiceDictationSheet { transcript in
-                // Texto transcrito → mismo flujo que tipear en el FocusBar.
-                // Nova decide backend vs fallback, ejecuta acciones, sync
-                // Supabase + programa notificación si es recordatorio.
-                // El sheet ya se cerró (via dismiss en VoiceDictationSheet),
-                // así que la respuesta inline aparece en Mi Día limpia.
-                processNovaInline(text: transcript)
+        // Mic inline: el dictation service llena focusBarText en vivo.
+        // Cuando el usuario detiene (toca el mic stop) y hay transcript,
+        // el texto queda en la barra listo para revisar o enviar.
+        .onChange(of: dictationService.transcript) { _, newTranscript in
+            // Solo escribimos al FocusBar mientras está dictando — al
+            // finalizar el state pasa a idle y dejamos de hooking.
+            if isDictating || dictationService.state == .listening {
+                focusBarText = newTranscript
             }
-            .presentationDetents([.height(380)])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(Theme.Colors.background)
         }
+        .onChange(of: dictationService.state) { _, newState in
+            switch newState {
+            case .listening:
+                isDictating = true
+                dictationDeniedMessage = nil
+            case .idle, .processing:
+                isDictating = false
+            case .denied:
+                isDictating = false
+                dictationDeniedMessage = "Activa el micrófono y voz en Ajustes del iPhone."
+            case .error(let msg):
+                isDictating = false
+                dictationDeniedMessage = msg
+            case .requestingPermissions:
+                isDictating = false
+            }
+        }
+        .alert("Sin permiso de voz", isPresented: .constant(dictationDeniedMessage != nil), actions: {
+            Button("Abrir Ajustes") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+                dictationDeniedMessage = nil
+            }
+            Button("Cerrar", role: .cancel) { dictationDeniedMessage = nil }
+        }, message: {
+            Text(dictationDeniedMessage ?? "")
+        })
         // Sheets de edición — se abren desde el menú "Editar" de cualquier
         // evento o tarea real en Mi Día.
         .sheet(item: $editingEvent) { event in
@@ -274,12 +319,39 @@ struct MiDiaView: View {
             },
             onMic: {
                 HapticManager.shared.tap()
-                // Mic del FocusBar = DICTADO RÁPIDO. NO abre Nova Live
-                // fullscreen (eso vive en Nova tab). Mini sheet compacto
-                // → transcribe → procesa inline como si tipearas.
-                showVoiceDictation = true
-            }
+                // Mic del FocusBar = DICTADO INLINE. NO abre Nova Live,
+                // NO abre sheet, NO cambia de pantalla. El texto se llena
+                // en la barra mientras hablas; al tocar mic otra vez (que
+                // ahora es stop), termina y queda listo para revisar y
+                // mandar con el botón enviar.
+                Task { await toggleInlineDictation() }
+            },
+            isDictating: isDictating
         )
+        .overlay(alignment: .topLeading) {
+            // Indicador discreto de "Escuchando…" cuando dicta — flota
+            // sobre el FocusBar sin tapar nada.
+            if isDictating {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Theme.Colors.focusAccent)
+                        .frame(width: 6, height: 6)
+                    Text("Escuchando…")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.focusAccent)
+                        .tracking(0.5)
+                        .textCase(.uppercase)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(Theme.Colors.focusAccentSoft)
+                )
+                .padding(.leading, Theme.Spacing.md)
+                .padding(.top, -10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 
     // MARK: - Nova inline (interacción principal desde Mi Día)
@@ -294,6 +366,30 @@ struct MiDiaView: View {
     /// 3. Si está en modo demo o no logueado, va directo al parser local
     ///    (sin llamar backend, sin nota).
     /// Mantiene la inline response abajo del FocusBar — no navega al chat.
+    /// Toggle del dictado inline. Si NO está dictando, pide permisos y
+    /// arranca; el transcript llena `focusBarText` en vivo via `.onChange`.
+    /// Si YA está dictando, lo detiene — el texto queda en la barra para
+    /// que el usuario revise y mande con el botón enviar.
+    private func toggleInlineDictation() async {
+        if isDictating {
+            dictationService.stop()
+            return
+        }
+        // Limpiar transcript previo si el usuario va a empezar de cero.
+        // Si quería dictar después de un texto que ya escribió, se respeta.
+        let auth = await dictationService.currentAuthorizationStatus()
+        switch auth {
+        case .authorized:
+            await dictationService.start()
+        case .notDetermined:
+            if await dictationService.requestAuthorization() {
+                await dictationService.start()
+            }
+        case .denied:
+            dictationDeniedMessage = "Activa el micrófono y voz en Ajustes del iPhone para usar el dictado."
+        }
+    }
+
     private func processNovaInline(text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -967,9 +1063,102 @@ struct MiDiaView: View {
         }
     }
 
-    // MARK: - Timeline
+    // MARK: - Vencidos
 
+    /// Sección "Vencidos" — recordatorios que ya pasaron y siguen sin
+    /// atender. Se muestra entre el header de Mi Día y el timeline para
+    /// que el usuario los vea primero. Compacta — cada uno con título,
+    /// hora vencida, y acciones (reprogramar +5 min / borrar).
     @ViewBuilder
+    private var overdueRemindersSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack(spacing: 6) {
+                Image(systemName: "bell.slash.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Theme.Colors.warning)
+                Text("Vencidos")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Theme.Colors.warning)
+                    .tracking(0.8)
+                    .textCase(.uppercase)
+            }
+            VStack(spacing: Theme.Spacing.xs) {
+                ForEach(overdueReminders.prefix(3)) { reminder in
+                    overdueReminderRow(reminder)
+                }
+            }
+        }
+    }
+
+    private func overdueReminderRow(_ event: FocusEvent) -> some View {
+        let timeLabel = DateFormatters.hourMinute.string(from: event.startTime)
+        let elapsed = Int(Date().timeIntervalSince(event.startTime) / 60)
+        let ago = elapsed < 60
+            ? "hace \(max(elapsed, 1)) min"
+            : "hace \(elapsed / 60) h"
+        return HStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.Colors.warning)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title)
+                    .font(Theme.Typography.bodyEmphasized)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                    .lineLimit(1)
+                Text("\(timeLabel) · \(ago)")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.textTertiary)
+            }
+            Spacer()
+            // Reprogramar a "ahora + 5 min" como atajo rápido.
+            Button {
+                HapticManager.shared.tick()
+                reschedule(event, addingMinutes: 5)
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.focusAccent)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Theme.Colors.focusAccentSoft))
+            }
+            .buttonStyle(.plain)
+            // Borrar = "ya pasó, no me importa".
+            Button {
+                HapticManager.shared.tap()
+                store.deleteEvent(event.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.Colors.textTertiary)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Theme.Colors.surfaceHigh))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .fill(Theme.Colors.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                        .strokeBorder(Theme.Colors.warning.opacity(0.30), lineWidth: 1)
+                )
+        )
+    }
+
+    /// Reprograma un recordatorio sumando minutos desde "ahora". Triggers
+    /// re-schedule de la notificación automáticamente via updateEvent.
+    private func reschedule(_ event: FocusEvent, addingMinutes: Int) {
+        var updated = event
+        let newStart = Date().addingTimeInterval(TimeInterval(addingMinutes * 60))
+        updated.startTime = newStart
+        // Mantener punto en el tiempo (5 min de duración interna como antes).
+        updated.endTime = newStart.addingTimeInterval(5 * 60)
+        store.updateEvent(updated)
+    }
+
     private var timelineSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             HStack(alignment: .firstTextBaseline) {

@@ -637,8 +637,13 @@ struct FocusBarInput: View {
     var placeholder: String = "Pregúntale a Nova…"
     var onSubmit: () -> Void
     var onMic: (() -> Void)? = nil
+    /// Estado de dictado en vivo. Cuando es `true`, el icono mic se
+    /// convierte en un "stop" pulsante para indicar que está escuchando.
+    /// El padre maneja el ciclo on/off via `onMic`.
+    var isDictating: Bool = false
 
     @FocusState private var isFocused: Bool
+    @State private var dictationPulse: Bool = false
 
     private var canSubmit: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -688,15 +693,46 @@ struct FocusBarInput: View {
 
             if let onMic {
                 Button(action: onMic) {
-                    Image(systemName: "mic.fill")
+                    Image(systemName: isDictating ? "stop.fill" : "mic.fill")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.focusAccent)
+                        .foregroundStyle(isDictating ? .white : Theme.Colors.focusAccent)
                         .frame(width: 32, height: 32)
                         .background(
-                            Circle().fill(Theme.Colors.focusAccentSoft)
+                            Circle().fill(
+                                isDictating
+                                    ? Theme.Colors.focusAccent
+                                    : Theme.Colors.focusAccentSoft
+                            )
+                        )
+                        .overlay(
+                            // Halo pulsante cuando dicta — feedback visual
+                            // inmediato sin sheet ni popup.
+                            Circle()
+                                .strokeBorder(
+                                    Theme.Colors.focusAccent.opacity(isDictating ? 0.45 : 0),
+                                    lineWidth: 2
+                                )
+                                .scaleEffect(isDictating && dictationPulse ? 1.55 : 1.0)
+                                .opacity(isDictating && dictationPulse ? 0 : 1)
+                                .animation(
+                                    isDictating
+                                        ? .easeOut(duration: 1.2).repeatForever(autoreverses: false)
+                                        : .default,
+                                    value: dictationPulse
+                                )
                         )
                 }
                 .buttonStyle(.plain)
+                .onChange(of: isDictating) { _, dictating in
+                    if dictating {
+                        dictationPulse = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            dictationPulse = true
+                        }
+                    } else {
+                        dictationPulse = false
+                    }
+                }
             }
 
             // Botón enviar siempre visible para no romper el layout al teclear;

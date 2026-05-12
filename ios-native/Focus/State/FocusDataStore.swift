@@ -2232,10 +2232,40 @@ final class FocusDataStore: ObservableObject {
         eventsFor(date: Date())
     }
 
+    /// Recordatorios puntuales de hoy cuya hora ya pasó y NO fueron
+    /// "completados" (eliminar = completar — V1 sin estado done para
+    /// eventos). Los usamos para mostrar una sección "Vencidos" en
+    /// Mi Día separada del timeline regular.
+    func overdueRemindersToday() -> [FocusEvent] {
+        let now = Date()
+        return todayEvents().filter { event in
+            event.isReminder == true && event.startTime < now
+        }
+    }
+
+    /// Eventos de hoy que NO son recordatorios vencidos — el timeline
+    /// "normal" de Mi Día y Calendario.
+    func upcomingAndCurrentEventsToday() -> [FocusEvent] {
+        let now = Date()
+        return todayEvents().filter { event in
+            // Recordatorio vencido → fuera del timeline normal.
+            if event.isReminder == true, event.startTime < now {
+                return false
+            }
+            return true
+        }
+    }
+
     var nextBlock: FocusEvent? {
         let now = Date()
-        return todayEvents().first { event in
-            (event.endTime ?? event.startTime) >= now
+        return upcomingAndCurrentEventsToday().first { event in
+            // Para recordatorios usamos solo startTime (no endTime interno
+            // de 5min que mentía y los hacía aparecer como "próximo bloque"
+            // hasta 5 min después de su hora real).
+            if event.isReminder == true {
+                return event.startTime >= now
+            }
+            return (event.endTime ?? event.startTime) >= now
         }
     }
 
@@ -2708,10 +2738,29 @@ final class FocusDataStore: ObservableObject {
         // - Si endTime null → es punto en el tiempo. Lo marcamos como
         //   inferredDuration o isReminder según contexto.
         // - Si título empieza con "Recordatorio:" o icon es "alarm" → reminder.
+        // - Si el userText original contiene un trigger explícito de
+        //   recordatorio ("acuérdame", "recuérdame", "avísame", "que no
+        //   se me olvide"), también marcar como recordatorio. Esto cubre
+        //   el caso donde el backend devuelve un add_event normal sin
+        //   icon=alarm para una frase como "acuérdame buscar a la
+        //   Agustina" — sin esto, la notificación local nunca se
+        //   programaba.
         // - Si endTime explícita → rango real.
         let backendIcon = payload.icon ?? ""
+        let userTextLower = userText.lowercased()
+        let userAskedReminder = userTextLower.contains("acuérdame")
+            || userTextLower.contains("acuerdame")
+            || userTextLower.contains("acuérdate")
+            || userTextLower.contains("acuerdate")
+            || userTextLower.contains("recuérdame")
+            || userTextLower.contains("recuerdame")
+            || userTextLower.contains("avísame")
+            || userTextLower.contains("avisame")
+            || userTextLower.contains("que no se me olvide")
+            || userTextLower.contains("no te olvides")
         let isReminderHint = title.lowercased().hasPrefix("recordatorio")
             || backendIcon.lowercased() == "alarm"
+            || userAskedReminder
 
         var explicitEnd: Date? = nil
         if let endStr = payload.endTimeString,
