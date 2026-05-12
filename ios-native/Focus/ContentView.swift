@@ -5,40 +5,54 @@ struct ContentView: View {
     @AppStorage("focus.v1.hasSeenOnboarding") private var hasSeenOnboarding = false
     @State private var isBooting = true
 
-    var body: some View {
-        ZStack {
-            if isBooting {
-                BootView()
-                    .transition(.opacity)
-                    .zIndex(2)
-            } else {
-                routedContent
-                    .transition(.opacity)
-                    .zIndex(0)
-            }
-        }
-        .animation(.easeOut(duration: 0.4), value: isBooting)
-        .animation(.easeOut(duration: 0.25), value: hasSeenOnboarding)
-        .animation(.easeOut(duration: 0.25), value: auth.isAuthenticatedOrDemo)
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                isBooting = false
-            }
-        }
+    /// Estado de navegación raíz como UN solo valor. Antes había 3
+    /// `.animation(value:)` modifiers separados (`isBooting`,
+    /// `hasSeenOnboarding`, `auth.isAuthenticatedOrDemo`) que disparaban
+    /// crossfades simultáneos cuando dos cambiaban juntos (típico al
+    /// terminar onboarding: `hasSeenOnboarding=true` + `auth.enterDemo()`
+    /// en el mismo turno). El resultado eran capas duplicadas en pantalla
+    /// — Onboarding + Login mezclados. Con un solo `route` computado y
+    /// un switch sin animaciones, SwiftUI hace swap atómico — solo una
+    /// pantalla visible nunca.
+    enum Route: Hashable {
+        case boot
+        case onboarding
+        case login
+        case main
+    }
+
+    private var route: Route {
+        if isBooting { return .boot }
+        if !hasSeenOnboarding { return .onboarding }
+        // Refresh-token / init aún resolviendo: BootView en vez de
+        // parpadear Login. Mismo treatment que .boot.
+        if case .loading = auth.state { return .boot }
+        if auth.isAuthenticatedOrDemo { return .main }
+        return .login
     }
 
     @ViewBuilder
-    private var routedContent: some View {
-        if !hasSeenOnboarding {
-            OnboardingView()
-        } else if case .loading = auth.state {
-            // Refresh-token en curso (o init aún resolviendo): seguir
-            // mostrando BootView para no parpadear Login.
+    var body: some View {
+        switch route {
+        case .boot:
             BootView()
-        } else if auth.isAuthenticatedOrDemo {
-            MainTabView()
-        } else {
+                .onAppear(perform: scheduleBootEnd)
+        case .onboarding:
+            OnboardingView()
+        case .login:
             LoginView()
+        case .main:
+            MainTabView()
+        }
+    }
+
+    /// Termina el boot después de 1.8s. Solo se llama UNA vez (cuando
+    /// BootView aparece). El timer está acá y no en `init` para que NO
+    /// arranque si por alguna razón ya cambiamos de ruta antes.
+    private func scheduleBootEnd() {
+        guard isBooting else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            isBooting = false
         }
     }
 }

@@ -2,18 +2,18 @@
 """
 scripts/build-ios-appicon.py
 
-AppIcon V7 de Focus — engranaje minimalista + núcleo blanco sobre
-cobalto. Replica fielmente el `FocusGearMark` SwiftUI que la app usa en
-onboarding y headers internos. Una sola identidad: launcher = onboarding
-= header.
+AppIcon V8 de Focus — engranaje compacto, MUCHO más aire alrededor,
+núcleo más prominente, anillo finísimo. Mantiene la misma identidad
+del FocusLogoMark (sistema/mecanismo mental) pero con escala premium
+para launcher: ~60% del canvas en vez de ~98%.
 
-V7 vs V6:
-- V6 era "F geométrica + dot cyan" → identidad inconsistente: el launcher
-  era una F y la app interna usaba engranaje. Lectura: dos brands.
-- V7 es el MISMO engranaje del FocusLogoMark — 6 lóbulos redondeados
-  radiales + anillo del cuerpo + núcleo central blanco. Lectura
-  unificada: sistema/mecanismo de pensamiento. Premium, App Store-ready,
-  no se confunde con app de meditación ni con target/crosshair.
+V8 vs V7:
+- V7 tenía el engranaje ocupando casi todo el canvas → leía como
+  "rueda gigante" y se sentía target-y a tamaño pequeño.
+- V8 reduce la escala a 0.60 y deja ~20% de margen cobalto a cada
+  lado. El símbolo se siente intencional y centrado, no llenando el
+  cuadrado. Anillo más fino, núcleo más visible. 6 dientes pero
+  proporcionalmente más pequeños — ya no domina la lectura de "rueda".
 
 Reglas iOS: 1024×1024 RGB sin alpha · sin transparencia.
 
@@ -153,18 +153,21 @@ def main() -> int:
 
     center = (big / 2, big / 2)
 
-    # Proporciones — refinadas vs. el FocusGearMark SwiftUI para que el
-    # AppIcon se sienta más "engranaje" y menos "bullseye/target". Los
-    # cambios: anillo más fino, núcleo más prominente, dientes más anchos
-    # y largos que dominan visualmente. La identidad sigue siendo la
-    # misma; solo está más balanceada para tamaño pequeño de launcher.
-    body_radius = big * 0.32         # anillo medio
-    tooth_inner = big * 0.34         # casi tocando el anillo (sin gap)
-    tooth_outer = big * 0.51         # más largo
+    # Proporciones V8 — engranaje compacto al 60% del canvas. ~20% de
+    # margen cobalto a cada lado. El símbolo se siente intencional, no
+    # "lleno hasta el borde". Anillo finísimo, núcleo prominente.
+    #
+    # Las proporciones que siguen son relativas al CANVAS completo, no
+    # al símbolo. Para un símbolo ~60% del canvas, el tooth_outer
+    # (radio externo del diente, también el radio del símbolo completo)
+    # vale 0.30 (60% diámetro / 2 = 30% radio).
+    body_radius = big * 0.20         # anillo más interno
+    tooth_inner = big * 0.22         # base del diente, justo afuera del anillo
+    tooth_outer = big * 0.30         # punta del diente = límite externo del símbolo
     tooth_count = 6
-    tooth_half_width = math.pi / tooth_count * 0.55  # más ancho angular
-    ring_stroke = big * 0.055        # más fino → menos target
-    nucleus_radius = big * 0.13      # más prominente → identidad pop
+    tooth_half_width = math.pi / tooth_count * 0.50  # ancho angular moderado
+    ring_stroke = big * 0.035        # anillo MUY fino → no compite con núcleo
+    nucleus_radius = big * 0.085     # núcleo prominente — corazón del símbolo
 
     # 6 dientes radiales — primer diente arriba (-π/2), luego cada 60°.
     for i in range(tooth_count):
@@ -207,7 +210,7 @@ def main() -> int:
         json.dump(contents, f, indent=2)
         f.write("\n")
 
-    print(f"✓ AppIcon V7 (engranaje + núcleo): {OUT_APPICON.relative_to(REPO)}")
+    print(f"✓ AppIcon V8 (engranaje compacto): {OUT_APPICON.relative_to(REPO)}")
     print(f"  {SIZE}×{SIZE} RGB · sin alpha · {OUT_APPICON.stat().st_size // 1024}KB")
     print(f"✓ Preview: {OUT_PREVIEW.relative_to(REPO)}")
     return 0

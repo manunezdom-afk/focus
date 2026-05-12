@@ -16,40 +16,19 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            // Fondo base — mantenemos textPrimary oscuro para legibilidad,
-            // pero PINTAMOS el frame inicial con un tinte cobalto MÁS
-            // intenso que el anterior (0.12 → ~0.20 en la parte superior)
-            // para que la primera impresión sea Focus brand y no blanco
-            // plano. El bottom sigue siendo background para no romper la
-            // legibilidad de los botones.
-            Theme.Colors.background.ignoresSafeArea()
-
+            // Fondo: UN solo LinearGradient cobalto→background.
+            // Antes apilábamos background + linear + radial; era pesado
+            // y la app se sentía lenta al arrancar. Con un solo gradient
+            // el frame inicial sigue siendo Focus brand y el render es
+            // mucho más barato.
             LinearGradient(
                 colors: [
-                    Theme.Colors.focusAccent.opacity(0.22),
-                    Theme.Colors.focusAccent.opacity(0.08),
+                    Theme.Colors.focusAccent.opacity(0.20),
                     Theme.Colors.background
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .ignoresSafeArea()
-
-            // Halo radial sutil arriba — refuerza la sensación spotlight
-            // sobre el logo en page 1.
-            VStack(spacing: 0) {
-                RadialGradient(
-                    colors: [
-                        Theme.Colors.focusAccent.opacity(0.18),
-                        Theme.Colors.focusAccent.opacity(0.0)
-                    ],
-                    center: .top,
-                    startRadius: 60,
-                    endRadius: 360
-                )
-                .frame(height: 520)
-                Spacer()
-            }
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
