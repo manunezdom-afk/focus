@@ -27,13 +27,15 @@ struct TareasView: View {
     /// Tarea en edición. nil = sheet cerrado.
     @State private var editingTask: FocusTask? = nil
 
-    /// Si el usuario no creó nada todavía, mostramos ejemplos.
+    /// Tareas reales si hay; ejemplos solo en modo demo (no logueado).
+    /// Cuenta real con 0 tareas → vacío real.
     private var displayTasks: [FocusTask] {
-        store.hasUserTasks ? store.tasks : DemoDataProvider.shared.exampleAllTasks()
+        if store.hasUserTasks { return store.tasks }
+        return store.isInDemoMode ? DemoDataProvider.shared.exampleAllTasks() : []
     }
 
     private var showingExamples: Bool {
-        !store.hasUserTasks
+        !store.hasUserTasks && store.isInDemoMode
     }
 
     var body: some View {

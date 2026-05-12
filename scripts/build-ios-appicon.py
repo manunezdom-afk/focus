@@ -2,18 +2,17 @@
 """
 scripts/build-ios-appicon.py
 
-AppIcon V5 de Focus — núcleo sólido + 2 anillos concéntricos sobre cobalto.
-Lectura: aperture / claridad mental / foco. NO letras, NO pétalos, NO chispas.
+AppIcon V6 de Focus — "F" geométrica blanca + dot de "pensamiento"
+en cobalto. El usuario rechazó las versiones tipo target/círculo
+concéntrico (V5) y pidió algo más cercano a "pensar / mecanismo
+mental / organización", no un crosshair de meditación genérica.
 
-V5 vs V4:
-- V4 era F geométrica + sparkle → leía como "letra de marca", no claridad.
-- V5 son círculos concéntricos → símbolo abstracto de focus/clarity/aperture.
-  Funciona a todos los tamaños, es premium y App Store-ready.
-
-Family system (mismo símbolo, distinto gradiente):
-- Focus → cobalt (#2E4FE8 → #182F82).
-- Kairos (futuro) → violeta.
-- Spark (futuro) → naranja.
+V6 vs V5:
+- V5 eran 2 anillos + núcleo → leía como target/crosshair. El usuario
+  lo rechazó múltiples veces.
+- V6 es "F" geométrica + dot accent → letra de marca + chispa de
+  intelición. Bold, simple, App Store-ready, no se confunde con apps
+  de meditación.
 
 Reglas iOS: 1024×1024 RGB sin alpha · sin transparencia.
 
@@ -38,6 +37,9 @@ SS = 4
 C_TOP = (46, 79, 232)        # #2E4FE8 cobalto vivo
 C_BOTTOM = (24, 47, 130)     # #182F82 azul profundo
 WHITE = (255, 255, 255)
+# Dot de "pensamiento" — accent cyan brillante para diferenciarlo del
+# blanco de la F. Sugiere "señal viva / chispa mental".
+ACCENT = (110, 200, 255)     # #6EC8FF cyan claro vivo
 
 
 def lerp(a, b, t):
@@ -53,57 +55,31 @@ def build_gradient(size: int) -> Image.Image:
     return img
 
 
-def draw_ring(draw: ImageDraw.ImageDraw, size: int, diameter_ratio: float,
-              thickness_ratio: float, color=WHITE) -> None:
-    """Anillo (stroke circle) centrado, sin relleno interior.
-
-    diameter_ratio: diámetro como fracción del canvas (e.g. 0.70 → 70% del size).
-    thickness_ratio: grosor del stroke como fracción del canvas.
-    """
-    cx = size / 2
-    cy = size / 2
-    r_outer = (size * diameter_ratio) / 2
-    r_inner = r_outer - (size * thickness_ratio)
-    # Outer disk
-    draw.ellipse(
-        [cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer],
-        fill=color,
-    )
-    # Cut out inner disk (color del fondo NO funciona porque hay gradiente).
-    # Solución: usar máscara con composición alpha.
-    # Pillow trick: dibujamos un círculo "vacío" usando ImageDraw.ellipse con
-    # outline+width, que solo dibuja el contorno.
-    # → Reescribimos abajo.
-
-
-def draw_stroked_ring(img: Image.Image, size: int, diameter_ratio: float,
-                       thickness_ratio: float, color=WHITE, alpha: int = 255) -> None:
-    """Anillo (contorno hueco) compositado sobre `img` con alpha exacto."""
-    cx = size / 2
-    cy = size / 2
-    diameter = size * diameter_ratio
-    thickness = max(1, int(size * thickness_ratio))
-    bbox = [cx - diameter / 2, cy - diameter / 2,
-            cx + diameter / 2, cy + diameter / 2]
-
+def draw_rounded_rect(img: Image.Image, size: int, x: float, y: float,
+                       w: float, h: float, radius: float,
+                       color=WHITE, alpha: int = 255) -> None:
+    """Rectángulo con esquinas redondeadas, alpha exacto."""
     overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     ov_draw = ImageDraw.Draw(overlay)
-    ring_color = (color[0], color[1], color[2], alpha)
-    ov_draw.ellipse(bbox, outline=ring_color, width=thickness)
+    fill = (color[0], color[1], color[2], alpha)
+    ov_draw.rounded_rectangle(
+        [x, y, x + w, y + h],
+        radius=radius,
+        fill=fill,
+    )
     img.paste(overlay, (0, 0), overlay)
 
 
-def draw_disk(img: Image.Image, size: int, diameter_ratio: float,
-              color=WHITE) -> None:
-    """Disco sólido centrado."""
-    cx = size / 2
-    cy = size / 2
-    diameter = size * diameter_ratio
-    bbox = [cx - diameter / 2, cy - diameter / 2,
-            cx + diameter / 2, cy + diameter / 2]
+def draw_disk(img: Image.Image, size: int, cx: float, cy: float,
+              radius: float, color=WHITE, alpha: int = 255) -> None:
+    """Disco sólido en posición arbitraria."""
     overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     ov_draw = ImageDraw.Draw(overlay)
-    ov_draw.ellipse(bbox, fill=(color[0], color[1], color[2], 255))
+    fill = (color[0], color[1], color[2], alpha)
+    ov_draw.ellipse(
+        [cx - radius, cy - radius, cx + radius, cy + radius],
+        fill=fill,
+    )
     img.paste(overlay, (0, 0), overlay)
 
 
@@ -111,14 +87,63 @@ def main() -> int:
     big = SIZE * SS
     img = build_gradient(big).convert("RGBA")
 
-    # Anillo exterior — sutil, alpha ~140/255 (~0.55).
-    draw_stroked_ring(img, big, diameter_ratio=0.70, thickness_ratio=0.028,
-                      color=WHITE, alpha=140)
-    # Anillo medio — borde del foco (sólido).
-    draw_stroked_ring(img, big, diameter_ratio=0.44, thickness_ratio=0.050,
-                      color=WHITE, alpha=255)
-    # Núcleo sólido.
-    draw_disk(img, big, diameter_ratio=0.18, color=WHITE)
+    # === Construcción de la "F" geométrica ===
+    # Centrada horizontalmente, ligeramente arriba del centro vertical
+    # para dejar aire abajo. Bordes redondeados premium.
+    #
+    # Bounding box conceptual de la F: ~52% del canvas en altura,
+    # ancho de ~40% (el F tiene espacio negativo a la derecha).
+    # Stem (palo vertical): 16% del canvas en ancho.
+    # Bars: top = 38% canvas wide, middle = 30% canvas wide.
+    # Todo con corner radius redondeado para sentirse premium, no rígido.
+
+    # Centro: dejamos espacio para el dot accent arriba-derecha, así que
+    # la F va un poco a la izquierda del centro absoluto.
+    f_center_x = big * 0.46
+    f_center_y = big * 0.50
+
+    stem_w = big * 0.13
+    stem_h = big * 0.52
+    bar_top_w = big * 0.36
+    bar_top_h = big * 0.13
+    bar_mid_w = big * 0.28
+    bar_mid_h = big * 0.12
+    radius_stem = big * 0.05
+    radius_bar = big * 0.05
+
+    stem_x = f_center_x - stem_w / 2
+    stem_y = f_center_y - stem_h / 2
+    # Stem
+    draw_rounded_rect(img, big, stem_x, stem_y, stem_w, stem_h,
+                      radius=radius_stem, color=WHITE)
+    # Top bar — empieza al lado izquierdo del stem, se extiende a la derecha.
+    bar_top_x = stem_x
+    bar_top_y = stem_y
+    draw_rounded_rect(img, big, bar_top_x, bar_top_y,
+                      bar_top_w, bar_top_h,
+                      radius=radius_bar, color=WHITE)
+    # Middle bar — un poco más corta que el top bar, posicionada al
+    # ~38% de la altura del stem.
+    bar_mid_x = stem_x
+    bar_mid_y = stem_y + stem_h * 0.36
+    draw_rounded_rect(img, big, bar_mid_x, bar_mid_y,
+                      bar_mid_w, bar_mid_h,
+                      radius=radius_bar, color=WHITE)
+
+    # === Accent dot — "chispa de pensamiento" ===
+    # Posicionado arriba-derecha de la F, fuera del bounding box principal,
+    # como un indicador "viva / inteligente". Cyan vivo para contrastar.
+    dot_radius = big * 0.055
+    dot_cx = bar_top_x + bar_top_w + big * 0.08
+    dot_cy = bar_top_y + bar_top_h * 0.35
+    # Aura sutil del dot (glow).
+    draw_disk(img, big, dot_cx, dot_cy, dot_radius * 1.7,
+              color=ACCENT, alpha=60)
+    # Dot principal sólido.
+    draw_disk(img, big, dot_cx, dot_cy, dot_radius, color=ACCENT)
+    # Highlight blanco interior para sensación premium.
+    draw_disk(img, big, dot_cx - dot_radius * 0.25, dot_cy - dot_radius * 0.25,
+              dot_radius * 0.35, color=WHITE, alpha=200)
 
     img = img.convert("RGB").resize((SIZE, SIZE), Image.LANCZOS)
 
@@ -142,7 +167,7 @@ def main() -> int:
         json.dump(contents, f, indent=2)
         f.write("\n")
 
-    print(f"✓ AppIcon V5 (núcleo + anillos): {OUT_APPICON.relative_to(REPO)}")
+    print(f"✓ AppIcon V6 (F + dot): {OUT_APPICON.relative_to(REPO)}")
     print(f"  {SIZE}×{SIZE} RGB · sin alpha · {OUT_APPICON.stat().st_size // 1024}KB")
     print(f"✓ Preview: {OUT_PREVIEW.relative_to(REPO)}")
     return 0

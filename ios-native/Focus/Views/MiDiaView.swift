@@ -31,13 +31,15 @@ struct MiDiaView: View {
 
     // MARK: - Source of truth
 
-    /// Eventos visibles: del usuario si tiene, demo si no (excluyendo los
-    /// títulos descartados — persisten a disco vía store).
+    /// Eventos visibles: del usuario si tiene, demo si NO tiene Y está en
+    /// modo demo (no logueado). Una cuenta real con 0 eventos muestra vacío
+    /// real — nunca eventos falsos como si fueran propios.
     /// Recordatorios vencidos van separados en `overdueReminders`.
     private var displayEvents: [FocusEvent] {
         if store.hasUserEvents {
             return store.upcomingAndCurrentEventsToday()
         }
+        guard store.isInDemoMode else { return [] }
         return DemoDataProvider.shared.exampleTodayEvents()
             .filter { !store.dismissedDemoEventTitles.contains($0.title) }
     }
@@ -51,12 +53,13 @@ struct MiDiaView: View {
         return store.overdueRemindersToday()
     }
 
-    /// Pendientes visibles: del usuario si tiene, demo si no (excluyendo
-    /// descartados — persisten a disco vía store).
+    /// Pendientes visibles: reales si hay, demo solo si está en modo demo
+    /// (no logueado). Cuenta real con 0 tareas → vacío real.
     private var displayPendingTasks: [FocusTask] {
         if store.hasUserTasks {
             return store.pendingTodayTasks
         }
+        guard store.isInDemoMode else { return [] }
         return DemoDataProvider.shared.exampleTodayTasks()
             .filter { !$0.done && !store.dismissedDemoTaskTitles.contains($0.title) }
     }

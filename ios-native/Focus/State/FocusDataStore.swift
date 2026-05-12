@@ -2286,6 +2286,14 @@ final class FocusDataStore: ObservableObject {
         !tasks.isEmpty
     }
 
+    /// True solo cuando el usuario NO está logueado — sin `syncCredentials`,
+    /// la app está en modo demo. Los ejemplos del Calendario/Mi Día/Tareas
+    /// SOLO deben aparecer en este modo. Un usuario logueado con 0 ítems
+    /// debe ver estado vacío real, NO eventos demo falsos.
+    var isInDemoMode: Bool {
+        syncCredentials == nil
+    }
+
     // MARK: - Eventos
 
     func eventsFor(date target: Date) -> [FocusEvent] {
@@ -2517,6 +2525,9 @@ final class FocusDataStore: ObservableObject {
         }
         if !valid.isEmpty { return valid }
         if hasUserData { return [] }
+        // Solo mostrar sugerencias demo en modo demo (no logueado). Una
+        // cuenta real sin ítems propios ve vacío real.
+        guard isInDemoMode else { return [] }
         return DemoDataProvider.shared.suggestions()
     }
 

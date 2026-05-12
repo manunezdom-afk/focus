@@ -400,17 +400,16 @@ struct NovaView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             inputBar
         }
-        .scrollDismissesKeyboard(.interactively)
-        // Tap-outside dismiss: cualquier tap dentro del chat (no en input)
-        // cierra el teclado. Convive con taps de chips y burbujas.
-        .simultaneousGesture(
-            TapGesture().onEnded { _ in
-                UIApplication.shared.sendAction(
-                    #selector(UIResponder.resignFirstResponder),
-                    to: nil, from: nil, for: nil
-                )
-            }
-        )
+        // `.immediately` da comportamiento predecible — un scroll cierra
+        // el teclado inmediatamente. `.interactively` causaba layouts
+        // inestables donde el inputBar se sentía "pegado" al teclado a
+        // medio bajar y desaparecía visualmente detrás de los chips.
+        .scrollDismissesKeyboard(.immediately)
+        // El `simultaneousGesture(TapGesture)` previo capturaba taps que
+        // CAÍAN sobre el TextField del inputBar — el flujo era: tap →
+        // dismiss keyboard → TextField gain focus → re-open keyboard,
+        // dejando UI inestable. Lo quitamos: el usuario cierra teclado
+        // con el botón "Listo" del toolbar o haciendo scroll.
     }
 
     /// Empty state estilo Gemini: hero centrado con mark grande + saludo
@@ -603,6 +602,18 @@ struct NovaView: View {
                     .submitLabel(.send)
                     .onSubmit(submitDraft)
                     .padding(.vertical, 4)
+                    // Toolbar "Listo" arriba del teclado — sin esto el
+                    // usuario no tiene cómo cerrarlo si decide no enviar.
+                    .toolbar {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("Listo") {
+                                inputFocused = false
+                            }
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.focusAccent)
+                        }
+                    }
 
                 // Mic del input del chat = dictado rápido para escribir
                 // un mensaje. NO abre Nova Live — eso está en el chip
@@ -656,12 +667,13 @@ struct NovaView: View {
             .padding(.bottom, Theme.Spacing.sm)
             .animation(.easeInOut(duration: 0.18), value: inputFocused)
         }
-        // Background SÓLIDO sin `ignoresSafeArea` — SwiftUI maneja la
-        // keyboard avoidance automáticamente vía `safeAreaInset`. Si
-        // dejábamos `ignoresSafeArea(.bottom)` el background trataba de
-        // extenderse "bajo" el teclado y el bloque blanco del input
-        // desaparecía detrás del teclado en el empty state del chat.
-        .background(Theme.Colors.background)
+        // Background SÓLIDO + sombra superior sutil para separar
+        // visualmente del contenido scrollable. Sin `ignoresSafeArea` —
+        // SwiftUI maneja la keyboard avoidance vía `safeAreaInset`.
+        .background(
+            Theme.Colors.background
+                .shadow(color: .black.opacity(0.06), radius: 4, y: -2)
+        )
     }
 
     private func submitDraft() {

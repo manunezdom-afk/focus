@@ -21,12 +21,17 @@ struct CalendarioView: View {
     @State private var showCreateEvent = false
     @State private var editingEvent: FocusEvent? = nil
 
-    /// Eventos a mostrar para el día seleccionado. Si el usuario no tiene
-    /// ningún evento real, mostramos ejemplos para que vea la app llena.
+    /// Eventos a mostrar para el día seleccionado.
+    /// - Si tiene eventos reales → los muestra (logueado o demo).
+    /// - Si NO tiene eventos Y está en modo demo (no logueado) → muestra
+    ///   ejemplos para ilustrar la app.
+    /// - Si NO tiene eventos Y está LOGUEADO → array vacío. La cuenta real
+    ///   NUNCA debe mostrar eventos demo falsos como si fueran del usuario.
     private var displayEvents: [FocusEvent] {
         if store.hasUserEvents {
             return store.eventsFor(date: selectedDate)
         }
+        guard store.isInDemoMode else { return [] }
         let cal = Calendar.current
         return DemoDataProvider.shared.exampleWeekEvents()
             .filter { cal.isDate($0.startTime, inSameDayAs: selectedDate) }
@@ -34,7 +39,7 @@ struct CalendarioView: View {
     }
 
     private var showingExamples: Bool {
-        !store.hasUserEvents
+        !store.hasUserEvents && store.isInDemoMode
     }
 
     /// Cuenta eventos para un día dado (para el dot indicator).
@@ -43,6 +48,7 @@ struct CalendarioView: View {
         if store.hasUserEvents {
             return store.events.filter { cal.isDate($0.startTime, inSameDayAs: date) }.count
         }
+        guard store.isInDemoMode else { return 0 }
         return DemoDataProvider.shared.exampleWeekEvents()
             .filter { cal.isDate($0.startTime, inSameDayAs: date) }.count
     }
