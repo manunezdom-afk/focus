@@ -430,7 +430,6 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Focus;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Focus usa la cámara para que Nova lea tu agenda o notas escritas y las convierta en eventos automáticamente.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Focus usa el micrófono para que puedas pedirle a Nova que organice tu día con la voz.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Focus transcribe tu voz para convertirla en tareas, eventos y recordatorios.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -463,7 +462,6 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Focus;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Focus usa la cámara para que Nova lea tu agenda o notas escritas y las convierta en eventos automáticamente.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Focus usa el micrófono para que puedas pedirle a Nova que organice tu día con la voz.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Focus transcribe tu voz para convertirla en tareas, eventos y recordatorios.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

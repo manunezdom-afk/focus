@@ -41,6 +41,7 @@ Documento central de auditoría continua del proyecto Focus.
 | 23 | 2026-05-11 | Bloque 1: Nova natural + chat Gemini empty state | **Parser muy ampliado** con frases coloquiales chilenas/latinas:<br>• **Nuevos verbos de evento**: `ponme `/`ponme un/una/el/la`, `tengo médico/medico/doctor`, `clase con`.<br>• **Nuevos verbos de tarea**: `avísame `/`avisame `/`avísame que ` (también dispara `wantsReminder`).<br>• **Marcadores de tiempo coloquiales**: `en la tarde` → 16:00, `en la noche` → 20:00, `en la mañana` → 9:00, `después de almuerzo`/`después del almuerzo` → 15:00, `después del trabajo` → 18:00, `al final del día` → 18:00, `al amanecer` → 7:00.<br>**Triggers que mantienen el verbo en el título** (`keptInTitleTriggers`): `buscar a `, `ir a buscar `, `salir a /con`, `ir a `/`voy a `/`vamos a `, `juntarme con `, `almuerzo/cena/desayuno/café con `, `reunión con`, `clase con/de`, `pasar a /por `. Resultado: "buscar a la agustina tipo 3 acuérdate" → "Buscar a Agustina"; "ir a buscar a la agustina a las 3 acuérdame" → "Ir a buscar a Agustina".<br>**Triggers tipo `tengo X`** (`tengoLikeTriggers`): "tengo parcial" → título "Parcial"; "tengo médico" → "Médico"; "tengo clase" → "Clase". El título es la palabra-clave después de "tengo".<br>**`stripLeadingArticle`**: artículo "la"/"el" al inicio del título limpio se quita y capitaliza la siguiente palabra ("la agustina" → "Agustina").<br>**`firstMatchingTrigger` ahora prioriza el trigger más largo** cuando hay empate de posición. Garantiza que "ir a buscar " (12 chars) gane sobre "ir a " (5 chars) en la misma frase. **Correcciones contextuales nuevas**: `bórralo`/`elimínalo`/`borrar` → `.deleteLastItem` (borra el último evento o tarea del store y limpia contexto). `era X`/`no era Juan, era Pedro`/`era con X` → `.correctLastEvent(.setTitle(X))` (cambia título del último evento conservando fecha/hora/ubicación). `isCorrectionStart` ampliado para detectar estos casos. **`createTask` lleva `dueDate`**: el parser ahora preserva la fecha extraída ("mañana") y la pasa al executor, que mapea a categoría (.hoy/.semana/.algunDia) y al campo `dueDate` de `FocusTask`. Inline response incluye "para mañana" / "para el jueves" cuando aplica. **Chat empty state estilo Gemini**: cuando `novaMessages.isEmpty && !isNovaTyping`, NovaView muestra hero centrado con NovaSparkMark 36pt en una RoundedRect 84pt cobalto + sombra violeta, título "¿Qué quieres ordenar?" (28pt medium), subtítulo, y 4 chips: Organizar mi día / Crear tarea / Agendar evento / Revisar pendientes. Tap → `handleQuickAction` correspondiente. **Sin welcome message persistido**: `FocusDataStore.init` y `resetToDemoState` arrancan `novaMessages = []`. El saludo vive solo en la UI del empty state. **Límites conocidos**: parser solo procesa UN intent por frase; no entiende fechas absolutas tipo "15 de diciembre"; recurrencia detectada pero no implementada; no edita propiedades múltiples a la vez. |
 | 24 | 2026-05-11 | Calendario Día/Semana/Mes + editar + segundos | **Calendario Día/Semana/Mes**: `CalendarioView.ViewMode` enum con segmented control. Día = detalle de un día. Semana = comportamiento previo. Mes = nueva `MonthGridView` (7 cols L-D, puntos cobalto, navegación chevrones). **Editar eventos/tareas**: `NuevoEventoSheet(editing:onSave:)` y `NuevaTareaSheet(editing:onSave:)` precargan campos y conservan id. `FocusDataStore.updateTask(_:)` nuevo. ProximoBloqueCard menú `· · ·` y contextMenus en TimelineEventRow / MiDiaTaskRow / CalendarEventCard / TaskRowFull suman "Editar" además de "Eliminar". **Recordatorios sin duración inferida**: `FocusEvent.inferredDuration: Bool?` nuevo. `displayAsPointInTime = isReminder \|\| inferredDuration`. Parser `extractExplicitEndTime` detecta "de X a Y", "hasta las Y", "por N hora(s)/min". `NovaIntent.createEvent` lleva `endTime: Date?`. Executor tres caminos: reminder (5min + isReminder), rango explícito (end real, no point), sin rango (5min + inferredDuration=true, point). **Segundos en eventos EN CURSO**: TimelineView 1s tick + formato "Termina en X min Y s" para in-progress. Futuros sin segundos. Recordatorios formato absoluto. |
 | 25 | 2026-05-11 | Bloque 2: QA UI/teclado/safe area | **Tap-outside keyboard dismiss**: `simultaneousGesture(TapGesture)` agregado al ScrollView de Mi Día y al chat de Nova. Convive con taps de botones (simultáneo, no exclusivo) — los botones siguen funcionando, el teclado se cierra. Combina con `scrollDismissesKeyboard(.immediately)` ya existente y toolbar "Listo" del FocusBarInput. **Header top padding consistente**: Mi Día, Calendario, Nova y Ajustes ahora usan `Theme.Spacing.lg` (16pt) en lugar del mix `.md/.lg` que tenían. Junto al safe-area inset que iOS aplica, da aire suficiente respecto a notch/Dynamic Island en todos los tabs. **Bottom safety verificado**: todas las pantallas (Mi Día, Calendario, Nova, NovaInbox, Ajustes, Tareas) cierran su scroll con `Spacer(minLength: Theme.Spacing.bottomBarSafety)` (110pt) — la tab bar custom no tapa la última card. **Toast position verificado**: `.overlay(alignment: .top)` respeta safe area inset (no se solapa con Dynamic Island). **Calendar Mes empty**: si el día seleccionado del mes no tiene eventos, `dayContent` muestra "Día libre" + botón "Nuevo evento" — comportamiento consistente con Día/Semana. **Build OK** simulador + iPhone 16 físico. Parser smoke-test: casos clave del Bloque 1 siguen funcionando (verified via parse trace mental + build success). **No se modificó**: lógica de parser, modelo de datos, persistencia, auth, demo, sync (no se conecta Supabase ni LLM). **Pendiente para Bloque 3+**: Supabase sync, Nova LLM real, notificaciones APNs, micrófono real, widgets, EventKit/Google Calendar OAuth, recurrencia funcional, deadlines visibles en TaskRow. |
+| 52 | 2026-05-12 | **Bloque 9: Beta Readiness — audit + camera permission cleanup + Google OAuth doc completa** | Revisión final pre-beta cerrada con amigos. **Code-level: NSCameraUsageDescription removida del pbxproj** — Focus NO usa la cámara en ningún flujo (verified via grep). Apple rechaza apps que declaran permisos que no usan ("declared but unused"). Removida ahora para evitar rejection futura. Mic + Speech siguen declaradas y SÍ se usan. **Auditoría exhaustiva del estado**: ver sección "Beta Readiness — Estado al 2026-05-12" abajo para la tabla completa de módulos, bloqueantes hard/soft, checklist TestFlight, guía para testers, instrucciones exactas para configurar Google OAuth en Supabase Dashboard. **Honestidad sobre Google OAuth**: el CÓDIGO está implementado y robusto (pase 50). PERO el flujo NO funciona end-to-end hasta que Martin haga 2 cambios manuales en Supabase Dashboard (Redirect URL + Google provider enable). Sin acceso al Dashboard desde Claude. Documentación incluye los pasos exactos paso a paso. Si Martin no hace esos cambios, el botón Google mostrará error humano ("Google sign-in todavía no está configurado en Supabase. Avísanos.") — NO se queda colgado, NO finge éxito. **OTP no se rompió** — el cambio del pase 51 (reset focus) y los anteriores no tocaron el flow OTP. AuthService.sendOTP + verifyOTP siguen idénticos. **Privacidad/seguridad básica revisada**: 0 logs con tokens (grep clean), 0 service_role en cliente (solo en comentario doc), tokens en Keychain con `kSecAttrAccessibleAfterFirstUnlock`, RLS owner-only validado en pase 27. **Build OK** simulador iPhone 17 / iOS 26.4.1. Bundle ID `me.usefocus.app`, Team D8UM897B2T, Marketing 1.0, Build 1 (bump al subir a TestFlight). **NO se tocó**: Nova lógica, sync, calendar, notifs, mic, recordatorios, tabs, paleta, AppIcon, backend, Bundle ID. |
 | 51 | 2026-05-12 | **Bloque 8: Pre-beta QA estático + 4 fixes de estabilidad** | Audit estático de los módulos críticos via 2 sub-agentes en paralelo (Nova/sync + auth/mic). Build limpio (sin warnings nuevos). **4 fixes aplicados, NO se introdujeron features nuevas**: **(1) [NovaLiveService.swift:175](ios-native/Focus/Services/NovaLiveService.swift) — weak capture explícito**. El audio tap capturaba `[weak request]` (variable local) — funcionalmente correcto porque `self.recognitionRequest` mantiene el strong, pero implícito y propenso a confusión. Cambiado a `[weak self]` + lectura dinámica de `self?.recognitionRequest?.append(buffer)`. Semántica clara: si el service muere o se hace tearDown, los buffers dejan de appenderse limpiamente. **(2) [FocusDataStore.deleteEvent + deleteTask](ios-native/Focus/State/FocusDataStore.swift) — orden de persist corregido**. Antes: 1) eliminar de array, 2) `persistEvents`, 3) `pendingDeleteEventIds.insert + persistPendingDeleteEvents`, 4) softDelete remoto. Si la app crasheaba entre (2) y (3), al relanzar quedaba `events.json` SIN el ítem + `pendingDelete.json` SIN la id → próximo `fetchRemoteAndMerge` lo resucitaba desde Supabase (porque el merge se basa en `pendingDeleteEventIds` para excluir). **Nuevo orden**: pendingDelete persist PRIMERO, luego array persist. Si crashea al medio, pendingDelete tiene la id; el merge SIEMPRE lo excluye aunque events.json todavía tenga el ítem. Aplicado idéntico a deleteTask. **(3) [LoginView.swift](ios-native/Focus/Views/LoginView.swift) — reset de focus states**. Cuando `auth.state` salía de `.codeSent` (login exitoso, cancelación, demo), `emailFocused`/`codeFocused` quedaban en true. Al volver a aparecer LoginView (logout posterior), el teclado se abría solo. Fix: en `onChange(of: auth.state)`, si la nueva state NO es `.codeSent`, resetear ambos focus a false. **(4) Audit confirmó que `signOut()` ya setea `state = .loggedOut` explícitamente y `NovaLiveService.stop()` ya tiene `guard state == .listening else { return }` para idempotencia** — el subagente había marcado estos como "missing" pero la implementación actual ya estaba correcta. Sin cambios de código, documentado. **Resultados de la auditoría completa**: módulos `NovaService`, `SupabaseSyncService`, `LocalNotificationService` (scheduling), `mergeRemoteEvents/Tasks`, `applyBackendActions`, `applyAuthChange`, `AuthService` OAuth — todos limpios. Sin force-unwraps peligrosos, sin Tasks que filtran, sin condiciones de carrera críticas. La cola `pendingDeleteEventIds` + el filtro en merge protegen contra "deleted reappear" en todos los escenarios (online, offline, refresh-token expirado, app kill durante delete). El path local de Nova (`applyLocalNovaIntent`) y el backend (`applyBackendActions`) ambos pasan por `NovaActionNormalizer.isLikelyDuplicate` antes de crear — anti-dup robusta. **Build OK** simulador iPhone 17 / iOS 26.4.1, único warning preexistente (sin relación con esta sesión): `FocusDataStore.swift:1197` immutable `lower` no usado. **Limitaciones del audit estático**: NO ejecuté la app en device. NO probé Google OAuth real (requiere config en Supabase Dashboard que el usuario debe hacer manualmente, pase 50). NO probé notifications en device (requieren tiempo real). Eso es QA manual de Martin. **Sin tocar**: Nova lógica, sync, calendar, recordatorios, tabs, paleta, AppIcon, backend, schema Supabase, Bundle ID. |
 | 50 | 2026-05-12 | **Onboarding 4 páginas + Google OAuth real + transición suave sin overlap** | Tres bloques de trabajo orientados a la primera impresión de un usuario nuevo. **(1) Transición suave Boot→Onboarding/Login sin re-introducir overlap** — el routing atómico (pase 48) eliminó las pantallas duplicadas pero la transición se sentía abrupta. **Fix**: fade-in INTERNO en cada view raíz (LoginView, OnboardingView) vía `@State contentVisible: Bool` + `.opacity(contentVisible ? 1 : 0)` + `withAnimation(.easeOut(0.28))` en `onAppear`. La animación vive DENTRO de la view, NO en `ContentView` root — por eso es imposible que crossfadee con otra. ContentView sigue siendo `switch route` sin `.animation()` ni `.transition()`. Resultado: aparece BootView (0.6s, su propia animación interna), swap atómico, fade-in suave de la siguiente view. Sin overlap, sin abrupto. **(2) Google Sign-In real** — antes el botón "Continuar con Google" solo mostraba "Próximamente disponible". Implementación nueva con `ASWebAuthenticationSession`: [AuthService.signInWithGoogle](ios-native/Focus/Services/AuthService.swift) construye URL OAuth contra `https://hvwqeemtfoyvfmongwzo.supabase.co/auth/v1/authorize?provider=google&redirect_to=focus://auth-callback`, lanza el Safari in-app, espera el callback, parsea los tokens del FRAGMENT (Supabase devuelve `#access_token=…&refresh_token=…&expires_at=…`), pide `/auth/v1/user` con el bearer para obtener `userId+email`, construye `SupabaseSession`. Persistencia via Keychain idéntica al OTP path. Nuevos `AuthError.oauthCanceled`/`.oauthProviderNotConfigured`/`.oauthCallbackInvalid` con copy humano. [AuthStore.signInWithGoogle](ios-native/Focus/State/AuthStore.swift) maneja loading state + errores. [LoginView](ios-native/Focus/Views/LoginView.swift) ahora resuelve la `UIWindow` activa con `resolvePresentationAnchor()` y la pasa como `ASPresentationAnchor`. El botón Google muestra `ProgressView` durante el flujo y se deshabilita. Cancelar el Safari sheet vuelve al estado anterior sin banner agresivo. **Importante — config manual pendiente** (sin acceso a Supabase Dashboard desde Claude): para que el OAuth funcione en producción, Martin necesita: (a) Supabase Dashboard → Authentication → URL Configuration → agregar `focus://auth-callback` a "Redirect URLs"; (b) Supabase Dashboard → Authentication → Providers → Google: enabled + Client ID + Client Secret del proyecto Google Cloud. Si faltan (a) o (b), Supabase devuelve `error=server_error` y la app muestra "Google sign-in todavía no está configurado en Supabase. Avísanos." — no finge éxito. NO se requiere CFBundleURLTypes en Info.plist: `ASWebAuthenticationSession` intercepta el callback por su parámetro `callbackURLScheme` antes de que el sistema lo procese. **(3) Onboarding 4 páginas con copy nueva** — antes 3 páginas. Ahora: P1 brand "Focus OS / Tu día, tus tareas y Nova en un solo lugar"; P2 Mi Día mock timeline "Ordena tu día sin pensarlo tanto / Ve tus bloques, pendientes y recordatorios en una vista simple"; P3 Nova mock card "Díselo como hablas / Pídele a Nova: «mañana despiértame a las 7 y recuérdame salir a las 8»"; P4 nueva "Que nada se te pase / Focus guarda eventos, tareas y te avisa en el momento correcto" con mock de notificación push (icono Focus + "En 5 min" en cobalto) + fila "También aparece en tu día". El timeline mock removió "Foco profundo" → "Bloque de trabajo" (consistente con el pase 43 que sacó las copies hardcoded de Foco profundo). Nova mock cambió "Nova tiene 4 sugerencias / Mover gym, asignar bloque, reservar pausa" → "Nova entendió / Despertarte 07:00, Salir 08:00, Aviso 10 min antes" — refleja el flujo real del multi-intent del pase 46. Animaciones suaves vía spring + page indicator + actions "Siguiente"/"Empezar" + demo button solo en la última página. **Performance**: el onboarding no agrega assets ni gradients pesados — los mocks son SwiftUI puro (RoundedRectangle + Text + Circle), Sin blur, sin animation infinita. El BootView sigue siendo 0.6s del pase 49. **Build OK** simulador iPhone 17 / iOS 26.4.1. **Sin tocar**: Nova lógica (`canFallbackToLocal`/`parseAll` pase 46), sync (44), demo isolation (45), Mi Día safe area (47), AppIcon V9 (49), routing atómico (48), tabs, Bundle ID, schema Supabase, calendario, notificaciones, recordatorios. **A probar en device** (Martin, **borrar Focus + Clean Build + reinstalar**): (a) Arranque: BootView ~0.6s → fade suave a Onboarding/Login (no abrupto, no overlap). (b) Onboarding 4 páginas: pasar páginas, "Saltar" funciona, llegar a P4 muestra "Empezar" + "Probar en modo demo". (c) Login email OTP sigue funcionando. (d) **Google**: tocar "Continuar con Google" → abre Safari in-app con login Google → al volver, queda logueado y entra a Main. Si falla por config: mensaje claro "Google sign-in todavía no está configurado en Supabase. Avísanos." (e) Cancelar Safari: vuelve a LoginView normal, sin loading colgado. (f) Login keyboard dismiss sigue funcionando (pase 49). (g) `auth.signOut()` desde Ajustes → borra Keychain → vuelve a Login. **Limitaciones documentadas**: el FocusLogoMark del onboarding (page 1) sigue siendo el engranaje + núcleo del pase 47/48. El AppIcon V9 son las pilas asimétricas + Nova dot — siguen diferentes. Decisión consciente; uniicar queda para próxima ronda si el usuario quiere. |
 | 49 | 2026-05-12 | **Arranque + Login keyboard + AppIcon V9** — 0.6s vs 1.8s + tap-outside dismiss + concepto nuevo no-circular | Tres bugs reportados post-pase 48. **(1) App se sentía más lenta al arrancar** — root cause: [ContentView.scheduleBootEnd](ios-native/Focus/ContentView.swift) tenía `DispatchQueue.main.asyncAfter(deadline: .now() + 1.8)`. 1.8 segundos de delay artificial PURO. El usuario veía el BootView frenarlo antes de cualquier interacción. **Fix**: reducido a **0.6s** (3× más rápido). Si `auth.state` todavía está en `.loading` cuando termina el timer, el `route` computed sigue devolviendo `.boot` automáticamente hasta que resuelva — no perdemos el placeholder para refresh-token lento. BootView animations también acortadas para que rindan en 0.6s: opacity/markScale `easeOut(0.8)` → `easeOut(0.35)`; glowOpacity `easeOut(1.2)` → `easeOut(0.45)`. **(2) Login no cerraba teclado tocando fondo** — `LoginView.rootContent` solo tenía `Theme.Colors.background.ignoresSafeArea()` sin `contentShape` ni `onTapGesture`. Tocar la zona blanca no hacía nada. **Fix**: el Color de fondo ahora tiene `.contentShape(Rectangle())` + `.onTapGesture { dismissKeyboard() }`. El `LinearGradient` overlay tiene `.allowsHitTesting(false)` para que NO robe los taps. Nuevo helper `dismissKeyboard()` apaga ambos `@FocusState` (emailFocused + codeFocused). Agregado `ToolbarItemGroup(placement: .keyboard)` con botón "Listo" en el TextField del email — Listo lo cierra desde el toolbar también. Los botones "Enviar código", Google y demoLink siguen funcionando porque tienen hit-test priority natural (son interactivos vs el Color que es decorativo). **(3) AppIcon V9 — concepto nuevo no-circular** — V7/V8 eran engranajes (anillo + dientes + núcleo). El usuario los seguía leyendo como "rueda / target / engranaje literal" aunque V8 tenía más aire. La forma CIRCULAR era el problema, no el tamaño. **V9** abandona completamente la geometría circular: tres barras horizontales redondeadas (pills) de anchos y posiciones asimétricos, sobre el gradient cobalto. Lectura: "orden mental, foco intencional, sistema de prioridades". Plus un dot accent cyan (#82C8FF) arriba a la derecha, fuera del bloque de barras — sugiere la capa Nova (chispa de inteligencia) sin saturar. Composición: barra 1 (superior, ancho 58%, izquierda), barra 2 (medio, ancho 38%, derecha), barra 3 (inferior, ancho 48%, izquierda). Asimetría intencional → no se lee como menú hamburguesa simétrico. El símbolo ocupa ~62% del canvas con ~19% de margen cobalto a cada lado. **Resultado**: imposible leerlo como rueda/engranaje/target/F. [Preview](docs/assets/focus-app-icon-preview.png). Script en [scripts/build-ios-appicon.py](scripts/build-ios-appicon.py). **Build OK** simulador iPhone 17 / iOS 26.4.1. **Limitaciones documentadas**: (a) Identidad: `FocusLogoMark` interno SIGUE siendo el engranaje + núcleo del pase 47/48. La marca del launcher (V9 bars + Nova dot) ya no coincide pixel-a-pixel con el símbolo del onboarding/headers. Decisión consciente — el usuario reportó SOLO el launcher como "no convence", el símbolo interno gusta más. Si después de probar V9 quiere unificar todo, se hace en una próxima ronda regenerando `FocusGearMark` como pills. (b) `auth.state == .loading` durante refresh-token: el `route` se queda en `.boot` automáticamente, pero el usuario podría ver el BootView por más de 0.6s en ese caso — eso es intencional, evita parpadear LoginView mientras se resuelve la sesión. (c) Nova accent cyan en el AppIcon: el FocusLogoMark interno no tiene este accent. Inconsistencia menor, decidida por preservar el símbolo interno actual. **Sin tocar**: Nova lógica (`canFallbackToLocal`/`parseAll` pase 46), sync (44), demo isolation (45), Mi Día safe area (47), LaunchScreen cobalto (47), routing atómico (48), tabs, Bundle ID, schema Supabase, auth backend. **A probar en device** (Martin, **borrar Focus + Clean Build + reinstalar**): (a) Launcher icon: tres barras blancas asimétricas + tiny dot cyan arriba-derecha. NO rueda. NO target. NO F. (b) Arranque: BootView debe durar ~0.6s, no 1.8s. Se siente notoriamente más rápido. (c) Login: tocar input, escribir, tocar fondo blanco arriba/abajo del input → teclado baja. Botón "Listo" del toolbar del teclado también lo cierra. Los botones "Enviar código", Google, demo siguen tappables normalmente. |
@@ -180,6 +181,176 @@ Usar Focus como app real día a día. Anotar:
 ### Bloque siguiente al QA (si todo pasa)
 
 **Bloque 8 — Polish visual avanzado** (a definir): icono Nova más distintivo, animaciones más cercanas a Gemini, consistencia FocusLogoMark con AppIcon V6. NO se abre hasta que el daily driver esté validado por ≥ 3 días sin pérdida de datos.
+
+---
+
+## Beta Readiness — Estado al 2026-05-12 (pase 52)
+
+> **TL;DR**: Código listo. Hay **3 bloqueantes hard** y **2 soft** que Martin debe resolver antes de invitar amigos. Google OAuth depende de 2 configuraciones manuales en Supabase Dashboard que Claude no puede hacer.
+
+### Estado por módulo
+
+| Módulo | Estado | Notas |
+|---|---|---|
+| Auth OTP email | ✅ funcional | Pase 5 (send) + pase 27 (sync e2e). Sin cambios desde entonces. |
+| Auth Google | ⚠️ **CÓDIGO LISTO, CONFIG MANUAL PENDIENTE** | Ver "Google OAuth — pasos exactos" abajo. |
+| Demo mode | ✅ aislado | `isInDemoMode = syncCredentials == nil`. NO sube a Supabase. |
+| Refresh token | ✅ | Pase 16, validado e2e en pase 28. |
+| Logout | ✅ | Limpia Keychain + state + expiresAt. NO borra datos locales (intencional). |
+| Onboarding | ✅ | 4 páginas, copy actualizado, no demo bleed (pase 50). |
+| Mi Día | ✅ | Safe area corregida (47), demo gateado (45), tabs trabajados. |
+| Calendario | ✅ | Delete swipe + long-press en Día/Semana/Mes. |
+| Tareas | ✅ | CRUD + complete + sync. |
+| Nova lógica | ✅ | NovaActionNormalizer + multi-intent + fallback 500. |
+| Notificaciones locales | ✅ | reminderOffsets + body limpio + subtitle dinámico. Cancel al delete. |
+| Micrófono Mi Día | ✅ | Dictado inline. Weak capture corregido (51). |
+| Nova Live | ✅ | Solo desde chip dedicado. AVAudioSession cleanup. |
+| Supabase sync | ✅ | Events + tasks. Pending-delete queue (orden de persist corregido en 51). |
+| Anti-duplicado | ✅ | isLikelyDuplicate en local Y backend path. |
+| Offline | ✅ V1 | Mutations locales persisten; sync recupera al reconectar. Borrados sobreviven. |
+| Eliminar cuenta | ❌ **placeholder** | "Próximamente" en Ajustes. **HARD BLOCKER App Store**, no bloquea TestFlight. |
+| Política de privacidad | ❌ **placeholder** | "Próximamente" en Ajustes. SOFT BLOCKER beta. Existe `PRIVACY_POLICY_DRAFT.md` sin URL pública. |
+| PrivacyInfo.xcprivacy | ❌ | Manifest moderno no creado. SOFT BLOCKER beta, HARD App Store. |
+| LaunchScreen | ✅ | Cobalto (`LaunchBackground`), sin flash blanco. |
+| Permissions strings | ✅ | Mic + Speech declarados y usados. Camera removida (no usada). |
+| AppIcon | ✅ | V9 pilas asimétricas, no rueda/target/F. |
+| Crash reporting | ❌ | No instalado (Sentry/Firebase Crashlytics). SOFT, recomendado para beta. |
+
+### Bloqueantes para beta cerrada con amigos
+
+**HARD blockers** (sin esto los testers van a frustrarse o quejarse):
+
+1. **Google OAuth: Supabase Dashboard sin configurar.** Sin (a) y (b) abajo, el botón muestra error humano pero NO funciona el login. Si la beta no necesita Google (solo OTP), saltarse este blocker.
+
+2. **"Eliminar cuenta" placeholder.** Apple App Store lo exige por guideline 5.1.1(v) para apps con signup. **TestFlight beta NO lo exige todavía**, pero los testers que prueben "eliminar mi cuenta de prueba" verán "Próximamente". Decisión: dejar visible con copy claro O ocultar la fila entera hasta tener backend de delete.
+
+3. **Build number = 1.** TestFlight necesita incrementar para cada upload. Para el primer upload, build 1 está bien. Subsequent uploads → bump a 2, 3, etc.
+
+**SOFT blockers** (no bloquean pero recomendados):
+
+1. **Política de privacidad URL.** TestFlight te pregunta una URL pública. Hostear `PRIVACY_POLICY_DRAFT.md` como página en `usefocus.me/privacy` antes del upload.
+
+2. **PrivacyInfo.xcprivacy.** Manifest moderno (May 2024+) que Apple analiza. Para TestFlight aún se acepta sin él, pero conviene crearlo (declara que usamos Keychain + UserDefaults + Network).
+
+### Google OAuth — pasos exactos para Martin
+
+**Sin estos 2 pasos, el botón "Continuar con Google" NO funciona. El código está listo, falta config server.**
+
+**Paso 1 — Agregar Redirect URL en Supabase**
+
+1. Abrir https://supabase.com/dashboard
+2. Seleccionar proyecto `hvwqeemtfoyvfmongwzo` (Focus)
+3. Sidebar → **Authentication** → **URL Configuration**
+4. En "Redirect URLs", click "Add URL"
+5. Pegar exactamente: `focus://auth-callback`
+6. Save
+
+**Paso 2 — Habilitar Google provider en Supabase**
+
+Requiere primero un proyecto Google Cloud con credenciales OAuth:
+
+1. Google Cloud Console (https://console.cloud.google.com) → Crear proyecto o usar uno existente
+2. APIs & Services → Credentials → **Create credentials → OAuth client ID**
+3. Application type: **Web application**
+4. Authorized redirect URIs: agregar **`https://hvwqeemtfoyvfmongwzo.supabase.co/auth/v1/callback`** (es el endpoint genérico de Supabase, NO el nuestro de iOS)
+5. Save → copiar **Client ID** y **Client Secret**
+
+Luego en Supabase:
+
+6. Supabase Dashboard → Authentication → **Providers**
+7. Buscar **Google** → toggle ON
+8. Pegar **Client ID** y **Client Secret** de Google Cloud
+9. Save
+
+**Verificación**:
+- Compilar Focus en iPhone físico (no simulador, ASWebAuthenticationSession tiene quirks en simulador)
+- Login → tocar "Continuar con Google"
+- Se abre Safari in-app con la pantalla de Google
+- Login con cuenta Google
+- Vuelve a Focus logueado, entra a Main
+- Cerrar/reabrir → mantiene sesión
+
+**Si falla**:
+- "Google sign-in todavía no está configurado en Supabase. Avísanos." → Falta paso 2 (provider Google enable)
+- App se queda en pantalla blanca de Safari → Falta paso 1 (Redirect URL no agregada)
+- "Recibimos una respuesta inválida de Google" → Probablemente Client ID/Secret incorrectos en Supabase
+
+### Checklist TestFlight (cuando estés listo para subir)
+
+- [ ] Bundle ID = `me.usefocus.app` (ya configurado)
+- [ ] Team Apple Developer activo (D8UM897B2T)
+- [ ] App configurada en App Store Connect (crear app si no existe)
+- [ ] Bump `CURRENT_PROJECT_VERSION` de 1 → 2 antes de cada upload nuevo
+- [ ] Marketing 1.0 OK para primera beta
+- [ ] Archive build → Distribute → TestFlight
+- [ ] Export compliance: marcar "Uses no encryption" (Focus solo usa HTTPS estándar)
+- [ ] Test info en App Store Connect: descripción de la beta + URL de privacidad
+- [ ] Internal testers: agregar tu email primero, validar antes de invitar amigos
+- [ ] External testers: 2-5 amigos por email — Apple manda link de invitación
+- [ ] (Opcional) Crash reporting: Sentry o Firebase Crashlytics antes de invitar
+- [ ] (Opcional) PrivacyInfo.xcprivacy
+
+### Guía para testers (Martin: enviarles esto cuando inviten)
+
+```markdown
+## Probaste Focus (beta cerrada)
+
+Gracias por probar Focus. Es una beta MUY temprana — esperamos bugs.
+
+### Qué probar (15 min de uso es suficiente)
+
+1. **Onboarding**: pasar las 4 páginas, "Empezar" o "Saltar".
+2. **Login**: probar uno solo
+   - "Continuar con email" → te llega un código → ingresarlo
+   - "Continuar con Google" (si te aparece habilitado)
+   - "Probar en modo demo" (sin login)
+3. **Crear evento**: en Mi Día o Calendario, tocar `+` → crear "Reunión mañana 10:00".
+4. **Crear tarea**: tab Tareas → `+` → "Estudiar para examen".
+5. **Crear recordatorio con voz**: en Mi Día, tocar el micrófono → decir "acuérdame comprar pan en 1 minuto" → tocar el mic otra vez para detener → mandar → la notif llega.
+6. **Hablar con Nova**: tab Nova → "Hablar con Nova" o escribir → "mañana despiértame a las 7 y luego salir a las 8".
+7. **Borrar evento**: swipe izquierda en una card o long-press → Eliminar.
+
+### Qué NO está listo todavía
+
+- "Eliminar cuenta" (placeholder)
+- "Política de privacidad" (en preparación)
+- Sync con Google Calendar / Apple Calendar
+- Widgets de iOS
+- Notificaciones avanzadas (multi-aviso, snooze)
+
+### Cómo reportar bugs
+
+WhatsApp/Email a Martin con:
+1. Qué intentabas hacer
+2. Qué pasó (descripción + screenshot)
+3. iPhone modelo + versión iOS
+4. Si el bug es reproducible o random
+
+Screenshots útiles: captura de la pantalla con el bug + la pantalla anterior.
+
+### Importante (privacidad)
+
+- Estamos en beta. NO pongas datos sensibles (médicos, financieros, info confidencial de trabajo).
+- Los eventos/tareas se guardan en tu iPhone Y se sincronizan a nuestra base de datos (Supabase, hosted en USA) solo si estás logueado con email o Google.
+- En modo demo, NADA se sube.
+- Si quieres borrar todo: Ajustes → "Borrar datos locales" (limpia local, no remoto todavía).
+```
+
+### Recomendación honesta
+
+**¿Listo para invitar 2-5 amigos hoy?**
+
+- **Si solo van a usar OTP + email**: SÍ, con la guía de arriba.
+- **Si quieres que prueben Google**: NO hasta que hagas los 2 pasos de Supabase Dashboard.
+- **Si vas a App Store después**: NO sin: eliminar cuenta funcional + privacy policy URL pública + PrivacyInfo.xcprivacy.
+
+### Próximo bloque
+
+**Bloque 10 — Beta launch + iteración** (cuando estés listo):
+1. Subir primera build TestFlight (build 2)
+2. Validar Google OAuth en device real
+3. Recolectar feedback de 2-5 amigos por 3-7 días
+4. Iterar bugs reportados antes de invitar más
 
 ---
 
