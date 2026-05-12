@@ -27,6 +27,26 @@ struct NovaView: View {
             ZStack {
                 Theme.Colors.background.ignoresSafeArea()
 
+                // Ambient gradient violeta SUTIL detrás del top de Nova
+                // tab — crea atmósfera "capa especial" sin pintar paredes
+                // de color. Solo se ve en la zona superior, fade a fondo
+                // normal antes del segmented control.
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [
+                            Theme.Colors.novaAccent.opacity(0.12),
+                            Theme.Colors.novaAccent.opacity(0.04),
+                            .clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 220)
+                    .blur(radius: 30)
+                    Spacer()
+                }
+                .ignoresSafeArea(edges: .top)
+
                 VStack(spacing: 0) {
                     branding
                         .padding(.horizontal, Theme.Spacing.xl)
@@ -197,14 +217,35 @@ struct NovaView: View {
     // MARK: - Branding header (consistente con Mi Día)
 
     private var branding: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center) {
                 FocusBrandRow()
                 Spacer()
+                // Sparkle decorativo a la derecha — la primera señal de
+                // que Nova es una capa especial, no otra sección más.
+                ZStack {
+                    Circle()
+                        .fill(Theme.Colors.novaGradient)
+                        .frame(width: 28, height: 28)
+                        .shadow(color: Theme.Colors.novaAccent.opacity(0.50), radius: 12, y: 4)
+                    NovaSparkMark(size: 12)
+                }
             }
+            // Título "Nova" con gradient — esto es lo que la diferencia
+            // visualmente de "Mi Día" o "Calendario" que tienen título
+            // negro plano. Treatment premium.
             Text("Nova")
-                .font(Theme.Typography.title)
-                .foregroundStyle(Theme.Colors.textPrimary)
+                .font(.system(size: 30, weight: .bold))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            Theme.Colors.focusAccent,
+                            Theme.Colors.novaAccent
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
         }
     }
 

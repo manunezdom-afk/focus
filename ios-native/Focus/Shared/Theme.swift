@@ -61,17 +61,21 @@ enum Theme {
         static let focusAccentSoft = Color(red: 0.145, green: 0.388, blue: 0.922).opacity(0.10)
         static let focusAccentHover = Color(red: 0.231, green: 0.510, blue: 0.965)
 
-        // Acento Nova — electric indigo más vibrante (#4F46FF). Conserva
-        // el tinte "AI" pero con más vida y personalidad. El indigo-500
-        // anterior (#6366F1) se sentía pastel y "típico"; este es más
-        // saturado, más eléctrico, sin perder armonía con el azul focus.
-        static let novaAccent = Color(red: 0.310, green: 0.275, blue: 1.000)
-        static let novaAccentSoft = Color(red: 0.310, green: 0.275, blue: 1.000).opacity(0.10)
+        // Acento Nova — electric purple-indigo (#5B4DFF). El indigo-500
+        // anterior (#6366F1) se sentía "típico" y el #4F46FF previo seguía
+        // tirando azul puro. Este tono tiene más violeta para que Nova se
+        // distinga claramente del azul focus dominante, sin caer en
+        // pastel ni en saturación infantil.
+        static let novaAccent = Color(red: 0.357, green: 0.302, blue: 1.000)
+        static let novaAccentSoft = Color(red: 0.357, green: 0.302, blue: 1.000).opacity(0.12)
         // Violet profundo para acentos secundarios (gradient tail, halos).
-        static let novaAccentDeep = Color(red: 0.482, green: 0.290, blue: 0.965)
+        static let novaAccentDeep = Color(red: 0.545, green: 0.298, blue: 0.965)
         // Electric blue muy saturado — sirve como "highlight" en glow,
         // borders activos, dots, etc.
         static let novaElectric = Color(red: 0.220, green: 0.510, blue: 1.000)
+        // Halo ambient — usado de fondo en Nova tab/Nova Live para crear
+        // atmósfera sutil sin pintar pared violet.
+        static let novaHalo = Color(red: 0.357, green: 0.302, blue: 1.000).opacity(0.06)
 
         // Estados
         static let success = Color(red: 0.063, green: 0.725, blue: 0.506)   // #10B981 emerald

@@ -16,6 +16,7 @@ struct NovaLiveView: View {
 
     @State private var ambientPhase: Bool = false
     @State private var didAutoStart: Bool = false
+    @State private var entranceProgress: CGFloat = 0  // 0 → 1 al aparecer
 
     var body: some View {
         ZStack {
@@ -24,21 +25,45 @@ struct NovaLiveView: View {
 
             VStack(spacing: 0) {
                 topBar
+                    // Safe area extra arriba: el botón X + label "Nova Live"
+                    // necesitan respirar respecto al Dynamic Island.
+                    .padding(.top, Theme.Spacing.sm)
+
                 Spacer(minLength: 0)
+
                 centerVisual
-                    .frame(height: 280)
+                    .frame(height: 300)
+                    // Entrada animada: el core hace zoom-in suave.
+                    .scaleEffect(0.85 + 0.15 * entranceProgress)
+                    .opacity(entranceProgress)
+
                 Spacer(minLength: 0)
+
                 transcriptArea
                     .padding(.horizontal, Theme.Spacing.lg)
+                    .opacity(entranceProgress)
+
                 Spacer(minLength: 0)
+
                 primaryActions
                     .padding(.horizontal, Theme.Spacing.xl)
                     .padding(.bottom, Theme.Spacing.xl)
+                    .opacity(entranceProgress)
+                    .offset(y: 20 * (1 - entranceProgress))
             }
             .padding(.horizontal, Theme.Spacing.xl)
         }
         .preferredColorScheme(.dark)
-        .onAppear { ambientPhase = true }
+        .onAppear {
+            // Micro-haptic al abrir Nova Live — sensación de "entrar a
+            // otro modo". Sutil, no intrusivo.
+            HapticManager.shared.tap()
+            ambientPhase = true
+            // Animación de entrada smooth, no instantánea.
+            withAnimation(.easeOut(duration: 0.55)) {
+                entranceProgress = 1
+            }
+        }
         .task {
             if !didAutoStart {
                 didAutoStart = true
@@ -174,61 +199,75 @@ struct NovaLiveView: View {
     private var centerVisual: some View {
         let isListening = service.state == .listening
         return ZStack {
-            // Tres anillos staggered cuando está escuchando — efecto ripple.
-            PulseRing(active: isListening, color: Theme.Colors.novaAccent.opacity(0.55), delay: 0.0)
-            PulseRing(active: isListening, color: Theme.Colors.focusAccent.opacity(0.50), delay: 0.85)
-            PulseRing(active: isListening, color: Theme.Colors.novaAccent.opacity(0.40), delay: 1.70)
+            // 4 anillos staggered cuando está escuchando — efecto ripple
+            // más denso para sensación "vivo". El delay distinto crea
+            // capas de ondas que se persiguen.
+            PulseRing(active: isListening, color: Theme.Colors.novaAccent.opacity(0.65), delay: 0.0)
+            PulseRing(active: isListening, color: Theme.Colors.focusAccent.opacity(0.55), delay: 0.65)
+            PulseRing(active: isListening, color: Theme.Colors.novaAccent.opacity(0.45), delay: 1.30)
+            PulseRing(active: isListening, color: Theme.Colors.focusAccent.opacity(0.35), delay: 1.95)
 
-            // Halo difuso detrás del core — siempre visible, pulsa lento.
+            // Halo ambient grande detrás del core — más intenso y respira
+            // siempre, incluso cuando NO escucha (sensación "Nova está
+            // viva").
             Circle()
                 .fill(
                     RadialGradient(
                         colors: [
-                            Theme.Colors.novaAccent.opacity(0.65),
-                            Theme.Colors.novaAccent.opacity(0.0)
+                            Theme.Colors.novaAccent.opacity(0.85),
+                            Theme.Colors.novaAccent.opacity(0.30),
+                            Theme.Colors.focusAccent.opacity(0.0)
                         ],
                         center: .center,
                         startRadius: 20,
-                        endRadius: 140
+                        endRadius: 180
                     )
                 )
-                .frame(width: 240, height: 240)
-                .scaleEffect(ambientPhase ? 1.08 : 0.94)
-                .animation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true), value: ambientPhase)
+                .frame(width: 300, height: 300)
+                .scaleEffect(ambientPhase ? 1.15 : 0.88)
+                .animation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true), value: ambientPhase)
+                .blur(radius: 8)
 
-            // Core sólido — esfera con gradient + glow.
+            // Core sólido — esfera con gradient + doble glow potente.
             ZStack {
                 Circle()
                     .fill(
                         RadialGradient(
                             colors: [
-                                Color.white.opacity(0.95),
-                                Theme.Colors.novaAccent.opacity(0.90),
+                                Color.white.opacity(0.98),
+                                Theme.Colors.novaAccent.opacity(0.95),
+                                Theme.Colors.novaAccentDeep.opacity(0.90),
                                 Theme.Colors.focusAccent.opacity(0.85)
                             ],
-                            center: UnitPoint(x: 0.38, y: 0.32),
-                            startRadius: 6,
-                            endRadius: 90
+                            center: UnitPoint(x: 0.35, y: 0.30),
+                            startRadius: 8,
+                            endRadius: 110
                         )
                     )
-                    .frame(width: 130, height: 130)
-                    .shadow(color: Theme.Colors.novaAccent.opacity(0.85), radius: 35, y: 12)
-                    .shadow(color: Theme.Colors.focusAccent.opacity(0.45), radius: 60, y: 0)
+                    .frame(width: 150, height: 150)
+                    .shadow(color: Theme.Colors.novaAccent.opacity(0.95), radius: 45, y: 14)
+                    .shadow(color: Theme.Colors.focusAccent.opacity(0.55), radius: 80, y: 0)
+
+                // Anillo de borde delgado — define el core con elegancia.
+                Circle()
+                    .strokeBorder(.white.opacity(0.22), lineWidth: 1.2)
+                    .frame(width: 150, height: 150)
 
                 // Inner highlight (specular)
                 Circle()
-                    .fill(.white.opacity(0.40))
-                    .frame(width: 50, height: 50)
-                    .blur(radius: 18)
-                    .offset(x: -18, y: -22)
+                    .fill(.white.opacity(0.55))
+                    .frame(width: 60, height: 60)
+                    .blur(radius: 22)
+                    .offset(x: -22, y: -28)
 
-                NovaSparkMark(size: 56)
-                    .shadow(color: .white.opacity(0.6), radius: 8)
+                NovaSparkMark(size: 64)
+                    .shadow(color: .white.opacity(0.75), radius: 10)
+                    .shadow(color: Theme.Colors.novaAccent.opacity(0.7), radius: 6)
             }
-            .scaleEffect(isListening && ambientPhase ? 1.05 : 1.0)
+            .scaleEffect(isListening && ambientPhase ? 1.08 : 1.0)
             .animation(
                 isListening
-                    ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
+                    ? .easeInOut(duration: 1.2).repeatForever(autoreverses: true)
                     : .easeInOut(duration: 0.4),
                 value: ambientPhase
             )

@@ -1189,8 +1189,12 @@ struct MiDiaView: View {
                     ? displayEvents
                     : Array(displayEvents.prefix(visibleEventsLimit))
                 let hiddenCount = displayEvents.count - shown.count
+                // Densidad del timeline: spacious con 1-2 eventos (más
+                // presencia vertical, fonts más grandes), balanced con
+                // 3-5, compact con 6+. Adapta el ritmo visual al día.
+                let density = TimelineRowDensity.of(eventCount: displayEvents.count)
 
-                VStack(spacing: 0) {
+                VStack(spacing: density.rowSpacing) {
                     ForEach(Array(shown.enumerated()), id: \.element.id) { idx, event in
                         SwipeToDelete(enabled: true) {
                             if store.hasUserEvents {
@@ -1204,7 +1208,8 @@ struct MiDiaView: View {
                         } content: {
                             TimelineEventRow(
                                 event: event,
-                                isLast: idx == shown.count - 1 && hiddenCount == 0
+                                isLast: idx == shown.count - 1 && hiddenCount == 0,
+                                density: density
                             )
                         }
                         .contextMenu {
@@ -1527,16 +1532,75 @@ private struct ProximoBloqueCard: View {
 
 // MARK: - Timeline row
 
+/// Densidad visual del timeline — se adapta al número de eventos del día.
+/// Cuando hay pocos eventos (1-2), las cards crecen para llenar el espacio
+/// con presencia. Con muchos eventos, se compactan para que quepan sin
+/// hacer scroll excesivo.
+enum TimelineRowDensity {
+    case spacious   // 1-2 eventos — cards grandes, mucho aire
+    case balanced   // 3-5 eventos — layout normal
+    case compact    // 6+ eventos — compactado para densidad
+
+    var verticalPadding: CGFloat {
+        switch self {
+        case .spacious: return Theme.Spacing.lg + 4   // ~22
+        case .balanced: return Theme.Spacing.md       // ~12
+        case .compact:  return Theme.Spacing.sm       // ~8
+        }
+    }
+
+    var titleFont: Font {
+        switch self {
+        case .spacious: return .system(size: 19, weight: .semibold)
+        case .balanced: return Theme.Typography.bodyBold
+        case .compact:  return Theme.Typography.subheadEmphasized
+        }
+    }
+
+    var rowSpacing: CGFloat {
+        switch self {
+        case .spacious: return Theme.Spacing.lg
+        case .balanced: return Theme.Spacing.md
+        case .compact:  return Theme.Spacing.sm
+        }
+    }
+
+    var sidebarWidth: CGFloat {
+        switch self {
+        case .spacious: return 5
+        case .balanced: return 4
+        case .compact:  return 3
+        }
+    }
+
+    var metaFont: Font {
+        switch self {
+        case .spacious: return Theme.Typography.subhead
+        case .balanced: return Theme.Typography.caption
+        case .compact:  return Theme.Typography.caption
+        }
+    }
+
+    static func of(eventCount n: Int) -> TimelineRowDensity {
+        if n <= 2 { return .spacious }
+        if n <= 5 { return .balanced }
+        return .compact
+    }
+}
+
 private struct TimelineEventRow: View {
     let event: FocusEvent
     let isLast: Bool
+    var density: TimelineRowDensity = .balanced
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
             // Hora a la izquierda
             VStack(alignment: .trailing, spacing: 2) {
                 Text(event.timeRangeLabel.components(separatedBy: " ").first ?? "")
-                    .font(Theme.Typography.captionEmphasized)
+                    .font(density == .spacious
+                          ? .system(size: 13, weight: .semibold)
+                          : Theme.Typography.captionEmphasized)
                     .foregroundStyle(Theme.Colors.textPrimary)
                 if let dur = event.durationLabel {
                     Text(dur)
@@ -1551,10 +1615,12 @@ private struct TimelineEventRow: View {
                 ZStack {
                     Circle()
                         .stroke(event.section.color.opacity(0.5), lineWidth: 1.5)
-                        .frame(width: 10, height: 10)
+                        .frame(width: density == .spacious ? 12 : 10,
+                               height: density == .spacious ? 12 : 10)
                     Circle()
                         .fill(event.section.color)
-                        .frame(width: 5, height: 5)
+                        .frame(width: density == .spacious ? 6 : 5,
+                               height: density == .spacious ? 6 : 5)
                 }
                 if !isLast {
                     Rectangle()
@@ -1571,31 +1637,31 @@ private struct TimelineEventRow: View {
             HStack(spacing: 0) {
                 Rectangle()
                     .fill(event.section.color)
-                    .frame(width: 4)
+                    .frame(width: density.sidebarWidth)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: density == .spacious ? 8 : 6) {
                     Text(event.title)
-                        .font(Theme.Typography.bodyBold)
+                        .font(density.titleFont)
                         .foregroundStyle(Theme.Colors.textPrimary)
                         .lineLimit(2)
 
                     HStack(spacing: 4) {
                         Image(systemName: event.section.symbol)
-                            .font(.system(size: 11))
+                            .font(.system(size: density == .spacious ? 12 : 11))
                             .foregroundStyle(event.section.color)
                         Text(event.section.displayName)
-                            .font(Theme.Typography.caption)
+                            .font(density.metaFont)
                             .foregroundStyle(Theme.Colors.textTertiary)
                         if let loc = event.location, !loc.isEmpty {
                             Text("·").foregroundStyle(Theme.Colors.textQuaternary)
                             Text(loc)
-                                .font(Theme.Typography.caption)
+                                .font(density.metaFont)
                                 .foregroundStyle(Theme.Colors.textTertiary)
                                 .lineLimit(1)
                         }
                     }
                 }
-                .padding(.vertical, Theme.Spacing.md)
+                .padding(.vertical, density.verticalPadding)
                 .padding(.leading, Theme.Spacing.md)
                 .padding(.trailing, Theme.Spacing.md)
             }
