@@ -1551,7 +1551,7 @@ enum TimelineRowDensity {
 
     var titleFont: Font {
         switch self {
-        case .spacious: return .system(size: 19, weight: .semibold)
+        case .spacious: return .system(size: 22, weight: .semibold)
         case .balanced: return Theme.Typography.bodyBold
         case .compact:  return Theme.Typography.subheadEmphasized
         }
@@ -1667,19 +1667,40 @@ private struct TimelineEventRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                Theme.Colors.surface
+                // En modo spacious (1-2 eventos), un gradient sutil del color
+                // de la sección a surface para que la card tenga atmósfera
+                // y se sienta hero. En balanced/compact, solo surface plano.
+                Group {
+                    if density == .spacious {
+                        LinearGradient(
+                            colors: [
+                                event.section.color.opacity(0.10),
+                                Theme.Colors.surface
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    } else {
+                        Theme.Colors.surface
+                    }
+                }
             )
             // Recortamos TODO el HStack (banda + contenido + fondo) con el
             // mismo cornerRadius — así la banda lateral termina en curva
             // exactamente como la card, no recta.
             .clipShape(
-                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: density == .spacious ? Theme.Radius.lg : Theme.Radius.md, style: .continuous)
             )
             .overlay(
                 // El border va por fuera del clip para que se vea limpio
                 // en las esquinas redondeadas.
-                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                    .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                RoundedRectangle(cornerRadius: density == .spacious ? Theme.Radius.lg : Theme.Radius.md, style: .continuous)
+                    .strokeBorder(
+                        density == .spacious
+                            ? event.section.color.opacity(0.25)
+                            : Theme.Colors.border,
+                        lineWidth: density == .spacious ? 1.2 : Theme.Stroke.hairline
+                    )
             )
             .focusCardShadow()
             .padding(.bottom, isLast ? 0 : Theme.Spacing.sm)

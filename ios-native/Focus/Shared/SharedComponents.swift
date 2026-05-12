@@ -979,22 +979,88 @@ struct FocusLogoMark: View {
                     y: shadow ? size * 0.06 : 0
                 )
 
-            // Anillo exterior — orbita amplia, leve.
-            Circle()
-                .strokeBorder(Color.white.opacity(0.55), lineWidth: max(0.8, size * 0.028))
-                .frame(width: size * 0.70, height: size * 0.70)
+            // SÍMBOLO INTERNO — engranaje minimalista de 6 dientes redondeados
+            // alrededor de un núcleo. Comunica "mecanismo mental / sistema
+            // que piensa", no "target / círculo apuntado". Diseñado con
+            // proporciones geométricas premium (estilo Material 3).
+            FocusGearMark(diameter: size * 0.56)
 
-            // Anillo medio — borde del foco / aperture.
-            Circle()
-                .strokeBorder(Color.white, lineWidth: max(1, size * 0.050))
-                .frame(width: size * 0.44, height: size * 0.44)
-
-            // Núcleo sólido — el punto de foco, la mente centrada.
+            // Núcleo sólido — el punto central que sostiene el sistema.
             Circle()
                 .fill(Color.white)
-                .frame(width: size * 0.18, height: size * 0.18)
+                .frame(width: size * 0.16, height: size * 0.16)
+                .shadow(color: .black.opacity(shadow ? 0.15 : 0), radius: 2, y: 1)
         }
         .frame(width: size, height: size)
+    }
+}
+
+/// Engranaje estilizado: 6 lóbulos redondeados + cuerpo circular con hueco
+/// central. Más cercano a "rueda dentada moderna" que a "círculo target".
+struct FocusGearMark: View {
+    let diameter: CGFloat
+
+    var body: some View {
+        Canvas { ctx, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let bodyRadius = size.width * 0.30
+            let toothInner = size.width * 0.36   // base del diente
+            let toothOuter = size.width * 0.49   // punta del diente
+            let toothCount = 6
+            let toothHalfWidth: CGFloat = .pi / Double(toothCount) * 0.45  // radianes
+
+            // Dibuja 6 dientes redondeados como "globos" radiales.
+            for i in 0..<toothCount {
+                let angle = -CGFloat.pi / 2 + (2 * .pi / CGFloat(toothCount)) * CGFloat(i)
+                let leftAngle = angle - toothHalfWidth
+                let rightAngle = angle + toothHalfWidth
+
+                var p = Path()
+                let p1 = polar(center: center, radius: toothInner, angle: leftAngle)
+                let p2 = polar(center: center, radius: toothOuter, angle: leftAngle)
+                let p3 = polar(center: center, radius: toothOuter, angle: rightAngle)
+                let p4 = polar(center: center, radius: toothInner, angle: rightAngle)
+                p.move(to: p1)
+                // Lado externo del diente con curva suave (arco).
+                p.addLine(to: p2)
+                p.addArc(
+                    center: center,
+                    radius: toothOuter,
+                    startAngle: .radians(leftAngle),
+                    endAngle: .radians(rightAngle),
+                    clockwise: false
+                )
+                _ = p3
+                p.addLine(to: p4)
+                p.addArc(
+                    center: center,
+                    radius: toothInner,
+                    startAngle: .radians(rightAngle),
+                    endAngle: .radians(leftAngle),
+                    clockwise: true
+                )
+                p.closeSubpath()
+                ctx.fill(p, with: .color(.white.opacity(0.95)))
+            }
+
+            // Cuerpo circular del engranaje (anillo).
+            let bodyPath = Path(ellipseIn: CGRect(
+                x: center.x - bodyRadius,
+                y: center.y - bodyRadius,
+                width: bodyRadius * 2,
+                height: bodyRadius * 2
+            ))
+            ctx.stroke(
+                bodyPath,
+                with: .color(.white.opacity(0.95)),
+                lineWidth: size.width * 0.075
+            )
+        }
+        .frame(width: diameter, height: diameter)
+    }
+
+    private func polar(center: CGPoint, radius: CGFloat, angle: CGFloat) -> CGPoint {
+        CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
     }
 }
 

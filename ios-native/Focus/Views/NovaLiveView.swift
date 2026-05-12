@@ -207,6 +207,11 @@ struct NovaLiveView: View {
             PulseRing(active: isListening, color: Theme.Colors.novaAccent.opacity(0.45), delay: 1.30)
             PulseRing(active: isListening, color: Theme.Colors.focusAccent.opacity(0.35), delay: 1.95)
 
+            // Partículas orbitando alrededor del core — sensación de
+            // energía / pensamiento activo. Solo cuando escucha; cuando
+            // idle/processing quedan estáticas con baja opacidad.
+            OrbitingParticles(active: isListening)
+
             // Halo ambient grande detrás del core — más intenso y respira
             // siempre, incluso cuando NO escucha (sensación "Nova está
             // viva").
@@ -498,6 +503,85 @@ struct NovaLiveView: View {
 /// Anillo que se expande desde el centro y se desvanece, en loop infinito.
 /// Tres de estos staggered con `delay` distinto dan el efecto ripple
 /// continuo de Nova escuchando.
+// MARK: - OrbitingParticles
+
+/// Partículas pequeñas que rotan alrededor del core mientras Nova escucha.
+/// 5 dots a diferentes radios y velocidades — la diferencia de speed crea
+/// sensación de "energía cuántica / pensamiento activo".
+private struct OrbitingParticles: View {
+    let active: Bool
+
+    @State private var rotation: Double = 0
+    @State private var rotationFast: Double = 0
+    @State private var rotationSlow: Double = 0
+
+    var body: some View {
+        ZStack {
+            // Anillo 1 — 3 partículas a radio medio, velocidad media.
+            ForEach(0..<3, id: \.self) { i in
+                particle(
+                    radius: 95,
+                    angleOffset: Double(i) * 120,
+                    color: Theme.Colors.novaAccent,
+                    size: 5
+                )
+            }
+            .rotationEffect(.degrees(rotation))
+
+            // Anillo 2 — 2 partículas a radio mayor, velocidad lenta opuesta.
+            ForEach(0..<2, id: \.self) { i in
+                particle(
+                    radius: 120,
+                    angleOffset: Double(i) * 180 + 60,
+                    color: Theme.Colors.focusAccent,
+                    size: 4
+                )
+            }
+            .rotationEffect(.degrees(rotationSlow))
+
+            // Anillo 3 — 4 partículas pequeñas a radio menor, rápidas.
+            ForEach(0..<4, id: \.self) { i in
+                particle(
+                    radius: 75,
+                    angleOffset: Double(i) * 90,
+                    color: .white,
+                    size: 3
+                )
+            }
+            .rotationEffect(.degrees(rotationFast))
+        }
+        .opacity(active ? 1.0 : 0.25)
+        .animation(.easeInOut(duration: 0.6), value: active)
+        .onAppear { startAnimations() }
+        .onChange(of: active) { _, _ in startAnimations() }
+    }
+
+    private func particle(radius: CGFloat, angleOffset: Double, color: Color, size: CGFloat) -> some View {
+        let radians = angleOffset * .pi / 180.0
+        let xOffset = radius * CGFloat(cos(radians))
+        let yOffset = radius * CGFloat(sin(radians))
+        return Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+            .shadow(color: color.opacity(0.8), radius: size * 0.8)
+            .offset(x: xOffset, y: yOffset)
+    }
+
+    private func startAnimations() {
+        if active {
+            withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) {
+                rotation = 360
+            }
+            withAnimation(.linear(duration: 20).repeatForever(autoreverses: false)) {
+                rotationSlow = -360
+            }
+            withAnimation(.linear(duration: 9).repeatForever(autoreverses: false)) {
+                rotationFast = 360
+            }
+        }
+    }
+}
+
 private struct PulseRing: View {
     let active: Bool
     let color: Color
