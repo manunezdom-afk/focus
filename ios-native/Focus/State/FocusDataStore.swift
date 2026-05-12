@@ -403,10 +403,22 @@ enum NovaResponder {
 
     /// Splittea el texto en segmentos por conectores fuertes. Cada conector
     /// se reemplaza por un marker único y luego se separa por ese marker.
+    ///
+    /// **Bonus: split por " y " SOLO si ambos lados tienen su propia hora**.
+    /// Esto cubre el caso "seguir trabajo a las 1 y comer a las 7" → 2 intents
+    /// SIN romper casos sin hora propia tipo "comprar pan y leche" o
+    /// "reunión con Juan y Pedro a las 5" (donde " y " forma parte del título).
+    ///
+    /// Heurística: para cada `" y "` ocurrencia, miramos si HAY un patrón de
+    /// hora ANTES del " y " (en lo que sería el segmento izquierdo) Y
+    /// DESPUÉS del " y " (en el segmento derecho). Si ambos tienen hora,
+    /// es split seguro. Si solo uno o ninguno, NO split.
+    ///
     /// Devuelve segmentos no vacíos, trimeados.
     private static func splitOnStrongConnectors(_ text: String) -> [String] {
         let marker = "‖SEG‖"
         var working = text
+        // Primera pasada: conectores explícitos siempre splittean.
         for connector in strongConnectors {
             working = working.replacingOccurrences(
                 of: connector,
@@ -414,10 +426,84 @@ enum NovaResponder {
                 options: [.caseInsensitive]
             )
         }
+        // Segunda pasada: " y " con heurística de hora-en-ambos-lados.
+        working = applySmartYSplit(working, marker: marker)
         return working
             .components(separatedBy: marker)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    /// Patrón regex que detecta una **hora** en español. Cubre:
+    ///   - "a las 7", "a las 13:30"
+    ///   - "a la 1" (singular)
+    ///   - "tipo 5", "tipo las 8"
+    ///   - "07:00", "13:45"
+    ///   - "en 5 minutos", "en 1 hora"
+    /// Excluye cosas como "1 manzana" o "2 personas" — requiere preposición
+    /// o ":" o "minutos/horas" cerca.
+    private static let hourMarkerPattern: String = {
+        let core = #"(a la(s)?\s+\d{1,2}(:\d{2})?(\s*(am|pm|hrs?|hs))?)"#
+        let bare = #"(\b\d{1,2}:\d{2}\b)"#
+        let tipo = #"(\btipo\s+(la(s)?\s+)?\d{1,2}(:\d{2})?\b)"#
+        let relative = #"(\ben\s+\d{1,3}\s*(min|minutos?|h|hs|hrs?|horas?)\b)"#
+        return "(\(core)|\(bare)|\(tipo)|\(relative))"
+    }()
+
+    /// Split por " y " inteligente. Pasa por TODAS las ocurrencias de
+    /// `\b y \b` del texto y, para cada una, evalúa si ambos lados tienen
+    /// su propia hora. Si sí → reemplaza por el marker. Si no → respeta
+    /// el "y" como parte del título.
+    ///
+    /// Ejemplos:
+    /// - "seguir trabajo a las 1 y comer a las 7" → SPLIT (hora en ambos)
+    /// - "comprar pan y leche" → NO SPLIT (sin horas)
+    /// - "reunión con Juan y Pedro a las 5" → NO SPLIT (solo derecha tiene hora)
+    /// - "despertarme a las 7 y salir a las 8" → SPLIT
+    private static func applySmartYSplit(_ text: String, marker: String) -> String {
+        let lower = text.lowercased()
+        // Buscar TODAS las ocurrencias de " y " (con espacios).
+        guard let regex = try? NSRegularExpression(
+            pattern: #"\s+y\s+"#, options: [.caseInsensitive]
+        ) else { return text }
+
+        let ns = text as NSString
+        let lowerNS = lower as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        let matches = regex.matches(in: text, options: [], range: range)
+
+        guard !matches.isEmpty else { return text }
+
+        // Para cada match, decidir si separa. Procesamos en REVERSO para
+        // que los offsets no se invaliden al reemplazar.
+        var result = text
+        let hourRegex = try? NSRegularExpression(
+            pattern: hourMarkerPattern, options: [.caseInsensitive]
+        )
+        for match in matches.reversed() {
+            let leftSegment = lowerNS.substring(with: NSRange(
+                location: 0, length: match.range.location
+            ))
+            let rightSegment = lowerNS.substring(with: NSRange(
+                location: match.range.location + match.range.length,
+                length: lowerNS.length - (match.range.location + match.range.length)
+            ))
+            let leftHasHour = hourRegex?.firstMatch(
+                in: leftSegment,
+                range: NSRange(location: 0, length: (leftSegment as NSString).length)
+            ) != nil
+            let rightHasHour = hourRegex?.firstMatch(
+                in: rightSegment,
+                range: NSRange(location: 0, length: (rightSegment as NSString).length)
+            ) != nil
+            if leftHasHour && rightHasHour {
+                // Split seguro.
+                result = (result as NSString).replacingCharacters(
+                    in: match.range, with: marker
+                )
+            }
+        }
+        return result
     }
 
     /// Parser principal. `context` permite resolver referencias como
@@ -3820,14 +3906,19 @@ final class FocusDataStore: ObservableObject {
     private func fallbackNoteForChat(error: NovaServiceError) -> String? {
         switch error {
         case .unauthorized:
-            return "(Estoy usando el modo local mientras vuelves a iniciar sesión.)"
+            return "(Tu sesión expiró. Vuelve a iniciar sesión.)"
         case .quotaExceeded(let m):
-            return m.map { "(\($0))" } ?? "(Llegaste al límite diario de Nova.)"
+            return m.map { "(\($0))" }
         case .offline:
-            return "(Sin conexión — usé el modo local.)"
+            return "(Sin conexión — guardado local hasta volver a tener internet.)"
         case .timeout, .serviceUnavailable, .badLLMOutput, .network,
              .server, .invalidResponse, .encoding, .decoding:
-            return "(Nova avanzada no respondió bien — lo resolví en modo local.)"
+            // Antes mostrábamos "(Nova avanzada no respondió bien …)" en
+            // el chat. Eso preocupaba al usuario aunque la acción se
+            // hubiera ejecutado bien por fallback local. Devolver nil
+            // suprime la nota — el reply (que ya incluye el resumen de
+            // lo que Nova hizo) habla por sí solo.
+            return nil
         default:
             return nil
         }

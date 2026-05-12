@@ -335,11 +335,17 @@ struct MiDiaView: View {
             },
             isDictating: isDictating
         )
-        .overlay(alignment: .topLeading) {
+        .overlay(alignment: .bottomLeading) {
             // Indicador "Escuchando…" con waveform de decibeles. Las barras
             // suben/bajan en tiempo real según `audioLevel`, dando feedback
             // claro de que el mic está capturando voz (vs estar pegado en
             // estado "escuchando" sin captar nada).
+            //
+            // **Posición**: `.bottomLeading` con offset hacia abajo. Antes
+            // estaba en `.topLeading` con `padding(.top, -10)` que lo
+            // ponía ENCIMA del FocusBar y chocaba contra el diamante de
+            // Nova (NovaSparkMark del placeholder). Ahora cuelga DEBAJO
+            // del FocusBar, sin tapar nada y sin colisión.
             if isDictating {
                 HStack(spacing: 6) {
                     AudioLevelBars(level: dictationService.audioLevel)
@@ -356,8 +362,8 @@ struct MiDiaView: View {
                     Capsule().fill(Theme.Colors.focusAccentSoft)
                 )
                 .padding(.leading, Theme.Spacing.md)
-                .padding(.top, -10)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .offset(y: 28)   // cuelga debajo del FocusBar
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
     }
@@ -676,17 +682,21 @@ struct MiDiaView: View {
     private func humanFallbackNote(for error: NovaServiceError) -> String? {
         switch error {
         case .unauthorized:
-            return "Tu sesión expiró. Estoy usando el modo local mientras vuelves a iniciar sesión."
+            return "Tu sesión expiró. Vuelve a iniciar sesión cuando puedas."
         case .quotaExceeded(let message):
-            return message ?? "Llegaste al límite diario de Nova. Estoy usando el modo local."
+            return message
         case .offline:
-            return "Sin conexión. Estoy usando el modo local."
+            return "Sin conexión. Tus cambios quedan locales hasta que vuelvas a tener internet."
         case .timeout, .serviceUnavailable, .badLLMOutput, .network,
              .server, .invalidResponse, .encoding, .decoding:
-            // Cualquier error de servidor o respuesta inesperada → local
-            // fallback transparente. El usuario sabe que algo upstream
-            // falló pero NO ve códigos técnicos.
-            return "Nova avanzada no respondió bien. Lo resolví en modo local."
+            // Antes mostrábamos "Nova avanzada no respondió bien. Lo
+            // resolví en modo local." → técnico y alarmante. Si el
+            // fallback local logró ejecutar las acciones (resumen no
+            // vacío), el usuario NO necesita ver una nota de error —
+            // el `summary` ya le dice qué se hizo. Para los pocos casos
+            // donde el local tampoco entendió, el caller muestra una
+            // pregunta humana por separado. NO devolvemos nada acá.
+            return nil
         default:
             return nil
         }

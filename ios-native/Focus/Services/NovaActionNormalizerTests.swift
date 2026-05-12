@@ -274,6 +274,61 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
+        // ───── Smart " y " split (con hora en ambos lados) ────────────
+
+        // CASO DEL BUG REPORT — el caso real que motivó el fix.
+        let bugCase = NovaResponder.parseAll(
+            "seguir trabajo de mi papá a las 1 y comer a las 7"
+        )
+        check(
+            label: "parseAll: 'seguir trabajo a las 1 y comer a las 7' → 2 intents",
+            actual: bugCase.count,
+            expected: 2,
+            failures: &failures
+        )
+
+        let wakeAndLeave = NovaResponder.parseAll(
+            "despertarme a las 7 y salir a las 8"
+        )
+        check(
+            label: "parseAll: 'despertarme a las 7 y salir a las 8' → 2 intents",
+            actual: wakeAndLeave.count,
+            expected: 2,
+            failures: &failures
+        )
+
+        let studyAndCall = NovaResponder.parseAll(
+            "estudiar a las 5 y llamar a mi mamá a las 8"
+        )
+        check(
+            label: "parseAll: 'estudiar a las 5 y llamar a las 8' → 2 intents",
+            actual: studyAndCall.count,
+            expected: 2,
+            failures: &failures
+        )
+
+        // ───── Smart " y " NO-split (sin horas en ambos lados) ────────
+
+        // "comprar pan y leche" debe quedar como 1 sola tarea — "y leche"
+        // forma parte del título, no es una nueva acción.
+        let breadMilk = NovaResponder.parseAll("comprar pan y leche")
+        check(
+            label: "parseAll: 'comprar pan y leche' → 1 intent (no split)",
+            actual: breadMilk.count,
+            expected: 1,
+            failures: &failures
+        )
+
+        // "reunión con Juan y Pedro a las 5" — solo hay UNA hora (5), no
+        // dos. " y Pedro" es parte del título de la reunión.
+        let meetTwo = NovaResponder.parseAll("reunión con Juan y Pedro a las 5")
+        check(
+            label: "parseAll: 'reunión con Juan y Pedro a las 5' → 1 intent",
+            actual: meetTwo.count,
+            expected: 1,
+            failures: &failures
+        )
+
         // ───── Resultado ───────────────────────────────────────────────
 
         if failures.isEmpty {
