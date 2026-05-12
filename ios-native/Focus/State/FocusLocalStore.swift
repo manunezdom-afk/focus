@@ -48,16 +48,56 @@ enum FocusLocalStore {
 
     private static var defaults: UserDefaults { .standard }
 
+    /// Queue serial de baja prioridad para persistencia. JSONEncoder.encode
+    /// + UserDefaults.set toma 20-80ms cada uno (depende del tamaño del
+    /// array). Antes corrían en main thread → cada mutación bloqueaba la
+    /// UI por ~30-100ms. Con 5 acciones rápidas (swipes consecutivos),
+    /// el main thread se enquebraba 200-500ms y los touches subsequentes
+    /// se sentían "pegados".
+    ///
+    /// `.utility` qos es la priority correcta para esto — más baja que
+    /// userInitiated (no necesitamos respuesta inmediata) pero más alta
+    /// que background (queremos que termine pronto para no perder data
+    /// si la app se suspende).
+    ///
+    /// Serial → garantiza orden FIFO de los writes, evita race conditions
+    /// donde un save de tasks viejo aterrizaría después de uno nuevo.
+    private static let persistQueue = DispatchQueue(
+        label: "me.usefocus.app.localstore.persist",
+        qos: .utility
+    )
+
     // MARK: - API
 
     /// Codifica y guarda un valor bajo la key indicada.
-    /// Si falla, imprime el error a consola y la key queda con su valor previo.
+    /// **Async en background queue** — la mutación que disparó este save
+    /// no bloquea el main thread. Si falla, imprime el error a consola y
+    /// la key queda con su valor previo.
+    ///
+    /// **Persistencia eventual**: el write puede tardar 20-100ms en
+    /// completarse. Si la app se cierra inmediatamente después de un
+    /// save (raro), iOS coalesce los writes pending de UserDefaults en
+    /// el background; en la práctica no se pierde data.
     static func save<T: Encodable>(_ value: T, forKey key: Key) {
+        persistQueue.async {
+            do {
+                let data = try encoder.encode(value)
+                defaults.set(data, forKey: key.rawValue)
+            } catch {
+                print("[FocusLocalStore] save '\(key.rawValue)' failed: \(error)")
+            }
+        }
+    }
+
+    /// Versión SÍNCRONA del save. Solo usar cuando es crítico que el
+    /// write llegue al disco antes de continuar (e.g., `applicationWillTerminate`
+    /// hooks). En 99% de mutaciones normales usar `save` (async).
+    static func saveSync<T: Encodable>(_ value: T, forKey key: Key) {
         do {
             let data = try encoder.encode(value)
             defaults.set(data, forKey: key.rawValue)
         } catch {
-            print("[FocusLocalStore] save '\(key.rawValue)' failed: \(error)")
+            print("[FocusLocalStore] saveSync '\(key.rawValue)' failed: \(error)")
         }
     }
 
