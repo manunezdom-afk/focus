@@ -6,7 +6,7 @@ struct MiDiaView: View {
     @EnvironmentObject private var toast: ToastManager
     @State private var focusBarText: String = ""
     @State private var showAllEvents: Bool = false
-    @State private var showNovaLive: Bool = false
+    @State private var showVoiceDictation: Bool = false
     /// Evento que se está editando vía sheet. nil = sheet cerrado.
     @State private var editingEvent: FocusEvent? = nil
     /// Tarea que se está editando vía sheet. nil = sheet cerrado.
@@ -149,13 +149,18 @@ struct MiDiaView: View {
                 }
             )
         }
-        .fullScreenCover(isPresented: $showNovaLive) {
-            NovaLiveView { transcript in
-                // Texto transcrito → mismo flujo que tipear en FocusBar.
+        .sheet(isPresented: $showVoiceDictation) {
+            VoiceDictationSheet { transcript in
+                // Texto transcrito → mismo flujo que tipear en el FocusBar.
                 // Nova decide backend vs fallback, ejecuta acciones, sync
                 // Supabase + programa notificación si es recordatorio.
+                // El sheet ya se cerró (via dismiss en VoiceDictationSheet),
+                // así que la respuesta inline aparece en Mi Día limpia.
                 processNovaInline(text: transcript)
             }
+            .presentationDetents([.height(380)])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Theme.Colors.background)
         }
         // Sheets de edición — se abren desde el menú "Editar" de cualquier
         // evento o tarea real en Mi Día.
@@ -269,7 +274,10 @@ struct MiDiaView: View {
             },
             onMic: {
                 HapticManager.shared.tap()
-                showNovaLive = true
+                // Mic del FocusBar = DICTADO RÁPIDO. NO abre Nova Live
+                // fullscreen (eso vive en Nova tab). Mini sheet compacto
+                // → transcribe → procesa inline como si tipearas.
+                showVoiceDictation = true
             }
         )
     }

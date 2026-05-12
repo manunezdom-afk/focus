@@ -38,6 +38,7 @@
 		FA0000000000000000000093 /* LocalNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007D /* LocalNotificationService.swift */; };
 		FA0000000000000000000094 /* NovaLiveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007E /* NovaLiveService.swift */; };
 		FA0000000000000000000095 /* NovaLiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000007F /* NovaLiveView.swift */; };
+		FA0000000000000000000096 /* VoiceDictationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000098 /* VoiceDictationSheet.swift */; };
 		FA000000000000000000001A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000015 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -74,6 +75,7 @@
 		FA000000000000000000007D /* LocalNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNotificationService.swift; sourceTree = "<group>"; };
 		FA000000000000000000007E /* NovaLiveService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaLiveService.swift; sourceTree = "<group>"; };
 		FA000000000000000000007F /* NovaLiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaLiveView.swift; sourceTree = "<group>"; };
+		FA0000000000000000000098 /* VoiceDictationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceDictationSheet.swift; sourceTree = "<group>"; };
 		FA0000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -130,6 +132,7 @@
 				FA0000000000000000000058 /* CalendarioView.swift */,
 				FA0000000000000000000059 /* NovaView.swift */,
 				FA000000000000000000007F /* NovaLiveView.swift */,
+				FA0000000000000000000098 /* VoiceDictationSheet.swift */,
 				FA0000000000000000000073 /* NovaInboxView.swift */,
 				FA000000000000000000005A /* TareasView.swift */,
 				FA000000000000000000005B /* AjustesView.swift */,
@@ -271,6 +274,7 @@
 				FA0000000000000000000093 /* LocalNotificationService.swift in Sources */,
 				FA0000000000000000000094 /* NovaLiveService.swift in Sources */,
 				FA0000000000000000000095 /* NovaLiveView.swift in Sources */,
+				FA0000000000000000000096 /* VoiceDictationSheet.swift in Sources */,
 				FA0000000000000000000081 /* FocusDataStore.swift in Sources */,
 				FA0000000000000000000084 /* FocusLocalStore.swift in Sources */,
 				FA0000000000000000000088 /* AuthStore.swift in Sources */,

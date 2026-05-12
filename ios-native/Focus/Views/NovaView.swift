@@ -19,6 +19,7 @@ struct NovaView: View {
     @State private var showImportCalendar: Bool = false
     @State private var showExportCalendar: Bool = false
     @State private var showNovaLive: Bool = false
+    @State private var showVoiceDictation: Bool = false
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -94,6 +95,18 @@ struct NovaView: View {
                 // Backend o fallback local + acciones reales + sync.
                 store.sendNovaMessage(transcript)
             }
+        }
+        .sheet(isPresented: $showVoiceDictation) {
+            VoiceDictationSheet { transcript in
+                // Dictado del input del chat: el texto NO se envía solo,
+                // se carga en el draft para que el usuario lo revise y
+                // confirme con el botón enviar.
+                draft = transcript
+                inputFocused = true
+            }
+            .presentationDetents([.height(380)])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Theme.Colors.background)
         }
         .onChange(of: nav.pendingNovaPrompt) { _, newPrompt in
             // Si Mi Día (u otra pantalla) llega con un texto pendiente, lo
@@ -550,6 +563,24 @@ struct NovaView: View {
                     .onSubmit(submitDraft)
                     .padding(.vertical, 4)
 
+                // Mic del input del chat = dictado rápido para escribir
+                // un mensaje. NO abre Nova Live — eso está en el chip
+                // "Hablar con Nova" del empty state. Aquí el texto va al
+                // draft, el usuario revisa y manda con el botón enviar.
+                Button {
+                    HapticManager.shared.tap()
+                    showVoiceDictation = true
+                } label: {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.focusAccent)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            Circle().fill(Theme.Colors.focusAccentSoft)
+                        )
+                }
+                .buttonStyle(.plain)
+
                 Button(action: submitDraft) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 13, weight: .bold))
@@ -640,96 +671,72 @@ private struct NovaActionCard: View {
     }
 }
 
-// MARK: - Chat bubble (estilo Gemini: avatar grande, bubbles cuidadas)
+// MARK: - Chat message (estilo Gemini: respuesta de Nova fluye como texto,
+//                       sin burbuja; usuario sí mantiene burbuja sólida)
 
 private struct NovaMessageBubble: View {
     let message: NovaMessage
 
     var body: some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
-            if message.role == .nova {
-                novaAvatar
-            } else {
-                Spacer(minLength: Theme.Spacing.xxl)
-            }
-
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-                if message.role == .nova {
-                    Text("Nova")
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.Colors.textTertiary)
-                        .tracking(0.3)
-                }
-                Text(message.content)
-                    .font(Theme.Typography.subhead)
-                    .foregroundStyle(message.role == .user ? .white : Theme.Colors.textPrimary)
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, Theme.Spacing.md)
-                    .padding(.vertical, Theme.Spacing.sm + 2)
-                    .background(bubbleBackground)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(timestampLabel)
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(Theme.Colors.textQuaternary)
-            }
-
-            if message.role == .nova {
-                Spacer(minLength: Theme.Spacing.xxl)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var bubbleBackground: some View {
         if message.role == .user {
-            // Burbuja del usuario: gradient cobalto.
-            RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Theme.Colors.focusAccent,
-                            Theme.Colors.focusAccentHover
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .shadow(color: Theme.Colors.focusAccent.opacity(0.25), radius: 8, y: 3)
+            userRow
         } else {
-            // Burbuja de Nova: superficie + halo violeta sutil (gradient soft).
-            RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                .fill(Theme.Colors.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    Theme.Colors.novaAccent.opacity(0.18),
-                                    Theme.Colors.border.opacity(0.6)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: Theme.Stroke.hairline
-                        )
+            novaRow
+        }
+    }
+
+    /// Mensaje del usuario: burbuja sólida cobalto alineada a la derecha.
+    /// Sin gradient, sin shadow excesivo — limpio.
+    private var userRow: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Spacer(minLength: Theme.Spacing.xxl + Theme.Spacing.md)
+            Text(message.content)
+                .font(Theme.Typography.subhead)
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, Theme.Spacing.md + 2)
+                .padding(.vertical, Theme.Spacing.sm + 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Theme.Colors.focusAccent)
                 )
-                .shadow(color: Theme.Colors.novaAccent.opacity(0.08), radius: 10, y: 3)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private var novaAvatar: some View {
+    /// Respuesta de Nova: fluye como texto regular con el spark mark
+    /// al costado izquierdo. SIN burbuja, SIN border, SIN shadow.
+    /// Igual que Gemini: el assistant "habla", no "manda mensajes".
+    private var novaRow: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            novaSparkAvatar
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Nova")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.novaAccent)
+                    .tracking(0.6)
+                    .textCase(.uppercase)
+                Text(message.content)
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                    .multilineTextAlignment(.leading)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Theme.Spacing.md)
+        }
+    }
+
+    /// Avatar mini de Nova: cuadrado redondeado con gradient + spark mark.
+    /// Más sutil que el anterior, sin sombra heavy.
+    private var novaSparkAvatar: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Theme.Colors.novaGradient)
-                .frame(width: 30, height: 30)
-                .shadow(color: Theme.Colors.novaAccent.opacity(0.45), radius: 6, y: 2)
-            NovaSparkMark(size: 13)
+                .frame(width: 26, height: 26)
+            NovaSparkMark(size: 11)
         }
-        .padding(.top, 18)  // alinear con el primer renglón de texto
-    }
-
-    private var timestampLabel: String {
-        DateFormatters.hourMinute.string(from: message.timestamp)
+        .padding(.top, 2)
     }
 }
 
@@ -741,23 +748,25 @@ private struct NovaTypingIndicator: View {
     @State private var animating: Bool = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+        // Mismo layout que `novaRow` de NovaMessageBubble: avatar + dots
+        // alineados, sin burbuja con border. Mantiene la coherencia con
+        // las respuestas reales de Nova en el chat.
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
             ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Theme.Colors.novaGradient)
-                    .frame(width: 30, height: 30)
-                    .shadow(color: Theme.Colors.novaAccent.opacity(0.45), radius: 6, y: 2)
-                NovaSparkMark(size: 13)
+                    .frame(width: 26, height: 26)
+                NovaSparkMark(size: 11)
             }
-            .padding(.top, 6)
+            .padding(.top, 2)
 
             HStack(spacing: 5) {
                 ForEach(0..<3) { i in
                     Circle()
-                        .fill(Theme.Colors.textSecondary.opacity(0.7))
+                        .fill(Theme.Colors.novaAccent.opacity(0.75))
                         .frame(width: 7, height: 7)
-                        .scaleEffect(animating ? 1.0 : 0.55)
-                        .opacity(animating ? 1.0 : 0.55)
+                        .scaleEffect(animating ? 1.0 : 0.45)
+                        .opacity(animating ? 1.0 : 0.45)
                         .animation(
                             .easeInOut(duration: 0.65)
                                 .repeatForever(autoreverses: true)
@@ -766,18 +775,9 @@ private struct NovaTypingIndicator: View {
                         )
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                    .fill(Theme.Colors.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                    )
-            )
+            .padding(.top, 8)
 
-            Spacer(minLength: Theme.Spacing.xxl)
+            Spacer(minLength: Theme.Spacing.md)
         }
         .onAppear { animating = true }
     }
