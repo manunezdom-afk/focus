@@ -312,15 +312,23 @@ enum AuthService {
     /// autentica con Google, Supabase devuelve `focus://auth-callback#access_token=...`
     /// y este método parsea los tokens y construye la `SupabaseSession`.
     ///
-    /// Requisitos de configuración:
-    /// 1. `CFBundleURLTypes` registra `focus` en pbxproj (hecho en esta sesión).
-    /// 2. Supabase Dashboard → Authentication → URL Configuration:
-    ///    agregar `focus://auth-callback` a "Redirect URLs".
-    /// 3. Supabase Dashboard → Authentication → Providers → Google: enabled
-    ///    con Client ID / Secret del proyecto Google Cloud.
+    /// Requisitos de configuración (todos aplicados al 2026-05-12):
+    /// - Supabase Authentication → URL Configuration → Redirect URLs
+    ///   incluye `focus://auth-callback` (pase 53 via Chrome MCP).
+    /// - Supabase Authentication → Providers → Google: enabled con
+    ///   Client ID + Secret de Google Cloud (pase 53 verified).
+    /// - NO requiere `CFBundleURLTypes` en Info.plist: ASWebAuthSession
+    ///   intercepta el callback por `callbackURLScheme` antes del sistema.
     ///
-    /// Si (2) o (3) faltan, Supabase devolverá error en la URL de callback;
-    /// detectamos esos casos y devolvemos `.oauthProviderNotConfigured`.
+    /// **Limitación conocida**: iOS muestra el host técnico de Supabase
+    /// (`hvwqeemtfoyvfmongwzo.supabase.co`) en el prompt
+    /// "Focus quiere utilizar...". Esto es inherente a
+    /// `ASWebAuthenticationSession` — siempre muestra el host de la URL
+    /// que va a cargar. Solución real: Supabase Custom Auth Domain
+    /// (feature Pro, ~$25/mes) — configurar p.ej. `auth.usefocus.me`
+    /// como CNAME y cambiar `FocusConfig.supabaseURL`. Alternativa:
+    /// SDK nativo `GoogleSignIn` (Apple/Google directo, sin Supabase
+    /// como intermediario en el browser). No bloquea beta cerrada.
     @MainActor
     static func signInWithGoogle(presentationAnchor: ASPresentationAnchor) async throws -> SupabaseSession {
         // 1. Construir la URL de inicio OAuth contra Supabase.
@@ -330,7 +338,16 @@ enum AuthService {
         )!
         comps.queryItems = [
             URLQueryItem(name: "provider", value: "google"),
-            URLQueryItem(name: "redirect_to", value: oauthRedirectURL)
+            URLQueryItem(name: "redirect_to", value: oauthRedirectURL),
+            // `prompt=select_account` fuerza que Google muestre el
+            // selector de cuentas SIEMPRE, incluso si ya hay sesión
+            // activa en el navegador. Mejor UX: el usuario ve
+            // explícitamente qué cuenta está usando para entrar a Focus.
+            // Sin este param, si ya está logueado en Google, el flow
+            // auto-completa sin mostrar nada — confuso si el usuario
+            // tiene varias cuentas (personal, trabajo, etc.).
+            URLQueryItem(name: "query_params",
+                         value: "prompt=select_account")
         ]
         guard let startURL = comps.url else {
             throw AuthError.unknown("No se pudo armar la URL de OAuth.")

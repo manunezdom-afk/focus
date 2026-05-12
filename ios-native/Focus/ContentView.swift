@@ -23,11 +23,24 @@ struct ContentView: View {
 
     private var route: Route {
         if isBooting { return .boot }
-        if !hasSeenOnboarding { return .onboarding }
         // Refresh-token / init aún resolviendo: BootView en vez de
         // parpadear Login. Mismo treatment que .boot.
         if case .loading = auth.state { return .boot }
-        if auth.isAuthenticatedOrDemo { return .main }
+        // Si ya está autenticado o en demo, NUNCA mostrar onboarding —
+        // aunque hasSeenOnboarding sea false. Cubre el caso de
+        // reinstalación de la app con Keychain preservado: el
+        // @AppStorage no sobrevive al reinstall, pero la sesión en
+        // Keychain sí. Sin esta defensa el usuario logueado vería el
+        // onboarding como si fuera primera vez.
+        if auth.isAuthenticatedOrDemo {
+            if !hasSeenOnboarding {
+                // Auto-marcar onboarding como visto para que en futuros
+                // launches el routing sea directo.
+                DispatchQueue.main.async { hasSeenOnboarding = true }
+            }
+            return .main
+        }
+        if !hasSeenOnboarding { return .onboarding }
         return .login
     }
 

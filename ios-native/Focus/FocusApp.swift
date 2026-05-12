@@ -7,26 +7,36 @@ struct FocusApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(dataStore)
-                .environmentObject(authStore)
-                .preferredColorScheme(.light)
-                .tint(Theme.Colors.focusAccent)
-                // Conexión Auth → DataStore para sync Supabase. Cuando
-                // cambia el estado de auth (login, refresh, logout, demo),
-                // empujamos credenciales al store. Si hay sesión, dispara
-                // fetch remoto + habilita upserts en mutaciones.
-                .task(id: authChangeId) {
-                    syncAuthIntoDataStore()
-                }
-                // Bootstrap notificaciones locales: al arrancar la app,
-                // re-asegurar que cada recordatorio futuro tenga su notif
-                // programada. iOS no persiste notifs locales al reinstalar
-                // ni siempre tras updates, así que esto cubre el gap.
-                // Solo dispara una vez por sesión.
-                .task {
-                    dataStore.bootstrapLocalNotifications()
-                }
+            // Background cobalto cuya color matchea EXACTAMENTE el asset
+            // LaunchBackground (#1E2D6B = rgb 0.118/0.176/0.420). Sin esto,
+            // entre el iOS launch screen y el primer paint del BootView
+            // SwiftUI mostraba 1-2 frames de Color.white default → flash
+            // blanco. Ahora cualquier vista hija que NO pinte su propio
+            // fondo deja ver cobalto, no blanco.
+            ZStack {
+                Color(red: 0.118, green: 0.176, blue: 0.420)
+                    .ignoresSafeArea()
+                ContentView()
+            }
+            .environmentObject(dataStore)
+            .environmentObject(authStore)
+            .preferredColorScheme(.light)
+            .tint(Theme.Colors.focusAccent)
+            // Conexión Auth → DataStore para sync Supabase. Cuando
+            // cambia el estado de auth (login, refresh, logout, demo),
+            // empujamos credenciales al store. Si hay sesión, dispara
+            // fetch remoto + habilita upserts en mutaciones.
+            .task(id: authChangeId) {
+                syncAuthIntoDataStore()
+            }
+            // Bootstrap notificaciones locales: al arrancar la app,
+            // re-asegurar que cada recordatorio futuro tenga su notif
+            // programada. iOS no persiste notifs locales al reinstalar
+            // ni siempre tras updates, así que esto cubre el gap.
+            // Solo dispara una vez por sesión.
+            .task {
+                dataStore.bootstrapLocalNotifications()
+            }
         }
     }
 
