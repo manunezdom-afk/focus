@@ -1252,6 +1252,152 @@ enum NovaActionNormalizerTests {
             expected: true, failures: &failures
         )
 
+        // ───── REMINDER ABSOLUTO (bug 2026-05-13) ────────────────────
+        //
+        // Patrón "[evento] a las X acuérdame a las Y" debe extraerse como
+        // UN evento + UN aviso, no como dos acciones multi-intent.
+
+        // Caso 1: "tengo clases a las 1:30 acuérdame a las 12:50"
+        if let intent = NovaResponder.extractReminderAbsoluteIntent(
+            from: "tengo clases a las 1:30 acuérdame a las 12:50"
+        ), case let .newBlock(title, eh, em, rh, rm) = intent {
+            check(label: "abs-1: title contiene 'clase'",
+                  actual: title.lowercased().contains("clase"),
+                  expected: true, failures: &failures)
+            check(label: "abs-1: event hour 1", actual: eh, expected: 1, failures: &failures)
+            check(label: "abs-1: event min 30", actual: em, expected: 30, failures: &failures)
+            check(label: "abs-1: reminder hour 12", actual: rh, expected: 12, failures: &failures)
+            check(label: "abs-1: reminder min 50", actual: rm, expected: 50, failures: &failures)
+        } else {
+            failures.append("  ✗ abs-1: 'tengo clases a las 1:30 acuérdame a las 12:50' no matcheó newBlock")
+        }
+        // Defensa: isLikelyMultiAction NO debe marcarlo complejo.
+        check(
+            label: "abs-1: isLikelyMultiAction false (no es multi-action)",
+            actual: NovaResponder.isLikelyMultiAction(
+                "tengo clases a las 1:30 acuérdame a las 12:50"
+            ),
+            expected: false, failures: &failures
+        )
+
+        // Caso 2: "reunión a las 5 avísame a las 4:30"
+        if let intent = NovaResponder.extractReminderAbsoluteIntent(
+            from: "reunión a las 5 avísame a las 4:30"
+        ), case let .newBlock(title, eh, em, rh, rm) = intent {
+            check(label: "abs-2: title contiene 'reunión'",
+                  actual: title.lowercased().contains("reuni"),
+                  expected: true, failures: &failures)
+            check(label: "abs-2: event hour 5", actual: eh, expected: 5, failures: &failures)
+            check(label: "abs-2: event min 0", actual: em, expected: 0, failures: &failures)
+            check(label: "abs-2: reminder hour 4", actual: rh, expected: 4, failures: &failures)
+            check(label: "abs-2: reminder min 30", actual: rm, expected: 30, failures: &failures)
+        } else {
+            failures.append("  ✗ abs-2: 'reunión a las 5 avísame a las 4:30' no matcheó newBlock")
+        }
+        check(
+            label: "abs-2: isLikelyMultiAction false",
+            actual: NovaResponder.isLikelyMultiAction(
+                "reunión a las 5 avísame a las 4:30"
+            ),
+            expected: false, failures: &failures
+        )
+
+        // Caso 3: "ducharme a las 10 acuérdame a las 9:50"
+        if let intent = NovaResponder.extractReminderAbsoluteIntent(
+            from: "ducharme a las 10 acuérdame a las 9:50"
+        ), case let .newBlock(title, eh, em, rh, rm) = intent {
+            check(label: "abs-3: title contiene 'ducha'",
+                  actual: title.lowercased().contains("ducha"),
+                  expected: true, failures: &failures)
+            check(label: "abs-3: event hour 10", actual: eh, expected: 10, failures: &failures)
+            check(label: "abs-3: event min 0", actual: em, expected: 0, failures: &failures)
+            check(label: "abs-3: reminder hour 9", actual: rh, expected: 9, failures: &failures)
+            check(label: "abs-3: reminder min 50", actual: rm, expected: 50, failures: &failures)
+        } else {
+            failures.append("  ✗ abs-3: 'ducharme a las 10 acuérdame a las 9:50' no matcheó")
+        }
+        check(
+            label: "abs-3: isLikelyMultiAction false",
+            actual: NovaResponder.isLikelyMultiAction(
+                "ducharme a las 10 acuérdame a las 9:50"
+            ),
+            expected: false, failures: &failures
+        )
+
+        // Caso 4: "tengo que seguir trabajando a las 3:30 y comer a las 4"
+        // → NO es reminder absoluto (sin trigger 'acuérdame'). Sigue siendo
+        //   multi-action → isLikelyMultiAction true. No regresión.
+        check(
+            label: "abs-4: 'trabajando a las 3:30 y comer a las 4' isLikelyMultiAction true",
+            actual: NovaResponder.isLikelyMultiAction(
+                "tengo que seguir trabajando a las 3:30 y comer a las 4"
+            ),
+            expected: true, failures: &failures
+        )
+        check(
+            label: "abs-4: extractReminderAbsoluteIntent nil (sin trigger)",
+            actual: NovaResponder.extractReminderAbsoluteIntent(
+                from: "tengo que seguir trabajando a las 3:30 y comer a las 4"
+            ) == nil,
+            expected: true, failures: &failures
+        )
+
+        // Caso 5: "comprar pan y leche" — sin horas, sin reminder. No
+        // toca el flow nuevo. Sigue siendo simple task (no multi-action).
+        check(
+            label: "abs-5: 'comprar pan y leche' extractor nil",
+            actual: NovaResponder.extractReminderAbsoluteIntent(
+                from: "comprar pan y leche"
+            ) == nil,
+            expected: true, failures: &failures
+        )
+        check(
+            label: "abs-5: 'comprar pan y leche' isLikelyMultiAction false",
+            actual: NovaResponder.isLikelyMultiAction("comprar pan y leche"),
+            expected: false, failures: &failures
+        )
+
+        // Caso B (attach por absoluto): "acuérdame a las 9:50 de ducharme"
+        if let intent = NovaResponder.extractReminderAbsoluteIntent(
+            from: "acuérdame a las 9:50 de ducharme"
+        ), case let .attachByAbsolute(activity, rh, rm) = intent {
+            check(label: "abs-B: activity contiene 'ducha'",
+                  actual: activity.lowercased().contains("ducha"),
+                  expected: true, failures: &failures)
+            check(label: "abs-B: reminder hour 9", actual: rh, expected: 9, failures: &failures)
+            check(label: "abs-B: reminder min 50", actual: rm, expected: 50, failures: &failures)
+        } else {
+            failures.append("  ✗ abs-B: 'acuérdame a las 9:50 de ducharme' no matcheó attach")
+        }
+
+        // ───── REGRESSION: school context AM solo en 6-12 ─────────────
+        //
+        // Antes del fix: "clase a las 1:30" → 1:30 AM (forceAM agresivo).
+        // Después del fix: → 13:30 (school context no aplica para 1-5).
+        check(
+            label: "school-fix: 'clase a las 1:30' currentHour=14 → 13 (PM)",
+            actual: NovaResponder.adjustAmPm(
+                hour: 1, in: "clase a las 1:30", currentHour: 14
+            ),
+            expected: 13, failures: &failures
+        )
+        // Pero "clase a las 8" debe seguir siendo 8 AM (sin regresión).
+        check(
+            label: "school-fix: 'clase a las 8' currentHour=14 → 8 (AM)",
+            actual: NovaResponder.adjustAmPm(
+                hour: 8, in: "clase a las 8", currentHour: 14
+            ),
+            expected: 8, failures: &failures
+        )
+        // Y "clase a las 3" también PM (3 en 1-7 → +12).
+        check(
+            label: "school-fix: 'clase a las 3' currentHour=14 → 15 (PM)",
+            actual: NovaResponder.adjustAmPm(
+                hour: 3, in: "clase a las 3", currentHour: 14
+            ),
+            expected: 15, failures: &failures
+        )
+
         // ───── Resultado ───────────────────────────────────────────────
 
         if failures.isEmpty {

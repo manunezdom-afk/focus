@@ -338,6 +338,14 @@ enum NovaResponder {
     static func isLikelyMultiAction(_ text: String) -> Bool {
         let lower = text.lowercased()
 
+        // 0) Defensa: si el texto matchea el patrón "evento + reminder
+        //    absoluto" ("tengo clase a las 1:30 acuérdame a las 12:50",
+        //    "ducharme a las 10 acuérdame a las 9:50"), NO es complejo —
+        //    es UN evento con UN aviso. El caller ya lo atajará localmente
+        //    vía `tryReminderAbsoluteFlow`, pero esta defensa garantiza
+        //    que NUNCA se marque como multi-acción aunque tenga dos horas.
+        if extractReminderAbsoluteIntent(from: text) != nil { return false }
+
         // 1) Conectores fuertes ya son señal clara de múltiples acciones.
         let strongHints = [
             " y luego ", " y después ", " y despues ",
@@ -436,6 +444,167 @@ enum NovaResponder {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !activity.isEmpty else { return nil }
         return ReminderAttachIntent(offsetMinutes: offset, activity: activity)
+    }
+
+    /// Patrón "[evento] a las X, acuérdame a las Y" — el usuario describe
+    /// UN bloque con su hora Y un aviso absoluto. Diferente de
+    /// `extractReminderAttachIntent` que captura "N min antes de X".
+    enum ReminderAbsoluteIntent {
+        /// Frase del estilo "tengo clase a las 1:30 acuérdame a las 12:50".
+        /// El caller crea un nuevo evento con `reminderOffsets` calculado.
+        case newBlock(
+            rawTitle: String,
+            eventHour: Int, eventMinute: Int,
+            reminderHour: Int, reminderMinute: Int
+        )
+        /// Frase del estilo "acuérdame a las 9:50 de ducharme" — solo hay
+        /// trigger + tiempo absoluto + actividad. El caller hace fuzzy
+        /// match contra eventos existentes.
+        case attachByAbsolute(
+            activity: String,
+            reminderHour: Int, reminderMinute: Int
+        )
+    }
+
+    /// Detecta los patrones de "reminder absoluto":
+    /// A. "[evento] a las X(:M)[, y]? [trigger] a las Y(:M)" → newBlock
+    /// B. "[trigger] a las Y(:M) (de|del|para) [evento]" → attachByAbsolute
+    ///
+    /// Devuelve nil si no es ninguno de los dos patrones. Importante: si
+    /// la frase tiene MÁS de dos horas distintas o conectores fuertes de
+    /// múltiples acciones ("luego", "después de eso"), no consideramos
+    /// que sea un reminder-absoluto (más seguro caer al flujo normal).
+    static func extractReminderAbsoluteIntent(from text: String) -> ReminderAbsoluteIntent? {
+        let lower = text.lowercased()
+        // 1. Debe haber un trigger explícito de recordatorio.
+        let triggers = [
+            "acuérdame", "acuerdame", "acordame",
+            "recuérdame", "recuerdame", "recordame",
+            "avísame", "avisame"
+        ]
+        var foundTrigger: String? = nil
+        for t in triggers {
+            if lower.range(of: t) != nil { foundTrigger = t; break }
+        }
+        guard let trigger = foundTrigger else { return nil }
+
+        // 2. Encontrar TODAS las menciones de hora en formato "a la(s) H(:M)".
+        //    Solo dígitos por simplicidad — palabras se pueden agregar después
+        //    si los testers lo piden.
+        let hourPattern = #"\ba la?s?\s+(\d{1,2})(?::(\d{2}))?\b"#
+        guard let regex = try? NSRegularExpression(pattern: hourPattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let ns = lower as NSString
+        let allRange = NSRange(location: 0, length: ns.length)
+        let matches = regex.matches(in: lower, options: [], range: allRange)
+        guard !matches.isEmpty else { return nil }
+
+        // Conectores fuertes que sugieren múltiples ACCIONES (no
+        // evento+reminder). Si aparece uno, devolvemos nil y dejamos
+        // que el flujo normal de multi-intent maneje.
+        let strongMultiHints = [
+            " y luego ", " luego ", " después de eso ", " despues de eso ",
+            " también ", " además "
+        ]
+        for h in strongMultiHints where lower.contains(h) { return nil }
+
+        // 3. Helper: parsea un match de hora a (h, m, locStart).
+        //    locStart es la posición UTF16 del inicio del match en `lower`.
+        func parse(_ m: NSTextCheckingResult) -> (h: Int, m: Int, locStart: Int, range: NSRange)? {
+            guard m.numberOfRanges >= 2, m.range(at: 1).location != NSNotFound else {
+                return nil
+            }
+            let hStr = ns.substring(with: m.range(at: 1))
+            guard let h = Int(hStr) else { return nil }
+            var mm = 0
+            if m.numberOfRanges >= 3, m.range(at: 2).location != NSNotFound {
+                let mStr = ns.substring(with: m.range(at: 2))
+                mm = Int(mStr) ?? 0
+            }
+            guard h <= 23, mm <= 59 else { return nil }
+            return (h, mm, m.range.location, m.range)
+        }
+
+        // Posición UTF16 del trigger en `lower` (consistente con NSRange).
+        let triggerNSLoc = (lower as NSString).range(of: trigger).location
+        guard triggerNSLoc != NSNotFound else { return nil }
+
+        let parsedTimes = matches.compactMap(parse)
+        guard !parsedTimes.isEmpty else { return nil }
+
+        // 4. Separar tiempos ANTES del trigger (candidatos a event) y
+        //    DESPUÉS (candidatos a reminder). En el patrón típico:
+        //    "[evento] a las X TRIGGER a las Y" → X antes, Y después.
+        //    Para "TRIGGER a las Y de [evento]" → solo Y después.
+        let timesBefore = parsedTimes.filter { $0.locStart < triggerNSLoc }
+        let timesAfter  = parsedTimes.filter { $0.locStart >= triggerNSLoc }
+
+        // 5. Reminder = primer tiempo DESPUÉS del trigger.
+        guard let reminder = timesAfter.first else { return nil }
+        // Demasiados tiempos después → ambiguo, abort.
+        if timesAfter.count > 1 { return nil }
+
+        // 6. Si hay tiempo antes → Caso A (nuevo evento). Si no → Caso B
+        //    (attach a existing buscando "de X" después del reminder).
+        if let eventTime = timesBefore.last {
+            // Demasiados tiempos antes → ambiguo (3+ acciones), abort.
+            if timesBefore.count > 1 { return nil }
+
+            // Título = texto desde inicio hasta el match de event.
+            let titleEnd = eventTime.range.location
+            var rawTitle = ns.substring(with: NSRange(location: 0, length: titleEnd))
+            // Limpiar fillers iniciales típicos: "tengo", "hay", "tengo que".
+            let stripPrefixes = [
+                "tengo que ", "tengo ", "necesito ", "hay ",
+                "agenda ", "agéndame ", "agendame ",
+                "ponme ", "crea ",
+            ]
+            var changed = true
+            while changed {
+                changed = false
+                for p in stripPrefixes
+                    where rawTitle.lowercased().hasPrefix(p) {
+                    rawTitle = String(rawTitle.dropFirst(p.count))
+                    changed = true
+                    break
+                }
+                rawTitle = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            rawTitle = rawTitle
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: ",;:."))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawTitle.isEmpty else { return nil }
+            return .newBlock(
+                rawTitle: rawTitle,
+                eventHour: eventTime.h, eventMinute: eventTime.m,
+                reminderHour: reminder.h, reminderMinute: reminder.m
+            )
+        }
+
+        // Caso B — solo hay una hora (la del reminder). Buscar "de/del/para X"
+        // después de la hora reminder para extraer la activity.
+        let activityPattern = #"\b(?:de|del|para)\s+(?:(?:la|el|los|las|mi|tu|su)\s+)?(.+?)\s*(?:$|[.,;!?])"#
+        guard let aRegex = try? NSRegularExpression(
+            pattern: activityPattern, options: [.caseInsensitive]
+        ) else { return nil }
+        // Buscar después del reminder match (que ya está después del trigger).
+        let searchStart = reminder.range.location + reminder.range.length
+        let searchRange = NSRange(location: searchStart, length: ns.length - searchStart)
+        guard searchRange.length > 0,
+              let aMatch = aRegex.firstMatch(in: lower, options: [], range: searchRange),
+              aMatch.numberOfRanges >= 2,
+              aMatch.range(at: 1).location != NSNotFound else {
+            return nil
+        }
+        let activity = ns.substring(with: aMatch.range(at: 1))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !activity.isEmpty else { return nil }
+        return .attachByAbsolute(
+            activity: activity,
+            reminderHour: reminder.h, reminderMinute: reminder.m
+        )
     }
 
     /// Busca un evento cuyo título coincida aproximadamente con `activity`.
@@ -2237,7 +2406,13 @@ enum NovaResponder {
         // Verb context override antes de la regla coloquial (igual que adjustAmPm).
         switch detectHourContext(in: text) {
         case .forceAM:
-            return n == 12 ? 0 : n
+            // Solo horas típicas de mañana (6-12). Para 1-5 con school
+            // context (e.g. "tipo 1 en la clase"), la lectura típica es PM
+            // de tarde — fall-through a colloquial.
+            if n >= 6 && n <= 12 {
+                return n == 12 ? 0 : n
+            }
+            break
         case .forcePM:
             if n == 0 { return 12 }
             if n == 12 { return 12 }
@@ -2298,7 +2473,15 @@ enum NovaResponder {
         // 3) Verb context override antes de la regla coloquial.
         switch detectHourContext(in: text) {
         case .forceAM:
-            return hour == 12 ? 0 : hour
+            // School/morning override SOLO aplica a horas típicas de mañana
+            // (6-12). Para 1-5, la frase "clase a las 1:30" suele ser una
+            // clase de TARDE — no debe colapsar a 01:30. En esos casos
+            // dejamos pasar a la regla coloquial 1-7 → PM más abajo.
+            if hour >= 6 && hour <= 12 {
+                return hour == 12 ? 0 : hour
+            }
+            // hour ∈ 1..5 con school context → fall-through a colloquial
+            break
         case .forcePM:
             return hour == 12 ? 12 : hour + 12
         case .neutral:

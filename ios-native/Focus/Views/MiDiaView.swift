@@ -497,6 +497,16 @@ struct MiDiaView: View {
             return response
         }
 
+        // Short-circuit REMINDER ABSOLUTO: "[evento] a las X acuérdame a
+        // las Y" (caso A — crear evento nuevo con offset calculado) o
+        // "acuérdame a las Y de [evento existente]" (caso B — adjuntar
+        // a existing). El detector multi-action antes marcaba esto como
+        // complejo y mostraba "envíalas por separado" — bug reportado
+        // el 2026-05-13 con "Tengo clases a las 1:30 acuérdame a las 12:50".
+        if let response = tryReminderAbsoluteFlow(userText: trimmed) {
+            return response
+        }
+
         let preIntent = NovaResponder.parse(trimmed, context: store.novaContext)
         // Frase con múltiples acciones encadenadas o referencias temporales
         // en palabras ("en una hora", "más o menos a las 12"). El parser
@@ -706,6 +716,227 @@ struct MiDiaView: View {
         let h = minutes / 60
         let m = minutes % 60
         return "\(h) h \(m) min"
+    }
+
+    /// Short-circuit para reminder en TIEMPO ABSOLUTO. Maneja dos patrones:
+    ///
+    /// **Caso A — nuevo bloque + reminder absoluto**:
+    ///   "tengo clase a las 1:30 acuérdame a las 12:50"
+    ///   → crea evento "Clase" 13:30 con `reminderOffsets=[40]`.
+    ///
+    /// **Caso B — reminder absoluto sobre evento existente**:
+    ///   "acuérdame a las 9:50 de ducharme" (con "Ducharme" 10:00 en hoy)
+    ///   → atajamos al evento existente con offset calculado.
+    ///
+    /// Reglas:
+    /// - Si el reminder time queda DESPUÉS del event time → preguntamos
+    ///   sin crear.
+    /// - Si las dos horas son IGUALES → preguntamos también (aviso = evento
+    ///   no tiene sentido).
+    /// - Resolvemos AM/PM con el contexto: por defecto, si event hora es
+    ///   1-12 y reminder hora es 1-12, asumimos ambas en el MISMO bracket
+    ///   (PM o AM). La regla coloquial 1-7 → PM funciona bien para
+    ///   "clase a las 1:30 acuérdame a las 12:50" (event 13:30, reminder
+    ///   12:50). Si reminder > event en bracket PM, ya queda raro y
+    ///   preguntamos.
+    private func tryReminderAbsoluteFlow(userText: String) -> InlineNovaResponse? {
+        guard let intent = NovaResponder.extractReminderAbsoluteIntent(from: userText) else {
+            return nil
+        }
+
+        switch intent {
+        case .newBlock(let rawTitle, let eH, let eM, let rH, let rM):
+            return executeNewBlockWithAbsoluteReminder(
+                userText: userText,
+                rawTitle: rawTitle,
+                eventH: eH, eventMin: eM,
+                reminderH: rH, reminderMin: rM
+            )
+
+        case .attachByAbsolute(let activity, let rH, let rM):
+            return executeAttachAbsoluteReminder(
+                userText: userText,
+                activity: activity,
+                reminderH: rH, reminderMin: rM
+            )
+        }
+    }
+
+    /// Caso A: crear evento con offset calculado desde reminder absoluto.
+    private func executeNewBlockWithAbsoluteReminder(
+        userText: String,
+        rawTitle: String,
+        eventH: Int, eventMin: Int,
+        reminderH: Int, reminderMin: Int
+    ) -> InlineNovaResponse {
+        // 1. Resolver AM/PM para ambas horas usando adjustAmPm con el
+        //    texto completo como contexto. Esto le permite captar "de la
+        //    tarde", "de la mañana", verbos morning/PM, school context, etc.
+        //    Si event ≤ 12, lo pasamos por adjustAmPm. Si > 12, queda 24h.
+        let eventHour24 = eventH > 12 ? eventH : NovaResponder.adjustAmPm(
+            hour: eventH, in: userText
+        )
+        // El reminder hereda el MISMO bracket que el evento por defecto:
+        // si event quedó en PM (>=12), reminder con hour 1-12 también va
+        // PM SI eso lo deja antes del evento. Esto evita "clase 13:30
+        // acuérdame a las 12:50" interpretado como 12:50 AM.
+        let reminderHour24Naive = reminderH > 12 ? reminderH : NovaResponder.adjustAmPm(
+            hour: reminderH, in: userText
+        )
+        // Si naive nos da reminder DESPUÉS del evento Y la diferencia es
+        // exactamente 12h (típico AM/PM flip), reintenta con bracket opuesto.
+        var reminderHour24 = reminderHour24Naive
+        let eventMinutesAbs = eventHour24 * 60 + eventMin
+        var reminderMinutesAbs = reminderHour24 * 60 + reminderMin
+        if reminderMinutesAbs > eventMinutesAbs,
+           reminderH <= 12, eventHour24 >= 12, reminderHour24Naive < 12 {
+            // Reminder asumido AM pero evento PM → flip a PM también.
+            reminderHour24 = reminderHour24Naive + 12
+            reminderMinutesAbs = reminderHour24 * 60 + reminderMin
+        } else if reminderMinutesAbs > eventMinutesAbs,
+                  reminderH <= 12, eventHour24 >= 12, reminderHour24Naive >= 12 {
+            // Reminder PM pero queda después → quizá quiso AM (raro pero
+            // posible si event es PM tarde y reminder mañana siguiente).
+            // No flippeamos automáticamente — preguntamos abajo.
+        }
+
+        // 2. Calcular offset en minutos.
+        let offsetMinutes = eventMinutesAbs - reminderMinutesAbs
+
+        // 3. Validar: si offset <= 0 → reminder no es anterior al evento
+        //    → preguntar.
+        guard offsetMinutes > 0 else {
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Ese aviso queda después del bloque.",
+                details: "Pediste «\(rawTitle)» a las \(formatTime24(eventHour24, eventMin)) y aviso a las \(formatTime24(reminderHour24, reminderMin)). ¿Quieres cambiar la hora del aviso?",
+                action: .dismiss,
+                isError: false,
+                tone: .clarify
+            )
+        }
+
+        // 4. Limpiar el título (singular, capitalizado, sin filler).
+        let cleanTitle = NovaActionNormalizer.cleanTitle(rawTitle)
+        let finalTitle = cleanTitle.isEmpty ? rawTitle.capitalized : cleanTitle
+
+        // 5. Construir startTime hoy a la eventHour24:eventMin. Si ya
+        //    pasó hoy hace > 4h, lo bumpeamos a mañana (misma política
+        //    que extractDateTime). Conservador.
+        let cal = Calendar.current
+        let now = Date()
+        let startOfDay = cal.startOfDay(for: now)
+        guard var start = cal.date(
+            bySettingHour: eventHour24, minute: eventMin, second: 0, of: startOfDay
+        ) else {
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "No pude armar la hora del evento.",
+                details: nil, isError: true
+            )
+        }
+        if start <= now {
+            let gap = now.timeIntervalSince(start)
+            if gap > 14_400 {  // > 4h pasado → mañana
+                start = cal.date(byAdding: .day, value: 1, to: start) ?? start
+            }
+        }
+
+        // 6. Crear el evento.
+        let section = NovaResponder.guessSection(for: finalTitle) ?? .personal
+        let event = FocusEvent(
+            title: finalTitle,
+            startTime: start,
+            section: section,
+            reminderOffsets: [offsetMinutes]
+        )
+        store.addEvent(event)
+        HapticManager.shared.success()
+
+        // 7. Respuesta corta.
+        let fireLabel = formatTime24(reminderHour24, reminderMin)
+        return InlineNovaResponse(
+            userText: userText,
+            summary: "Listo. Te dejé «\(finalTitle)» a las \(formatTime24(eventHour24, eventMin)) con aviso a las \(fireLabel).",
+            details: "🔔 \(humanReminderLabel(offsetMinutes)) antes",
+            action: .openCalendar,
+            isError: false,
+            tone: .success
+        )
+    }
+
+    /// Caso B: attach reminder absoluto a un evento existente.
+    private func executeAttachAbsoluteReminder(
+        userText: String,
+        activity: String,
+        reminderH: Int, reminderMin: Int
+    ) -> InlineNovaResponse {
+        let todayEvents = store.todayEvents()
+        guard let matched = NovaResponder.findEventByApproxTitle(
+            activity, in: todayEvents
+        ) else {
+            return missingEventForAttachReminder(
+                activity: activity, offset: 0,
+                userText: userText
+            )
+        }
+
+        let cal = Calendar.current
+        let startOfMatched = cal.startOfDay(for: matched.startTime)
+        // Resolver reminder hour: si reminderH ≤ 12, intentar quedarse
+        // antes del evento. Caer a 24h literal si > 12.
+        let reminderHour24 = reminderH > 12 ? reminderH : NovaResponder.adjustAmPm(
+            hour: reminderH, in: userText
+        )
+        guard let reminderDate = cal.date(
+            bySettingHour: reminderHour24, minute: reminderMin, second: 0, of: startOfMatched
+        ) else { return missingEventForAttachReminder(
+            activity: activity, offset: 0, userText: userText
+        ) }
+
+        let offsetSeconds = matched.startTime.timeIntervalSince(reminderDate)
+        let offsetMinutes = Int(offsetSeconds / 60)
+        guard offsetMinutes > 0 else {
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Ese aviso queda después del bloque.",
+                details: "«\(matched.title)» empieza a las \(DateFormatters.hourMinute.string(from: matched.startTime)) y el aviso quedaría a las \(formatTime24(reminderHour24, reminderMin)). ¿Quieres cambiarlo?",
+                action: .dismiss,
+                isError: false,
+                tone: .clarify
+            )
+        }
+
+        let existing = matched.reminderOffsets ?? []
+        if existing.contains(offsetMinutes) {
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Ese aviso ya estaba agregado.",
+                details: "«\(matched.title)» · 🔔 \(humanReminderLabel(offsetMinutes)) antes",
+                action: .openCalendar,
+                isError: false,
+                tone: .clarify
+            )
+        }
+
+        var updated = matched
+        updated.reminderOffsets = (existing + [offsetMinutes]).sorted()
+        store.updateEvent(updated)
+        HapticManager.shared.success()
+
+        return InlineNovaResponse(
+            userText: userText,
+            summary: "Listo. Añadí un aviso a «\(matched.title)».",
+            details: "🔔 \(humanReminderLabel(offsetMinutes)) antes · \(formatTime24(reminderHour24, reminderMin))",
+            action: .openCalendar,
+            isError: false,
+            tone: .success
+        )
+    }
+
+    /// Formatea (h, m) como "HH:MM" en 24h. Helper local.
+    private func formatTime24(_ h: Int, _ m: Int) -> String {
+        String(format: "%02d:%02d", h, m)
     }
 
     /// True cuando el intent local SIEMPRE es mejor que el backend porque
