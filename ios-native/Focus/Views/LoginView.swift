@@ -9,20 +9,22 @@ struct LoginView: View {
 
     /// **Feature flag de Google Sign-In.** Cuando es `false`, el botón
     /// "Continuar con Google" + el divider "o" NO se renderizan. Toda la
-    /// lógica subyacente (AuthService.signInWithGoogle, AuthStore action,
-    /// callback handling) sigue intacta — solo se oculta la UI.
+    /// lógica subyacente (AuthService.signInWithGoogleNative, AuthStore
+    /// action, callback handling) sigue intacta — solo se oculta la UI.
     ///
-    /// **Por qué está en false para beta**: ASWebAuthenticationSession
-    /// muestra el host técnico de Supabase (`hvwqeemtfoyvfmongwzo...`) en
-    /// el prompt "Focus quiere utilizar...". Eso genera desconfianza tipo
-    /// phishing en testers nuevos. Soluciones reales (documentadas en
-    /// FOCUS_AUDIT_MASTER.md pase 55):
-    /// - **Path A**: GoogleSignIn SDK nativo (iOS client + Supabase
-    ///   signInWithIdToken). Requiere ~4-6h de trabajo + test en device.
-    /// - **Path B**: Supabase Custom Auth Domain (Pro plan $25/mes).
-    ///   Cambio mínimo de código (solo FocusConfig.supabaseURL).
-    /// Cuando Martin elija un path y termine la migración → flip a `true`.
-    private static let isGoogleSignInEnabled = true
+    /// **DESHABILITADO PARA BETA CERRADA (2026-05-12)**: el flow nativo
+    /// requiere el SPM GoogleSignIn-iOS + un URL Scheme en Info.plist
+    /// que TODAVÍA no están agregados en el proyecto (ver
+    /// `AuthService+GoogleNative.swift:30-46` con los pasos manuales que
+    /// faltan). Sin esos pasos, tocar el botón lanza
+    /// `AuthError.unknown("Google Sign-In nativo no disponible…")` —
+    /// experiencia rota para testers. OTP por email cubre todo el flow.
+    ///
+    /// Flip a `true` SOLO después de:
+    /// 1. Xcode → Add Package Dependency → GoogleSignIn-iOS.
+    /// 2. Info.plist URL Schemes con `googleReversedClientID`.
+    /// 3. Probar en device real, NO solo simulador.
+    private static let isGoogleSignInEnabled = false
     @EnvironmentObject private var auth: AuthStore
     @State private var email: String = ""
     @State private var code: String = ""

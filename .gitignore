@@ -23,7 +23,9 @@ legacy-capacitor-ios/App/.build/
 
 # ios-native Xcode build artifacts
 ios-native/.build/
+ios-native/build/
 ios-native/DerivedData/
+*.xcarchive
 .env*.local
 
 # Playwright
