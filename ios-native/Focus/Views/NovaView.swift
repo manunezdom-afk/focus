@@ -679,13 +679,22 @@ struct NovaView: View {
             .padding(.vertical, Theme.Spacing.sm + 1)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                    .fill(Theme.Colors.surface)
+                    .fill(
+                        inputFocused
+                            ? Theme.Colors.surface
+                            : Theme.Colors.surfaceHigh
+                    )
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                             .strokeBorder(
-                                inputFocused ? Theme.Colors.focusAccent.opacity(0.4) : Theme.Colors.border,
-                                lineWidth: inputFocused ? 1.2 : Theme.Stroke.hairline
+                                inputFocused ? Theme.Colors.focusAccent.opacity(0.45) : Theme.Colors.borderEmphasis.opacity(0.55),
+                                lineWidth: inputFocused ? 1.3 : 1.0
                             )
+                    )
+                    .shadow(
+                        color: Theme.Colors.cardShadow,
+                        radius: inputFocused ? 8 : 4,
+                        y: inputFocused ? 4 : 2
                     )
             )
             .padding(.horizontal, Theme.Spacing.lg)

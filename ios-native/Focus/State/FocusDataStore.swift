@@ -905,7 +905,7 @@ enum NovaResponder {
             return Self.pick([
                 "Anoto «\(title)»\(dueBit) como tarea\(recBit).\(remBit)",
                 "Listo, agrego «\(title)»\(dueBit) a tus pendientes\(recBit).\(remBit)",
-                "La meto como tarea\(dueBit)\(recBit). Si querés cambiar la prioridad, decime.\(remBit)"
+                "La meto como tarea\(dueBit)\(recBit). Si quieres cambiar la prioridad, dime.\(remBit)"
             ])
         case .createEvent(let title, let when, _, let location, let section, let wantsReminder):
             let timeBit = when.map { "el \(DateFormatters.weekdayDay.string(from: $0).lowercased()) a las \(DateFormatters.hourMinute.string(from: $0))" } ?? "cuando me digas"
@@ -915,7 +915,7 @@ enum NovaResponder {
             return Self.pick([
                 "Agendo «\(title)»\(placeBit) \(timeBit)\(sectionBit).\(remBit)",
                 "Listo, evento «\(title)» \(timeBit)\(placeBit)\(sectionBit).\(remBit)",
-                "Va «\(title)» \(timeBit)\(placeBit)\(sectionBit). Si querés cambiar algo, decime.\(remBit)"
+                "Va «\(title)» \(timeBit)\(placeBit)\(sectionBit). Si quieres cambiar algo, dime.\(remBit)"
             ])
         case .correctLastEvent(let modifier):
             switch modifier {
@@ -943,29 +943,29 @@ enum NovaResponder {
         case .reviewPending:
             return Self.pick([
                 "Tus pendientes están en Mi Día → «Pendientes de hoy».",
-                "Mirá «Pendientes de hoy» en Mi Día. Si querés que los reorganice, decime «organiza mi día».",
-                "Lo tenés todo arriba en Mi Día. ¿Los priorizamos por urgencia?"
+                "Mira «Pendientes de hoy» en Mi Día. Si quieres que los reorganice, dime «organiza mi día».",
+                "Lo tienes todo arriba en Mi Día. ¿Los priorizamos por urgencia?"
             ])
         case .askAboutDemo:
-            return "Los ejemplos solo aparecen mientras no tengas datos tuyos. Apenas crees tu primer evento o tarea, se reemplazan automáticamente. Si querés borrar todo, andá a Ajustes → Datos locales."
+            return "Los ejemplos solo aparecen mientras no tengas datos tuyos. Apenas crees tu primer evento o tarea, se reemplazan automáticamente. Si quieres borrar todo, ve a Ajustes → Datos locales."
         case .smallTalk(let reply):
             return reply
         case .clarify(.taskNeedsTitle):
-            return "Decime qué tarea querés que anote. Ej: «crea tarea estudiar cálculo»."
+            return "Dime qué tarea quieres que anote. Ej: «crea tarea estudiar cálculo»."
         case .clarify(.eventNeedsTitle):
-            return "¿Qué evento querés que agende? Ej: «agenda reunión con Juan mañana a las 12»."
+            return "¿Qué evento quieres que agende? Ej: «agenda reunión con Juan mañana a las 12»."
         case .clarify(.eventNeedsTime(let title, let date)):
             let day = DateFormatters.weekdayDay.string(from: date).lowercased()
             return "Tengo «\(title)» para el \(day). ¿A qué hora?"
         case .clarify(.eventNeedsDateTime(let title)):
             return "Tengo «\(title)». ¿Para qué día y a qué hora lo agendo?"
         case .clarify(.noContext):
-            return "No estoy seguro a qué te referís. Decime qué querés agendar o crear."
+            return "No estoy seguro a qué te refieres. Dime qué quieres agendar o crear."
         case .clarify(.unclear):
             return Self.pick([
-                "No estoy seguro de qué hacer. ¿Querés que cree una tarea, un evento o una sugerencia?",
-                "Eso no me queda claro. Probá con «crea tarea X», «agenda Y mañana a las 12» o «organiza mi día».",
-                "Decime un poco más. Puedo crear tareas, agendar eventos u ordenar tu día."
+                "No estoy seguro de qué hacer. ¿Quieres que cree una tarea, un evento o una sugerencia?",
+                "Eso no me queda claro. Prueba con «crea tarea X», «agenda Y mañana a las 12» o «organiza mi día».",
+                "Dime un poco más. Puedo crear tareas, agendar eventos u ordenar tu día."
             ])
         }
     }
@@ -974,16 +974,16 @@ enum NovaResponder {
 
     private static func randomGreeting() -> String {
         Self.pick([
-            "Hola. ¿Qué necesitás hoy?",
-            "Acá estoy. ¿En qué te ayudo?",
-            "Hola. Decime qué hacer y lo armo."
+            "Hola. ¿Qué necesitas hoy?",
+            "Aquí estoy. ¿En qué te ayudo?",
+            "Hola. Dime qué hacer y lo armo."
         ])
     }
 
     private static func randomAcknowledgment() -> String {
         Self.pick([
-            "Listo. Si cambiás de idea, decime.",
-            "Perfecto. Cualquier cosa estoy acá.",
+            "Listo. Si cambias de idea, dime.",
+            "Perfecto. Cualquier cosa estoy aquí.",
             "Bien. Lo dejo así."
         ])
     }

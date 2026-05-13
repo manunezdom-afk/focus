@@ -164,9 +164,9 @@ struct NovaInboxContent: View {
     private var emptyMessage: String {
         switch filter {
         case .pending:
-            return "Cuando agregues eventos o tareas, Nova te propondrá ajustes acá. Probá «organiza mi día» o «preparar mañana» desde el FocusBar."
+            return "Cuando agregues eventos o tareas, Nova te propondrá ajustes aquí. Prueba «organiza mi día» o «preparar mañana» desde el FocusBar."
         case .approved:
-            return "Cuando apruebes una sugerencia, va a quedar registrada acá."
+            return "Cuando apruebes una sugerencia, va a quedar registrada aquí."
         case .postponed:
             return "Las sugerencias pospuestas vuelven a aparecer más tarde."
         }

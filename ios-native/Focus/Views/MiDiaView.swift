@@ -951,7 +951,7 @@ struct MiDiaView: View {
                 return InlineNovaResponse(
                     userText: userText,
                     summary: "Necesito saber el día y la hora.",
-                    details: "Probá: «agenda \(title) mañana a las 12».",
+                    details: "Prueba: «agenda \(title) mañana a las 12».",
                     isError: true
                 )
             }
@@ -1055,7 +1055,7 @@ struct MiDiaView: View {
                 return InlineNovaResponse(
                     userText: userText,
                     summary: "No tengo nada reciente para mover.",
-                    details: "Si querés crear un nuevo evento, decime título, día y hora.",
+                    details: "Si quieres crear un nuevo evento, dime título, día y hora.",
                     action: .dismiss,
                     isError: true
                 )
@@ -1153,7 +1153,7 @@ struct MiDiaView: View {
             return InlineNovaResponse(
                 userText: userText,
                 summary: "No tengo nada reciente para borrar.",
-                details: "Si querés borrar algo más viejo, arrastrá a la izquierda en Mi Día o Calendario.",
+                details: "Si quieres borrar algo más viejo, arrastra a la izquierda en Mi Día o Calendario.",
                 action: .dismiss,
                 isError: true
             )

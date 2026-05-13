@@ -17,8 +17,8 @@ enum CoachMarkID: String, CaseIterable {
         switch self {
         case .focusBar:     return "Escribe como hablas"
         case .mic:          return "Dictar a Nova"
-        case .calendar:     return "Tu calendario del día"
-        case .nova:         return "Nova entiende tus pedidos"
+        case .calendar:     return "Tu día, de un vistazo"
+        case .nova:         return "Nova te entiende"
         case .reminderChip: return "Aviso anticipado"
         }
     }
@@ -27,15 +27,15 @@ enum CoachMarkID: String, CaseIterable {
     var body: String {
         switch self {
         case .focusBar:
-            return "Nova puede crear eventos, tareas y recordatorios. Probá pedirle algo en español natural."
+            return "Escríbele a Nova como si hablaras. Puede crear eventos, tareas y recordatorios."
         case .mic:
-            return "Tocá el micrófono y hablá. Cuando termines, el texto queda en la barra para revisar antes de enviar."
+            return "Toca el micrófono y habla. El texto queda escrito para que lo revises antes de enviar."
         case .calendar:
-            return "Acá ves tus bloques del día. Deslizá un bloque hacia la izquierda para borrarlo, o mantenelo presionado para editar."
+            return "Desliza un bloque a la izquierda para borrarlo o tócalo y mantén presionado para editar."
         case .nova:
-            return "Pedile a Nova que ordene tu día, cree tareas o corrija algo que ya agendaste. Entiende lenguaje natural."
+            return "Pídele organizar tu día, crear tareas o corregir algo que ya agendaste. Entiende lenguaje natural."
         case .reminderChip:
-            return "Este bloque tiene un aviso programado antes de empezar. Vas a recibir una notificación a esa hora."
+            return "Vas a recibir una notificación antes de la hora de inicio."
         }
     }
 
@@ -46,8 +46,33 @@ enum CoachMarkID: String, CaseIterable {
         case .focusBar:     return "«mañana despiértame a las 7 y recuérdame salir a las 8»"
         case .mic:          return nil
         case .calendar:     return nil
-        case .nova:         return "«ordená mi día» · «agenda reunión con Juan mañana a las 12»"
+        case .nova:         return "«organiza mi día» · «agenda reunión con Juan mañana a las 12»"
         case .reminderChip: return nil
+        }
+    }
+
+    /// SF Symbol que se muestra en la cabecera de la card. Cada tip tiene
+    /// uno distinto para que las cards no se sientan idénticas — visual
+    /// inmediato del feature al que se refiere el tip.
+    var glyph: String {
+        switch self {
+        case .focusBar:     return "text.bubble.fill"
+        case .mic:          return "mic.fill"
+        case .calendar:     return "calendar"
+        case .nova:         return "sparkles"
+        case .reminderChip: return "bell.badge.fill"
+        }
+    }
+
+    /// Color de marca de cada tip. Diferencia visualmente los coach marks
+    /// y se usa también en el botón "Entendido" para reforzar la identidad.
+    var accent: Color {
+        switch self {
+        case .focusBar:     return Theme.Colors.focusAccent
+        case .mic:          return Theme.Colors.focusAccent
+        case .calendar:     return Theme.Colors.sectionReunion
+        case .nova:         return Theme.Colors.novaAccent
+        case .reminderChip: return Theme.Colors.warning
         }
     }
 }
@@ -74,9 +99,15 @@ final class CoachMarksStore: ObservableObject {
     }
 
     /// Pide mostrar el coach mark si todavía no se vio. Idempotente.
+    /// Añade un pequeño delay para que el tip no aparezca al mismo tiempo
+    /// que la vista todavía está armando su layout — eso se sentía brusco.
     func presentIfNeeded(_ id: CoachMarkID) {
         guard shouldShow(id), presenting == nil else { return }
-        presenting = id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) { [weak self] in
+            guard let self else { return }
+            guard self.shouldShow(id), self.presenting == nil else { return }
+            self.presenting = id
+        }
     }
 
     /// Cierra el coach mark visible y lo marca como visto.
@@ -106,56 +137,58 @@ struct CoachMarkOverlay: View {
             ZStack {
                 // Backdrop oscuro semi-transparente — atenúa la UI detrás
                 // sin tapar completamente para que el usuario ubique
-                // visualmente a qué se refiere el tip.
-                Color.black.opacity(0.45)
+                // visualmente a qué se refiere el tip. Tap fuera para
+                // cerrar — patrón estándar iOS.
+                Color.black.opacity(0.40)
                     .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        store.dismissCurrent()
+                    }
                     .transition(.opacity)
                 CoachMarkCard(id: id) {
                     store.dismissCurrent()
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
-                .transition(.scale(scale: 0.92).combined(with: .opacity))
+                .transition(
+                    .asymmetric(
+                        insertion: .scale(scale: 0.88)
+                            .combined(with: .opacity)
+                            .combined(with: .move(edge: .bottom)),
+                        removal: .scale(scale: 0.94)
+                            .combined(with: .opacity)
+                    )
+                )
             }
-            .animation(.spring(response: 0.42, dampingFraction: 0.82), value: store.presenting)
+            // Spring más suave (response 0.55 vs 0.42 antes) + damping
+            // un toque más bajo para que sienta vida sin rebotar. Combinado
+            // con la animación de offset desde abajo, la entrada deja de
+            // sentirse "brusca" y se parece más a un sheet de iOS.
+            .animation(.spring(response: 0.55, dampingFraction: 0.82), value: store.presenting)
             .zIndex(1000)
         }
     }
 }
 
-/// La card flotante en sí. Diamante de Nova arriba, título, body, ejemplo
-/// opcional, botón "Entendido". Diseño: surface + stroke novaAccent, sin
-/// parecer alert del sistema.
+/// La card flotante en sí. Cabecera con glyph + halo del color de tip,
+/// título, body, ejemplo opcional, botón "Entendido" del color del tip.
+/// Diseño: surface + stroke acento, sin parecer alert del sistema.
 private struct CoachMarkCard: View {
     let id: CoachMarkID
     let onDismiss: () -> Void
 
-    @State private var diamondPulse: Bool = false
+    @State private var iconAppeared: Bool = false
+    @State private var haloPulse: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            // Diamante Nova con glow sutil — identidad de marca.
-            ZStack {
-                Circle()
-                    .strokeBorder(Theme.Colors.novaAccent.opacity(0.45), lineWidth: 2)
-                    .frame(width: 48, height: 48)
-                    .scaleEffect(diamondPulse ? 1.8 : 1.0)
-                    .opacity(diamondPulse ? 0 : 0.9)
-                    .animation(
-                        .easeOut(duration: 1.6).repeatForever(autoreverses: false),
-                        value: diamondPulse
-                    )
-                Circle()
-                    .fill(Theme.Colors.novaGradient)
-                    .frame(width: 48, height: 48)
-                    .shadow(color: Theme.Colors.novaAccent.opacity(0.55), radius: 14, y: 4)
-                NovaSparkMark(size: 20)
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.top, Theme.Spacing.sm)
+            header
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, Theme.Spacing.sm)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(id.title)
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .multilineTextAlignment(.leading)
                 Text(id.body)
@@ -165,15 +198,19 @@ private struct CoachMarkCard: View {
                 if let example = id.example {
                     Text(example)
                         .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.Colors.textTertiary)
+                        .foregroundStyle(id.accent)
                         .italic()
                         .padding(.top, 4)
-                        .padding(.horizontal, Theme.Spacing.sm)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, Theme.Spacing.sm + 2)
+                        .padding(.vertical, 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
                             RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
-                                .fill(Theme.Colors.novaAccentSoft)
+                                .fill(id.accent.opacity(0.10))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
+                                        .strokeBorder(id.accent.opacity(0.20), lineWidth: 1)
+                                )
                         )
                 }
             }
@@ -185,9 +222,9 @@ private struct CoachMarkCard: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Theme.Spacing.md - 2)
                     .background(
-                        Capsule().fill(Theme.Colors.novaGradient)
+                        Capsule().fill(buttonFill)
                     )
-                    .shadow(color: Theme.Colors.novaAccent.opacity(0.45), radius: 10, y: 4)
+                    .shadow(color: id.accent.opacity(0.40), radius: 12, y: 5)
             }
             .buttonStyle(.plain)
             .padding(.top, Theme.Spacing.xs)
@@ -199,11 +236,85 @@ private struct CoachMarkCard: View {
                 .fill(Theme.Colors.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                        .strokeBorder(Theme.Colors.novaAccent.opacity(0.30), lineWidth: 1.2)
+                        .strokeBorder(id.accent.opacity(0.28), lineWidth: 1.2)
                 )
         )
-        .focusCardShadow()
-        .onAppear { diamondPulse = true }
+        .focusCardShadow(strong: true)
+        .onAppear {
+            // Stagger sutil: el icono entra con un leve delay después de
+            // la card. Hace que el coach mark "se arme" en vez de aparecer
+            // todo a la vez, eliminando la sensación brusca.
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.7).delay(0.08)) {
+                iconAppeared = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                haloPulse = true
+            }
+        }
+    }
+
+    /// Header visual de la card. Para Nova mantenemos el diamante de marca;
+    /// para el resto, un glyph circular del color del tip — así cada
+    /// tutorial se siente distinto, no una secuencia de cards idénticas.
+    @ViewBuilder
+    private var header: some View {
+        ZStack {
+            // Halo expansivo del color del tip — pulsa sutil mientras la
+            // card está visible para atraer el ojo al icono.
+            Circle()
+                .strokeBorder(id.accent.opacity(0.40), lineWidth: 2)
+                .frame(width: 56, height: 56)
+                .scaleEffect(haloPulse ? 1.9 : 1.0)
+                .opacity(haloPulse ? 0 : 0.85)
+                .animation(
+                    .easeOut(duration: 1.8).repeatForever(autoreverses: false),
+                    value: haloPulse
+                )
+
+            if id == .nova {
+                // Nova mantiene su identidad: diamante con gradient.
+                Circle()
+                    .fill(Theme.Colors.novaGradient)
+                    .frame(width: 56, height: 56)
+                    .shadow(color: Theme.Colors.novaAccent.opacity(0.55), radius: 14, y: 5)
+                NovaSparkMark(size: 24)
+            } else {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                id.accent,
+                                id.accent.opacity(0.78)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 56, height: 56)
+                    .shadow(color: id.accent.opacity(0.45), radius: 14, y: 5)
+                Image(systemName: id.glyph)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .scaleEffect(iconAppeared ? 1.0 : 0.6)
+        .opacity(iconAppeared ? 1.0 : 0.0)
+    }
+
+    /// Fill del botón "Entendido". Nova sigue con su gradient característico;
+    /// el resto usa el accent del tip plano para reforzar la identidad
+    /// visual sin parecer "todos iguales con CTA violeta".
+    private var buttonFill: AnyShapeStyle {
+        if id == .nova {
+            return AnyShapeStyle(Theme.Colors.novaGradient)
+        }
+        return AnyShapeStyle(
+            LinearGradient(
+                colors: [id.accent, id.accent.opacity(0.85)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
     }
 }
 

@@ -260,7 +260,7 @@ struct AjustesView: View {
                             symbol: "key.fill",
                             tint: Theme.Colors.focusAccent,
                             title: "Iniciar sesión",
-                            subtitle: "Guardá tus datos en la nube y sincronizá entre dispositivos.",
+                            subtitle: "Guarda tus datos en la nube y sincroniza entre dispositivos.",
                             trailing: .chevron
                         )
                     }
@@ -383,7 +383,7 @@ struct AjustesView: View {
                     subtitle: "Sincronizar agenda con tu cuenta Google.",
                     sheet: CalendarConnectionSheet(
                         title: "Google Calendar",
-                        message: "Próximamente podrás conectar tu cuenta de Google con OAuth. Focus va a leer tus eventos y, si querés, escribir los bloques de foco de vuelta.",
+                        message: "Próximamente podrás conectar tu cuenta de Google con OAuth. Focus va a leer tus eventos y, si quieres, escribir los bloques de foco de vuelta.",
                         icon: "g.circle.fill",
                         tint: Color(red: 0.259, green: 0.522, blue: 0.957)
                     )

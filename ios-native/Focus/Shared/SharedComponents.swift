@@ -986,15 +986,19 @@ struct FocusBarInput: View {
         .padding(.vertical, Theme.Spacing.sm + 2)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                .fill(Theme.Colors.surface)
+                .fill(
+                    isFocused
+                        ? Theme.Colors.surface
+                        : Theme.Colors.surfaceHigh
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                 .strokeBorder(
                     isFocused
                         ? AnyShapeStyle(Theme.Colors.novaGradient)
-                        : AnyShapeStyle(Theme.Colors.border),
-                    lineWidth: isFocused ? 1.5 : Theme.Stroke.hairline
+                        : AnyShapeStyle(Theme.Colors.borderEmphasis.opacity(0.55)),
+                    lineWidth: isFocused ? 1.5 : 1.0
                 )
         )
         .focusCardShadow()
