@@ -1370,6 +1370,90 @@ enum NovaActionNormalizerTests {
             failures.append("  ✗ abs-B: 'acuérdame a las 9:50 de ducharme' no matcheó attach")
         }
 
+        // ───── resolveAbsoluteReminderHour: scoring AM/PM ─────────────
+        //
+        // Bug 2026-05-13 (Caso 1): "clases a las 1:30 acuérdame a las 12:50"
+        // — el reminder "12:50" con school context forceAM se resolvía a
+        // 0:50 (medianoche), dando offset ~12h 40min. Wrong. El scoring
+        // smart debe elegir PM 12:50 (mediodía) → offset 40 min.
+        //
+        // Patrón: dado eventHour24 y rawReminderHour 1-12, devolver el
+        // bracket (AM o PM) que produce offset positivo razonable.
+
+        // Caso 1 literal: event 13:30, reminder cruda 12:50 → debe ser 12 (PM mediodía).
+        check(
+            label: "scoring abs-1: event=13:30 + reminder cruda 12:50 → 12 (PM mediodía)",
+            actual: NovaResponder.resolveAbsoluteReminderHour(
+                rawReminderHour: 12, rawReminderMin: 50,
+                eventHour24: 13, eventMin: 30
+            ),
+            expected: 12, failures: &failures
+        )
+        // Caso 2: event 17:00, reminder cruda 4:30 → debe ser 16 (PM 4:30).
+        check(
+            label: "scoring abs-2: event=17:00 + reminder cruda 4:30 → 16 (PM)",
+            actual: NovaResponder.resolveAbsoluteReminderHour(
+                rawReminderHour: 4, rawReminderMin: 30,
+                eventHour24: 17, eventMin: 0
+            ),
+            expected: 16, failures: &failures
+        )
+        // Caso 3: event 10:00 AM, reminder cruda 9:50 → debe ser 9 (AM).
+        check(
+            label: "scoring abs-3: event=10:00 AM + reminder cruda 9:50 → 9 (AM)",
+            actual: NovaResponder.resolveAbsoluteReminderHour(
+                rawReminderHour: 9, rawReminderMin: 50,
+                eventHour24: 10, eventMin: 0
+            ),
+            expected: 9, failures: &failures
+        )
+        // Edge: reminder 24h literal (>12) — pasa tal cual.
+        check(
+            label: "scoring edge: reminder 16 (ya 24h) → 16",
+            actual: NovaResponder.resolveAbsoluteReminderHour(
+                rawReminderHour: 16, rawReminderMin: 0,
+                eventHour24: 17, eventMin: 0
+            ),
+            expected: 16, failures: &failures
+        )
+        // Edge: event temprano (8 AM), reminder 12:50 → AM 0:50 da offset 7h10m,
+        // PM 12:50 da offset NEGATIVO (-4h50m). AM gana.
+        check(
+            label: "scoring edge: event=8 AM + reminder 12:50 → 0 (AM noche)",
+            actual: NovaResponder.resolveAbsoluteReminderHour(
+                rawReminderHour: 12, rawReminderMin: 50,
+                eventHour24: 8, eventMin: 0
+            ),
+            expected: 0, failures: &failures
+        )
+
+        // ───── Caso 7 (ambiguo): "acuérdame lo de mañana" ────────────
+        //
+        // Sin trigger de tiempo concreto, ni "antes de", ni hora absoluta.
+        // El extractor de absoluto debe devolver nil. El de attach también.
+        // El flujo cae al parser local que pedirá clarify — no a "no pude
+        // separar" porque NO tiene 2 horas.
+
+        check(
+            label: "ambiguo: 'acuérdame lo de mañana' extract absoluto nil",
+            actual: NovaResponder.extractReminderAbsoluteIntent(
+                from: "acuérdame lo de mañana"
+            ) == nil,
+            expected: true, failures: &failures
+        )
+        check(
+            label: "ambiguo: 'acuérdame lo de mañana' extract attach nil",
+            actual: NovaResponder.extractReminderAttachIntent(
+                from: "acuérdame lo de mañana"
+            ) == nil,
+            expected: true, failures: &failures
+        )
+        check(
+            label: "ambiguo: 'acuérdame lo de mañana' isLikelyMultiAction false",
+            actual: NovaResponder.isLikelyMultiAction("acuérdame lo de mañana"),
+            expected: false, failures: &failures
+        )
+
         // ───── REGRESSION: school context AM solo en 6-12 ─────────────
         //
         // Antes del fix: "clase a las 1:30" → 1:30 AM (forceAM agresivo).

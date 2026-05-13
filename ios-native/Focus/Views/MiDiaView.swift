@@ -588,29 +588,37 @@ struct MiDiaView: View {
 
     /// Respuesta cuando el usuario manda una frase compleja (multi-acción)
     /// y NO tiene sesión activa. Sin IA fuerte no podemos separar las
-    /// acciones con seguridad — pedimos enviarlas una por una en vez de
-    /// crear un evento basura con el parser local.
+    /// acciones con seguridad — proponemos enviarlas una por una.
+    ///
+    /// Tono asistente real: no "no puedo", sino "lo hago mejor si me lo
+    /// pasas en partes". No usamos "isError: true" porque visualmente
+    /// arroja un tono ámbar/rojo de fallo que no corresponde a UX
+    /// normal de demo mode.
     private func complexInputNoSessionResponse(trimmed: String) -> InlineNovaResponse {
         InlineNovaResponse(
             userText: trimmed,
-            summary: "Esto necesita Nova con IA.",
-            details: "Tu mensaje tiene varias acciones encadenadas. Inicia sesión para que Nova las separe bien, o envíalas una por una desde aquí.",
-            isError: true
+            summary: "Probemos en partes.",
+            details: "Tu mensaje tiene varias cosas. Inicia sesión y las agendo todas juntas, o pásame una por una desde aquí.",
+            action: .dismiss,
+            isError: false,
+            tone: .clarify
         )
     }
 
     /// Respuesta cuando el backend falló procesando una frase compleja.
     /// MISMA política: no caer al parser local porque solo entendería una
-    /// de las acciones. Pedimos al usuario que las envíe separadas.
+    /// de las acciones. Pedimos enviarlas separadas con tono asistente.
     private func complexInputBackendErrorResponse(
         trimmed: String,
         error: NovaServiceError?
     ) -> InlineNovaResponse {
         InlineNovaResponse(
             userText: trimmed,
-            summary: "No pude separar las acciones de tu mensaje.",
-            details: "Tiene varias cosas encadenadas y Nova no pudo procesarlas a la vez. Envíalas por separado, por ejemplo: «en una hora voy a jugar fútbol», luego «en dos horas vuelvo».",
-            isError: true
+            summary: "Mejor lo hacemos en partes.",
+            details: "Estoy teniendo problemas para procesar todo junto. Pásame las acciones por separado y las agendo igual de bien — por ejemplo, primero «jugar fútbol en una hora», después «volver en dos horas».",
+            action: .dismiss,
+            isError: false,
+            tone: .clarify
         )
     }
 
@@ -769,41 +777,31 @@ struct MiDiaView: View {
         eventH: Int, eventMin: Int,
         reminderH: Int, reminderMin: Int
     ) -> InlineNovaResponse {
-        // 1. Resolver AM/PM para ambas horas usando adjustAmPm con el
-        //    texto completo como contexto. Esto le permite captar "de la
-        //    tarde", "de la mañana", verbos morning/PM, school context, etc.
-        //    Si event ≤ 12, lo pasamos por adjustAmPm. Si > 12, queda 24h.
+        // 1. Resolver event hour via `adjustAmPm` con el texto completo
+        //    como contexto (capta "de la tarde", verbos morning/PM,
+        //    school context con tope 6-12, etc.). Si event ≤ 12, lo
+        //    pasamos por adjustAmPm. Si > 12, queda 24h.
         let eventHour24 = eventH > 12 ? eventH : NovaResponder.adjustAmPm(
             hour: eventH, in: userText
         )
-        // El reminder hereda el MISMO bracket que el evento por defecto:
-        // si event quedó en PM (>=12), reminder con hour 1-12 también va
-        // PM SI eso lo deja antes del evento. Esto evita "clase 13:30
-        // acuérdame a las 12:50" interpretado como 12:50 AM.
-        let reminderHour24Naive = reminderH > 12 ? reminderH : NovaResponder.adjustAmPm(
-            hour: reminderH, in: userText
+        // 2. Reminder hour: usamos scoring smart que prueba AM y PM y
+        //    elige el bracket con offset positivo razonable (0..4 h
+        //    típicos). Esto evita el bug de "12:50" interpretado como
+        //    0:50 AM cuando el evento está en PM (offset ~12h, absurdo).
+        let reminderHour24 = NovaResponder.resolveAbsoluteReminderHour(
+            rawReminderHour: reminderH,
+            rawReminderMin: reminderMin,
+            eventHour24: eventHour24,
+            eventMin: eventMin
         )
-        // Si naive nos da reminder DESPUÉS del evento Y la diferencia es
-        // exactamente 12h (típico AM/PM flip), reintenta con bracket opuesto.
-        var reminderHour24 = reminderHour24Naive
-        let eventMinutesAbs = eventHour24 * 60 + eventMin
-        var reminderMinutesAbs = reminderHour24 * 60 + reminderMin
-        if reminderMinutesAbs > eventMinutesAbs,
-           reminderH <= 12, eventHour24 >= 12, reminderHour24Naive < 12 {
-            // Reminder asumido AM pero evento PM → flip a PM también.
-            reminderHour24 = reminderHour24Naive + 12
-            reminderMinutesAbs = reminderHour24 * 60 + reminderMin
-        } else if reminderMinutesAbs > eventMinutesAbs,
-                  reminderH <= 12, eventHour24 >= 12, reminderHour24Naive >= 12 {
-            // Reminder PM pero queda después → quizá quiso AM (raro pero
-            // posible si event es PM tarde y reminder mañana siguiente).
-            // No flippeamos automáticamente — preguntamos abajo.
-        }
 
-        // 2. Calcular offset en minutos.
+        let eventMinutesAbs = eventHour24 * 60 + eventMin
+        let reminderMinutesAbs = reminderHour24 * 60 + reminderMin
+
+        // 3. Calcular offset en minutos.
         let offsetMinutes = eventMinutesAbs - reminderMinutesAbs
 
-        // 3. Validar: si offset <= 0 → reminder no es anterior al evento
+        // 4. Validar: si offset <= 0 → reminder no es anterior al evento
         //    → preguntar.
         guard offsetMinutes > 0 else {
             return InlineNovaResponse(
@@ -883,10 +881,15 @@ struct MiDiaView: View {
 
         let cal = Calendar.current
         let startOfMatched = cal.startOfDay(for: matched.startTime)
-        // Resolver reminder hour: si reminderH ≤ 12, intentar quedarse
-        // antes del evento. Caer a 24h literal si > 12.
-        let reminderHour24 = reminderH > 12 ? reminderH : NovaResponder.adjustAmPm(
-            hour: reminderH, in: userText
+        let matchedHour24 = cal.component(.hour, from: matched.startTime)
+        let matchedMin = cal.component(.minute, from: matched.startTime)
+        // Smart scoring para evitar el bug de "12:50 AM vs PM" cuando el
+        // evento existente está en PM. Usa el mismo helper que Caso A.
+        let reminderHour24 = NovaResponder.resolveAbsoluteReminderHour(
+            rawReminderHour: reminderH,
+            rawReminderMin: reminderMin,
+            eventHour24: matchedHour24,
+            eventMin: matchedMin
         )
         guard let reminderDate = cal.date(
             bySettingHour: reminderHour24, minute: reminderMin, second: 0, of: startOfMatched

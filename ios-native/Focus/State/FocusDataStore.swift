@@ -607,6 +607,64 @@ enum NovaResponder {
         )
     }
 
+    /// Decide en qué bracket AM/PM cae el `rawReminderHour` (1..12) dado
+    /// el evento ya resuelto a 24h. Razonamiento: el reminder DEBE quedar
+    /// antes del evento Y a una distancia razonable (típicamente 0..4 h).
+    ///
+    /// Caso típico que esto resuelve: "clase a las 1:30 acuérdame a las
+    /// 12:50". El evento queda 13:30 (PM via colloquial). El reminder
+    /// crudo "12:50" sin contexto sería 0:50 AM por la regla "forceAM 12
+    /// → 0", lo cual da un offset de ~12.7 h (sin sentido). Con el
+    /// scoring, comparamos AM y PM bracket y elegimos el que produce un
+    /// offset positivo razonable.
+    ///
+    /// - Parameter rawReminderHour: hora cruda 0..12 del reminder.
+    /// - Parameter rawReminderMin: minutos crudos del reminder.
+    /// - Parameter eventHour24: hora del evento ya resuelta a 24h.
+    /// - Parameter eventMin: minutos del evento.
+    /// - Returns: hora 24h del reminder que produce el mejor offset.
+    ///   Si reminder es >12 (ya en 24h literal), retorna eso tal cual.
+    static func resolveAbsoluteReminderHour(
+        rawReminderHour: Int,
+        rawReminderMin: Int,
+        eventHour24: Int,
+        eventMin: Int
+    ) -> Int {
+        // 24h literal — no hay ambigüedad.
+        if rawReminderHour > 12 { return rawReminderHour }
+        // 0 ya es explícito (0..0 medianoche). Solo aplicamos scoring
+        // para 1..12.
+        if rawReminderHour == 0 { return 0 }
+
+        // Caso 12 es especial: AM = 0 (medianoche), PM = 12 (mediodía).
+        let amCandidate = rawReminderHour == 12 ? 0 : rawReminderHour
+        let pmCandidate = rawReminderHour == 12 ? 12 : rawReminderHour + 12
+
+        let eventMinutes = eventHour24 * 60 + eventMin
+        let amMinutes = amCandidate * 60 + rawReminderMin
+        let pmMinutes = pmCandidate * 60 + rawReminderMin
+
+        let amOffset = eventMinutes - amMinutes
+        let pmOffset = eventMinutes - pmMinutes
+
+        // Scoring: el mejor offset es:
+        //   - Positivo (reminder antes del evento).
+        //   - Pequeño (≤ 4 h ≈ 240 min) — típico aviso anticipado.
+        //
+        // Reglas:
+        //   - offset negativo (reminder después del evento) → penalización grande.
+        //   - offset > 4 h → penalización media (el usuario podría querer
+        //     un aviso muy anticipado, pero es atípico).
+        //   - offset ≤ 4 h → score = offset (cuanto menor, mejor).
+        func score(_ offset: Int) -> Int {
+            if offset <= 0 { return 1_000_000 + abs(offset) }
+            if offset > 240 { return 100_000 + offset }
+            return offset
+        }
+
+        return score(amOffset) <= score(pmOffset) ? amCandidate : pmCandidate
+    }
+
     /// Busca un evento cuyo título coincida aproximadamente con `activity`.
     /// Estrategia: normaliza ambos (sin acentos, lowercase, sin puntuación),
     /// prueba match exacto → substring en cualquier dirección → token
