@@ -19,14 +19,18 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            // Fondo: UN solo LinearGradient cobalto→background. Pintado
-            // SIEMPRE (sin depender de contentVisible) para que el fade-in
-            // del contenido se vea sobre el cobalto, no sobre blanco.
+            // Fondo: gradient cobalto multi-stop. Pintado SIEMPRE (sin
+            // depender de contentVisible) para que el fade-in del contenido
+            // se vea sobre el cobalto, no sobre blanco. Multi-stop con un
+            // guiño violeta hacia el medio para profundidad visual y
+            // continuidad con el diamante Nova del logo.
             LinearGradient(
-                colors: [
-                    Theme.Colors.focusAccent.opacity(0.20),
-                    Theme.Colors.background
-                ],
+                gradient: Gradient(stops: [
+                    .init(color: Theme.Colors.focusAccent.opacity(0.28), location: 0.00),
+                    .init(color: Theme.Colors.focusAccent.opacity(0.14), location: 0.35),
+                    .init(color: Theme.Colors.novaAccent.opacity(0.06),  location: 0.70),
+                    .init(color: Theme.Colors.background,                 location: 1.00),
+                ]),
                 startPoint: .top,
                 endPoint: .bottom
             )

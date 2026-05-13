@@ -7,15 +7,18 @@ struct BootView: View {
     @State private var markScale: CGFloat = 0.88
     @State private var glowOpacity: Double = 0.0
 
-    /// Gradiente radial: brillante azul en el centro, navy profundo en los bordes.
-    /// Da sensación de "spotlight" sobre el logo.
+    /// Gradiente radial multi-stop: brillante cobalto en el centro,
+    /// navy profundo intermedio, tinte indigo/violeta en los bordes.
+    /// Da sensación de "spotlight" sobre el logo, con un guiño violet
+    /// que conecta con el gradient interno del Nova diamond.
     private var bgRadial: some View {
         RadialGradient(
-            colors: [
-                Color(red: 0.118, green: 0.176, blue: 0.420),  // brillante centro
-                Color(red: 0.039, green: 0.055, blue: 0.165),  // navy profundo bordes
-                Color(red: 0.024, green: 0.039, blue: 0.118)   // casi negro en esquinas
-            ],
+            gradient: Gradient(stops: [
+                .init(color: Color(red: 0.145, green: 0.220, blue: 0.510), location: 0.00),  // cobalto brillante
+                .init(color: Color(red: 0.094, green: 0.135, blue: 0.330), location: 0.45),  // navy intermedio
+                .init(color: Color(red: 0.055, green: 0.065, blue: 0.210), location: 0.78),  // muy oscuro
+                .init(color: Color(red: 0.060, green: 0.040, blue: 0.160), location: 1.00),  // indigo nocturno
+            ]),
             center: .center,
             startRadius: 80,
             endRadius: 500

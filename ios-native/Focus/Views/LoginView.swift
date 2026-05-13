@@ -103,10 +103,12 @@ struct LoginView: View {
 
             VStack(spacing: 0) {
                 LinearGradient(
-                    colors: [
-                        Theme.Colors.focusAccent.opacity(0.10),
-                        Theme.Colors.background
-                    ],
+                    gradient: Gradient(stops: [
+                        .init(color: Theme.Colors.focusAccent.opacity(0.18), location: 0.00),
+                        .init(color: Theme.Colors.focusAccent.opacity(0.08), location: 0.45),
+                        .init(color: Theme.Colors.novaAccent.opacity(0.04),  location: 0.78),
+                        .init(color: Theme.Colors.background,                 location: 1.00),
+                    ]),
                     startPoint: .top,
                     endPoint: .bottom
                 )

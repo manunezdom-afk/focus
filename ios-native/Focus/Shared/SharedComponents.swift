@@ -1187,13 +1187,20 @@ struct FocusLogoMark: View {
     var shadow: Bool = true
     var gradient: LinearGradient = FocusLogoMark.defaultGradient
 
+    /// Gradient diagonal multi-stop: electric cobalt → focus blue → deep
+    /// navy → toque violeta. Más vivo que el dos-stops anterior, mantiene
+    /// el azul como identidad dominante y deja un guiño violet hacia el
+    /// borde inferior derecho — el mismo guiño Nova del gradient interno
+    /// (`Theme.Colors.novaGradient`).
     static let defaultGradient = LinearGradient(
-        colors: [
-            Color(red: 0.180, green: 0.310, blue: 0.910),  // #2E4FE8 cobalto vivo
-            Color(red: 0.094, green: 0.184, blue: 0.510)   // #182F82 azul profundo
-        ],
-        startPoint: .top,
-        endPoint: .bottom
+        gradient: Gradient(stops: [
+            .init(color: Color(red: 0.231, green: 0.510, blue: 0.965), location: 0.00),  // electric cobalt
+            .init(color: Color(red: 0.145, green: 0.388, blue: 0.922), location: 0.40),  // focus blue
+            .init(color: Color(red: 0.094, green: 0.184, blue: 0.510), location: 0.85),  // deep navy
+            .init(color: Color(red: 0.180, green: 0.130, blue: 0.520), location: 1.00),  // hint violet
+        ]),
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
     )
 
     var body: some View {
@@ -1209,90 +1216,72 @@ struct FocusLogoMark: View {
                     y: shadow ? size * 0.06 : 0
                 )
 
-            // SÍMBOLO INTERNO — engranaje minimalista de 6 dientes redondeados
-            // alrededor de un núcleo. Comunica "mecanismo mental / sistema
-            // que piensa", no "target / círculo apuntado". Diseñado con
-            // proporciones geométricas premium (estilo Material 3).
-            FocusGearMark(diameter: size * 0.56)
-
-            // Núcleo sólido — el punto central que sostiene el sistema.
+            // HALO RADIAL — luz blanca difusa detrás del diamante. Da
+            // sensación de "símbolo vivo" sin caer en el target/crosshair
+            // de Gemini. Sin estos pixels el diamante se ve pegado plano.
             Circle()
-                .fill(Color.white)
-                .frame(width: size * 0.16, height: size * 0.16)
-                .shadow(color: .black.opacity(shadow ? 0.15 : 0), radius: 2, y: 1)
+                .fill(
+                    RadialGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: Color.white.opacity(0.38), location: 0.0),
+                            .init(color: Color(red: 0.65, green: 0.80, blue: 1.0).opacity(0.18), location: 0.55),
+                            .init(color: Color.white.opacity(0.0), location: 1.0),
+                        ]),
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: size * 0.42
+                    )
+                )
+                .frame(width: size * 0.92, height: size * 0.92)
+
+            // NOVA DIAMOND — símbolo único de la app. Mismo rombo que se
+            // usa en FocusBar, Nova tab, Nova chat, Nova Live: identidad
+            // unificada de Nova como asistente. Reemplazó el engranaje
+            // (FocusGearMark) en 2026-05-13 — antes Focus y Nova lucían
+            // como dos productos distintos.
+            NovaSpark()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white,
+                            Color(red: 0.92, green: 0.96, blue: 1.0)  // ice blue tail
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: size * 0.46 * 0.62, height: size * 0.46)
+                .shadow(
+                    color: Color(red: 0.60, green: 0.75, blue: 1.0).opacity(shadow ? 0.55 : 0.25),
+                    radius: size * 0.06,
+                    x: 0,
+                    y: 0
+                )
+
+            // Highlight superior del rombo — pixel de luz sobre la arista
+            // superior para que el diamante se lea como volumen, no plano.
+            NovaSpark()
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.85), Color.white.opacity(0.0)],
+                        startPoint: .top,
+                        endPoint: .center
+                    ),
+                    lineWidth: max(0.6, size * 0.010)
+                )
+                .frame(width: size * 0.46 * 0.62, height: size * 0.46)
+                .blendMode(.plusLighter)
         }
         .frame(width: size, height: size)
     }
 }
 
-/// Engranaje estilizado: 6 lóbulos redondeados + cuerpo circular con hueco
-/// central. Más cercano a "rueda dentada moderna" que a "círculo target".
-struct FocusGearMark: View {
-    let diameter: CGFloat
-
-    var body: some View {
-        Canvas { ctx, size in
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            let bodyRadius = size.width * 0.30
-            let toothInner = size.width * 0.36   // base del diente
-            let toothOuter = size.width * 0.49   // punta del diente
-            let toothCount = 6
-            let toothHalfWidth: CGFloat = .pi / Double(toothCount) * 0.45  // radianes
-
-            // Dibuja 6 dientes redondeados como "globos" radiales.
-            for i in 0..<toothCount {
-                let angle = -CGFloat.pi / 2 + (2 * .pi / CGFloat(toothCount)) * CGFloat(i)
-                let leftAngle = angle - toothHalfWidth
-                let rightAngle = angle + toothHalfWidth
-
-                var p = Path()
-                let p1 = polar(center: center, radius: toothInner, angle: leftAngle)
-                let p2 = polar(center: center, radius: toothOuter, angle: leftAngle)
-                let p3 = polar(center: center, radius: toothOuter, angle: rightAngle)
-                let p4 = polar(center: center, radius: toothInner, angle: rightAngle)
-                p.move(to: p1)
-                // Lado externo del diente con curva suave (arco).
-                p.addLine(to: p2)
-                p.addArc(
-                    center: center,
-                    radius: toothOuter,
-                    startAngle: .radians(leftAngle),
-                    endAngle: .radians(rightAngle),
-                    clockwise: false
-                )
-                _ = p3
-                p.addLine(to: p4)
-                p.addArc(
-                    center: center,
-                    radius: toothInner,
-                    startAngle: .radians(rightAngle),
-                    endAngle: .radians(leftAngle),
-                    clockwise: true
-                )
-                p.closeSubpath()
-                ctx.fill(p, with: .color(.white.opacity(0.95)))
-            }
-
-            // Cuerpo circular del engranaje (anillo).
-            let bodyPath = Path(ellipseIn: CGRect(
-                x: center.x - bodyRadius,
-                y: center.y - bodyRadius,
-                width: bodyRadius * 2,
-                height: bodyRadius * 2
-            ))
-            ctx.stroke(
-                bodyPath,
-                with: .color(.white.opacity(0.95)),
-                lineWidth: size.width * 0.075
-            )
-        }
-        .frame(width: diameter, height: diameter)
-    }
-
-    private func polar(center: CGPoint, radius: CGFloat, angle: CGFloat) -> CGPoint {
-        CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
-    }
-}
+// Nota histórica: existió un `FocusGearMark` (engranaje 6-dientes)
+// hasta el 2026-05-13. Se removió porque hacía que Focus pareciera otra
+// app distinta de Nova dentro de la propia app — el usuario veía el
+// engranaje en Mi Día/Nova headers y el rombo Nova en chat/FocusBar,
+// como si fueran dos productos. Ahora `FocusLogoMark` muestra el rombo
+// Nova (NovaSpark) con halo: identidad unificada Focus + Nova.
 
 // MARK: - Nova spark mark (logo propio de Nova, distinto del sparkle 4-point)
 

@@ -106,13 +106,20 @@ struct MiDiaView: View {
         ZStack {
             Theme.Colors.background.ignoresSafeArea()
 
-            // Hero zone: gradiente sutil detrás del header — identidad de Mi Día.
+            // Hero zone: gradient sutil detrás del header — identidad de
+            // Mi Día. Multi-stop: cobalto suave → tinte azul intermedio →
+            // un guiño violeta Nova → fade a background. Antes era un
+            // simple 2-stops cobalto→bg que se veía plano; ahora la
+            // transición de azul agrega profundidad y conecta visualmente
+            // con el gradient interno del FocusLogoMark / Nova diamond.
             VStack(spacing: 0) {
                 LinearGradient(
-                    colors: [
-                        Theme.Colors.focusAccent.opacity(0.08),
-                        Theme.Colors.background
-                    ],
+                    gradient: Gradient(stops: [
+                        .init(color: Theme.Colors.focusAccent.opacity(0.14), location: 0.00),
+                        .init(color: Theme.Colors.focusAccent.opacity(0.07), location: 0.45),
+                        .init(color: Theme.Colors.novaAccent.opacity(0.04),  location: 0.78),
+                        .init(color: Theme.Colors.background,                 location: 1.00),
+                    ]),
                     startPoint: .top,
                     endPoint: .bottom
                 )
