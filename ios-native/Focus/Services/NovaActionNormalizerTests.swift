@@ -760,6 +760,104 @@ enum NovaActionNormalizerTests {
         check(label: "shortRelated: 1 intent (no split, llevar no tiene hora)",
               actual: shortRelated.count, expected: 1, failures: &failures)
 
+        // ───── BUG REPORT 2026-05-12 v2 — CASOS EXACTOS DEL USUARIO ───
+
+        // Caso 1 (exacto): "en una hora voy a jugar fútbol, en dos horas
+        // vuelvo y a las 12 me acuesto". Tiene 3 acciones con horarios
+        // relativos en palabras ("en una hora", "en dos horas") + hora
+        // ambigua "a las 12". El parser LOCAL no puede separarlas (smart
+        // " y " split exige hora en dígitos en ambos lados); el detector
+        // debe marcarla como compleja para forzar el backend.
+        check(
+            label: "caso1: isLikelyMultiAction true (en una hora…, en dos horas…, a las 12)",
+            actual: NovaResponder.isLikelyMultiAction(
+                "en una hora voy a jugar fútbol, en dos horas vuelvo y a las 12 me acuesto"
+            ),
+            expected: true,
+            failures: &failures
+        )
+
+        // Caso 2 (exacto): "tengo que seguir trabajando a las 3:30 y comer
+        // a las 4" — dos horas en dígitos, smart " y " split debe separar.
+        let caso2 = runPipeline("tengo que seguir trabajando a las 3:30 y comer a las 4")
+        check(label: "caso2: 2 intents", actual: caso2.count, expected: 2, failures: &failures)
+        if caso2.count == 2 {
+            check(label: "caso2[0] title 'Seguir trabajando'",
+                  actual: caso2[0].title, expected: "Seguir trabajando", failures: &failures)
+            check(label: "caso2[0] hour 15", actual: caso2[0].hour, expected: 15, failures: &failures)
+            check(label: "caso2[0] minute 30", actual: caso2[0].minute, expected: 30, failures: &failures)
+            check(label: "caso2[0] no reunión", actual: caso2[0].section != .reunion, expected: true, failures: &failures)
+            check(label: "caso2[1] title 'Comer'",
+                  actual: caso2[1].title, expected: "Comer", failures: &failures)
+            check(label: "caso2[1] hour 16", actual: caso2[1].hour, expected: 16, failures: &failures)
+            check(label: "caso2[1] no reunión", actual: caso2[1].section != .reunion, expected: true, failures: &failures)
+        }
+
+        // Caso 3 (exacto): "necesito ir a buscar a mi hermano a las tres"
+        // — hora en palabra, 1 acción. NO debe preguntar "¿cuándo?".
+        let caso3 = runPipeline("necesito ir a buscar a mi hermano a las tres")
+        check(label: "caso3: 1 intent (no clarify)",
+              actual: caso3.count, expected: 1, failures: &failures)
+        if let first = caso3.first {
+            check(label: "caso3 NO es clarify",
+                  actual: first.kind != .clarify, expected: true, failures: &failures)
+            check(label: "caso3 title 'Ir a buscar a mi hermano'",
+                  actual: first.title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "caso3 hour 15", actual: first.hour, expected: 15, failures: &failures)
+            check(label: "caso3 HOY", actual: first.day, expected: .today, failures: &failures)
+        }
+
+        // Caso 4 (exacto): "tengo que ir a buscar a mi hermano en 20 min
+        // luego salir a jugar fútbol a las 10 y llevar la pelota a las 11"
+        // → 3 intents con títulos limpios; NUNCA "Salir a jugar fútbol
+        // que llevar la pelota" concatenado.
+        let caso4 = runPipeline("tengo que ir a buscar a mi hermano en 20 min luego salir a jugar fútbol a las 10 y llevar la pelota a las 11")
+        check(label: "caso4: 3 intents", actual: caso4.count, expected: 3, failures: &failures)
+        if caso4.count == 3 {
+            check(label: "caso4[0] title 'Ir a buscar a mi hermano'",
+                  actual: caso4[0].title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "caso4[1] title 'Salir a jugar fútbol'",
+                  actual: caso4[1].title, expected: "Salir a jugar fútbol", failures: &failures)
+            check(label: "caso4[1] hour 10", actual: caso4[1].hour, expected: 10, failures: &failures)
+            check(label: "caso4[2] title 'Llevar la pelota'",
+                  actual: caso4[2].title, expected: "Llevar la pelota", failures: &failures)
+            check(label: "caso4[2] hour 11", actual: caso4[2].hour, expected: 11, failures: &failures)
+            let badConcat = caso4.contains {
+                let t = $0.title.lowercased()
+                return t.contains("que llevar") || t.contains("fútbol que")
+                    || t.contains("futbol que")
+            }
+            check(label: "caso4: ningún título concatenado",
+                  actual: badConcat, expected: false, failures: &failures)
+        }
+
+        // AM/PM contextual reglas firmes del spec del usuario:
+        // - despertarme a las 7 = 07:00
+        // - clase a las 8 = 08:00
+        // - comer a las 7 = 19:00
+        // - trabajar a las 3:30 = 15:30
+        // (cubiertas en `bug1`/`bug7`/`bug8`/`case4`/`case5`/`case1` arriba —
+        //  añadimos asserts redundantes para que el bloque del usuario
+        //  esté visible y verifiquemos cualquier regresión futura).
+        let amTests: [(String, Int, Int)] = [
+            ("despertarme a las 7", 7, 0),
+            ("clase a las 8", 8, 0),
+            ("comer a las 7", 19, 0),
+            ("trabajar a las 3:30", 15, 30)
+        ]
+        for (text, h, m) in amTests {
+            let r = runPipeline(text)
+            if let first = r.first {
+                check(label: "AM/PM '\(text)' hour=\(h)",
+                      actual: first.hour, expected: h, failures: &failures)
+                check(label: "AM/PM '\(text)' minute=\(m)",
+                      actual: first.minute ?? 0, expected: m, failures: &failures)
+            } else {
+                let msg = "  ✗ AM/PM '\(text)' — pipeline devolvió 0 intents"
+                print(msg); failures.append(msg)
+            }
+        }
+
         // ───── isLikelyMultiAction (gating de fallback local) ──────────
 
         // Caso real reportado el 2026-05-12: el parser local NO entiende

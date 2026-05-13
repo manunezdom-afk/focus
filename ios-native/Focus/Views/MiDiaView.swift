@@ -538,17 +538,24 @@ struct MiDiaView: View {
                 let note = humanFallbackNote(for: error)
                 return runLocalFallback(for: trimmed, withNote: note)
             }
+            // Errores sin fallback (mensaje vacío, demasiado largo). Mostramos
+            // SOLO el mensaje humanizado de `errorDescription` — sin prefijo
+            // "Nova tuvo un problema" que sonaba como falla del sistema.
             return InlineNovaResponse(
                 userText: trimmed,
-                summary: "Nova tuvo un problema.",
-                details: error.errorDescription ?? "Inténtalo en un momento.",
+                summary: error.errorDescription ?? "No pude procesar tu mensaje.",
+                details: nil,
                 isError: true
             )
         } catch {
             if isComplex {
                 return complexInputBackendErrorResponse(trimmed: trimmed, error: nil)
             }
-            return runLocalFallback(for: trimmed, withNote: "Usé el modo local porque Nova avanzada no respondió.")
+            // Caer al parser local sin nota — el usuario no necesita saber
+            // que hubo un error técnico si la acción se ejecutó. Si el
+            // local tampoco entiende, `runLocalFallback` ya devuelve un
+            // mensaje humano pidiendo aclaración.
+            return runLocalFallback(for: trimmed, withNote: nil)
         }
     }
 
@@ -896,8 +903,10 @@ struct MiDiaView: View {
         }
     }
 
-    /// Mensajes amables que mostramos cuando el backend falla y caemos a local.
-    /// Estado técnico va solo a console.log, NO a la UI principal.
+    /// Mensajes amables que mostramos cuando el backend falla y caemos a
+    /// local. Estado técnico va solo a console.log, NUNCA a la UI. El
+    /// usuario no debe leer "modo local", "Nova avanzada", "Error 500",
+    /// "status code", etc. — es ruido de implementación.
     private func humanFallbackNote(for error: NovaServiceError) -> String? {
         switch error {
         case .unauthorized:
@@ -905,16 +914,13 @@ struct MiDiaView: View {
         case .quotaExceeded(let message):
             return message
         case .offline:
-            return "Sin conexión. Tus cambios quedan locales hasta que vuelvas a tener internet."
+            return "Sin conexión. Tus cambios se guardan en este iPhone hasta que vuelvas a tener internet."
         case .timeout, .serviceUnavailable, .badLLMOutput, .network,
              .server, .invalidResponse, .encoding, .decoding:
-            // Antes mostrábamos "Nova avanzada no respondió bien. Lo
-            // resolví en modo local." → técnico y alarmante. Si el
-            // fallback local logró ejecutar las acciones (resumen no
-            // vacío), el usuario NO necesita ver una nota de error —
-            // el `summary` ya le dice qué se hizo. Para los pocos casos
-            // donde el local tampoco entendió, el caller muestra una
-            // pregunta humana por separado. NO devolvemos nada acá.
+            // Si el fallback local ejecutó las acciones, el `summary` ya
+            // dice qué se hizo — no agregamos nota. Para los casos donde
+            // el local tampoco entendió, el caller muestra una pregunta
+            // humana por separado.
             return nil
         default:
             return nil

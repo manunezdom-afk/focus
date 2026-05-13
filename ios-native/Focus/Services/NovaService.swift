@@ -189,21 +189,26 @@ enum NovaServiceError: Error, LocalizedError {
         }
     }
 
+    /// Mensajes que SÍ se muestran al usuario cuando el error no permite
+    /// fallback (típicamente cuota agotada o mensaje vacío). Todos en
+    /// español neutro, sin jargon técnico, sin números de status. El
+    /// usuario no debe saber que existió un "500", un "modo local" ni
+    /// "Nova avanzada vs simple" — eso es ruido de implementación.
     var errorDescription: String? {
         switch self {
-        case .emptyMessage:        return "Mensaje vacío."
-        case .messageTooLong:      return "Mensaje demasiado largo."
-        case .unauthorized:        return "Sesión inválida."
+        case .emptyMessage:        return "El mensaje está vacío."
+        case .messageTooLong:      return "El mensaje es demasiado largo. Acórtalo un poco."
+        case .unauthorized:        return "Tu sesión expiró. Vuelve a iniciar sesión cuando puedas."
         case .quotaExceeded(let m): return m ?? "Llegaste al límite diario de Nova."
-        case .badLLMOutput:        return "La respuesta no se entendió. Intenta otra vez."
-        case .serviceUnavailable:  return "Nova está sobrecargada. Vuelve a intentar."
-        case .offline:             return "Sin conexión."
-        case .timeout:             return "Nova tardó demasiado."
-        case .network:             return "Error de red."
-        case .invalidResponse:     return "Respuesta inesperada del servidor."
-        case .encoding:            return "Error preparando la solicitud."
-        case .decoding:            return "Error procesando la respuesta."
-        case .server(let status):  return "Error del servidor (\(status))."
+        case .badLLMOutput:        return "No pude entender bien lo que respondió Nova. Repite el mensaje, por favor."
+        case .serviceUnavailable:  return "Nova está saturada en este momento. Vuelve a intentarlo en un rato."
+        case .offline:             return "Sin conexión. Tus cambios quedan en este iPhone hasta que vuelvas a tener internet."
+        case .timeout:             return "Nova tardó más de lo esperado. Vuelve a intentarlo."
+        case .network:             return "Hubo un problema con la conexión. Vuelve a intentarlo."
+        case .invalidResponse:     return "Algo no salió como esperaba. Vuelve a intentarlo."
+        case .encoding:            return "No pude armar tu solicitud. Vuelve a intentarlo."
+        case .decoding:            return "No pude leer la respuesta. Vuelve a intentarlo."
+        case .server:              return "Algo no salió como esperaba. Vuelve a intentarlo en un momento."
         }
     }
 }

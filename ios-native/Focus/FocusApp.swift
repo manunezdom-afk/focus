@@ -8,13 +8,14 @@ struct FocusApp: App {
 
     init() {
         #if DEBUG
-        // Si la app se lanza con `FOCUS_RUN_TESTS=1`, corre la suite de
-        // tests del normalizer y escribe el resultado a un file en
-        // Documents — `print()` no es confiable desde GUI app, pero un
-        // file en Documents podemos leerlo desde host via `simctl
-        // get_app_container` o lo equivalente en dispositivo físico.
-        // No afecta release builds.
-        if ProcessInfo.processInfo.environment["FOCUS_RUN_TESTS"] == "1" {
+        // Test runner gate: `FOCUS_RUN_TESTS=1` env var (preferido —
+        // `SIMCTL_CHILD_FOCUS_RUN_TESTS=1` desde el host) o argumento
+        // `--run-nova-tests` en argv. Algunas combinaciones de simulador/
+        // versión de iOS no propagan SIMCTL_CHILD_* a `ProcessInfo`, así
+        // que aceptamos ambas formas.
+        let envFlag = ProcessInfo.processInfo.environment["FOCUS_RUN_TESTS"] == "1"
+        let argFlag = CommandLine.arguments.contains("--run-nova-tests")
+        if envFlag || argFlag {
             let result = NovaActionNormalizerTests.runAll()
             print("===== NOVA TESTS =====\n\(result)\n=====================")
             if let docs = FileManager.default.urls(
