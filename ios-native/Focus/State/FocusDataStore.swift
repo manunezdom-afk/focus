@@ -795,9 +795,44 @@ enum NovaResponder {
                     workingSeg = "\(day) \(workingSeg)"
                 }
             }
+            // Reordenamiento estructural: "a las X [verbo]" → "[verbo] a las X".
+            // Patrón típico tras splitear por "luego/después": "a las 3 ducharme"
+            // queda con la hora al principio y el parser no extrae bien el
+            // título. Si invertimos el orden, "ducharme a las 3" matchea los
+            // patrones de event/chore triggers normalmente.
+            workingSeg = reorderTimeFirstSegment(workingSeg)
             intents.append(parse(workingSeg, context: context))
         }
         return intents
+    }
+
+    /// Si el segmento comienza con "a la(s) HH(:MM)" seguido de un verbo
+    /// (presumiblemente la acción), reordena moviendo la hora al final.
+    /// Ej: "a las 3 ducharme" → "ducharme a las 3". Sin cambios si la
+    /// estructura no matchea — la mayoría de frases bien formadas
+    /// ("ducharme a las 3", "agenda dentista mañana 10") pasan tal cual.
+    private static func reorderTimeFirstSegment(_ seg: String) -> String {
+        let trimmed = seg.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = #"^(a la?s?\s+\d{1,2}(?::\d{2})?)\s+(\S.*)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(
+                in: trimmed,
+                range: NSRange(location: 0, length: (trimmed as NSString).length)
+              ),
+              match.numberOfRanges >= 3,
+              match.range(at: 1).location != NSNotFound,
+              match.range(at: 2).location != NSNotFound
+        else { return seg }
+        let ns = trimmed as NSString
+        let timePart = ns.substring(with: match.range(at: 1))
+        let restPart = ns.substring(with: match.range(at: 2))
+        // Heurística: el "resto" debe parecer un verbo / acción (no otra
+        // hora ni filler). Aceptamos si empieza con letra y tiene ≥ 3 chars.
+        guard let firstChar = restPart.first,
+              firstChar.isLetter,
+              restPart.count >= 3
+        else { return seg }
+        return "\(restPart) \(timePart)"
     }
 
     /// Conectores fuertes que indican una nueva acción dentro de la misma

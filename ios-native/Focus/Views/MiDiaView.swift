@@ -532,14 +532,12 @@ struct MiDiaView: View {
             store.setPendingClarification(pending)
         }
 
-        // 3. Sin sesión activa → parser local directo. No mostramos nota
-        // porque el usuario está en modo demo a propósito. EXCEPCIÓN:
-        // si la frase es compleja (multi-acción), no podemos resolverla
-        // bien sin la IA — pedimos enviarlas separadas.
+        // 3. Sin sesión activa → parser local directo (incluso para frases
+        // complejas). `runLocalFallback` ya tiene multi-intent splitting
+        // por "luego/después/también" + smart " y " split. Si logra crear
+        // al menos un ítem, devuelve éxito multi-intent; si no, cae a un
+        // mensaje útil (no "no pude separar" genérico).
         guard let creds = store.syncCredentials else {
-            if isComplex {
-                return complexInputNoSessionResponse(trimmed: trimmed)
-            }
             return runLocalFallback(for: trimmed, withNote: nil)
         }
 
@@ -554,20 +552,17 @@ struct MiDiaView: View {
             )
             return await applyBackendResult(result, userText: trimmed)
         } catch let error as NovaServiceError {
-            // Frase compleja + backend falló: NO caer al parser local.
-            // El local solo entendería una de las N acciones y crearía
-            // un evento basura. Es mucho mejor pedirle al usuario que
-            // las separe.
-            if isComplex {
-                return complexInputBackendErrorResponse(trimmed: trimmed, error: error)
-            }
+            // Política 2026-05-13 v3: aunque la frase sea compleja, si el
+            // backend falla intentamos el parser local. `runLocalFallback`
+            // tiene multi-intent + smart " y " split + reordenamiento de
+            // segmentos. Si logra ejecutar 1+ acción, devolvemos eso. Si
+            // ni eso logra, devuelve un mensaje útil mostrando lo que SÍ
+            // entendió en vez del genérico "no pude separar".
             if error.canFallbackToLocal {
                 let note = humanFallbackNote(for: error)
                 return runLocalFallback(for: trimmed, withNote: note)
             }
-            // Errores sin fallback (mensaje vacío, demasiado largo). Mostramos
-            // SOLO el mensaje humanizado de `errorDescription` — sin prefijo
-            // "Nova tuvo un problema" que sonaba como falla del sistema.
+            // Errores sin fallback (mensaje vacío, demasiado largo).
             return InlineNovaResponse(
                 userText: trimmed,
                 summary: error.errorDescription ?? "No pude procesar tu mensaje.",
@@ -575,9 +570,6 @@ struct MiDiaView: View {
                 isError: true
             )
         } catch {
-            if isComplex {
-                return complexInputBackendErrorResponse(trimmed: trimmed, error: nil)
-            }
             // Caer al parser local sin nota — el usuario no necesita saber
             // que hubo un error técnico si la acción se ejecutó. Si el
             // local tampoco entiende, `runLocalFallback` ya devuelve un
@@ -1134,12 +1126,16 @@ struct MiDiaView: View {
         }
 
         if createdItems.isEmpty {
-            // Nada se creó — no guardar basura. Pedir separación manual.
+            // Nada se creó — no guardar basura. Mensaje útil con tono
+            // asistente (clarify, no error) en vez de "no pude separar"
+            // que sonaba como rendición.
             return InlineNovaResponse(
                 userText: trimmed,
-                summary: "Entendí varias cosas pero no logré separarlas con confianza.",
-                details: "Prueba enviándolas por separado.",
-                isError: true
+                summary: "Vamos en partes.",
+                details: "Te entendí varias cosas pero quiero confirmar antes de agendar. ¿Me las pasas una por una?",
+                action: .dismiss,
+                isError: false,
+                tone: .clarify
             )
         }
 

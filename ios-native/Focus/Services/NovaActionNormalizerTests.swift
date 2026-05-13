@@ -1454,6 +1454,59 @@ enum NovaActionNormalizerTests {
             expected: false, failures: &failures
         )
 
+        // ───── REORDEN: 'a las X [verbo]' → '[verbo] a las X' ─────────
+        //
+        // Tras splitear por "luego/después", el segundo segmento puede
+        // empezar con la hora ("a las 3 ducharme"). El parser local
+        // entiende mejor si reordenamos a "ducharme a las 3".
+        //
+        // Bug del screenshot 2026-05-13:
+        //   "ir a buscar a mi hermano a las 2 luego a las 3 ducharme"
+        // splits a:
+        //   1. "ir a buscar a mi hermano a las 2"  ✓ (parser OK)
+        //   2. "a las 3 ducharme"  ← antes daba clarify, ahora reordena
+        //                            a "ducharme a las 3" y parser OK.
+
+        let reorderTest = NovaResponder.parseAll(
+            "ir a buscar a mi hermano a las 2 luego a las 3 ducharme"
+        )
+        check(label: "reorden: 'a las 2 luego a las 3 ducharme' → 2 intents",
+              actual: reorderTest.count, expected: 2, failures: &failures)
+
+        let reorderResults = runPipeline(
+            "ir a buscar a mi hermano a las 2 luego a las 3 ducharme"
+        )
+        check(label: "reorden runPipeline: 2 intents",
+              actual: reorderResults.count, expected: 2, failures: &failures)
+        if reorderResults.count == 2 {
+            // Intent 1: "Ir a buscar a mi hermano" hora 14 (PM colloquial)
+            check(label: "reorden[0] title 'Ir a buscar a mi hermano'",
+                  actual: reorderResults[0].title,
+                  expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "reorden[0] hour 14",
+                  actual: reorderResults[0].hour, expected: 14, failures: &failures)
+            // Intent 2: "Ducharme" hora 15 (PM colloquial)
+            check(label: "reorden[1] title 'Ducharme'",
+                  actual: reorderResults[1].title, expected: "Ducharme", failures: &failures)
+            check(label: "reorden[1] hour 15",
+                  actual: reorderResults[1].hour, expected: 15, failures: &failures)
+            // Crítico: ninguno debe ser .clarify
+            check(label: "reorden[1] kind ≠ clarify",
+                  actual: reorderResults[1].kind != .clarify,
+                  expected: true, failures: &failures)
+        }
+
+        // Caso similar con palabras: "estudiar a las 5 luego a las 7 cenar"
+        let reorderWords = runPipeline("estudiar a las 5 luego a las 7 cenar")
+        check(label: "reorden-2: 'estudiar a las 5 luego a las 7 cenar' → 2 intents",
+              actual: reorderWords.count, expected: 2, failures: &failures)
+        if reorderWords.count == 2 {
+            check(label: "reorden-2[0] hour 17 (estudiar PM)",
+                  actual: reorderWords[0].hour, expected: 17, failures: &failures)
+            check(label: "reorden-2[1] hour 19 (cenar PM por verbo)",
+                  actual: reorderWords[1].hour, expected: 19, failures: &failures)
+        }
+
         // ───── REGRESSION: school context AM solo en 6-12 ─────────────
         //
         // Antes del fix: "clase a las 1:30" → 1:30 AM (forceAM agresivo).
