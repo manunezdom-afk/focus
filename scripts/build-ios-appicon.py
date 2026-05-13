@@ -2,30 +2,37 @@
 """
 scripts/build-ios-appicon.py
 
-AppIcon V9 de Focus — "Pilas asimétricas" + acento Nova.
+AppIcon V10 de Focus — engranaje del pensamiento + núcleo focal.
 
-Concepto abstracto de pensamiento organizado: 3 barras horizontales
-redondeadas, de anchos distintos, en posiciones asimétricas. Lectura:
-"orden mental, foco intencional, sistema de prioridades". Plus un dot
-cyan accent arriba a la derecha que sugiere la capa Nova (chispa de
-inteligencia).
+Concepto: Focus viene de "enfocarse", "pensar", "concentrarse". El
+engranaje (rueda dentada) comunica MECANISMO MENTAL, sistema que piensa.
+El núcleo sólido central es el PUNTO FOCAL — la concentración. Juntos:
+"sistema mental enfocado".
 
-V9 vs V8/V7:
-- V7/V8 eran engranaje + núcleo concéntrico → el usuario lo leía como
-  "rueda / target / engranaje literal" aunque se hiciera más pequeño.
-  La forma circular era el problema, no el tamaño.
-- V9 ABANDONA la geometría circular. Solo 3 barras horizontales
-  asimétricas (anchos y posiciones distintos). Cero círculos en el
-  símbolo principal — solo un dot accent muy pequeño arriba a la
-  derecha. Imposible leerlo como wheel/gear/target.
+V10 vs V9 (3 pilas asimétricas):
+- V9 era abstracto, leía como "lista" o "menú". No comunicaba el
+  concepto de Focus = concentración.
+- V10 vuelve al engranaje pero ahora MATCHEA el `FocusLogoMark`
+  SwiftUI que ya se ve dentro de la app (BootView, Login, Onboarding,
+  Ajustes footer). Antes había 2 iconos distintos:
+  · AppIcon en home iPhone → 3 barras (V9).
+  · FocusLogoMark dentro de la app → engranaje 6 dientes.
+  Ahora son el MISMO símbolo — coherencia visual end-to-end.
 
-Composición (todo en proporciones del canvas 1024):
-- Barra 1 (superior, larga, alineada a la izquierda).
-- Barra 2 (medio, corta, alineada a la derecha).
-- Barra 3 (inferior, media, alineada a la izquierda).
-- Cada barra con corner radius alto para sentir premium.
-- Dot accent Nova (cyan): chico, arriba-derecha, fuera de la zona de
-  las barras — refuerza la "capa Nova" sin saturar.
+Composición (todo proporcional al canvas 1024):
+- Fondo: gradient cobalto vivo → azul profundo (paleta Focus).
+- Engranaje blanco centrado:
+  · 6 dientes redondeados radiales.
+  · Cuerpo anular (stroked) que une los dientes.
+- Núcleo blanco sólido central — el "focus point".
+
+Geometría idéntica a FocusGearMark.swift (en proporciones del frame del
+engranaje, que ocupa 56% del canvas):
+- bodyRadius  = frame * 0.30   (radio del anillo del cuerpo)
+- toothInner  = frame * 0.36   (base del diente, donde sale del cuerpo)
+- toothOuter  = frame * 0.49   (punta del diente)
+- bodyStroke  = frame * 0.075  (grosor del anillo)
+- toothHalfWidth = π/6 * 0.45  (radianes; 6 dientes equiespaciados)
 
 Reglas iOS: 1024×1024 RGB sin alpha · sin transparencia.
 
@@ -35,6 +42,7 @@ Uso: python3 scripts/build-ios-appicon.py
 from PIL import Image, ImageDraw
 from pathlib import Path
 import json
+import math
 import sys
 
 REPO = Path(__file__).resolve().parent.parent
@@ -46,11 +54,10 @@ OUT_PREVIEW = REPO / "docs/assets/focus-app-icon-preview.png"
 SIZE = 1024
 SS = 4  # supersampling para suavizar bordes
 
-# Paleta Focus (cobalto profundo).
+# Paleta Focus (cobalto profundo) — misma que el FocusLogoMark Swift.
 C_TOP = (46, 79, 232)        # #2E4FE8 cobalto vivo
 C_BOTTOM = (24, 47, 130)     # #182F82 azul profundo
 WHITE = (255, 255, 255)
-ACCENT_CYAN = (130, 200, 255)   # accent Nova (chispa)
 
 
 def lerp(a, b, t):
@@ -66,84 +73,112 @@ def build_gradient(size: int) -> Image.Image:
     return img
 
 
-def draw_rounded_pill(img: Image.Image, size: int, x: float, y: float,
-                       w: float, h: float, color=WHITE, alpha: int = 255) -> None:
-    """Rectángulo con esquinas REDONDEADAS al máximo (pill) — radio = h/2."""
-    overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ov_draw = ImageDraw.Draw(overlay)
-    fill = (color[0], color[1], color[2], alpha)
-    radius = h / 2  # full pill
-    ov_draw.rounded_rectangle(
-        [x, y, x + w, y + h],
-        radius=radius,
-        fill=fill,
-    )
-    img.paste(overlay, (0, 0), overlay)
+def polar(cx: float, cy: float, radius: float, angle_rad: float):
+    """Punto cartesiano desde polares — angle 0 = derecha, π/2 = abajo (CG)."""
+    return (cx + math.cos(angle_rad) * radius, cy + math.sin(angle_rad) * radius)
 
 
-def draw_disk(img: Image.Image, size: int, cx: float, cy: float,
-              radius: float, color=WHITE, alpha: int = 255) -> None:
-    """Disco sólido (para el accent dot Nova)."""
-    overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ov_draw = ImageDraw.Draw(overlay)
-    fill = (color[0], color[1], color[2], alpha)
-    ov_draw.ellipse(
-        [cx - radius, cy - radius, cx + radius, cy + radius],
-        fill=fill,
+def draw_gear_tooth(draw_alpha: ImageDraw.ImageDraw, cx: float, cy: float,
+                     angle: float, half_width: float,
+                     inner_r: float, outer_r: float, color=(255, 255, 255, 255)):
+    """Dibuja UN diente del engranaje como polígono trapezoidal radial.
+
+    El diente arranca en el anillo interior (toothInner) y se extiende
+    hasta toothOuter. Es un trapezoide con dos lados radiales (left,right)
+    y dos arcos (tangentes al inner y outer). Para suavizar PIL no tiene
+    addArc — aproximamos cada arco con varios puntos.
+    """
+    left = angle - half_width
+    right = angle + half_width
+    # Aproximación del arco con N puntos.
+    n_arc = 8
+    points = []
+    # Lado izquierdo: del inner al outer (radial).
+    points.append(polar(cx, cy, inner_r, left))
+    points.append(polar(cx, cy, outer_r, left))
+    # Arco externo: de left a right (puntos a lo largo del arco).
+    for i in range(1, n_arc):
+        t = i / n_arc
+        a = left + (right - left) * t
+        points.append(polar(cx, cy, outer_r, a))
+    points.append(polar(cx, cy, outer_r, right))
+    # Lado derecho: del outer al inner.
+    points.append(polar(cx, cy, inner_r, right))
+    # Arco interno (volver desde right a left por dentro).
+    for i in range(1, n_arc):
+        t = i / n_arc
+        a = right - (right - left) * t
+        points.append(polar(cx, cy, inner_r, a))
+    draw_alpha.polygon(points, fill=color)
+
+
+def draw_ring(draw_alpha: ImageDraw.ImageDraw, cx: float, cy: float,
+              radius: float, stroke: float, color=(255, 255, 255, 255)):
+    """Anillo: outer ellipse - inner ellipse (truco de PIL)."""
+    outer = radius + stroke / 2
+    inner = radius - stroke / 2
+    # Outer fill.
+    draw_alpha.ellipse(
+        [cx - outer, cy - outer, cx + outer, cy + outer],
+        fill=color
     )
-    img.paste(overlay, (0, 0), overlay)
+    # Inner hole (transparente). Cuando lo paste-amos al canvas, este
+    # hueco se respeta porque el overlay es RGBA.
+    draw_alpha.ellipse(
+        [cx - inner, cy - inner, cx + inner, cy + inner],
+        fill=(0, 0, 0, 0)
+    )
 
 
 def main() -> int:
     big = SIZE * SS
     img = build_gradient(big).convert("RGBA")
 
-    # Proporciones de las 3 barras (todo relativo al canvas, supersampled).
-    # Las barras viven en un "área de marca" centrada de ~62% del canvas.
-    # Eso deja ~19% de margen cobalto a cada lado — premium, intencional.
-    #
-    # Layout (asimétrico, "no es un menú hamburguesa simétrico"):
-    #   ▰▰▰▰▰▰▰▰▰      ← barra 1: ancho 58%, alineada izquierda
-    #             ▰▰▰▰▰  ← barra 2: ancho 38%, alineada derecha
-    #     ▰▰▰▰▰▰▰        ← barra 3: ancho 48%, alineada izquierda (offset)
-    #
-    # Altura de cada barra ~9% del canvas. Spacing vertical entre barras
-    # ~5% del canvas. Total alto del bloque ~37% del canvas → centrado.
+    # Overlay para dibujar el engranaje (necesario para mezclar polígonos
+    # de dientes + anillo + núcleo manteniendo transparencias correctas).
+    overlay = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
 
-    bar_h = big * 0.090
-    gap_y = big * 0.060
+    # Geometría del engranaje — mismas proporciones que `FocusGearMark` Swift.
+    # gear_frame_diameter es el "frame" virtual donde vive el engranaje
+    # (size.width en el Canvas SwiftUI).
+    gear_frame_diameter = big * 0.56  # ~57% del canvas
+    cx = big / 2
+    cy = big / 2
 
-    block_height = 3 * bar_h + 2 * gap_y
-    block_top = (big - block_height) / 2
+    body_radius = gear_frame_diameter * 0.30
+    tooth_inner = gear_frame_diameter * 0.36
+    tooth_outer = gear_frame_diameter * 0.49
+    body_stroke = gear_frame_diameter * 0.075
 
-    # Barra 1: superior, larga, izquierda.
-    b1_w = big * 0.58
-    b1_x = big * 0.19
-    b1_y = block_top
-    draw_rounded_pill(img, big, b1_x, b1_y, b1_w, bar_h)
+    n_teeth = 6
+    tooth_half_width = (math.pi / n_teeth) * 0.45  # radianes
 
-    # Barra 2: medio, corta, derecha — crea asimetría dinámica.
-    b2_w = big * 0.38
-    b2_x = big - big * 0.19 - b2_w   # alineada a la derecha respeto al margen
-    b2_y = block_top + bar_h + gap_y
-    draw_rounded_pill(img, big, b2_x, b2_y, b2_w, bar_h)
+    # 6 dientes equiespaciados, empezando arriba (-π/2 en coordinate de
+    # PIL es "arriba"... pero PIL Y crece hacia abajo. En Canvas SwiftUI
+    # `-π/2` es arriba porque Y crece hacia abajo en CGContext también.
+    # Mantenemos consistencia con SwiftUI.).
+    for i in range(n_teeth):
+        angle = -math.pi / 2 + (2 * math.pi / n_teeth) * i
+        draw_gear_tooth(
+            odraw, cx, cy, angle, tooth_half_width,
+            tooth_inner, tooth_outer,
+            color=(WHITE[0], WHITE[1], WHITE[2], 242)  # 0.95 alpha como Swift
+        )
 
-    # Barra 3: inferior, media, izquierda — visualmente "vuelve".
-    b3_w = big * 0.48
-    b3_x = big * 0.19
-    b3_y = block_top + 2 * (bar_h + gap_y)
-    draw_rounded_pill(img, big, b3_x, b3_y, b3_w, bar_h)
+    # Cuerpo: anillo strokeado.
+    draw_ring(odraw, cx, cy, body_radius, body_stroke,
+              color=(WHITE[0], WHITE[1], WHITE[2], 242))
 
-    # Accent dot Nova — pequeño, arriba a la derecha, fuera del bloque
-    # de barras. Sugiere "capa inteligente" sin saturar la lectura.
-    dot_radius = big * 0.030
-    dot_cx = big * 0.78
-    dot_cy = block_top - big * 0.06
-    # Halo apenas perceptible (alpha bajo).
-    draw_disk(img, big, dot_cx, dot_cy, dot_radius * 1.8,
-              color=ACCENT_CYAN, alpha=55)
-    # Dot principal sólido cyan.
-    draw_disk(img, big, dot_cx, dot_cy, dot_radius, color=ACCENT_CYAN)
+    # Núcleo central — Círculo blanco sólido, "focus point". Diámetro
+    # 16% del canvas (igual que FocusLogoMark Swift).
+    core_radius = (big * 0.16) / 2
+    odraw.ellipse(
+        [cx - core_radius, cy - core_radius, cx + core_radius, cy + core_radius],
+        fill=(WHITE[0], WHITE[1], WHITE[2], 255)
+    )
+
+    img.paste(overlay, (0, 0), overlay)
 
     # Downscale con LANCZOS para suavizar bordes.
     img = img.convert("RGB").resize((SIZE, SIZE), Image.LANCZOS)
@@ -168,7 +203,7 @@ def main() -> int:
         json.dump(contents, f, indent=2)
         f.write("\n")
 
-    print(f"✓ AppIcon V9 (pilas asimétricas + Nova accent): {OUT_APPICON.relative_to(REPO)}")
+    print(f"✓ AppIcon V10 (engranaje del pensamiento): {OUT_APPICON.relative_to(REPO)}")
     print(f"  {SIZE}×{SIZE} RGB · sin alpha · {OUT_APPICON.stat().st_size // 1024}KB")
     print(f"✓ Preview: {OUT_PREVIEW.relative_to(REPO)}")
     return 0
