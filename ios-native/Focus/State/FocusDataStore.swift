@@ -312,6 +312,83 @@ enum NovaResponder {
 
     // MARK: Public API
 
+    /// Detecta si una frase parece tener MÚLTIPLES acciones que el parser
+    /// local NO puede separar con confianza.
+    ///
+    /// El parser local maneja bien:
+    ///   - conectores explícitos ("y luego", "luego", "después")
+    ///   - " y " cuando AMBOS lados tienen una hora numérica
+    ///
+    /// Pero falla con:
+    ///   - números en palabras ("en una hora", "en dos horas")
+    ///   - cláusulas separadas por comas en vez de conectores
+    ///   - referencias temporales borrosas ("más o menos a las 12")
+    ///   - 3+ acciones encadenadas en una sola oración
+    ///
+    /// Para esos casos preferimos forzar el backend (IA fuerte). Si el
+    /// backend está caído, mostramos pregunta humana — NO ejecutamos el
+    /// parser local, que acabaría creando UN evento con título sucio y
+    /// hora arbitraria (caso reportado por el usuario el 2026-05-12:
+    /// "en una hora más voy a jugar fútbol, en dos horas más tengo que
+    /// volver y más o menos a las 12 me tengo que acostar" terminaba como
+    /// "Voy a ir a jugar fútbol — 12:00").
+    ///
+    /// Heurística amplia: prefiere falsos positivos (mandar al backend de
+    /// más) sobre falsos negativos (crear basura).
+    static func isLikelyMultiAction(_ text: String) -> Bool {
+        let lower = text.lowercased()
+
+        // 1) Conectores fuertes ya son señal clara de múltiples acciones.
+        let strongHints = [
+            " y luego ", " y después ", " y despues ",
+            " luego ", " después de eso ", " despues de eso ",
+            " después ", " despues ",
+            " también ", " tambien ",
+            " además ", " ademas ",
+            " más tarde ", " mas tarde "
+        ]
+        for hint in strongHints where lower.contains(hint) { return true }
+
+        // 2) Contar marcadores temporales. ≥2 hits → casi seguro multi.
+        // Soporta números EN PALABRAS (una/dos/tres) que el hour pattern
+        // del parser local no maneja en `applySmartYSplit`.
+        let timePatterns: [String] = [
+            // "en N min/horas" — N en palabra o dígito
+            #"\ben\s+(una|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|media|\d{1,3})\s*(min|minutos?|h|hs|hrs?|horas?)\b"#,
+            // "a la(s) N" / "a la N" — dígito
+            #"\ba la(s)?\s+\d{1,2}(:\d{2})?\b"#,
+            // "a la(s) N" — palabra
+            #"\ba la(s)?\s+(una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\b"#,
+            // "tipo N" / "tipo las N"
+            #"\btipo\s+(la(s)?\s+)?\d{1,2}(:\d{2})?\b"#,
+            // HH:MM standalone
+            #"(?<!\d)\d{1,2}:\d{2}(?!\d)"#
+        ]
+        var timeHits = 0
+        let ns = lower as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        for pattern in timePatterns {
+            guard let re = try? NSRegularExpression(
+                pattern: pattern, options: [.caseInsensitive]
+            ) else { continue }
+            timeHits += re.numberOfMatches(in: lower, options: [], range: range)
+            if timeHits >= 2 { return true }
+        }
+
+        // 3) Comas con verbo+tiempo en cada cláusula. Heurística simple:
+        // 1+ coma + al menos 1 marcador temporal + texto largo.
+        if text.count >= 70, text.contains(","), timeHits >= 1 {
+            return true
+        }
+
+        // 4) Texto muy largo + alguna conjunción → probable múltiple.
+        if text.count >= 120 && (lower.contains(" y ") || lower.contains(",")) {
+            return true
+        }
+
+        return false
+    }
+
     /// Parser multi-intent: separa frases compuestas por conectores
     /// fuertes ("y luego", "luego", "después", "también", "además") y
     /// parsea cada segmento como un intent independiente.

@@ -481,6 +481,12 @@ struct MiDiaView: View {
     /// 3. Llamar backend con accessToken; fallback local en errores recuperables.
     private func resolveNovaResponse(for trimmed: String) async -> InlineNovaResponse {
         let preIntent = NovaResponder.parse(trimmed, context: store.novaContext)
+        // Frase con múltiples acciones encadenadas o referencias temporales
+        // en palabras ("en una hora", "más o menos a las 12"). El parser
+        // local NO sabe separar estas con confianza — fuerza al backend
+        // (IA fuerte). Si el backend falla, pedimos al usuario que las
+        // envíe por separado en vez de crear basura localmente.
+        let isComplex = NovaResponder.isLikelyMultiAction(trimmed)
 
         // 1. Short-circuit: intents que requieren contexto local que el
         //    backend no tiene (corrige/borra último ítem, follow-up
@@ -500,8 +506,13 @@ struct MiDiaView: View {
         }
 
         // 3. Sin sesión activa → parser local directo. No mostramos nota
-        // porque el usuario está en modo demo a propósito.
+        // porque el usuario está en modo demo a propósito. EXCEPCIÓN:
+        // si la frase es compleja (multi-acción), no podemos resolverla
+        // bien sin la IA — pedimos enviarlas separadas.
         guard let creds = store.syncCredentials else {
+            if isComplex {
+                return complexInputNoSessionResponse(trimmed: trimmed)
+            }
             return runLocalFallback(for: trimmed, withNote: nil)
         }
 
@@ -516,6 +527,13 @@ struct MiDiaView: View {
             )
             return await applyBackendResult(result, userText: trimmed)
         } catch let error as NovaServiceError {
+            // Frase compleja + backend falló: NO caer al parser local.
+            // El local solo entendería una de las N acciones y crearía
+            // un evento basura. Es mucho mejor pedirle al usuario que
+            // las separe.
+            if isComplex {
+                return complexInputBackendErrorResponse(trimmed: trimmed, error: error)
+            }
             if error.canFallbackToLocal {
                 let note = humanFallbackNote(for: error)
                 return runLocalFallback(for: trimmed, withNote: note)
@@ -527,8 +545,39 @@ struct MiDiaView: View {
                 isError: true
             )
         } catch {
+            if isComplex {
+                return complexInputBackendErrorResponse(trimmed: trimmed, error: nil)
+            }
             return runLocalFallback(for: trimmed, withNote: "Usé el modo local porque Nova avanzada no respondió.")
         }
+    }
+
+    /// Respuesta cuando el usuario manda una frase compleja (multi-acción)
+    /// y NO tiene sesión activa. Sin IA fuerte no podemos separar las
+    /// acciones con seguridad — pedimos enviarlas una por una en vez de
+    /// crear un evento basura con el parser local.
+    private func complexInputNoSessionResponse(trimmed: String) -> InlineNovaResponse {
+        InlineNovaResponse(
+            userText: trimmed,
+            summary: "Esto necesita Nova con IA.",
+            details: "Tu mensaje tiene varias acciones encadenadas. Inicia sesión para que Nova las separe bien, o envíalas una por una desde aquí.",
+            isError: true
+        )
+    }
+
+    /// Respuesta cuando el backend falló procesando una frase compleja.
+    /// MISMA política: no caer al parser local porque solo entendería una
+    /// de las acciones. Pedimos al usuario que las envíe separadas.
+    private func complexInputBackendErrorResponse(
+        trimmed: String,
+        error: NovaServiceError?
+    ) -> InlineNovaResponse {
+        InlineNovaResponse(
+            userText: trimmed,
+            summary: "No pude separar las acciones de tu mensaje.",
+            details: "Tiene varias cosas encadenadas y Nova no pudo procesarlas a la vez. Envíalas por separado, por ejemplo: «en una hora voy a jugar fútbol», luego «en dos horas vuelvo».",
+            isError: true
+        )
     }
 
     /// True cuando el intent local SIEMPRE es mejor que el backend porque

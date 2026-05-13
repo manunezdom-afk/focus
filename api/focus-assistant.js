@@ -138,7 +138,12 @@ export default async function handler(req, res) {
     try {
       response = await anthropic.messages.create({
         model: modelId,
-        max_tokens: 1500,
+        // 2048 (subimos desde 1500 el 2026-05-12): el prompt nuevo manda
+        // emitir múltiples add_event para frases compuestas tipo "en una
+        // hora X, en dos horas Y, a las 12 Z". Con 1500 Haiku truncaba
+        // a veces JSON con 3 acciones + reply + confirmaciones. 2048 da
+        // margen sin disparar mucho el costo (~3-5% más por request).
+        max_tokens: 2048,
         system: systemPrompt,
         messages: [...messages, ...extraMsgs],
       })
@@ -176,13 +181,14 @@ export default async function handler(req, res) {
 
   // Detecta si un response de Haiku necesita escalarse a Sonnet:
   // - hit max_tokens (truncation)
-  // - output cerca del límite (1300/1500 tokens — riesgo de respuesta cortada)
+  // - output cerca del límite (~87% de max_tokens — riesgo de respuesta cortada)
   // - filterCalendarEditActions strippeó acciones (Haiku quería editar sin
   //   intent explícito, Sonnet con prompt refinado debería dar mejor add_event)
   function shouldEscalateToSonnet(response, strippedCount) {
     if (response?.stop_reason === 'max_tokens') return true
     const outputTokens = response?.usage?.output_tokens || 0
-    if (outputTokens > 1300) return true
+    // 1780 ≈ 87% de 2048. Antes era 1300 ≈ 87% de 1500.
+    if (outputTokens > 1780) return true
     if (strippedCount > 0) return true
     return false
   }
@@ -196,7 +202,7 @@ export default async function handler(req, res) {
         '1) NUNCA uses edit_event/update_event/delete_event a menos que el usuario haya escrito un verbo explícito de edición (mueve, cambia, edita, modifica, reagenda, pásalo, corre, adelanta, atrasa, borra, elimina, cancela, quita).\n' +
         '2) Si el usuario menciona hora sin fecha, date=hoy (sin importar si la hora ya pasó). Si quería otro día, lo dirá ("mañana", "viernes").\n' +
         '3) Eventos similares de OTRO DÍA NO bloquean creación nueva — son eventos distintos.\n' +
-        '4) Si dudás entre crear y editar, SIEMPRE elegí add_event.\n' +
+        '4) Si dudas entre crear y editar, SIEMPRE elige add_event.\n' +
         '5) Cierra todas las llaves del JSON; sin texto fuera del objeto.',
       1,
       FALLBACK_MODEL_ID,

@@ -760,6 +760,98 @@ enum NovaActionNormalizerTests {
         check(label: "shortRelated: 1 intent (no split, llevar no tiene hora)",
               actual: shortRelated.count, expected: 1, failures: &failures)
 
+        // ───── isLikelyMultiAction (gating de fallback local) ──────────
+
+        // Caso real reportado el 2026-05-12: el parser local NO entiende
+        // "en una hora", "en dos horas", ni la coma como separador, así
+        // que terminaba creando un único evento basura "Voy a ir a jugar
+        // fútbol — 12:00". El detector debe marcar la frase como compleja
+        // para forzar el backend (IA fuerte).
+        check(
+            label: "isLikelyMultiAction: caso reportado 'en una hora… en dos horas… a las 12'",
+            actual: NovaResponder.isLikelyMultiAction(
+                "En una hora más te voy a ir a jugar fútbol, en dos horas más tengo que volver y más o menos a las 12 me tengo que acostar"
+            ),
+            expected: true,
+            failures: &failures
+        )
+
+        // Spec del usuario — frases que SÍ deben gatear el backend:
+        check(
+            label: "isLikelyMultiAction: 'trabajar a las 3:30 y comer a las 4' (2 acciones+horas)",
+            actual: NovaResponder.isLikelyMultiAction(
+                "tengo que seguir trabajando a las 3:30 y comer a las 4"
+            ),
+            expected: true,
+            failures: &failures
+        )
+        check(
+            label: "isLikelyMultiAction: 'mañana despiértame a las 7 y salir a las 8' (2 acciones+horas)",
+            actual: NovaResponder.isLikelyMultiAction(
+                "mañana despiértame a las 7 y salir a las 8"
+            ),
+            expected: true,
+            failures: &failures
+        )
+        check(
+            label: "isLikelyMultiAction: 'jugar fútbol a las 10 y llevar la pelota a las 9:30'",
+            actual: NovaResponder.isLikelyMultiAction(
+                "jugar fútbol a las 10 y llevar la pelota a las 9:30"
+            ),
+            expected: true,
+            failures: &failures
+        )
+
+        // Spec del usuario — frases SIMPLES que NO deben gatear el backend:
+        check(
+            label: "isLikelyMultiAction: 'buscar a mi hermano a las tres' (1 acción, 1 hora) → false",
+            actual: NovaResponder.isLikelyMultiAction(
+                "necesito ir a buscar a mi hermano a las tres"
+            ),
+            expected: false,
+            failures: &failures
+        )
+        check(
+            label: "isLikelyMultiAction: 'comprar pan y leche' (sin horas, 'y' une objetos) → false",
+            actual: NovaResponder.isLikelyMultiAction("comprar pan y leche"),
+            expected: false,
+            failures: &failures
+        )
+        check(
+            label: "isLikelyMultiAction: 'reunión con Juan y Pedro a las 5' (1 hora, 'y' une personas) → false",
+            actual: NovaResponder.isLikelyMultiAction(
+                "reunión con Juan y Pedro a las 5"
+            ),
+            expected: false,
+            failures: &failures
+        )
+        check(
+            label: "isLikelyMultiAction: 'agenda dentista mañana a las 10' (simple) → false",
+            actual: NovaResponder.isLikelyMultiAction("agenda dentista mañana a las 10"),
+            expected: false,
+            failures: &failures
+        )
+        check(
+            label: "isLikelyMultiAction: 'café' (vacía, sin hora) → false",
+            actual: NovaResponder.isLikelyMultiAction("café"),
+            expected: false,
+            failures: &failures
+        )
+
+        // Conectores explícitos siempre disparan, aunque solo haya 1 hora:
+        check(
+            label: "isLikelyMultiAction: 'gym a las 7 y luego correr' (conector 'y luego')",
+            actual: NovaResponder.isLikelyMultiAction("gym a las 7 y luego correr"),
+            expected: true,
+            failures: &failures
+        )
+        check(
+            label: "isLikelyMultiAction: 'almuerzo, después siesta' (conector 'después')",
+            actual: NovaResponder.isLikelyMultiAction("almuerzo, después siesta"),
+            expected: true,
+            failures: &failures
+        )
+
         // ───── Resultado ───────────────────────────────────────────────
 
         if failures.isEmpty {
