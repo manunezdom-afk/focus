@@ -744,7 +744,13 @@ enum NovaActionNormalizerTests {
             check(label: "complex[1] hour 10", actual: complex[1].hour, expected: 10, failures: &failures)
             check(label: "complex[2] title 'Llevar la pelota' (NO concatenado)",
                   actual: complex[2].title, expected: "Llevar la pelota", failures: &failures)
-            check(label: "complex[2] hour 11", actual: complex[2].hour, expected: 11, failures: &failures)
+            // Hora 11 → 11 AM si tests corren de día, 23 PM si corren de noche
+            // (regla night-context aplica desde >=19h con runtime real). Ambas
+            // son interpretaciones correctas del input "a las 11".
+            let complexHour2 = complex[2].hour ?? -1
+            check(label: "complex[2] hour ∈ {11, 23}",
+                  actual: complexHour2 == 11 || complexHour2 == 23,
+                  expected: true, failures: &failures)
             // Crítico: NO debe contener "que llevar" en ningún título.
             let hasBadConcatenation = complex.contains {
                 $0.title.lowercased().contains("que llevar")
@@ -821,7 +827,11 @@ enum NovaActionNormalizerTests {
             check(label: "caso4[1] hour 10", actual: caso4[1].hour, expected: 10, failures: &failures)
             check(label: "caso4[2] title 'Llevar la pelota'",
                   actual: caso4[2].title, expected: "Llevar la pelota", failures: &failures)
-            check(label: "caso4[2] hour 11", actual: caso4[2].hour, expected: 11, failures: &failures)
+            // Hora 11 → 11 AM o 23 PM según runtime (night-context).
+            let caso4Hour2 = caso4[2].hour ?? -1
+            check(label: "caso4[2] hour ∈ {11, 23}",
+                  actual: caso4Hour2 == 11 || caso4Hour2 == 23,
+                  expected: true, failures: &failures)
             let badConcat = caso4.contains {
                 let t = $0.title.lowercased()
                 return t.contains("que llevar") || t.contains("fútbol que")
@@ -857,6 +867,59 @@ enum NovaActionNormalizerTests {
                 print(msg); failures.append(msg)
             }
         }
+
+        // ───── NIGHT CONTEXT — adjustAmPm con currentHour fijo ─────────
+        //
+        // Tests determinísticos del override de noche. El overload de
+        // `adjustAmPm` permite inyectar `currentHour` y verificar la
+        // interpretación nocturna sin depender del wall clock.
+        //
+        // Spec del usuario:
+        // - 21:53 + "a las 11" → 23 (PM hoy)
+        // - 21:53 + "a las 12" → 0 (medianoche próxima)
+        // - 21:53 + "a las 9" → 9 (AM mañana — PM ya pasó)
+        // - 14:00 + "a las 11" → 11 (mañana AM, regla coloquial)
+        // - 14:00 + "a las 12 de la noche" → 0 (override PM/madrugada)
+
+        let nightTests: [(Int, Int, String, Int, String)] = [
+            // currentHour, hour, text, expected, label
+            (21, 11, "ir a buscar a mi hermano a las 11",                 23, "21h + 11 → 23"),
+            (21, 12, "a las 12 volver a casa",                            0,  "21h + 12 → 0 (medianoche)"),
+            (22, 11, "a las 11 me acuesto",                               23, "22h + 11 → 23"),
+            (21, 10, "a las 10",                                          22, "21h + 10 → 22"),
+            (21, 9,  "a las 9",                                           9,  "21h + 9 → 9 (AM, PM ya pasó)"),
+            (21, 8,  "a las 8",                                           8,  "21h + 8 → 8 AM"),
+            // Marcador explícito 'mañana' apaga night-context
+            (21, 10, "mañana a las 10",                                   10, "mañana suprime night-context"),
+            (21, 11, "mañana a las 11",                                   11, "mañana suprime night-context"),
+            // Día — comportamiento original (sin night-context)
+            (14, 11, "ir a buscar a mi hermano a las 11",                 11, "14h + 11 → 11 AM (colloquial)"),
+            (14, 3,  "a las 3",                                           15, "14h + 3 → 15 PM (colloquial 1-7)"),
+            // School context — siempre AM aunque sea noche
+            (21, 8,  "clase a las 8",                                     8,  "21h + 'clase a las 8' → 8 AM"),
+            (21, 10, "tengo clase a las 10",                              10, "21h + 'tengo clase a las 10' → 10 AM"),
+            // Verb context PM gana sobre night
+            (21, 9,  "cenar a las 9",                                     21, "21h + 'cenar a las 9' → 21 PM"),
+            // AM explícito gana sobre todo
+            (21, 11, "a las 11 de la mañana",                             11, "AM explícito ignora noche"),
+        ]
+        for (ch, h, text, expected, label) in nightTests {
+            let actual = NovaResponder.adjustAmPm(hour: h, in: text, currentHour: ch)
+            check(label: "night: \(label)",
+                  actual: actual, expected: expected, failures: &failures)
+        }
+
+        // Caso 2 del usuario, end-to-end via detector de complejidad:
+        // "ir a buscar a mi hermano a las 11 y a las 12 volver a casa"
+        // debe marcarse como complejo para que la app fuerce el backend.
+        check(
+            label: "caso2-v2: 'ir a buscar a las 11 y a las 12 volver a casa' isLikelyMultiAction true",
+            actual: NovaResponder.isLikelyMultiAction(
+                "ir a buscar a mi hermano a las 11 y a las 12 volver a casa"
+            ),
+            expected: true,
+            failures: &failures
+        )
 
         // ───── isLikelyMultiAction (gating de fallback local) ──────────
 

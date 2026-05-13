@@ -23,6 +23,57 @@ const FALLBACK_MODEL_ID = 'claude-sonnet-4-6-20251022'
 // En Hobby Vercel ignora valores >10s y mantiene 10s. En Pro respeta 60s.
 export const maxDuration = 60
 
+// Detector de complejidad — espejo aproximado del `isLikelyMultiAction`
+// de iOS (`NovaResponder.swift`). Lo usamos en el server para enrutar
+// frases con varias acciones DIRECTAMENTE a Sonnet, sin pasar primero
+// por Haiku. Haiku tropezaba con "en una hora… en dos horas…": perdía
+// acciones, concatenaba títulos. Sonnet razona mejor estos casos.
+//
+// Conservador: prefiere falsos positivos (rutear de más a Sonnet) sobre
+// falsos negativos (dejar a Haiku con un input que romperá).
+function detectComplexInput(text) {
+  if (typeof text !== 'string') return false
+  const lower = text.toLowerCase()
+
+  // 1) Conectores fuertes = casi seguro multi-acción.
+  const strongHints = [
+    ' y luego ', ' y después ', ' y despues ',
+    ' luego ', ' después de eso ', ' despues de eso ',
+    ' después ', ' despues ',
+    ' también ', ' tambien ',
+    ' además ', ' ademas ',
+    ' más tarde ', ' mas tarde ',
+  ]
+  for (const h of strongHints) {
+    if (lower.includes(h)) return true
+  }
+
+  // 2) Múltiples marcadores temporales (≥2 hits) — incluye palabras
+  //    como "en una hora", "en dos horas".
+  const timePatterns = [
+    /\ben\s+(una|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|media|\d{1,3})\s*(min|minutos?|h|hs|hrs?|horas?)\b/i,
+    /\ba la(s)?\s+\d{1,2}(:\d{2})?\b/i,
+    /\ba la(s)?\s+(una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\b/i,
+    /\btipo\s+(la(s)?\s+)?\d{1,2}(:\d{2})?\b/i,
+    /(?<!\d)\d{1,2}:\d{2}(?!\d)/,
+  ]
+  let timeHits = 0
+  for (const re of timePatterns) {
+    const reGlobal = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g')
+    const matches = lower.match(reGlobal)
+    if (matches) timeHits += matches.length
+    if (timeHits >= 2) return true
+  }
+
+  // 3) Comas con tiempo + texto razonablemente largo.
+  if (text.length >= 70 && text.includes(',') && timeHits >= 1) return true
+
+  // 4) Texto muy largo + algún conector implícito.
+  if (text.length >= 120 && (lower.includes(' y ') || lower.includes(','))) return true
+
+  return false
+}
+
 export default async function handler(req, res) {
   setCorsHeaders(req, res, { methods: 'POST, OPTIONS' })
 
@@ -271,7 +322,40 @@ export default async function handler(req, res) {
   }
 
   try {
-    // PASO 1 — Haiku (modelo barato, cubre 90%+ de los requests).
+    // PASO 0 — Detector de complejidad. Frases con varias acciones,
+    // conectores fuertes ("luego", "después", "y"), o múltiples
+    // referencias temporales (incluyendo palabras como "en una hora")
+    // necesitan razonamiento más fino. Haiku tropezaba con esos casos
+    // (concatenaba títulos, perdía acciones). Para esos vamos directo
+    // a Sonnet — ~10% más caro pero MUY mejor en estructura.
+    const isComplexInput = detectComplexInput(message)
+    if (isComplexInput) {
+      console.log('[focus-assistant] complex input → Sonnet directly')
+      try {
+        const dDirect = await runClaude('', 1, FALLBACK_MODEL_ID)
+        const rDirect = (dDirect.content?.[0]?.text ?? '').trim()
+        try {
+          const parsedDirect = safeParseAssistantJSON(rDirect)
+          return finalize(parsedDirect, { escalated: true })
+        } catch {
+          // Sonnet falló parseando — caso muy raro. NO devolvemos basura
+          // al cliente; le pedimos enviar separado.
+          console.error('[focus-assistant] Sonnet (direct) JSON parse failed for complex input')
+          recordUsage(admin, userId, ACTION_TYPES.NOVA_PREMIUM_MESSAGE).catch(() => {})
+          return res.status(200).json({
+            reply: 'Tu mensaje tiene varias cosas encadenadas. Envíalas por separado para que las agende bien.',
+            confidence: 0,
+            shouldAskUser: true,
+            actions: [],
+          })
+        }
+      } catch (err) {
+        // Sonnet API falló — re-throw para que el catch general formatee.
+        throw err
+      }
+    }
+
+    // PASO 1 — Haiku (modelo barato, cubre 90%+ de los requests SIMPLES).
     const d1 = await runClaude('', 1)
     const r1 = (d1.content?.[0]?.text ?? '').trim()
     let parsed
@@ -279,20 +363,16 @@ export default async function handler(req, res) {
       parsed = safeParseAssistantJSON(r1)
     } catch {
       // PASO 2a — JSON inválido: reintenta directamente con Sonnet (Path B).
-      // No reintentamos con Haiku porque ya falló al parsear; Sonnet con el
-      // prompt de refuerzo suele dar JSON limpio en una sola pasada.
       try {
         const dPremium = await escalateToSonnet()
         const rPremium = (dPremium.content?.[0]?.text ?? '').trim()
         return finalize(safeParseAssistantJSON(rPremium), { escalated: true })
       } catch {
         console.error('[focus-assistant] JSON parse failed after Sonnet escalation')
-        // Aún si el parse falló dos veces (Haiku + Sonnet), los modelos SÍ
-        // gastaron tokens. Contamos la acción base para evitar abuso.
         recordUsage(admin, userId, ACTION_TYPES.NOVA_MESSAGE).catch(() => {})
         return res.status(502).json({
           error: 'llm_bad_output',
-          reply: 'Tuve un problema procesando la respuesta. Repite el mensaje por favor.',
+          reply: 'No pude procesar la respuesta. Repite el mensaje, por favor.',
           actions: [],
         })
       }
@@ -300,10 +380,13 @@ export default async function handler(req, res) {
 
     // PASO 2b — Haiku parseó OK pero ¿la respuesta es de calidad suficiente?
     // Detectamos signals de "esto va a salir mal" (ediciones strippeadas,
-    // truncation) y escalamos a Sonnet con prompt refinado.
+    // truncation, confidence baja) y escalamos a Sonnet con prompt refinado.
     const haikuActions = Array.isArray(parsed?.actions) ? parsed.actions : []
     const preFilter = filterCalendarEditActions(haikuActions, message)
-    const escalateNeeded = shouldEscalateToSonnet(d1, preFilter.stripped.length)
+    const haikuConfidence = typeof parsed?.confidence === 'number' ? parsed.confidence : 1.0
+    const escalateNeeded =
+      shouldEscalateToSonnet(d1, preFilter.stripped.length) ||
+      haikuConfidence < 0.55
 
     if (escalateNeeded) {
       try {
@@ -312,9 +395,6 @@ export default async function handler(req, res) {
         const parsedPremium = safeParseAssistantJSON(rPremium)
         return finalize(parsedPremium, { escalated: true })
       } catch {
-        // Sonnet también falló al parsear → caemos al Haiku original (que
-        // al menos parseó OK). filterCalendarEditActions en finalize()
-        // strippea las ediciones malas y agrega la nota humana al reply.
         console.warn('[focus-assistant] Sonnet escalation failed, falling back to Haiku response')
         return finalize(parsed, { escalated: false })
       }

@@ -34,12 +34,22 @@ enum NovaService {
 
     /// Resultado exitoso de una llamada. El `reply` es texto plano corto
     /// para mostrar al usuario. `actions` son mutaciones estructuradas
-    /// que el caller aplica al `FocusDataStore`.
+    /// que el caller aplica al `FocusDataStore`. `confidence` y
+    /// `shouldAskUser` permiten al cliente decidir si ejecuta o solo
+    /// muestra la pregunta.
     struct Result {
         let reply: String
         let actions: [BackendAction]
         let smartActionsBlocked: Bool
         let smartActionsMessage: String?
+        /// 0..1 — qué tan seguro está Nova de su interpretación. ≥0.80
+        /// = ejecutar normal. 0.55..0.79 = ejecutar pero el reply
+        /// confirma/aclara. <0.55 = NO ejecutar (preguntar primero).
+        /// Si el backend no devolvió el campo, asumimos 1.0 (alta).
+        let confidence: Double
+        /// Si true, el backend pidió no ejecutar y mostrar la pregunta
+        /// del reply. Las `actions` deberían venir vacías cuando es true.
+        let shouldAskUser: Bool
     }
 
     /// Llama al backend. Lanza `NovaServiceError` para que el caller
@@ -107,7 +117,9 @@ enum NovaService {
                     reply: decoded.reply,
                     actions: decoded.actions,
                     smartActionsBlocked: decoded.smartActionsBlocked ?? false,
-                    smartActionsMessage: decoded.smartActionsMessage
+                    smartActionsMessage: decoded.smartActionsMessage,
+                    confidence: decoded.confidence ?? 1.0,
+                    shouldAskUser: decoded.shouldAskUser ?? false
                 )
             } catch {
                 throw NovaServiceError.decoding(error)
@@ -286,12 +298,16 @@ private struct BackendResponsePayload: Decodable {
     let actions: [BackendAction]
     let smartActionsBlocked: Bool?
     let smartActionsMessage: String?
+    let confidence: Double?
+    let shouldAskUser: Bool?
 
     enum CodingKeys: String, CodingKey {
         case reply
         case actions
         case smartActionsBlocked = "smart_actions_blocked"
         case smartActionsMessage = "smart_actions_message"
+        case confidence
+        case shouldAskUser
     }
 
     init(from decoder: Decoder) throws {
@@ -299,6 +315,8 @@ private struct BackendResponsePayload: Decodable {
         self.reply = try c.decodeIfPresent(String.self, forKey: .reply) ?? ""
         self.smartActionsBlocked = try c.decodeIfPresent(Bool.self, forKey: .smartActionsBlocked)
         self.smartActionsMessage = try c.decodeIfPresent(String.self, forKey: .smartActionsMessage)
+        self.confidence = try c.decodeIfPresent(Double.self, forKey: .confidence)
+        self.shouldAskUser = try c.decodeIfPresent(Bool.self, forKey: .shouldAskUser)
         // Decodificar actions de forma resiliente: si un item falla por type
         // desconocido o shape inesperado, lo saltamos en vez de tumbar todo.
         if let raw = try? c.decode([RawAction].self, forKey: .actions) {

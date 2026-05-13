@@ -16,6 +16,17 @@ struct FocusApp: App {
         let envFlag = ProcessInfo.processInfo.environment["FOCUS_RUN_TESTS"] == "1"
         let argFlag = CommandLine.arguments.contains("--run-nova-tests")
         if envFlag || argFlag {
+            // Marker file ANTES de runAll() para que sepamos que init() entró
+            // a esta rama. Si runAll() crashea, este file queda como evidencia.
+            if let docs = FileManager.default.urls(
+                for: .documentDirectory, in: .userDomainMask
+            ).first {
+                let marker = docs.appendingPathComponent("focus-tests-started.log")
+                try? "init reached test branch at \(Date())".write(
+                    to: marker, atomically: true, encoding: .utf8
+                )
+            }
+
             let result = NovaActionNormalizerTests.runAll()
             print("===== NOVA TESTS =====\n\(result)\n=====================")
             if let docs = FileManager.default.urls(

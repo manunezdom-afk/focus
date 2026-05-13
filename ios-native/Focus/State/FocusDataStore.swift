@@ -2151,7 +2151,18 @@ enum NovaResponder {
     ///   - 1..7 → PM (uso social/diurno típico).
     ///   - 8..11 → AM (típico horario laboral/escolar de mañana).
     ///   - 12 → 12:00 (mediodía).
-    private static func adjustAmPm(hour: Int, in text: String) -> Int {
+    static func adjustAmPm(hour: Int, in text: String) -> Int {
+        adjustAmPm(
+            hour: hour,
+            in: text,
+            currentHour: Calendar.current.component(.hour, from: Date())
+        )
+    }
+
+    /// Overload con `currentHour` explícito — usado por tests para hacer
+    /// la regla de noche determinista. Producción siempre llama el wrapper
+    /// que toma `Date()` real.
+    static func adjustAmPm(hour: Int, in text: String, currentHour: Int) -> Int {
         guard hour <= 12 else { return hour }
 
         // 1) AM explícito.
@@ -2177,7 +2188,40 @@ enum NovaResponder {
             break
         }
 
-        // 4) Sin marcador → regla coloquial chilena/latina.
+        // 4) NIGHT CONTEXT — si son ≥19h (noche) y el usuario dijo una
+        // hora pequeña SIN marcador explícito de día ("mañana", "hoy",
+        // weekday), probablemente se refiere a "esta noche / madrugada"
+        // y no a la mañana siguiente. El usuario que a las 21:53 dice
+        // "a las 11" quiere 23:00, no 11:00 AM de mañana.
+        //
+        // Reglas:
+        //   - "a las 12" → 0 (medianoche próxima)
+        //   - "a las N" con N ∈ [1, 11]: si N+12 está en el FUTURO del
+        //     mismo día (> currentHour), interpretar como PM hoy.
+        //     Si N+12 ya pasó → caer a regla coloquial.
+        //
+        // Ejemplos a las 21 (currentHour=21):
+        //   "a las 11" → 11+12=23 > 21 → 23 ✓
+        //   "a las 10" → 10+12=22 > 21 → 22 ✓
+        //   "a las 9"  → 9+12=21 > 21 falso → coloquial 9 AM
+        //   "a las 12" → 0 (medianoche)
+        let lowerForDay = text.lowercased()
+        let hasExplicitDayMarker = lowerForDay.contains("mañana")
+            || lowerForDay.contains("manana")
+            || lowerForDay.contains("hoy")
+            || lowerForDay.range(
+                of: #"\b(lunes|martes|mi(é|e)rcoles|jueves|viernes|s(á|a)bado|domingo)\b"#,
+                options: .regularExpression
+            ) != nil
+        if !hasExplicitDayMarker, currentHour >= 19 {
+            if hour == 12 { return 0 }
+            if hour >= 1 && hour <= 11 {
+                let pmHour = hour + 12
+                if pmHour > currentHour { return pmHour }
+            }
+        }
+
+        // 5) Sin marcador → regla coloquial chilena/latina.
         if hour >= 1 && hour <= 7 { return hour + 12 }   // 1→13, 3→15, 7→19
         return hour                                        // 8..12 quedan AM
     }
@@ -2210,9 +2254,17 @@ enum NovaResponder {
             return .forceAM
         }
 
-        // 2) Acción matinal de desplazamiento + destino educacional.
-        //    "salir a la universidad" / "ir a clase" / "entrar al colegio".
-        let hasMorningAction = lower.range(
+        // 2) Acción matinal de desplazamiento + destino educacional, O
+        //    SOLO palabra educacional (default morning). Casos:
+        //    - "salir a la universidad a las 8" → forceAM
+        //    - "ir a clase a las 9" → forceAM
+        //    - "clase a las 8" → forceAM (sin verbo, default morning class)
+        //
+        //    Hacer forceAM con solo hasSchoolWord protege el caso "clase a
+        //    las 8" para que la nueva regla de noche (≥19h) NO lo bumpee
+        //    a 20:00. En español académico, una clase mencionada sin más
+        //    contexto se asume diurna.
+        _ = lower.range(  // hasMorningAction se conserva para futuras reglas
             of: #"\b(salir|salgo|sale|ir|voy|vamos|entrar|entro|entra)\b"#,
             options: .regularExpression
         ) != nil
@@ -2220,7 +2272,7 @@ enum NovaResponder {
             of: #"\b(clase|clases|universidad|colegio|escuela|facultad|liceo|preescolar)\b"#,
             options: .regularExpression
         ) != nil
-        if hasMorningAction && hasSchoolWord {
+        if hasSchoolWord {
             return .forceAM
         }
 

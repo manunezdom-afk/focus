@@ -620,9 +620,31 @@ struct MiDiaView: View {
     /// turno corto ("a las 3", "mañana", "en 20") puede completar la
     /// acción aunque el local parser no haya detectado clarify.
     private func applyBackendResult(_ result: NovaService.Result, userText: String) async -> InlineNovaResponse {
-        let outcome = store.applyBackendActions(result.actions, userText: userText)
-
         let replyText = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Planner gate: si el backend pidió no ejecutar (shouldAskUser=true
+        // o confidence < 0.55), NO aplicamos las acciones — mostramos sólo
+        // la pregunta y guardamos un pending para que el próximo turno
+        // corto la complete. Es la diferencia entre "asistente que actúa"
+        // (alta confianza) y "asistente que pregunta cuando duda".
+        if result.shouldAskUser || result.confidence < 0.55 {
+            if !replyText.isEmpty, !store.novaContext.pendingIsActive {
+                persistBackendQuestionAsPending(userText: userText, question: replyText)
+            }
+            let parts = splitReplyForUI(replyText.isEmpty
+                ? "Necesito un dato más para agendar esto."
+                : replyText)
+            return InlineNovaResponse(
+                userText: userText,
+                summary: parts.summary,
+                details: parts.details,
+                action: .dismiss,
+                isError: false,
+                tone: .clarify
+            )
+        }
+
+        let outcome = store.applyBackendActions(result.actions, userText: userText)
         // Cuota de smart actions agotada: pegar nota humana al final.
         let blockedNote: String? = result.smartActionsBlocked
             ? (result.smartActionsMessage ?? "Llegaste al límite diario de acciones de Nova.")
