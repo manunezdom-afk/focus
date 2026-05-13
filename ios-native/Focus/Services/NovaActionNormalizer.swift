@@ -301,10 +301,15 @@ enum NovaActionNormalizer {
     // MARK: - endTime rules
 
     /// Decide qué endTime guardar en el FocusEvent según las reglas del producto:
-    /// - Si `isReminder` es true → siempre `nil` visible (UI muestra como punto).
-    /// - Si `hasExplicitEndTime` (el usuario dijo "de X a Y" o "hasta Z") y el
-    ///   end provisto es > start → respetar.
-    /// - Sino → `nil` (la UI lo trata como punto inferido).
+    /// - **Rango explícito SIEMPRE gana**: si `hasExplicitEndTime` y end > start,
+    ///   se respeta. Aplica también cuando `isReminder == true` — bajo el nuevo
+    ///   modelo "todo con hora = bloque", el flag de aviso anticipado va como
+    ///   chip dentro del mismo bloque (vía `reminderOffsets`), NO reemplaza la
+    ///   duración real. Antes "reunión de 5 a 6 acuérdame 15 min antes" perdía
+    ///   el rango porque `isReminder=true` devolvía `nil`.
+    /// - **Reminder sin rango** → `nil` (UI muestra punto, sin duración).
+    /// - **Sin rango ni reminder** → `nil` con `inferredDuration=true` (UI lo
+    ///   trata como punto inferido).
     ///
     /// Importante: NO devolvemos `start + 5min` artificial — eso causaba que
     /// recordatorios vencidos se vieran como "próximos" hasta 5 min después.
@@ -316,11 +321,13 @@ enum NovaActionNormalizer {
         hasExplicitEndTime: Bool,
         isReminder: Bool
     ) -> (endTime: Date?, inferredDuration: Bool) {
-        if isReminder {
-            return (nil, false)  // recordatorio puntual
-        }
+        // Rango explícito gana — incluso si el usuario dijo "acuérdame N antes".
+        // El offset va como chip dentro del mismo bloque, no como duración.
         if hasExplicitEndTime, let end = providedEndTime, end > startTime {
             return (end, false)
+        }
+        if isReminder {
+            return (nil, false)  // recordatorio puntual sin rango
         }
         return (nil, true)  // duración inferida, mostrar como punto
     }

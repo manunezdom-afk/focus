@@ -160,13 +160,28 @@ enum NovaActionNormalizerTests {
         let now = Date()
         let oneHour = now.addingTimeInterval(3600)
 
-        let reminderEnd = NovaActionNormalizer.resolveEndTime(
+        // Cambio de criterio 2026-05-12: el rango explícito SIEMPRE gana,
+        // incluso cuando isReminder=true. Antes "reunión de 5 a 6 acuérdame
+        // 15 antes" perdía el rango — bajo el nuevo modelo, el aviso va como
+        // chip dentro del mismo bloque y la duración real se respeta.
+        let reminderWithRange = NovaActionNormalizer.resolveEndTime(
             startTime: now, providedEndTime: oneHour,
             hasExplicitEndTime: true, isReminder: true
         )
         check(
-            label: "resolveEndTime: isReminder=true ignora endTime explícito",
-            actual: reminderEnd.endTime,
+            label: "resolveEndTime: rango explícito gana aunque sea reminder",
+            actual: reminderWithRange.endTime != nil,
+            expected: true,
+            failures: &failures
+        )
+        // Recordatorio SIN rango → nil (punto en el tiempo).
+        let reminderPoint = NovaActionNormalizer.resolveEndTime(
+            startTime: now, providedEndTime: nil,
+            hasExplicitEndTime: false, isReminder: true
+        )
+        check(
+            label: "resolveEndTime: reminder sin rango → nil",
+            actual: reminderPoint.endTime,
             expected: nil as Date?,
             failures: &failures
         )
@@ -513,13 +528,22 @@ enum NovaActionNormalizerTests {
         if bug1.count == 2 {
             check(label: "bug1[0] title", actual: bug1[0].title, expected: "Seguir trabajando", failures: &failures)
             check(label: "bug1[0] hour 15", actual: bug1[0].hour, expected: 15, failures: &failures)
-            check(label: "bug1[0] HOY (no martes/miércoles)", actual: bug1[0].day, expected: .today, failures: &failures)
+            // El día depende de la hora a la que corren los tests. Si son
+            // antes de 19:30, 15:30 cae hoy futuro; si son después, el
+            // bumpea-a-mañana legítimo lo manda a tomorrow. AMBOS son
+            // aceptables — el bug original era que caía a "otherDay" por
+            // interpretación errónea de 3:30 → 03:30.
+            check(label: "bug1[0] today o tomorrow (no otherDay)",
+                  actual: bug1[0].day == .today || bug1[0].day == .tomorrow,
+                  expected: true, failures: &failures)
             check(label: "bug1[0] no reunión", actual: bug1[0].section != .reunion, expected: true, failures: &failures)
             check(label: "bug1[0] es recordatorio", actual: bug1[0].isReminder, expected: true, failures: &failures)
 
             check(label: "bug1[1] title", actual: bug1[1].title, expected: "Comer", failures: &failures)
             check(label: "bug1[1] hour 16", actual: bug1[1].hour, expected: 16, failures: &failures)
-            check(label: "bug1[1] HOY", actual: bug1[1].day, expected: .today, failures: &failures)
+            check(label: "bug1[1] today o tomorrow",
+                  actual: bug1[1].day == .today || bug1[1].day == .tomorrow,
+                  expected: true, failures: &failures)
             check(label: "bug1[1] no reunión", actual: bug1[1].section != .reunion, expected: true, failures: &failures)
         }
 
@@ -659,6 +683,51 @@ enum NovaActionNormalizerTests {
         // detecta hora. Si no detecta, kind sería clarify o el intent no
         // tendría hour. Ya cubierto por wordBug arriba.
 
+        // ───── MODELO UNIFICADO "bloque" 2026-05-12 ───────────────────
+
+        // Bug del producto: antes los recordatorios aparecían como tarjeta
+        // separada Y como bloque en timeline → duplicado. Ahora todo lo que
+        // tiene hora es UN solo bloque con chip de offset opcional.
+
+        // Bloque 1: "ir a buscar a mi hermano a las 6:30 y comer a las 8"
+        //           → 2 bloques, ambos hoy, sin duplicados.
+        let block1 = runPipeline("ir a buscar a mi hermano a las 6:30 y comer a las 8")
+        check(label: "block1: 2 intents", actual: block1.count, expected: 2, failures: &failures)
+        if block1.count == 2 {
+            check(label: "block1[0] hour 18", actual: block1[0].hour, expected: 18, failures: &failures)
+            check(label: "block1[0] minute 30", actual: block1[0].minute, expected: 30, failures: &failures)
+            check(label: "block1[1] hour 20", actual: block1[1].hour, expected: 20, failures: &failures)
+            check(label: "block1[0] sin offset", actual: block1[0].reminderOffsetMinutes, expected: nil, failures: &failures)
+        }
+
+        // Bloque 2: "ir a buscar a mi hermano a las 6:30 acuérdame 40 minutos antes"
+        //           → 1 bloque con reminderOffsetMinutes = 40.
+        let block2 = runPipeline("ir a buscar a mi hermano a las 6:30 acuérdame 40 minutos antes")
+        check(label: "block2: 1 intent", actual: block2.count, expected: 1, failures: &failures)
+        if let first = block2.first {
+            check(label: "block2 hour 18", actual: first.hour, expected: 18, failures: &failures)
+            check(label: "block2 minute 30", actual: first.minute, expected: 30, failures: &failures)
+            check(label: "block2 offset = 40 min", actual: first.reminderOffsetMinutes, expected: 40, failures: &failures)
+            check(label: "block2 title sin 'acuérdame'", actual: first.title, expected: "Ir a buscar a mi hermano", failures: &failures)
+        }
+
+        // Bloque 3: "reunión con Juan de 5 a 6 acuérdame 15 minutos antes"
+        //           → evento con duración + reminderOffsetMinutes = 15.
+        let block3 = runPipeline("reunión con Juan de 5 a 6 acuérdame 15 minutos antes")
+        check(label: "block3: 1 intent", actual: block3.count, expected: 1, failures: &failures)
+        if let first = block3.first {
+            check(label: "block3 hour 17 (start)", actual: first.hour, expected: 17, failures: &failures)
+            check(label: "block3 endHour 18", actual: first.endHour, expected: 18, failures: &failures)
+            check(label: "block3 offset = 15 min", actual: first.reminderOffsetMinutes, expected: 15, failures: &failures)
+        }
+
+        // Bloque 4: "comprar pan" → tarea (sin hora).
+        let block4 = runPipeline("comprar pan")
+        check(label: "block4: 1 intent", actual: block4.count, expected: 1, failures: &failures)
+        if let first = block4.first {
+            check(label: "block4 kind = task", actual: first.kind, expected: .task, failures: &failures)
+        }
+
         // ───── Resultado ───────────────────────────────────────────────
 
         if failures.isEmpty {
@@ -686,9 +755,15 @@ enum NovaActionNormalizerTests {
         let kind: ParsedKind
         let title: String
         let hour: Int?
+        let minute: Int?
+        let endHour: Int?
         let day: DayLabel
         let section: EventSection?
         let isReminder: Bool
+        /// Minutos antes del startTime extraídos de "acuérdame N antes".
+        /// Permite testear que un mismo bloque conserva su offset sin
+        /// crearse como ítem duplicado.
+        let reminderOffsetMinutes: Int?
     }
 
     enum DayLabel: String, Equatable {
@@ -703,38 +778,46 @@ enum NovaActionNormalizerTests {
         let intents = NovaResponder.parseAll(text)
         return intents.compactMap { intent -> ParsedAction? in
             switch intent {
-            case let .createEvent(rawTitle, when, _, _, section, wantsReminder):
+            case let .createEvent(rawTitle, when, explicitEnd, _, section, wantsReminder):
                 let title = NovaActionNormalizer.cleanTitle(rawTitle)
                 let hour = when.map { Calendar.current.component(.hour, from: $0) }
+                let minute = when.map { Calendar.current.component(.minute, from: $0) }
+                let endHour = explicitEnd.map { Calendar.current.component(.hour, from: $0) }
                 let day = dayLabel(for: when)
                 let reminder = wantsReminder
                     || NovaActionNormalizer.isReminderTrigger(in: text)
                     || NovaActionNormalizer.impliesPunctualReminder(in: text)
+                let offset = NovaActionNormalizer.extractReminderOffset(from: text)
                 return ParsedAction(
                     kind: reminder ? .reminder : .event,
-                    title: title, hour: hour, day: day,
-                    section: section, isReminder: reminder
+                    title: title, hour: hour, minute: minute, endHour: endHour, day: day,
+                    section: section, isReminder: reminder,
+                    reminderOffsetMinutes: offset
                 )
             case let .createTask(rawTitle, dueDate, _, wantsReminder):
                 let title = NovaActionNormalizer.cleanTitle(rawTitle)
                 let hour = dueDate.map { Calendar.current.component(.hour, from: $0) }
+                let minute = dueDate.map { Calendar.current.component(.minute, from: $0) }
                 let day = dayLabel(for: dueDate)
                 let reminder = wantsReminder
                     || NovaActionNormalizer.isReminderTrigger(in: text)
                     || NovaActionNormalizer.impliesPunctualReminder(in: text)
                 return ParsedAction(
-                    kind: .task, title: title, hour: hour, day: day,
-                    section: nil, isReminder: reminder
+                    kind: .task, title: title, hour: hour, minute: minute, endHour: nil, day: day,
+                    section: nil, isReminder: reminder,
+                    reminderOffsetMinutes: nil
                 )
             case .clarify:
                 return ParsedAction(
-                    kind: .clarify, title: "", hour: nil, day: .none,
-                    section: nil, isReminder: false
+                    kind: .clarify, title: "", hour: nil, minute: nil, endHour: nil, day: .none,
+                    section: nil, isReminder: false,
+                    reminderOffsetMinutes: nil
                 )
             default:
                 return ParsedAction(
-                    kind: .other, title: "", hour: nil, day: .none,
-                    section: nil, isReminder: false
+                    kind: .other, title: "", hour: nil, minute: nil, endHour: nil, day: .none,
+                    section: nil, isReminder: false,
+                    reminderOffsetMinutes: nil
                 )
             }
         }

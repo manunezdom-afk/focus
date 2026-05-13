@@ -1847,6 +1847,36 @@ enum NovaResponder {
             let resolvedH = h <= 12 ? adjustAmPm(hour: h, in: text) : h
             return (resolvedH, m)
         }
+        // 1c) Rango "de N a M" / "de las N a las M" / "entre N y M" — captura
+        //     el N INICIAL como start time. El endTime se calcula aparte en
+        //     `extractExplicitEndTime`. Sin este caso, "reunión de 5 a 6"
+        //     caía a clarify(¿Cuándo?) porque el "5" no tenía prefix "a las".
+        if let h = firstCaptureInt(
+            text,
+            pattern: #"\bde (?:la?s? )?(\d{1,2})(?::\d{2})?\s+(?:a|hasta)\s+(?:la?s? )?\d{1,2}"#,
+            group: 1
+        ), h < 24 {
+            let m = firstCaptureInt(
+                text,
+                pattern: #"\bde (?:la?s? )?\d{1,2}:(\d{2})\s+(?:a|hasta)"#,
+                group: 1
+            ) ?? 0
+            let resolvedH = h <= 12 ? adjustAmPm(hour: h, in: text) : h
+            return (resolvedH, m)
+        }
+        if let h = firstCaptureInt(
+            text,
+            pattern: #"\bentre (?:la?s? )?(\d{1,2})(?::\d{2})?\s+y\s+(?:la?s? )?\d{1,2}"#,
+            group: 1
+        ), h < 24 {
+            let m = firstCaptureInt(
+                text,
+                pattern: #"\bentre (?:la?s? )?\d{1,2}:(\d{2})\s+y"#,
+                group: 1
+            ) ?? 0
+            let resolvedH = h <= 12 ? adjustAmPm(hour: h, in: text) : h
+            return (resolvedH, m)
+        }
         // 2) "a las 12" / "a la 1" / "a eso de las 3" / "cerca de las 3"
         if let h = firstCaptureInt(text, pattern: #"(?:a la?s?|eso de las?|cerca de las?|alrededor de las?) (\d{1,2})\b"#, group: 1), h < 24 {
             return (adjustAmPm(hour: h, in: text), 0)
@@ -4055,10 +4085,20 @@ final class FocusDataStore: ObservableObject {
                 eventId: event.id
             )
             let timeLabel = DateFormatters.hourMinute.string(from: date)
-            let dayLabel = DateFormatters.weekdayDay.string(from: date).lowercased()
-            return isReminderHint
-                ? "Listo, te lo recuerdo: «\(title)» el \(dayLabel) a las \(timeLabel)."
-                : "Agendé «\(title)» el \(dayLabel) a las \(timeLabel)."
+            let dayLabel: String = {
+                if cal.isDateInToday(date) { return "hoy" }
+                if cal.isDateInTomorrow(date) { return "mañana" }
+                return "el \(DateFormatters.weekdayDay.string(from: date).lowercased())"
+            }()
+            // Copy unificado: "bloque" en vez de mezclar "recordatorio" /
+            // "evento". El chip 🔔 dentro del bloque comunica el offset.
+            if let mins = extractedOffsets?.first {
+                let offsetLabel = mins < 60
+                    ? "\(mins) min antes"
+                    : (mins % 60 == 0 ? "\(mins/60) h antes" : "\(mins/60) h \(mins%60) min antes")
+                return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel) con aviso \(offsetLabel)."
+            }
+            return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel)."
 
         case .createTask(let rawTitle, let dueDate, _, let wantsReminder):
             // Mismo pipeline de limpieza para tareas.

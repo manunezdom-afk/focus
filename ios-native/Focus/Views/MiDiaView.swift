@@ -67,11 +67,6 @@ struct MiDiaView: View {
             .filter { !$0.done && !store.dismissedDemoTaskTitles.contains($0.title) }
     }
 
-    private var nextBlock: FocusEvent? {
-        let now = Date()
-        return displayEvents.first { ($0.endTime ?? $0.startTime) >= now }
-    }
-
     var body: some View {
         ZStack {
             Theme.Colors.background.ignoresSafeArea()
@@ -134,32 +129,12 @@ struct MiDiaView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
 
-                    if let next = nextBlock {
-                        SwipeToDelete(enabled: true) {
-                            if store.hasUserEvents {
-                                store.deleteEvent(next.id)
-                            } else {
-                                withAnimation(.easeOut(duration: 0.22)) {
-                                    store.dismissDemoEvent(title: next.title)
-                                }
-                            }
-                            toast.success("Evento eliminado", symbol: "trash.fill")
-                        } content: {
-                            ProximoBloqueCard(
-                                event: next,
-                                onEdit: store.hasUserEvents ? { editingEvent = next } : nil,
-                                onDelete: {
-                                    if store.hasUserEvents {
-                                        store.deleteEvent(next.id)
-                                    } else {
-                                        store.dismissDemoEvent(title: next.title)
-                                    }
-                                    toast.success("Evento eliminado", symbol: "trash.fill")
-                                }
-                            )
-                        }
-                        .padding(.horizontal, Theme.Spacing.xl)
-                    }
+                    // Antes acá iba un `ProximoBloqueCard` con el próximo evento.
+                    // Lo sacamos: duplicaba el primer item del timeline más
+                    // abajo (mismo evento renderizado dos veces). Ahora el
+                    // timeline es la ÚNICA fuente de verdad para los bloques
+                    // de hoy — el primer item recibe un badge "PRÓXIMO" para
+                    // darle presencia visual sin duplicar.
 
                     if !overdueReminders.isEmpty {
                         overdueRemindersSection
@@ -620,7 +595,7 @@ struct MiDiaView: View {
             let resp = executeIntent(intent, userText: trimmed)
             guard !resp.isError else { continue }
             if lastAction == nil { lastAction = resp.action }
-            if let item = CreatedItem(intent: intent) {
+            if let item = CreatedItem(intent: intent, userText: trimmed) {
                 createdItems.append(item)
             }
         }
@@ -651,26 +626,38 @@ struct MiDiaView: View {
     /// Estructura interna para describir lo que se creó tras ejecutar cada
     /// intent del multi-intent. Nos permite componer un resumen humano
     /// agrupando por tipo y día.
+    ///
+    /// **Modelo unificado**: bajo el nuevo criterio "todo con hora = bloque",
+    /// ya no separamos visualmente "recordatorio" vs "evento" en Mi Día.
+    /// `kind` se queda como `.block` (tiene hora) o `.task` (no la tiene).
+    /// El offset de aviso anticipado va en `reminderOffsetMinutes` del
+    /// mismo bloque, no como ítem aparte.
     private struct CreatedItem {
-        enum Kind { case reminder, event, task }
+        enum Kind { case block, task }
         let kind: Kind
         let title: String
         let date: Date?
+        /// Si el usuario dijo "acuérdame N min antes", se persiste como
+        /// metadata del bloque y se renderiza como chip 🔔 dentro del
+        /// mismo ítem en Mi Día.
+        let reminderOffsetMinutes: Int?
 
-        init?(intent: NovaIntent) {
+        init?(intent: NovaIntent, userText: String) {
             switch intent {
-            case let .createEvent(rawTitle, when, _, _, _, wantsReminder):
+            case let .createEvent(rawTitle, when, _, _, _, _):
                 let cleaned = NovaActionNormalizer.cleanTitle(rawTitle)
                 guard !cleaned.isEmpty else { return nil }
-                self.kind = wantsReminder ? .reminder : .event
+                self.kind = .block
                 self.title = cleaned
                 self.date = when
+                self.reminderOffsetMinutes = NovaActionNormalizer.extractReminderOffset(from: userText)
             case let .createTask(rawTitle, dueDate, _, _):
                 let cleaned = NovaActionNormalizer.cleanTitle(rawTitle)
                 guard !cleaned.isEmpty else { return nil }
                 self.kind = .task
                 self.title = cleaned
                 self.date = dueDate
+                self.reminderOffsetMinutes = nil
             default:
                 return nil
             }
@@ -678,15 +665,17 @@ struct MiDiaView: View {
     }
 
     /// Convierte los items creados en (summary, details) humanos.
+    /// Bajo el modelo unificado, todo lo que tiene hora es un "bloque" en
+    /// Mi Día — el offset de aviso se muestra como chip dentro del mismo
+    /// bloque, no como tarjeta aparte.
+    ///
     /// Ejemplos:
-    /// - 2 recordatorios mismo día → "Listo. Te dejé 2 recordatorios para hoy."
-    ///   + bullets en details.
-    /// - 1 evento + 1 recordatorio → "Listo. Te dejé 1 evento y 1 recordatorio."
-    /// - 1 tarea → no debería pasar (count == 1 va por path simple).
+    /// - 2 bloques mismo día → "Listo. Te dejé 2 bloques para hoy: …"
+    /// - 1 bloque + 1 tarea → "Listo. Te dejé 1 bloque y 1 tarea."
+    /// - 1 tarea sola → no debería pasar (count == 1 va por path simple).
     private func composeMultiIntentMessage(items: [CreatedItem]) -> (String, String?) {
-        let reminders = items.filter { $0.kind == .reminder }
-        let events    = items.filter { $0.kind == .event }
-        let tasks     = items.filter { $0.kind == .task }
+        let blocks = items.filter { $0.kind == .block }
+        let tasks  = items.filter { $0.kind == .task }
 
         // Detectar si todos los items con fecha caen en el mismo día → "para hoy/mañana/...".
         let allDates = items.compactMap { $0.date }
@@ -702,27 +691,26 @@ struct MiDiaView: View {
             return DateFormatters.weekdayDay.string(from: date).lowercased()
         }()
 
-        // Summary: header humano.
+        // Summary: header humano. "Bloque" cuando tiene hora, "tarea" sino.
         let header: String
         let dayBit = dayLabel.map { " para \($0)" } ?? ""
-        switch (reminders.count, events.count, tasks.count) {
-        case (let r, 0, 0) where r >= 2:
-            header = "Listo. Te dejé \(r) recordatorios\(dayBit)."
-        case (0, let e, 0) where e >= 2:
-            header = "Listo. Te dejé \(e) eventos\(dayBit)."
-        case (0, 0, let t) where t >= 2:
+        switch (blocks.count, tasks.count) {
+        case (let b, 0) where b >= 2:
+            header = "Listo. Te dejé \(b) bloques\(dayBit)."
+        case (0, let t) where t >= 2:
             header = "Listo. Anoté \(t) tareas\(dayBit)."
         default:
             // Mixed.
             var parts: [String] = []
-            if events.count > 0    { parts.append("\(events.count) evento\(events.count == 1 ? "" : "s")") }
-            if reminders.count > 0 { parts.append("\(reminders.count) recordatorio\(reminders.count == 1 ? "" : "s")") }
-            if tasks.count > 0     { parts.append("\(tasks.count) tarea\(tasks.count == 1 ? "" : "s")") }
+            if blocks.count > 0 { parts.append("\(blocks.count) bloque\(blocks.count == 1 ? "" : "s")") }
+            if tasks.count > 0  { parts.append("\(tasks.count) tarea\(tasks.count == 1 ? "" : "s")") }
             let combined = parts.joined(separator: " y ")
             header = "Listo. Te dejé \(combined)\(dayBit)."
         }
 
-        // Details: bullets ordenados por hora si aplica.
+        // Details: bullets ordenados por hora. Si el item tiene reminder
+        // offset, lo incluimos en el mismo bullet — sin duplicar como ítem
+        // aparte.
         let sorted = items.sorted { a, b in
             switch (a.date, b.date) {
             case let (l?, r?): return l < r
@@ -733,20 +721,29 @@ struct MiDiaView: View {
         }
         let bullets = sorted.map { item -> String in
             let hh = item.date.map { DateFormatters.hourMinute.string(from: $0) }
+            var line: String
             switch (hh, sameDay) {
             case let (.some(time), true):
-                return "• \(item.title) — \(time)"
+                line = "• \(item.title) — \(time)"
             case let (.some(time), false):
                 if let d = item.date {
                     let day = cal.isDateInToday(d) ? "hoy"
                         : cal.isDateInTomorrow(d) ? "mañana"
                         : DateFormatters.weekdayDay.string(from: d).lowercased()
-                    return "• \(item.title) — \(day) \(time)"
+                    line = "• \(item.title) — \(day) \(time)"
+                } else {
+                    line = "• \(item.title) — \(time)"
                 }
-                return "• \(item.title) — \(time)"
             case (.none, _):
-                return "• \(item.title)"
+                line = "• \(item.title)"
             }
+            if let mins = item.reminderOffsetMinutes {
+                let offsetLabel = mins < 60
+                    ? "\(mins) min antes"
+                    : (mins % 60 == 0 ? "\(mins/60) h antes" : "\(mins/60) h \(mins%60) min antes")
+                line += "  🔔 \(offsetLabel)"
+            }
+            return line
         }
         let details = bullets.isEmpty ? nil : bullets.joined(separator: "\n")
         return (header, details)
@@ -924,43 +921,56 @@ struct MiDiaView: View {
                 )
             }
             let cal = Calendar.current
-            // Tres rutas:
-            // 1) Recordatorio (wantsReminder o intención puntual) → duración
-            //    interna mínima 5 min + isReminder=true, UI como punto.
-            // 2) Rango explícito ("de 3 a 4", "hasta 4", "por 1h") → end real,
-            //    UI como rango. inferredDuration = false.
-            // 3) Sin end-time explícita y sin reminder → duración interna 5 min
-            //    pero `inferredDuration: true` para que la UI lo muestre como
-            //    punto puntual.
+            // Pipeline unificado con `applyLocalNovaIntent` del store:
+            //   1) Si hay endTime explícito (rango "de X a Y") → respetarlo
+            //      siempre, AUNQUE además el usuario haya dicho "acuérdame N
+            //      antes". El chip de offset va dentro del MISMO bloque, no
+            //      duplica el evento.
+            //   2) Si NO hay endTime y wantsReminder → punto en tiempo,
+            //      duración interna 5 min para ordenamiento, isReminder=true.
+            //   3) Si NO hay endTime y no es reminder → inferredDuration=true,
+            //      la UI lo muestra como punto puntual.
+            let endResolution = NovaActionNormalizer.resolveEndTime(
+                startTime: date,
+                providedEndTime: explicitEnd,
+                hasExplicitEndTime: explicitEnd != nil && (explicitEnd ?? date) > date,
+                isReminder: wantsReminder
+            )
             let end: Date
             let isReminderFlag: Bool?
             let inferredFlag: Bool?
-            if wantsReminder {
+            if let resolved = endResolution.endTime {
+                // Rango explícito (con o sin "acuérdame antes").
+                end = resolved
+                isReminderFlag = nil
+                inferredFlag = false
+            } else if wantsReminder {
                 end = cal.date(byAdding: .minute, value: 5, to: date) ?? date
                 isReminderFlag = true
                 inferredFlag = nil
-            } else if let explicit = explicitEnd, explicit > date {
-                end = explicit
-                isReminderFlag = nil
-                inferredFlag = false
             } else {
                 end = cal.date(byAdding: .minute, value: 5, to: date) ?? date
                 isReminderFlag = nil
-                inferredFlag = true
+                inferredFlag = endResolution.inferredDuration
             }
 
             let effectiveSection: EventSection
             if wantsReminder {
                 effectiveSection = section ?? .reminder
             } else {
-                // Default .personal (no .reunion) — la heurística previa
-                // marcaba TODO lo desconocido como "Reunión", que confundía
-                // al usuario para verbos como "seguir trabajando" o "comer".
-                // Si la sección del intent es nil, volvemos a intentar
-                // detectarla desde el título limpio antes de caer al neutral.
                 effectiveSection = section
                     ?? NovaResponder.guessSection(for: title)
                     ?? .personal
+            }
+            // Reminder offset SIEMPRE se extrae si está en userText, sin
+            // importar si es recordatorio puntual o evento con duración.
+            // Antes solo se pasaba en el path remote → el chip 🔔 nunca
+            // aparecía en eventos creados localmente.
+            let extractedOffsets: [Int]?
+            if let mins = NovaActionNormalizer.extractReminderOffset(from: userText) {
+                extractedOffsets = [mins]
+            } else {
+                extractedOffsets = nil
             }
             let event = FocusEvent(
                 title: title,
@@ -969,7 +979,8 @@ struct MiDiaView: View {
                 section: effectiveSection,
                 location: location,
                 isReminder: isReminderFlag,
-                inferredDuration: inferredFlag
+                inferredDuration: inferredFlag,
+                reminderOffsets: extractedOffsets
             )
             store.addEvent(event)
             store.updateNovaContext(
@@ -985,17 +996,22 @@ struct MiDiaView: View {
             let dayLabel = DateFormatters.capitalizeFirst(
                 DateFormatters.weekdayDay.string(from: date)
             )
-            let kindLabel = wantsReminder ? "recordatorio" : effectiveSection.displayName.lowercased()
-            var detail = "\(dayLabel) · \(timeLabel) · \(kindLabel)"
+            // Copy unificado para el usuario: "bloque" en vez de mezclar
+            // "recordatorio"/"evento". Si hay offset, se menciona.
+            var detail = "\(dayLabel) · \(timeLabel)"
             if let loc = location { detail += " · \(loc)" }
-            if wantsReminder {
-                detail += "\nLas notificaciones automáticas están en preparación."
+            if let mins = extractedOffsets?.first {
+                let offsetLabel = mins < 60
+                    ? "\(mins) min antes"
+                    : (mins % 60 == 0 ? "\(mins/60) h antes" : "\(mins/60) h \(mins%60) min antes")
+                detail += " · 🔔 \(offsetLabel)"
             }
             return InlineNovaResponse(
                 userText: userText,
-                summary: wantsReminder ? "Recordatorio agendado." : "Evento agregado a Calendario.",
+                summary: "Listo. Te dejé «\(title)» en Mi Día.",
                 details: detail,
-                action: .openCalendar
+                action: .openCalendar,
+                tone: .success
             )
 
         case .correctLastEvent(let modifier):
@@ -1481,7 +1497,8 @@ struct MiDiaView: View {
                             TimelineEventRow(
                                 event: event,
                                 isLast: idx == shown.count - 1 && hiddenCount == 0,
-                                density: density
+                                density: density,
+                                isNext: idx == 0
                             )
                         }
                         .contextMenu {
@@ -1640,168 +1657,6 @@ struct MiDiaView: View {
     }
 }
 
-// MARK: - Próximo bloque (con contador tiempo real azul)
-
-private struct ProximoBloqueCard: View {
-    let event: FocusEvent
-    /// Si está presente, mostrar opción "Editar" en el menú. Para demos es nil.
-    let onEdit: (() -> Void)?
-    let onDelete: () -> Void
-
-    @State private var showDeleteConfirm: Bool = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            HStack(spacing: Theme.Spacing.sm) {
-                Text(headerLabel)
-                    .font(Theme.Typography.captionEmphasized)
-                    .foregroundStyle(headerTint)
-                    .tracking(1.2)
-                Spacer()
-                Text(event.timeRangeLabel)
-                    .font(Theme.Typography.timestamp)
-                    .foregroundStyle(Theme.Colors.textPrimary)
-
-                // Menú overflow (· · ·) — Editar (si aplica) + Eliminar.
-                Menu {
-                    if let onEdit {
-                        Button {
-                            onEdit()
-                        } label: {
-                            Label("Editar", systemImage: "pencil")
-                        }
-                    }
-                    Button(role: .destructive) {
-                        onDelete()
-                    } label: {
-                        Label("Eliminar", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.textTertiary)
-                        .padding(.leading, 4)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(event.title)
-                    .font(Theme.Typography.title2)
-                    .foregroundStyle(Theme.Colors.textPrimary)
-                    .lineLimit(2)
-                // Contador: tick cada 1s para que los eventos EN CURSO
-                // muestren minutos + segundos en tiempo real. Eventos
-                // futuros y recordatorios actualizan al mismo ritmo pero
-                // su texto solo cambia al cruzar minuto/hora.
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(countdownLabel(now: context.date))
-                        .font(Theme.Typography.subheadEmphasized)
-                        .foregroundStyle(Theme.Colors.focusAccent)
-                        .monospacedDigit()
-                        .contentTransition(.numericText(countsDown: true))
-                }
-            }
-
-            HStack(spacing: 6) {
-                StatePill(
-                    label: event.displayAsPointInTime ? "Recordatorio" : event.section.displayName,
-                    tint: event.displayAsPointInTime ? Theme.Colors.sectionReminder : event.section.color,
-                    symbol: event.displayAsPointInTime ? "bell.fill" : event.section.symbol
-                )
-                if let loc = event.location, !loc.isEmpty {
-                    LocationLabel(location: loc)
-                }
-            }
-        }
-        .padding(Theme.Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                .fill(Theme.Colors.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                        .strokeBorder(headerTint.opacity(0.18), lineWidth: 1)
-                )
-        )
-        .focusCardShadow()
-        .contextMenu {
-            if let onEdit {
-                Button(action: onEdit) {
-                    Label("Editar", systemImage: "pencil")
-                }
-            }
-            Button(role: .destructive, action: onDelete) {
-                Label("Eliminar", systemImage: "trash")
-            }
-        }
-    }
-
-    private var headerLabel: String {
-        if event.isNow { return "EN CURSO" }
-        if event.displayAsPointInTime { return "RECORDATORIO" }
-        return "PRÓXIMO"
-    }
-
-    private var headerTint: Color {
-        if event.isNow { return Theme.Colors.success }
-        if event.displayAsPointInTime { return Theme.Colors.sectionReminder }
-        return Theme.Colors.focusAccent
-    }
-
-    /// Contador con segundos solo cuando el evento está EN CURSO. Recordatorios
-    /// y eventos puntuales: formato absoluto humano sin segundos.
-    private func countdownLabel(now: Date) -> String {
-        let cal = Calendar.current
-        // En curso → minutos + segundos ("Termina en 24 min 18 s")
-        if !event.displayAsPointInTime,
-           let end = event.endTime, event.startTime <= now && end >= now {
-            let totalSeconds = max(0, Int(end.timeIntervalSince(now)))
-            if totalSeconds == 0 { return "Termina ahora" }
-            return "Termina en " + formatMS(seconds: totalSeconds)
-        }
-        let diff = event.startTime.timeIntervalSince(now)
-        if diff <= 0 {
-            return event.displayAsPointInTime ? "Es ahora" : "Empezó ya"
-        }
-        // Recordatorios y eventos sin duración explícita: formato absoluto.
-        if event.displayAsPointInTime {
-            let time = DateFormatters.hourMinute.string(from: event.startTime)
-            if cal.isDateInToday(event.startTime) { return "Hoy a las \(time)" }
-            if cal.isDateInTomorrow(event.startTime) { return "Mañana a las \(time)" }
-            let day = DateFormatters.weekdayDay.string(from: event.startTime).lowercased()
-            return "El \(day) a las \(time)"
-        }
-        // Eventos futuros con duración: "Empieza en N min" / "N h N min" (sin
-        // segundos para no parpadear el texto cada segundo durante horas).
-        let totalMinutes = Int(diff / 60)
-        if totalMinutes == 0 { return "Empieza pronto" }
-        return "Empieza en " + formatHM(minutes: totalMinutes)
-    }
-
-    /// Formato minutos + segundos para eventos EN CURSO.
-    /// "5 min 42 s" / "1 min 5 s" / "42 s".
-    private func formatMS(seconds: Int) -> String {
-        let h = seconds / 3600
-        let m = (seconds % 3600) / 60
-        let s = seconds % 60
-        var parts: [String] = []
-        if h > 0 { parts.append("\(h) h") }
-        if h > 0 || m > 0 { parts.append("\(m) min") }
-        parts.append("\(s) s")
-        return parts.joined(separator: " ")
-    }
-
-    private func formatHM(minutes: Int) -> String {
-        if minutes < 60 {
-            return minutes == 1 ? "1 min" : "\(minutes) min"
-        }
-        let h = minutes / 60
-        let m = minutes % 60
-        let hLabel = h == 1 ? "1 h" : "\(h) h"
-        if m == 0 { return hLabel }
-        return "\(hLabel) \(m) min"
-    }
-}
-
 // MARK: - Timeline row
 
 /// Densidad visual del timeline — se adapta al número de eventos del día.
@@ -1864,6 +1719,37 @@ private struct TimelineEventRow: View {
     let event: FocusEvent
     let isLast: Bool
     var density: TimelineRowDensity = .balanced
+    /// True cuando este es el primer evento upcoming del día — se muestra
+    /// un mini badge "PRÓXIMO" para darle presencia visual sin necesitar
+    /// una card duplicada (la antigua ProximoBloqueCard).
+    var isNext: Bool = false
+
+    /// Chip de recordatorio anticipado. Si el evento tiene
+    /// `reminderOffsets = [40]` mostramos "🔔 40 min antes" dentro del
+    /// mismo bloque — antes era una tarjeta separada que duplicaba
+    /// visualmente el evento.
+    private var primaryReminderOffsetMinutes: Int? {
+        guard let offsets = event.reminderOffsets, !offsets.isEmpty else { return nil }
+        return offsets.first
+    }
+
+    private var reminderChipLabel: String? {
+        guard let m = primaryReminderOffsetMinutes else { return nil }
+        let extraCount = (event.reminderOffsets?.count ?? 0) - 1
+        let base: String
+        if m < 60 {
+            base = "\(m) min antes"
+        } else if m == 60 {
+            base = "1 h antes"
+        } else if m % 60 == 0 {
+            base = "\(m / 60) h antes"
+        } else {
+            let h = m / 60
+            let mm = m % 60
+            base = "\(h) h \(mm) min antes"
+        }
+        return extraCount > 0 ? "\(base) (+\(extraCount))" : base
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
@@ -1912,6 +1798,20 @@ private struct TimelineEventRow: View {
                     .frame(width: density.sidebarWidth)
 
                 VStack(alignment: .leading, spacing: density == .spacious ? 8 : 6) {
+                    // Badge "PRÓXIMO" + título. El badge solo aparece en el
+                    // primer evento upcoming del día — reemplaza la antigua
+                    // ProximoBloqueCard sin duplicar el contenido.
+                    if isNext && !event.isNow {
+                        Text("PRÓXIMO")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Theme.Colors.focusAccent)
+                            .tracking(1.2)
+                    } else if event.isNow {
+                        Text("EN CURSO")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Theme.Colors.success)
+                            .tracking(1.2)
+                    }
                     Text(event.title)
                         .font(density.titleFont)
                         .foregroundStyle(Theme.Colors.textPrimary)
@@ -1931,6 +1831,26 @@ private struct TimelineEventRow: View {
                                 .foregroundStyle(Theme.Colors.textTertiary)
                                 .lineLimit(1)
                         }
+                    }
+
+                    // Chip recordatorio anticipado — "🔔 40 min antes". Aparece
+                    // DENTRO del mismo bloque, no como card separada arriba.
+                    // Misma regla para eventos puntuales con offset y eventos
+                    // con duración con offset.
+                    if let chipLabel = reminderChipLabel {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bell.fill")
+                                .font(.system(size: density == .spacious ? 11 : 10, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.sectionReminder)
+                            Text(chipLabel)
+                                .font(density.metaFont)
+                                .foregroundStyle(Theme.Colors.sectionReminder)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule().fill(Theme.Colors.sectionReminder.opacity(0.12))
+                        )
                     }
 
                     // Contador live solo si: evento EN CURSO o empieza en
