@@ -1406,7 +1406,17 @@ enum NovaResponder {
             // Capitalizar primera palabra de `rest` si es minúscula y no es
             // una preposición/artículo — captura "agustina" → "Agustina"
             // cuando no fue normalizado por el artículo previo.
-            rest = capitalizeFirstNounIfLower(rest)
+            //
+            // PERO si el trigger termina en " a" (ej. "salir a", "ir a") y
+            // rest empieza con un verbo en infinitivo (-ar/-er/-ir), NO
+            // capitalizamos — es un segundo verbo, no nombre propio.
+            //   "salir a jugar fútbol" → "Salir a jugar fútbol" (NO "Jugar")
+            //   "ir a comprar pan"     → "Ir a comprar pan"     (NO "Comprar")
+            let isInfinitiveAfterTriggerA = trimmedTriggerLower.hasSuffix(" a")
+                && (rest.range(of: #"^\w+(?:ar|er|ir)\b"#, options: .regularExpression) != nil)
+            if !isInfinitiveAfterTriggerA {
+                rest = capitalizeFirstNounIfLower(rest)
+            }
 
             if rest.isEmpty { return normalizedVerb }
 
@@ -3199,6 +3209,9 @@ final class FocusDataStore: ObservableObject {
         var didMutate: Bool = false
         /// Resumen humano de la última mutación, listo para inline response.
         var summary: String? = nil
+        /// Detalle multilínea con bullets de TODOS los items creados (cuando
+        /// hubo más de uno). Se rinde en `InlineNovaResponse.details`.
+        var details: String? = nil
         /// Acciones ignoradas/strippadas — para diagnóstico en logs.
         var ignored: [String] = []
         /// ID del evento creado o editado en esta tanda (si aplica). Para
@@ -3208,6 +3221,10 @@ final class FocusDataStore: ObservableObject {
         var primaryTaskId: UUID? = nil
         /// Si la acción primaria fue un recordatorio puntual.
         var primaryIsReminder: Bool = false
+        /// Items creados en esta tanda, para componer resumen multi-action
+        /// uniforme al final ("Listo. Te dejé 3 bloques para hoy: …").
+        var createdEvents: [FocusEvent] = []
+        var createdTasks: [FocusTask] = []
     }
 
     /// Aplica una secuencia de `BackendAction` al store. Cada mutación
@@ -3249,6 +3266,7 @@ final class FocusDataStore: ObservableObject {
                         outcome.summary = summaryForCreatedEvent(event)
                         outcome.primaryEventId = event.id
                         outcome.primaryIsReminder = event.isReminder == true
+                        outcome.createdEvents.append(event)
                         updateNovaContext(
                             from: userText,
                             title: event.title,
@@ -3320,6 +3338,7 @@ final class FocusDataStore: ObservableObject {
                     outcome.didMutate = true
                     outcome.summary = "Tarea «\(task.title)» agregada."
                     outcome.primaryTaskId = task.id
+                    outcome.createdTasks.append(task)
                     updateNovaContext(
                         from: userText,
                         title: task.title,
@@ -3364,7 +3383,82 @@ final class FocusDataStore: ObservableObject {
             }
         }
 
+        // Si el backend devolvió MÚLTIPLES creaciones, sobreescribir el
+        // summary/details con una composición humana uniforme. Antes el
+        // summary quedaba con la ÚLTIMA acción solamente — confuso cuando
+        // se crearon 2 o 3 ítems.
+        let totalCreated = outcome.createdEvents.count + outcome.createdTasks.count
+        if totalCreated >= 2 {
+            let (sum, det) = composeMultiOutcome(outcome.createdEvents, outcome.createdTasks)
+            outcome.summary = sum
+            outcome.details = det
+        }
+
         return outcome
+    }
+
+    /// Compone summary humano + bullets para multi-action del backend.
+    /// Mismo formato que `composeMultiIntentMessage` del local path —
+    /// modelo unificado "bloque" + chip de offset cuando aplique.
+    private func composeMultiOutcome(
+        _ events: [FocusEvent],
+        _ tasks: [FocusTask]
+    ) -> (String, String?) {
+        let cal = Calendar.current
+        let dates = events.map { $0.startTime } + tasks.compactMap { $0.dueDate }
+        let sameDay: Bool = {
+            guard let first = dates.first else { return false }
+            return dates.allSatisfy { cal.isDate($0, inSameDayAs: first) }
+        }()
+        let dayLabel: String? = {
+            guard sameDay, let d = dates.first else { return nil }
+            if cal.isDateInToday(d) { return "hoy" }
+            if cal.isDateInTomorrow(d) { return "mañana" }
+            return DateFormatters.weekdayDay.string(from: d).lowercased()
+        }()
+        let dayBit = dayLabel.map { " para \($0)" } ?? ""
+
+        let blocksCount = events.count
+        let tasksCount = tasks.count
+        let header: String
+        switch (blocksCount, tasksCount) {
+        case (let b, 0) where b >= 2:
+            header = "Listo. Te dejé \(b) bloques\(dayBit)."
+        case (0, let t) where t >= 2:
+            header = "Listo. Anoté \(t) tareas\(dayBit)."
+        default:
+            var parts: [String] = []
+            if blocksCount > 0 { parts.append("\(blocksCount) bloque\(blocksCount == 1 ? "" : "s")") }
+            if tasksCount > 0  { parts.append("\(tasksCount) tarea\(tasksCount == 1 ? "" : "s")") }
+            header = "Listo. Te dejé \(parts.joined(separator: " y "))\(dayBit)."
+        }
+
+        var bullets: [String] = []
+        let sortedEvents = events.sorted { $0.startTime < $1.startTime }
+        for ev in sortedEvents {
+            let time = DateFormatters.hourMinute.string(from: ev.startTime)
+            var line: String
+            if sameDay {
+                line = "• \(ev.title) — \(time)"
+            } else {
+                let day = cal.isDateInToday(ev.startTime) ? "hoy"
+                    : cal.isDateInTomorrow(ev.startTime) ? "mañana"
+                    : DateFormatters.weekdayDay.string(from: ev.startTime).lowercased()
+                line = "• \(ev.title) — \(day) \(time)"
+            }
+            if let mins = ev.reminderOffsets?.first {
+                let offsetLabel = mins < 60
+                    ? "\(mins) min antes"
+                    : (mins % 60 == 0 ? "\(mins/60) h antes" : "\(mins/60) h \(mins%60) min antes")
+                line += "  🔔 \(offsetLabel)"
+            }
+            bullets.append(line)
+        }
+        for t in tasks {
+            bullets.append("• \(t.title)")
+        }
+        let details = bullets.isEmpty ? nil : bullets.joined(separator: "\n")
+        return (header, details)
     }
 
     /// Crea un `FocusEvent` desde el payload del backend. Resuelve fecha/hora,
@@ -3644,13 +3738,17 @@ final class FocusDataStore: ObservableObject {
         }
     }
 
-    /// Construye un mensaje humano para confirmar la creación de un evento
-    /// — usado como `summary` inline ("Evento agregado a Calendario.").
+    /// Mensaje humano de confirmación al crear UN evento desde el backend.
+    /// Bajo el modelo unificado "todo con hora = bloque" usamos "bloque" en
+    /// vez de mezclar "evento"/"recordatorio". Más simple para el usuario.
     private func summaryForCreatedEvent(_ event: FocusEvent) -> String {
-        if event.isReminder == true {
-            return "Recordatorio agendado."
-        }
-        return "Evento agregado a Calendario."
+        let cal = Calendar.current
+        let dayLabel: String
+        if cal.isDateInToday(event.startTime) { dayLabel = "hoy" }
+        else if cal.isDateInTomorrow(event.startTime) { dayLabel = "mañana" }
+        else { dayLabel = "el \(DateFormatters.weekdayDay.string(from: event.startTime).lowercased())" }
+        let timeLabel = DateFormatters.hourMinute.string(from: event.startTime)
+        return "Listo. Te dejé «\(event.title)» \(dayLabel) a las \(timeLabel)."
     }
 
     /// Parsea un `id` string del backend a UUID. Si no es UUID válido,

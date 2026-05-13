@@ -728,6 +728,38 @@ enum NovaActionNormalizerTests {
             check(label: "block4 kind = task", actual: first.kind, expected: .task, failures: &failures)
         }
 
+        // ───── BUG REPORT 2026-05-12 — INSTRUCCIÓN COMPLEJA ────────────
+
+        // Bug iPhone: "tengo que ir a buscar a mi hermano en 20 min luego
+        // salir a jugar fútbol a las 10 y llevar la pelota a las 11"
+        // → Nova creó "Salir a jugar futbol que llevar la pelota" como
+        // título concatenado. Esperamos 3 intents con títulos limpios.
+        let complex = runPipeline("tengo que ir a buscar a mi hermano en 20 min luego salir a jugar fútbol a las 10 y llevar la pelota a las 11")
+        check(label: "complex: 3 intents", actual: complex.count, expected: 3, failures: &failures)
+        if complex.count == 3 {
+            check(label: "complex[0] title 'Ir a buscar a mi hermano'",
+                  actual: complex[0].title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "complex[1] title 'Salir a jugar fútbol'",
+                  actual: complex[1].title, expected: "Salir a jugar fútbol", failures: &failures)
+            check(label: "complex[1] hour 10", actual: complex[1].hour, expected: 10, failures: &failures)
+            check(label: "complex[2] title 'Llevar la pelota' (NO concatenado)",
+                  actual: complex[2].title, expected: "Llevar la pelota", failures: &failures)
+            check(label: "complex[2] hour 11", actual: complex[2].hour, expected: 11, failures: &failures)
+            // Crítico: NO debe contener "que llevar" en ningún título.
+            let hasBadConcatenation = complex.contains {
+                $0.title.lowercased().contains("que llevar")
+            }
+            check(label: "complex: ningún título concatenado con 'que llevar'",
+                  actual: hasBadConcatenation, expected: false, failures: &failures)
+        }
+
+        // Caso menor del mismo bug: "salir a jugar fútbol a las 10 y llevar
+        // la pelota" → segundo segmento SIN hora (no debería splittear por
+        // " y " porque smart split exige hora en ambos lados).
+        let shortRelated = runPipeline("salir a jugar fútbol a las 10 y llevar la pelota")
+        check(label: "shortRelated: 1 intent (no split, llevar no tiene hora)",
+              actual: shortRelated.count, expected: 1, failures: &failures)
+
         // ───── Resultado ───────────────────────────────────────────────
 
         if failures.isEmpty {

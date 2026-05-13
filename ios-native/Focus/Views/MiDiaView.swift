@@ -549,9 +549,14 @@ struct MiDiaView: View {
 
         if outcome.didMutate {
             // Hubo mutación: usamos el resumen del outcome como cabecera +
-            // el reply textual como detalle. Acción contextual según tipo.
+            // los bullets generados (multi-action) o el reply textual del
+            // backend (single action) como detalle. Acción contextual según
+            // tipo. Para múltiples ítems creados, `outcome.details` trae los
+            // bullets compuestos por el store — el reply textual del backend
+            // queda redundante y lo omitimos.
             let summary = outcome.summary ?? "Listo."
-            var details: String? = replyText.isEmpty ? nil : replyText
+            let baseDetails = outcome.details ?? (replyText.isEmpty ? nil : replyText)
+            var details: String? = baseDetails
             if let note = blockedNote {
                 details = [details, note].compactMap { $0 }.joined(separator: "\n\n")
             }
@@ -565,7 +570,8 @@ struct MiDiaView: View {
                 summary: summary,
                 details: details,
                 action: action,
-                isError: false
+                isError: false,
+                tone: .success
             )
         }
 

@@ -334,13 +334,16 @@ struct InlineNovaResponseView: View {
         }
     }
 
-    /// Diamante de Nova animado según tono.
+    /// Diamante de Nova animado según tono. El diamante mantiene SIEMPRE
+    /// identidad Nova (gradient violeta) en TODOS los estados — el feedback
+    /// de éxito/error se da por wash de color sutil del card, no por un
+    /// glyph grande encima del diamante. Premium > genérico.
     private var diamondBadge: some View {
         ZStack {
             // Halo gradient sólido cuando processing.
             if tone == .processing {
                 Circle()
-                    .strokeBorder(toneColor.opacity(0.55), lineWidth: 2)
+                    .strokeBorder(Theme.Colors.novaAccent.opacity(0.55), lineWidth: 2)
                     .frame(width: 24, height: 24)
                     .scaleEffect(processingPulse ? 1.7 : 1.0)
                     .opacity(processingPulse ? 0 : 0.9)
@@ -350,54 +353,24 @@ struct InlineNovaResponseView: View {
                     )
             }
             Circle()
-                .fill(diamondFill)
+                .fill(Theme.Colors.novaGradient)
                 .frame(width: 24, height: 24)
-                .shadow(color: toneColor.opacity(0.45), radius: 6, y: 1)
+                .shadow(color: Theme.Colors.novaAccent.opacity(0.40), radius: 6, y: 1)
             NovaSparkMark(size: 11)
-            // Glyph del estado superpuesto (small).
-            if let glyph = toneGlyph {
-                Image(systemName: glyph)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 14, height: 14)
-                    .background(Circle().fill(toneColor))
-                    .offset(x: 10, y: 10)
-            }
         }
         .frame(width: 28, height: 28)
     }
 
-    private var diamondFill: AnyShapeStyle {
-        switch tone {
-        case .success:
-            return AnyShapeStyle(LinearGradient(
-                colors: [Theme.Colors.success.opacity(0.85), Theme.Colors.success],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            ))
-        case .error:
-            return AnyShapeStyle(LinearGradient(
-                colors: [Theme.Colors.warning.opacity(0.85), Theme.Colors.warning],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            ))
-        case .processing, .clarify:
-            return AnyShapeStyle(Theme.Colors.novaGradient)
-        }
-    }
-
+    /// Color del acento del card. Antes era muy verde fuerte en success;
+    /// ahora `.success` usa nova (violeta), `.error` ámbar suave (no rojo),
+    /// `.clarify`/`.processing` violeta Nova. Esto mantiene identidad de
+    /// marca consistente — Nova es violeta, no verde gigante.
     private var toneColor: Color {
         switch tone {
-        case .success:    return Theme.Colors.success
+        case .success:    return Theme.Colors.novaAccent
         case .clarify:    return Theme.Colors.novaAccent
         case .error:      return Theme.Colors.warning
         case .processing: return Theme.Colors.novaAccent
-        }
-    }
-
-    private var toneGlyph: String? {
-        switch tone {
-        case .success: return "checkmark"
-        case .error:   return "exclamationmark"
-        case .clarify, .processing: return nil
         }
     }
 
