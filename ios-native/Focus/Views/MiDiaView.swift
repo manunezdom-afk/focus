@@ -68,6 +68,40 @@ struct MiDiaView: View {
             .filter { !$0.done && !store.dismissedDemoTaskTitles.contains($0.title) }
     }
 
+    /// Eventos del día siguiente del usuario. Demo NO tiene datos para
+    /// mañana — mostrarlos confundiría, así que devolvemos vacío.
+    private var tomorrowEvents: [FocusEvent] {
+        guard store.hasUserEvents else { return [] }
+        let cal = Calendar.current
+        guard let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) else {
+            return []
+        }
+        return store.eventsFor(date: tomorrow)
+    }
+
+    /// Bloques de hoy que aún no terminaron — los que están "por venir".
+    /// Usado para detectar cuándo el día está terminando.
+    private var remainingTodayEvents: [FocusEvent] {
+        let now = Date()
+        return displayEvents.filter { event in
+            let end = event.endTime ?? event.startTime
+            return end >= now
+        }
+    }
+
+    /// Preview de mañana: solo aparece de noche real (≥20h, antes de
+    /// medianoche) cuando el día está prácticamente terminado (0–2 bloques
+    /// aún por venir hoy) y hay al menos un evento mañana. Es un guiño
+    /// sutil, no una sección activa. Pasada la medianoche NO aparece —
+    /// el "hoy" del usuario rolló de calendario y mostrar "tomorrow" en
+    /// ese contexto confunde.
+    private var shouldShowTomorrowPreview: Bool {
+        let hour = Calendar.current.component(.hour, from: Date())
+        guard hour >= 20 else { return false }
+        guard remainingTodayEvents.count <= 2 else { return false }
+        return !tomorrowEvents.isEmpty
+    }
+
     var body: some View {
         ZStack {
             Theme.Colors.background.ignoresSafeArea()
@@ -145,6 +179,8 @@ struct MiDiaView: View {
                     timelineSection
 
                     pendingTasksSection
+
+                    nextDayPreviewSection
 
                     Spacer(minLength: Theme.Spacing.bottomBarSafety)
                 }
@@ -1192,7 +1228,7 @@ struct MiDiaView: View {
             if pending.isEmpty {
                 return InlineNovaResponse(
                     userText: userText,
-                    summary: "No tienes pendientes de hoy. Disfrutalo."
+                    summary: "No tienes pendientes de hoy. Disfrútalo."
                 )
             }
             let preview = pending.prefix(3).map { "• \($0.title)" }.joined(separator: "\n")
@@ -1608,17 +1644,8 @@ struct MiDiaView: View {
             .padding(.horizontal, Theme.Spacing.xl)
 
             if shown.isEmpty {
-                HStack(spacing: Theme.Spacing.md) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(Theme.Colors.success)
-                    Text("Terminaste tus pendientes de hoy.")
-                        .font(Theme.Typography.body)
-                        .foregroundStyle(Theme.Colors.textSecondary)
-                    Spacer()
-                }
-                .focusCard()
-                .padding(.horizontal, Theme.Spacing.xl)
+                pendingClearedCard
+                    .padding(.horizontal, Theme.Spacing.xl)
             } else {
                 VStack(spacing: Theme.Spacing.sm) {
                     ForEach(shown) { task in
@@ -1689,6 +1716,164 @@ struct MiDiaView: View {
         if count == 0 { return "Todo listo" }
         if count == 1 { return "1 pendiente" }
         return "\(count) pendientes"
+    }
+
+    // MARK: - Pendientes despejados (sustituye el viejo "check verde")
+
+    /// Card que aparece cuando no quedan pendientes. Cambia el tono según
+    /// la hora — un detalle pequeño que aleja la card del "checkmark
+    /// genérico" hacia algo más de marca: gradient cobalto→violeta, un
+    /// glyph contextual (sparkle de día, luna de noche), y dos líneas con
+    /// jerarquía clara en vez de una sola frase de éxito.
+    private var pendingClearedCard: some View {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let isNight = hour >= 20 || hour < 5
+        let isEvening = hour >= 17 && hour < 20
+
+        let glyph: String
+        let title: String
+        let sub: String
+
+        if isNight {
+            glyph = "moon.stars.fill"
+            title = "Cerraste el día"
+            sub = "No quedan pendientes para hoy."
+        } else if isEvening {
+            glyph = "sparkles"
+            title = "Lista al día"
+            sub = "Terminaste tus pendientes."
+        } else {
+            glyph = "sparkle"
+            title = "Sin pendientes"
+            sub = "Tu lista de hoy está despejada."
+        }
+
+        return HStack(spacing: Theme.Spacing.md + 2) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Theme.Colors.focusAccent.opacity(0.14),
+                                Theme.Colors.novaAccent.opacity(0.14)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                Circle()
+                    .strokeBorder(Theme.Colors.focusAccent.opacity(0.22), lineWidth: 1)
+                    .frame(width: 44, height: 44)
+                Image(systemName: glyph)
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Theme.Colors.focusAccent, Theme.Colors.novaAccent],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Theme.Typography.bodyBold)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                Text(sub)
+                    .font(Theme.Typography.subhead)
+                    .foregroundStyle(Theme.Colors.textSecondary)
+            }
+            Spacer()
+        }
+        .padding(Theme.Spacing.md + 2)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(Theme.Colors.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                        .strokeBorder(Theme.Colors.focusAccent.opacity(0.16), lineWidth: 1)
+                )
+                .focusCardShadow()
+        )
+    }
+
+    // MARK: - Preview "Para mañana"
+
+    /// Vista previa muy sutil de los eventos de mañana — solo aparece de
+    /// noche cuando el día ya está terminando. Diseñada para sentirse
+    /// como un "recordatorio amable" y NO como otra sección activa:
+    /// header en lowercase con sunrise glyph, filas en colores muted,
+    /// fondo en tinte sutil con borde apenas visible.
+    @ViewBuilder
+    private var nextDayPreviewSection: some View {
+        if shouldShowTomorrowPreview {
+            let shown = Array(tomorrowEvents.prefix(3))
+            let extra = tomorrowEvents.count - shown.count
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm + 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "sunrise.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                    Text("Mañana")
+                        .font(Theme.Typography.subheadEmphasized)
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                    Spacer()
+                    Text(tomorrowEvents.count == 1
+                         ? "1 bloque"
+                         : "\(tomorrowEvents.count) bloques")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.textQuaternary)
+                        .tracking(0.3)
+                }
+                .padding(.horizontal, Theme.Spacing.xl)
+
+                VStack(spacing: Theme.Spacing.xs) {
+                    ForEach(shown) { event in
+                        tomorrowPreviewRow(event)
+                    }
+                    if extra > 0 {
+                        Text(extra == 1 ? "y 1 más" : "y \(extra) más")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.textTertiary)
+                            .padding(.top, 4)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
+                .padding(Theme.Spacing.md + 2)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                        .fill(Theme.Colors.surfaceTinted.opacity(0.55))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                                .strokeBorder(Theme.Colors.border.opacity(0.45), lineWidth: 0.5)
+                        )
+                )
+                .padding(.horizontal, Theme.Spacing.xl)
+            }
+        }
+    }
+
+    /// Fila individual del preview de mañana. Tipografía un punto más
+    /// chica que el timeline real + colores muted para que se vea
+    /// claramente como "vista previa", no como un bloque accionable.
+    private func tomorrowPreviewRow(_ event: FocusEvent) -> some View {
+        HStack(spacing: Theme.Spacing.md) {
+            Text(DateFormatters.hourMinute.string(from: event.startTime))
+                .font(Theme.Typography.timestamp)
+                .foregroundStyle(Theme.Colors.textTertiary)
+                .frame(width: 50, alignment: .leading)
+            Capsule()
+                .fill(event.section.color.opacity(0.55))
+                .frame(width: 3, height: 18)
+            Text(event.title)
+                .font(Theme.Typography.subhead)
+                .foregroundStyle(Theme.Colors.textSecondary)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.vertical, 3)
     }
 }
 
