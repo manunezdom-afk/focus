@@ -43,6 +43,7 @@
 		FA0000000000000000000096 /* VoiceDictationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000098 /* VoiceDictationSheet.swift */; };
 		FA0000000000000000000097 /* NovaActionNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000099 /* NovaActionNormalizer.swift */; };
 		FA000000000000000000009A /* NovaActionNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA000000000000000000009B /* NovaActionNormalizerTests.swift */; };
+		FA00000000000000000000B2 /* NovaActionValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA00000000000000000000B3 /* NovaActionValidator.swift */; };
 		FA000000000000000000001A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000015 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -84,6 +85,7 @@
 		FA0000000000000000000098 /* VoiceDictationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceDictationSheet.swift; sourceTree = "<group>"; };
 		FA0000000000000000000099 /* NovaActionNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaActionNormalizer.swift; sourceTree = "<group>"; };
 		FA000000000000000000009B /* NovaActionNormalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaActionNormalizerTests.swift; sourceTree = "<group>"; };
+		FA00000000000000000000B3 /* NovaActionValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaActionValidator.swift; sourceTree = "<group>"; };
 		FA0000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -183,6 +185,7 @@
 				FA000000000000000000007D /* LocalNotificationService.swift */,
 				FA000000000000000000007E /* NovaLiveService.swift */,
 				FA0000000000000000000099 /* NovaActionNormalizer.swift */,
+				FA00000000000000000000B3 /* NovaActionValidator.swift */,
 				FA000000000000000000009B /* NovaActionNormalizerTests.swift */,
 			);
 			path = Services;
@@ -297,6 +300,7 @@
 				FA0000000000000000000095 /* NovaLiveView.swift in Sources */,
 				FA0000000000000000000096 /* VoiceDictationSheet.swift in Sources */,
 				FA0000000000000000000097 /* NovaActionNormalizer.swift in Sources */,
+				FA00000000000000000000B2 /* NovaActionValidator.swift in Sources */,
 				FA000000000000000000009A /* NovaActionNormalizerTests.swift in Sources */,
 				FA0000000000000000000081 /* FocusDataStore.swift in Sources */,
 				FA0000000000000000000084 /* FocusLocalStore.swift in Sources */,

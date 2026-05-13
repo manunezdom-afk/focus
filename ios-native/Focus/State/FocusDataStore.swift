@@ -3640,7 +3640,13 @@ final class FocusDataStore: ObservableObject {
         } else if let iconBased = sectionFromIcon(backendIcon) {
             section = iconBased
         } else {
-            section = NovaResponder.guessSection(for: cleanedTitle) ?? .reunion
+            // Default a .personal (no .reunion). guessSection puede devolver
+            // nil cuando el título no tiene triggers fuertes; en ese caso
+            // tratamos el evento como "personal" — es el catch-all menos
+            // dañino. La categoría "reunion" antes era el default y eso
+            // hacía que "comer a las 4" terminara como reunión en el
+            // calendario, lo que confundía al usuario.
+            section = NovaResponder.guessSection(for: cleanedTitle) ?? .personal
         }
 
         // PASO 5: endTime via normalizer. Centralizado para que el visible

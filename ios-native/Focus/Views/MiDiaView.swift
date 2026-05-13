@@ -644,7 +644,36 @@ struct MiDiaView: View {
             )
         }
 
-        let outcome = store.applyBackendActions(result.actions, userText: userText)
+        // Validador post-IA: revisa títulos sucios (concat, hora pegada),
+        // categoría "reunión" sin trigger, longitudes anómalas. Si detecta
+        // riesgo en CUALQUIER acción, NO aplica ninguna y baja a clarify.
+        // Es la segunda red — el primer filtro es la confianza del modelo;
+        // este atrapa modelos sobreconfiados.
+        let validation = NovaActionValidator.validate(
+            actions: result.actions,
+            userText: userText
+        )
+        if validation.shouldAsk {
+            let question = validation.suggestedQuestion
+                ?? "Te entendí varias cosas, prefiero revisarlas contigo antes de guardar."
+            if !store.novaContext.pendingIsActive {
+                persistBackendQuestionAsPending(userText: userText, question: question)
+            }
+            // Loggeamos el motivo a console para diagnóstico.
+            for (_, reason) in validation.rejected {
+                print("[NovaValidator] rechazo: \(reason)")
+            }
+            return InlineNovaResponse(
+                userText: userText,
+                summary: question,
+                details: replyText.isEmpty ? nil : replyText,
+                action: .dismiss,
+                isError: false,
+                tone: .clarify
+            )
+        }
+
+        let outcome = store.applyBackendActions(validation.safeActions, userText: userText)
         // Cuota de smart actions agotada: pegar nota humana al final.
         let blockedNote: String? = result.smartActionsBlocked
             ? (result.smartActionsMessage ?? "Llegaste al límite diario de acciones de Nova.")

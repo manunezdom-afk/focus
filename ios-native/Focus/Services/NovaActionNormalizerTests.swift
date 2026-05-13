@@ -1013,6 +1013,118 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
+        // ───── 7 CASOS OBLIGATORIOS DEL USUARIO (2026-05-13) ──────────
+        //
+        // Asegurar que cada caso real del spec tenga su test pipeline.
+        // Algunos ya existían bajo otros nombres; los duplicamos acá con
+        // el rótulo "user-caso-N" para que el bloque sea evidente al
+        // leer la salida del runner.
+
+        // Caso 1: "necesito ir a buscar a mi hermano a las tres"
+        let u1 = runPipeline("necesito ir a buscar a mi hermano a las tres")
+        check(label: "user-caso-1: 1 intent (no clarify)",
+              actual: u1.count, expected: 1, failures: &failures)
+        if let first = u1.first {
+            check(label: "user-caso-1: kind ≠ clarify",
+                  actual: first.kind != .clarify, expected: true, failures: &failures)
+            check(label: "user-caso-1: title 'Ir a buscar a mi hermano'",
+                  actual: first.title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "user-caso-1: hour 15", actual: first.hour, expected: 15, failures: &failures)
+            check(label: "user-caso-1: today", actual: first.day, expected: .today, failures: &failures)
+        }
+
+        // Caso 2: "ir a buscar a mi hermano a las 11 y a las 12 volver a casa"
+        // — frase compleja, debe gatear backend.
+        check(
+            label: "user-caso-2: isLikelyMultiAction true",
+            actual: NovaResponder.isLikelyMultiAction(
+                "ir a buscar a mi hermano a las 11 y a las 12 volver a casa"
+            ),
+            expected: true,
+            failures: &failures
+        )
+        // Determinista: adjustAmPm con currentHour fijo (21:53) cubre la
+        // interpretación nocturna de "a las 11" y "a las 12".
+        check(label: "user-caso-2: 21h + 'a las 11' → 23",
+              actual: NovaResponder.adjustAmPm(
+                  hour: 11, in: "ir a buscar a mi hermano a las 11", currentHour: 21
+              ),
+              expected: 23, failures: &failures)
+        check(label: "user-caso-2: 21h + 'a las 12' → 0 (medianoche)",
+              actual: NovaResponder.adjustAmPm(
+                  hour: 12, in: "a las 12 volver a casa", currentHour: 21
+              ),
+              expected: 0, failures: &failures)
+
+        // Caso 3: "en una hora voy a jugar fútbol, en dos horas vuelvo y a las 12 me acuesto"
+        check(
+            label: "user-caso-3: isLikelyMultiAction true",
+            actual: NovaResponder.isLikelyMultiAction(
+                "en una hora voy a jugar fútbol, en dos horas vuelvo y a las 12 me acuesto"
+            ),
+            expected: true,
+            failures: &failures
+        )
+
+        // Caso 4: "tengo que seguir trabajando a las 3:30 y comer a las 4"
+        let u4 = runPipeline("tengo que seguir trabajando a las 3:30 y comer a las 4")
+        check(label: "user-caso-4: 2 intents",
+              actual: u4.count, expected: 2, failures: &failures)
+        if u4.count == 2 {
+            check(label: "user-caso-4: [0] title 'Seguir trabajando'",
+                  actual: u4[0].title, expected: "Seguir trabajando", failures: &failures)
+            check(label: "user-caso-4: [0] hour 15", actual: u4[0].hour, expected: 15, failures: &failures)
+            check(label: "user-caso-4: [0] minute 30", actual: u4[0].minute, expected: 30, failures: &failures)
+            check(label: "user-caso-4: [0] no reunión",
+                  actual: u4[0].section != .reunion, expected: true, failures: &failures)
+            check(label: "user-caso-4: [1] title 'Comer'",
+                  actual: u4[1].title, expected: "Comer", failures: &failures)
+            check(label: "user-caso-4: [1] hour 16", actual: u4[1].hour, expected: 16, failures: &failures)
+            check(label: "user-caso-4: [1] no reunión",
+                  actual: u4[1].section != .reunion, expected: true, failures: &failures)
+        }
+
+        // Caso 5: "tengo que ir a buscar a mi hermano en 20 min luego salir a jugar fútbol a las 10 y llevar la pelota a las 11"
+        let u5 = runPipeline("tengo que ir a buscar a mi hermano en 20 min luego salir a jugar fútbol a las 10 y llevar la pelota a las 11")
+        check(label: "user-caso-5: 3 intents",
+              actual: u5.count, expected: 3, failures: &failures)
+        if u5.count == 3 {
+            check(label: "user-caso-5: [0] title 'Ir a buscar a mi hermano'",
+                  actual: u5[0].title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "user-caso-5: [1] title 'Salir a jugar fútbol'",
+                  actual: u5[1].title, expected: "Salir a jugar fútbol", failures: &failures)
+            check(label: "user-caso-5: [2] title 'Llevar la pelota'",
+                  actual: u5[2].title, expected: "Llevar la pelota", failures: &failures)
+            // Crítico: ningún título con concatenación tipo "que llevar".
+            let badConcat = u5.contains { t in
+                t.title.lowercased().contains("que llevar") ||
+                t.title.lowercased().contains("fútbol que")
+            }
+            check(label: "user-caso-5: ningún título concatenado",
+                  actual: badConcat, expected: false, failures: &failures)
+        }
+
+        // Caso 6: "comprar pan y leche" → 1 tarea, no split
+        let u6 = runPipeline("comprar pan y leche")
+        check(label: "user-caso-6: 1 intent (tarea, no split)",
+              actual: u6.count, expected: 1, failures: &failures)
+        if let first = u6.first {
+            check(label: "user-caso-6: kind = task",
+                  actual: first.kind, expected: .task, failures: &failures)
+        }
+
+        // Caso 7: "reunión con Juan y Pedro a las 5" → 1 reunión
+        let u7 = runPipeline("reunión con Juan y Pedro a las 5")
+        check(label: "user-caso-7: 1 intent (no split)",
+              actual: u7.count, expected: 1, failures: &failures)
+        if let first = u7.first {
+            check(label: "user-caso-7: section = reunion",
+                  actual: first.section, expected: .reunion, failures: &failures)
+        }
+
+        // ───── Validador post-IA ──────────────────────────────────────
+        NovaActionValidatorTests.runAll(into: &failures)
+
         // ───── Resultado ───────────────────────────────────────────────
 
         if failures.isEmpty {
