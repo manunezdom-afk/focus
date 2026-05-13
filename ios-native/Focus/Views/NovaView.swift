@@ -12,6 +12,7 @@ struct NovaView: View {
     @EnvironmentObject private var store: FocusDataStore
     @EnvironmentObject private var nav: NavigationCoordinator
     @EnvironmentObject private var toast: ToastManager
+    @EnvironmentObject private var coachMarks: CoachMarksStore
 
     @State private var draft: String = ""
     @State private var showCreateTask: Bool = false
@@ -84,6 +85,14 @@ struct NovaView: View {
                 }
             }
             .navigationBarHidden(true)
+        }
+        // Coach mark de Nova la primera vez que el usuario llega a esta
+        // tab. Mismo patrón que Mi Día y Calendario.
+        .task(id: nav.selectedTab) {
+            if nav.selectedTab == .nova {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                coachMarks.presentIfNeeded(.nova)
+            }
         }
         .sheet(isPresented: $showCreateTask) {
             NuevaTareaSheet { task in

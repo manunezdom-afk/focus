@@ -158,6 +158,7 @@ extension AuthService {
             struct User: Decodable {
                 let id: String
                 let email: String?
+                let user_metadata: UserMetadata?
             }
         }
 
@@ -179,7 +180,8 @@ extension AuthService {
             refreshToken: decoded.refresh_token,
             expiresAt: expires,
             userId: decoded.user.id,
-            email: decoded.user.email ?? ""
+            email: decoded.user.email ?? "",
+            fullName: decoded.user.user_metadata?.bestDisplayName ?? ""
         )
     }
 

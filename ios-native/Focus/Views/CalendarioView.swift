@@ -16,6 +16,8 @@ struct CalendarioView: View {
 
     @EnvironmentObject private var store: FocusDataStore
     @EnvironmentObject private var toast: ToastManager
+    @EnvironmentObject private var nav: NavigationCoordinator
+    @EnvironmentObject private var coachMarks: CoachMarksStore
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var viewMode: ViewMode = .week
     @State private var showCreateEvent = false
@@ -101,6 +103,16 @@ struct CalendarioView: View {
                 }
                 .presentationDetents([.medium, .large])
                 .presentationBackground(Theme.Colors.background)
+            }
+            // Coach mark de Calendario la primera vez que el usuario llega
+            // a esta tab. `.task(id: nav.selectedTab)` se redispara cada
+            // vez que el usuario cambia de tab — el guard interno asegura
+            // que solo presente cuando realmente entró acá.
+            .task(id: nav.selectedTab) {
+                if nav.selectedTab == .calendario {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    coachMarks.presentIfNeeded(.calendar)
+                }
             }
         }
     }

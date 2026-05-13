@@ -56,9 +56,35 @@ struct SupabaseSession: Codable, Hashable {
     let expiresAt: Date
     let userId: String
     let email: String
+    /// Nombre completo (Google `name`/`full_name` o Supabase
+    /// `user_metadata.full_name`). Vacío si el provider no lo dio (típico
+    /// en OTP-only sin perfil enriquecido). La UI debe caer al email.
+    var fullName: String
 
     var isExpired: Bool {
         expiresAt <= Date()
+    }
+
+    init(accessToken: String, refreshToken: String, expiresAt: Date,
+         userId: String, email: String, fullName: String = "") {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.expiresAt = expiresAt
+        self.userId = userId
+        self.email = email
+        self.fullName = fullName
+    }
+
+    /// Decoder custom para no romper sesiones persistidas en disco antes de
+    /// que existiera el campo `fullName`. Si la key no existe → string vacío.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.accessToken = try c.decode(String.self, forKey: .accessToken)
+        self.refreshToken = try c.decode(String.self, forKey: .refreshToken)
+        self.expiresAt = try c.decode(Date.self, forKey: .expiresAt)
+        self.userId = try c.decode(String.self, forKey: .userId)
+        self.email = try c.decode(String.self, forKey: .email)
+        self.fullName = try c.decodeIfPresent(String.self, forKey: .fullName) ?? ""
     }
 }
 
@@ -177,7 +203,8 @@ enum AuthService {
                     refreshToken: r.refresh_token,
                     expiresAt: expiresAt,
                     userId: r.user.id,
-                    email: r.user.email ?? cleanEmail
+                    email: r.user.email ?? cleanEmail,
+                    fullName: r.user.user_metadata?.bestDisplayName ?? ""
                 )
             }
 
@@ -269,7 +296,8 @@ enum AuthService {
                     refreshToken: r.refresh_token ?? refreshToken,
                     expiresAt: expiresAt,
                     userId: r.user?.id ?? "",
-                    email: r.user?.email ?? ""
+                    email: r.user?.email ?? "",
+                    fullName: r.user?.user_metadata?.bestDisplayName ?? ""
                 )
             }
 
@@ -494,6 +522,7 @@ private struct VerifyResponse: Decodable {
     struct SBUser: Decodable {
         let id: String
         let email: String?
+        let user_metadata: UserMetadata?
     }
 }
 
@@ -507,6 +536,37 @@ private struct RefreshResponse: Decodable {
     struct SBUser: Decodable {
         let id: String
         let email: String?
+        let user_metadata: UserMetadata?
+    }
+}
+
+/// Subset de `user_metadata` que nos interesa. Supabase guarda metadata
+/// arbitraria pero estos campos son los que llenan Google y los proveedores
+/// más comunes:
+///   - `full_name`: "Martín Núñez" (Google `name`).
+///   - `name`: a veces presente con el mismo valor que `full_name`.
+///   - `given_name` / `family_name`: nombre/apellido por separado.
+/// Si el usuario solo hizo OTP sin enriquecer perfil, todos vienen nil → la
+/// UI cae al email.
+struct UserMetadata: Decodable {
+    let full_name: String?
+    let name: String?
+    let given_name: String?
+    let family_name: String?
+
+    /// Mejor nombre disponible, priorizando full_name → name → "given family".
+    /// Devuelve string vacío si nada está disponible.
+    var bestDisplayName: String {
+        if let fn = full_name?.trimmingCharacters(in: .whitespacesAndNewlines), !fn.isEmpty {
+            return fn
+        }
+        if let n = name?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
+            return n
+        }
+        let given = given_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let family = family_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let combined = [given, family].filter { !$0.isEmpty }.joined(separator: " ")
+        return combined
     }
 }
 

@@ -4,6 +4,7 @@ struct MiDiaView: View {
     @EnvironmentObject private var store: FocusDataStore
     @EnvironmentObject private var nav: NavigationCoordinator
     @EnvironmentObject private var toast: ToastManager
+    @EnvironmentObject private var coachMarks: CoachMarksStore
     // ScenePhase — para cancelar dictado cuando la app va a background
     // (privacy: no dejar mic activo cuando el usuario sale de la app).
     @Environment(\.scenePhase) private var scenePhase
@@ -167,20 +168,30 @@ struct MiDiaView: View {
         // Mic inline: el dictation service llena focusBarText en vivo.
         // Cuando el usuario detiene (toca el mic stop) y hay transcript,
         // el texto queda en la barra listo para revisar o enviar.
-        .onChange(of: dictationService.transcript) { _, newTranscript in
-            // Solo escribimos al FocusBar mientras está dictando — al
-            // finalizar el state pasa a idle y dejamos de hooking.
-            if isDictating || dictationService.state == .listening {
-                focusBarText = newTranscript
-            }
-        }
+        // ChatGPT-style: durante la escucha NO escribimos transcript palabra
+        // por palabra al input — eso ensucia visualmente y distrae. Solo
+        // animamos el diamante de Nova. Cuando el dictado termina (state
+        // pasa a `.idle`), volcamos el transcript final completo al input.
+        // El usuario lo revisa y manda con el botón enviar.
         .onChange(of: dictationService.state) { _, newState in
             switch newState {
             case .listening:
                 isDictating = true
                 dictationDeniedMessage = nil
-            case .idle, .processing:
+            case .processing:
+                // Mientras el recognizer está cerrando: ya no captura más
+                // audio. Mantenemos el estado "dictando" visualmente hasta
+                // que pase a .idle con el transcript final.
+                isDictating = true
+            case .idle:
                 isDictating = false
+                // Volcar transcript final al input — recién acá el usuario
+                // ve el texto, revisa y manda con enviar.
+                let finalTranscript = dictationService.transcript
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !finalTranscript.isEmpty {
+                    focusBarText = finalTranscript
+                }
             case .denied:
                 isDictating = false
                 dictationDeniedMessage = "Activa el micrófono y voz en Ajustes del iPhone."
@@ -198,6 +209,17 @@ struct MiDiaView: View {
         .onChange(of: nav.selectedTab) { _, newTab in
             if isDictating && newTab != .miDia {
                 dictationService.cancel()
+            }
+        }
+        // Coach mark del FocusBar la primera vez que el usuario entra
+        // a Mi Día. Solo se dispara una vez por dispositivo (flag en
+        // UserDefaults). El usuario puede resetear desde Ajustes.
+        .task(id: nav.selectedTab) {
+            if nav.selectedTab == .miDia {
+                // Pequeño delay para que la UI termine de aparecer antes
+                // del overlay — evita parpadeo al boot.
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                coachMarks.presentIfNeeded(.focusBar)
             }
         }
         // Mismo cleanup cuando la app va a background — sin esto el mic
@@ -335,6 +357,13 @@ struct MiDiaView: View {
             },
             onMic: {
                 HapticManager.shared.tap()
+                // Coach mark del mic la primera vez. Lo disparamos ANTES
+                // de empezar el dictado para que el usuario entienda el
+                // flujo (escucha → revisa → envía) antes de empezar.
+                if coachMarks.shouldShow(.mic) {
+                    coachMarks.presentIfNeeded(.mic)
+                    return
+                }
                 // Mic del FocusBar = DICTADO INLINE. NO abre Nova Live,
                 // NO abre sheet, NO cambia de pantalla.
                 Task { await toggleInlineDictation() }
@@ -1724,6 +1753,8 @@ private struct TimelineEventRow: View {
     /// una card duplicada (la antigua ProximoBloqueCard).
     var isNext: Bool = false
 
+    @EnvironmentObject private var coachMarks: CoachMarksStore
+
     /// Chip de recordatorio anticipado. Si el evento tiene
     /// `reminderOffsets = [40]` mostramos "🔔 40 min antes" dentro del
     /// mismo bloque — antes era una tarjeta separada que duplicaba
@@ -1911,6 +1942,14 @@ private struct TimelineEventRow: View {
             )
             .focusCardShadow()
             .padding(.bottom, isLast ? 0 : Theme.Spacing.sm)
+        }
+        // Coach mark del chip 🔔: la primera vez que el usuario ve un
+        // evento con reminder offset, le explicamos qué significa el chip.
+        // Solo dispara si este row tiene offset y el flag no se vio antes.
+        .onAppear {
+            if event.reminderOffsets?.isEmpty == false {
+                coachMarks.presentIfNeeded(.reminderChip)
+            }
         }
     }
 

@@ -5,6 +5,8 @@ import UIKit
 struct AjustesView: View {
     @EnvironmentObject private var store: FocusDataStore
     @EnvironmentObject private var auth: AuthStore
+    @EnvironmentObject private var nav: NavigationCoordinator
+    @EnvironmentObject private var coachMarks: CoachMarksStore
     @AppStorage("focus.v1.hasSeenOnboarding") private var hasSeenOnboarding = false
     @State private var showPersonalitySheet = false
     @State private var showResetConfirm = false
@@ -217,8 +219,14 @@ struct AjustesView: View {
                     AjustesRow(
                         symbol: "person.crop.circle.fill",
                         tint: Theme.Colors.focusAccent,
-                        title: auth.currentEmail ?? "Sesión activa",
-                        subtitle: "Sesión iniciada",
+                        title: auth.displayName,
+                        // Si hay nombre real (Google name / metadata),
+                        // mostramos el email pequeño debajo como subtitle.
+                        // Si NO hay nombre, el title ya ES el email — el
+                        // subtitle pasa a "Sesión iniciada" como antes.
+                        subtitle: auth.hasRealName
+                            ? (auth.currentEmail ?? "")
+                            : "Sesión iniciada",
                         trailing: .badge("Activa", Theme.Colors.success)
                     )
                     Divider().overlay(Theme.Colors.border).padding(.leading, 60)
@@ -715,6 +723,25 @@ struct AjustesView: View {
                         tint: Theme.Colors.focusAccent,
                         title: "Ver tutorial otra vez",
                         subtitle: "Repasá el onboarding de bienvenida.",
+                        trailing: .chevron
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+
+                Button {
+                    HapticManager.shared.tap()
+                    coachMarks.resetAll()
+                    // Feedback breve: regresar a Mi Día para que el primer
+                    // tip aparezca enseguida y el usuario vea el efecto.
+                    nav.selectedTab = .miDia
+                } label: {
+                    AjustesRow(
+                        symbol: "lightbulb",
+                        tint: Theme.Colors.novaAccent,
+                        title: "Ver consejos otra vez",
+                        subtitle: "Los mini tutoriales contextuales volverán a aparecer.",
                         trailing: .chevron
                     )
                 }

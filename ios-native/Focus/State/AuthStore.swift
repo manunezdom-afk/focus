@@ -94,6 +94,32 @@ final class AuthStore: ObservableObject {
         return nil
     }
 
+    /// Nombre completo de la sesión activa si el provider lo dio
+    /// (Google name/full_name o user_metadata.full_name). Vacío para
+    /// usuarios OTP-only sin perfil enriquecido. La UI cae al email.
+    var currentFullName: String? {
+        if case .loggedIn(let s) = state {
+            let trimmed = s.fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return nil
+    }
+
+    /// Nombre que la UI muestra arriba en Ajustes/Perfil. Prioriza
+    /// `fullName` real; si no hay, cae al email; si tampoco hay, devuelve
+    /// "Usuario Focus".
+    var displayName: String {
+        if let name = currentFullName { return name }
+        if let email = currentEmail, !email.isEmpty { return email }
+        return "Usuario Focus"
+    }
+
+    /// True cuando la sesión activa tiene nombre real (no email). Útil
+    /// para decidir si mostramos el email debajo como subtitle.
+    var hasRealName: Bool {
+        currentFullName != nil
+    }
+
     var accessToken: String? {
         if case .loggedIn(let s) = state { return s.accessToken }
         return nil
@@ -261,12 +287,16 @@ final class AuthStore: ObservableObject {
               let expiresAt = UserDefaults.standard.object(forKey: expiresAtKey) as? Date else {
             return nil
         }
+        // fullName puede no estar (data legacy persistida antes de pase 64).
+        // Si está vacío, la UI cae al email.
+        let fullName = KeychainStore.get(.fullName) ?? ""
         return SupabaseSession(
             accessToken: access,
             refreshToken: refresh,
             expiresAt: expiresAt,
             userId: userId,
-            email: email
+            email: email,
+            fullName: fullName
         )
     }
 
@@ -275,6 +305,7 @@ final class AuthStore: ObservableObject {
         KeychainStore.set(s.refreshToken, forKey: .refreshToken)
         KeychainStore.set(s.userId, forKey: .userId)
         KeychainStore.set(s.email, forKey: .email)
+        KeychainStore.set(s.fullName, forKey: .fullName)
         UserDefaults.standard.set(s.expiresAt, forKey: expiresAtKey)
     }
 }

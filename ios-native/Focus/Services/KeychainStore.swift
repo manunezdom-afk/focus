@@ -13,6 +13,10 @@ enum KeychainStore {
         case refreshToken = "me.usefocus.app.auth.refresh_token"
         case userId       = "me.usefocus.app.auth.user_id"
         case email        = "me.usefocus.app.auth.email"
+        /// Nombre completo del usuario (de Google `name`/`full_name` o de
+        /// Supabase `user_metadata`). Opcional — si está vacío, la UI cae
+        /// al email como displayName.
+        case fullName     = "me.usefocus.app.auth.full_name"
     }
 
     @discardableResult

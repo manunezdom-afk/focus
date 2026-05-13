@@ -4,6 +4,7 @@ import SwiftUI
 struct FocusApp: App {
     @StateObject private var dataStore = FocusDataStore()
     @StateObject private var authStore = AuthStore()
+    @StateObject private var coachMarks = CoachMarksStore()
 
     init() {
         #if DEBUG
@@ -38,9 +39,14 @@ struct FocusApp: App {
                 Color(red: 0.118, green: 0.176, blue: 0.420)
                     .ignoresSafeArea()
                 ContentView()
+                // Overlay global de coach marks — se monta acá para que
+                // ningún sheet/tab interfiera con el zIndex. La card aparece
+                // cuando `coachMarks.presenting != nil`.
+                CoachMarkOverlay(store: coachMarks)
             }
             .environmentObject(dataStore)
             .environmentObject(authStore)
+            .environmentObject(coachMarks)
             .preferredColorScheme(.light)
             .tint(Theme.Colors.focusAccent)
             // Conexión Auth → DataStore para sync Supabase. Cuando
