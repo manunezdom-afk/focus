@@ -83,7 +83,12 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
     // MARK: - Scheduling
 
     /// Programa una notificación local para el evento si:
-    /// - es recordatorio (`isReminder == true`),
+    /// - es recordatorio puntual (`isReminder == true`), **O**
+    /// - tiene `reminderOffsets` configurados (≥ 1 offset) — caso típico:
+    ///   evento regular tipo "Ducharme 10:00" al que el usuario le pegó
+    ///   un aviso de "10 min antes" → `reminderOffsets=[10]`, isReminder
+    ///   sigue false porque el evento en sí no es un compromiso de aviso.
+    ///   El usuario igual quiere recibir la notif a las 09:50.
     /// - su `startTime` está en el futuro,
     /// - el toggle global lo permite (lo chequea el caller),
     /// - el permiso está concedido (lo chequea el caller).
@@ -91,9 +96,12 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
     /// Idempotente: usar la misma id reemplaza la pendiente anterior, así
     /// que es seguro llamarla varias veces (por ejemplo en `mergeRemoteEvents`).
     func scheduleReminder(for event: FocusEvent) async {
-        guard event.isReminder == true else {
-            // No es recordatorio puntual → no programamos. Si pasó de ser
-            // recordatorio a evento normal, el caller debe llamar cancel.
+        let isReminderEvent = event.isReminder == true
+        let hasOffsets = !(event.reminderOffsets?.isEmpty ?? true)
+        guard isReminderEvent || hasOffsets else {
+            // Ni recordatorio puntual ni con offsets → no programamos.
+            // El caller (FocusDataStore.syncLocalNotification) garantiza
+            // que cualquier pendiente previa se cancela.
             return
         }
         guard event.startTime > Date() else {

@@ -487,6 +487,16 @@ struct MiDiaView: View {
     ///    aunque el backend haya respondido.
     /// 3. Llamar backend con accessToken; fallback local en errores recuperables.
     private func resolveNovaResponse(for trimmed: String) async -> InlineNovaResponse {
+        // Short-circuit ATTACH-REMINDER: "acuérdame N min antes de X" donde
+        // X coincide con un evento existente de hoy. Lo resolvemos local
+        // SIN llamar al backend — la respuesta es corta, predecible y no
+        // depende de que el modelo siga las reglas. Si el patrón existe
+        // pero no encontramos el evento, devolvemos clarify con chips
+        // para que el usuario decida (crear bloque / tarea).
+        if let response = tryAttachReminderToExistingEvent(userText: trimmed) {
+            return response
+        }
+
         let preIntent = NovaResponder.parse(trimmed, context: store.novaContext)
         // Frase con múltiples acciones encadenadas o referencias temporales
         // en palabras ("en una hora", "más o menos a las 12"). El parser
@@ -592,6 +602,110 @@ struct MiDiaView: View {
             details: "Tiene varias cosas encadenadas y Nova no pudo procesarlas a la vez. Envíalas por separado, por ejemplo: «en una hora voy a jugar fútbol», luego «en dos horas vuelvo».",
             isError: true
         )
+    }
+
+    /// Short-circuit "acuérdame N min antes de X" → attach reminder al
+    /// evento existente. Devuelve `nil` si el input NO matchea el patrón
+    /// — el flujo normal sigue. Si matchea y encuentra el evento, hace
+    /// el edit local SIN llamar al backend (más rápido, sin AI, copy
+    /// limpio garantizado). Si matchea pero no encuentra el evento,
+    /// devuelve un clarify con chips ("crear bloque" / "agregar tarea").
+    ///
+    /// El usuario reportó (2026-05-13) que Nova respondía con frases
+    /// largas y técnicas tipo "Listo, te aviso 10 minutos antes de tu
+    /// ducha a las 9:50 AM. No moví ni edité el evento existente..."
+    /// — eso era el modelo (Sonnet) generando texto sin ceñirse al
+    /// prompt. Resolviendo local nos aseguramos copy corto y predecible.
+    private func tryAttachReminderToExistingEvent(userText: String) -> InlineNovaResponse? {
+        guard let intent = NovaResponder.extractReminderAttachIntent(from: userText) else {
+            return nil
+        }
+        let todayEvents = store.todayEvents()
+        guard let matched = NovaResponder.findEventByApproxTitle(
+            intent.activity, in: todayEvents
+        ) else {
+            // Patrón matcheó pero no hay evento con ese título — pregunta.
+            return missingEventForAttachReminder(
+                activity: intent.activity,
+                offset: intent.offsetMinutes,
+                userText: userText
+            )
+        }
+
+        let existing = matched.reminderOffsets ?? []
+        if existing.contains(intent.offsetMinutes) {
+            // Duplicado — informar al usuario y NO mutar.
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Ese aviso ya estaba agregado.",
+                details: "«\(matched.title)» · 🔔 \(humanReminderLabel(intent.offsetMinutes))",
+                action: .openCalendar,
+                isError: false,
+                tone: .clarify
+            )
+        }
+
+        // Aplicar: añadir offset al evento (sin tocar título / hora /
+        // categoría). El store dispara sync remoto + reprograma la
+        // notificación local.
+        var updated = matched
+        updated.reminderOffsets = (existing + [intent.offsetMinutes]).sorted()
+        store.updateEvent(updated)
+        HapticManager.shared.success()
+
+        let fireTime = matched.startTime.addingTimeInterval(-Double(intent.offsetMinutes) * 60)
+        let fireLabel = DateFormatters.hourMinute.string(from: fireTime)
+
+        return InlineNovaResponse(
+            userText: userText,
+            summary: "Listo. Añadí un aviso a «\(matched.title)».",
+            details: "🔔 \(humanReminderLabel(intent.offsetMinutes)) · \(fireLabel)",
+            action: .openCalendar,
+            isError: false,
+            tone: .success
+        )
+    }
+
+    /// Respuesta cuando el patrón "acuérdame N min antes de X" matcheó
+    /// pero X no coincide con ningún evento de hoy. NO creamos basura;
+    /// devolvemos clarify con chips para que el usuario decida.
+    private func missingEventForAttachReminder(
+        activity: String,
+        offset: Int,
+        userText: String
+    ) -> InlineNovaResponse {
+        // Capitalizar primera letra del activity para mostrarlo en el copy.
+        let displayActivity: String = {
+            guard let first = activity.first else { return activity }
+            return first.uppercased() + activity.dropFirst()
+        }()
+        // Chips: "Crear como evento" → agenda <activity>; "Como tarea" →
+        // crea tarea <activity>. El callback genérico de InlineNovaResponseView
+        // ejecuta el chip.sendText como nuevo mensaje del usuario.
+        let chips = [
+            NovaQuickChip(label: "Crear como evento", sendText: "agenda \(activity)"),
+            NovaQuickChip(label: "Crear como tarea", sendText: "crea tarea \(activity)"),
+        ]
+        return InlineNovaResponse(
+            userText: userText,
+            summary: "No encontré «\(displayActivity)» en tu día.",
+            details: "¿Quieres crear ese bloque o agregarlo como tarea? El aviso de \(humanReminderLabel(offset)) antes te lo seteo cuando exista.",
+            action: .dismiss,
+            isError: false,
+            tone: .clarify,
+            quickChips: chips
+        )
+    }
+
+    /// "10" → "10 min", "60" → "1 h", "90" → "1 h 30 min". Para mostrar
+    /// en el copy del aviso de manera consistente.
+    private func humanReminderLabel(_ minutes: Int) -> String {
+        if minutes < 60 { return "\(minutes) min" }
+        if minutes == 60 { return "1 h" }
+        if minutes % 60 == 0 { return "\(minutes / 60) h" }
+        let h = minutes / 60
+        let m = minutes % 60
+        return "\(h) h \(m) min"
     }
 
     /// True cuando el intent local SIEMPRE es mejor que el backend porque
@@ -2071,18 +2185,21 @@ private struct TimelineEventRow: View {
     private var reminderChipLabel: String? {
         guard let m = primaryReminderOffsetMinutes else { return nil }
         let extraCount = (event.reminderOffsets?.count ?? 0) - 1
-        let base: String
+        let unit: String
         if m < 60 {
-            base = "\(m) min antes"
+            unit = "\(m) min antes"
         } else if m == 60 {
-            base = "1 h antes"
+            unit = "1 h antes"
         } else if m % 60 == 0 {
-            base = "\(m / 60) h antes"
+            unit = "\(m / 60) h antes"
         } else {
             let h = m / 60
             let mm = m % 60
-            base = "\(h) h \(mm) min antes"
+            unit = "\(h) h \(mm) min antes"
         }
+        // "Aviso N min antes" lee como subtítulo de metadata del evento,
+        // distinto del propio título — match al spec del usuario.
+        let base = "Aviso \(unit)"
         return extraCount > 0 ? "\(base) (+\(extraCount))" : base
     }
 

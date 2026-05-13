@@ -389,6 +389,123 @@ enum NovaResponder {
         return false
     }
 
+    // MARK: - Reminder attach (asociar aviso a evento existente)
+
+    /// Resultado de detectar la intención "agregame un aviso N minutos antes
+    /// de [evento existente]". `activity` es el texto crudo después de
+    /// "antes de" — luego se busca un evento por título aproximado.
+    struct ReminderAttachIntent {
+        let offsetMinutes: Int
+        let activity: String
+    }
+
+    /// Detecta el patrón "acuérdame/recuérdame/avísame N min antes de X".
+    /// Devuelve `(offset, activity)` si matchea, nil en caso contrario.
+    ///
+    /// Esto NO crea un evento — solo extrae la intención. El caller decide
+    /// si encuentra el evento existente (entonces hace edit) o pide
+    /// confirmación al usuario.
+    static func extractReminderAttachIntent(from text: String) -> ReminderAttachIntent? {
+        let lower = text.lowercased()
+        // 1. Trigger de recordatorio
+        let hasTrigger = matchesAny(lower, [
+            "acuérdame", "acuerdame", "acordame",
+            "recuérdame", "recuerdame", "recordame",
+            "avísame", "avisame"
+        ])
+        guard hasTrigger else { return nil }
+
+        // 2. Cantidad de minutos/horas antes
+        guard let offset = NovaActionNormalizer.extractReminderOffset(from: lower),
+              offset > 0 else { return nil }
+
+        // 3. Extraer "antes de X" — captura todo después de "antes de" hasta
+        // el final del segmento (puntuación o fin).
+        // Soporta "antes de", "antes del", "antes de la/el/los/las".
+        let activityPattern = #"\bantes de(?:l)?\s+(?:(?:la|el|los|las|mi|tu|su)\s+)?(.+?)\s*(?:$|[.,;!?]|\bpor favor\b)"#
+        guard let regex = try? NSRegularExpression(
+            pattern: activityPattern,
+            options: [.caseInsensitive]
+        ) else { return nil }
+        let ns = lower as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        guard let match = regex.firstMatch(in: lower, options: [], range: range),
+              match.numberOfRanges >= 2,
+              match.range(at: 1).location != NSNotFound else { return nil }
+        let activity = ns.substring(with: match.range(at: 1))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !activity.isEmpty else { return nil }
+        return ReminderAttachIntent(offsetMinutes: offset, activity: activity)
+    }
+
+    /// Busca un evento cuyo título coincida aproximadamente con `activity`.
+    /// Estrategia: normaliza ambos (sin acentos, lowercase, sin puntuación),
+    /// prueba match exacto → substring en cualquier dirección → token
+    /// overlap (≥1 palabra significativa de ≥3 chars).
+    ///
+    /// Si hay múltiples candidatos, prefiere score más alto; en empate,
+    /// prefiere el más cercano FUTURO (un evento ya pasado matchea peor que
+    /// uno por venir). Pensado para "acuérdame N min antes de ducharme"
+    /// donde el usuario habla del próximo evento del día.
+    static func findEventByApproxTitle(
+        _ activity: String,
+        in events: [FocusEvent]
+    ) -> FocusEvent? {
+        let normTarget = normalizeForFuzzy(activity)
+        guard !normTarget.isEmpty else { return nil }
+        let targetTokens = Set(normTarget.split(separator: " ")
+                                  .map(String.init)
+                                  .filter { $0.count >= 3 })
+
+        let candidates: [(score: Int, event: FocusEvent)] = events.compactMap { event in
+            let normTitle = normalizeForFuzzy(event.title)
+            guard !normTitle.isEmpty else { return nil }
+            // Match exacto
+            if normTitle == normTarget { return (100, event) }
+            // Substring (target dentro de title) — "ducha" matchea "ducha matutina"
+            if normTitle.contains(normTarget) { return (80, event) }
+            // Substring (title dentro de target) — "ducharme" matchea con activity "ducharme rápido"
+            if normTarget.contains(normTitle) { return (75, event) }
+            // Token overlap — al menos una palabra de 3+ chars compartida
+            let titleTokens = Set(normTitle.split(separator: " ")
+                                     .map(String.init)
+                                     .filter { $0.count >= 3 })
+            let intersect = targetTokens.intersection(titleTokens).count
+            if intersect >= 1 {
+                return (50 + intersect * 10, event)
+            }
+            return nil
+        }
+
+        guard !candidates.isEmpty else { return nil }
+        let now = Date()
+        let sorted = candidates.sorted { a, b in
+            if a.score != b.score { return a.score > b.score }
+            let aFuture = a.event.startTime > now
+            let bFuture = b.event.startTime > now
+            if aFuture != bFuture { return aFuture }
+            return abs(a.event.startTime.timeIntervalSinceNow)
+                < abs(b.event.startTime.timeIntervalSinceNow)
+        }
+        return sorted.first?.event
+    }
+
+    /// Normaliza un string para fuzzy match: sin acentos, lowercase, sin
+    /// puntuación, colapsa espacios.
+    static func normalizeForFuzzy(_ text: String) -> String {
+        let folded = text.folding(
+            options: .diacriticInsensitive,
+            locale: Locale(identifier: "es")
+        ).lowercased()
+        let allowed = CharacterSet.letters.union(.decimalDigits).union(.whitespaces)
+        let scrubbed = folded.unicodeScalars
+            .map { allowed.contains($0) ? Character($0) : " " }
+        return String(scrubbed)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
     /// Parser multi-intent: separa frases compuestas por conectores
     /// fuertes ("y luego", "luego", "después", "también", "además") y
     /// parsea cada segmento como un intent independiente.
@@ -3061,17 +3178,24 @@ final class FocusDataStore: ObservableObject {
     }
 
     /// Re-sincroniza la notificación local para `event`. Tres ramas:
-    /// - `isReminder == true` + `startTime > now` + permisos OK + toggle ON →
-    ///   programa (idempotente, reemplaza pendiente anterior).
+    /// - (`isReminder == true` ∨ tiene `reminderOffsets`) + `startTime > now`
+    ///   + permisos OK + toggle ON → programa (idempotente).
     /// - Cualquier otro caso → cancela la pendiente si existía (cubre el
     ///   flujo "evento dejó de ser recordatorio" o "se movió al pasado").
+    ///
+    /// Cambio 2026-05-13: ahora también programamos cuando el evento tiene
+    /// `reminderOffsets` aunque NO sea `isReminder`. Caso típico: usuario
+    /// tiene "Ducharme" 10:00 (evento regular) y le pide a Nova "acuérdame
+    /// 10 min antes" → seteamos reminderOffsets=[10]. Antes esto entraba
+    /// al guard y se cancelaba la notif.
     ///
     /// Si el toggle está apagado o falta permiso, cancelamos cualquier
     /// pendiente sobrante — así el usuario que apaga el switch deja de ver
     /// alertas inmediatamente.
     private func syncLocalNotification(for event: FocusEvent) {
-        // No es recordatorio o ya pasó → cancel y listo.
-        guard event.isReminder == true, event.startTime > Date() else {
+        let isReminderEvent = event.isReminder == true
+        let hasOffsets = !(event.reminderOffsets?.isEmpty ?? true)
+        guard (isReminderEvent || hasOffsets), event.startTime > Date() else {
             LocalNotificationService.shared.cancelReminder(eventId: event.id)
             return
         }

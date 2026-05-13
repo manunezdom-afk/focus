@@ -1125,6 +1125,133 @@ enum NovaActionNormalizerTests {
         // ───── Validador post-IA ──────────────────────────────────────
         NovaActionValidatorTests.runAll(into: &failures)
 
+        // ───── Attach-reminder: detectar "acuérdame N antes de X" ─────
+        //
+        // Spec del usuario: cuando dice "acuérdame N min antes de
+        // ducharme" y existe un evento "Ducharme", debemos extraer
+        // (offset=N, activity="ducharme") y luego usar fuzzy match para
+        // encontrar el evento. NO crear basura.
+
+        // 1. extractReminderAttachIntent — pattern matching
+
+        if let intent = NovaResponder.extractReminderAttachIntent(
+            from: "Acuérdame 10 minutos antes de ducharme"
+        ) {
+            check(label: "attach: offset 10 min",
+                  actual: intent.offsetMinutes, expected: 10, failures: &failures)
+            check(label: "attach: activity 'ducharme'",
+                  actual: intent.activity, expected: "ducharme", failures: &failures)
+        } else {
+            let msg = "  ✗ attach: no extrajo intent de 'Acuérdame 10 minutos antes de ducharme'"
+            print(msg); failures.append(msg)
+        }
+
+        // Caso B literal del spec del usuario
+        if let intent = NovaResponder.extractReminderAttachIntent(
+            from: "acuérdame 40 min antes de ir a buscar a mi hermano"
+        ) {
+            check(label: "attach-B: offset 40 min",
+                  actual: intent.offsetMinutes, expected: 40, failures: &failures)
+            check(label: "attach-B: activity contiene 'buscar a mi hermano' o similar",
+                  actual: intent.activity.contains("hermano"),
+                  expected: true, failures: &failures)
+        } else {
+            let msg = "  ✗ attach-B: no extrajo intent del caso 'mi hermano'"
+            print(msg); failures.append(msg)
+        }
+
+        // Variantes que NO deben matchear: sin "antes de", sin trigger, etc.
+        check(
+            label: "attach: 'acuérdame comprar pan' sin 'antes de' → nil",
+            actual: NovaResponder.extractReminderAttachIntent(
+                from: "acuérdame comprar pan en 10 min"
+            ) == nil,
+            expected: true, failures: &failures
+        )
+        check(
+            label: "attach: sin trigger 'acuérdame' → nil",
+            actual: NovaResponder.extractReminderAttachIntent(
+                from: "ducharme a las 10"
+            ) == nil,
+            expected: true, failures: &failures
+        )
+
+        // 2. findEventByApproxTitle — fuzzy match
+
+        let mockDucharme = FocusEvent(
+            title: "Ducharme",
+            startTime: Date().addingTimeInterval(60 * 60),     // +1h
+            section: .personal
+        )
+        let mockBuscarHermano = FocusEvent(
+            title: "Ir a buscar a mi hermano",
+            startTime: Date().addingTimeInterval(60 * 60 * 2), // +2h
+            section: .personal
+        )
+        let mockEvents = [mockDucharme, mockBuscarHermano]
+
+        // Match exacto: "ducharme" → Ducharme
+        if let m = NovaResponder.findEventByApproxTitle("ducharme", in: mockEvents) {
+            check(label: "fuzzy: 'ducharme' → 'Ducharme' exacto",
+                  actual: m.id, expected: mockDucharme.id, failures: &failures)
+        } else {
+            let msg = "  ✗ fuzzy: 'ducharme' no encontró el evento Ducharme"
+            print(msg); failures.append(msg)
+        }
+
+        // Match con acentos / mayúsculas diferentes
+        if let m = NovaResponder.findEventByApproxTitle("DUCHARME", in: mockEvents) {
+            check(label: "fuzzy: 'DUCHARME' (mayúscula) → Ducharme",
+                  actual: m.id, expected: mockDucharme.id, failures: &failures)
+        }
+
+        // Match substring: "ducha" matchea "Ducharme" (substring)
+        if let m = NovaResponder.findEventByApproxTitle("ducha", in: mockEvents) {
+            check(label: "fuzzy: 'ducha' → Ducharme (substring)",
+                  actual: m.id, expected: mockDucharme.id, failures: &failures)
+        } else {
+            let msg = "  ✗ fuzzy: 'ducha' no encontró Ducharme via substring"
+            print(msg); failures.append(msg)
+        }
+
+        // Match token overlap: "ir a buscar a mi hermano"
+        if let m = NovaResponder.findEventByApproxTitle(
+            "ir a buscar a mi hermano", in: mockEvents
+        ) {
+            check(label: "fuzzy: 'ir a buscar a mi hermano' → match exacto",
+                  actual: m.id, expected: mockBuscarHermano.id, failures: &failures)
+        } else {
+            let msg = "  ✗ fuzzy: 'ir a buscar a mi hermano' no encontró el evento"
+            print(msg); failures.append(msg)
+        }
+
+        // Match parcial: "buscar hermano" → "Ir a buscar a mi hermano"
+        if let m = NovaResponder.findEventByApproxTitle(
+            "buscar hermano", in: mockEvents
+        ) {
+            check(label: "fuzzy: 'buscar hermano' → Ir a buscar a mi hermano",
+                  actual: m.id, expected: mockBuscarHermano.id, failures: &failures)
+        } else {
+            let msg = "  ✗ fuzzy: 'buscar hermano' no matcheó"
+            print(msg); failures.append(msg)
+        }
+
+        // Sin match: "estudiar matemáticas" no debe matchear nada
+        check(
+            label: "fuzzy: 'estudiar matemáticas' sin match → nil",
+            actual: NovaResponder.findEventByApproxTitle(
+                "estudiar matemáticas", in: mockEvents
+            ) == nil,
+            expected: true, failures: &failures
+        )
+
+        // Empty events → nil
+        check(
+            label: "fuzzy: events vacío → nil",
+            actual: NovaResponder.findEventByApproxTitle("ducharme", in: []) == nil,
+            expected: true, failures: &failures
+        )
+
         // ───── Resultado ───────────────────────────────────────────────
 
         if failures.isEmpty {
