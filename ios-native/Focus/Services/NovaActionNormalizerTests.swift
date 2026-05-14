@@ -81,6 +81,56 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
+        // ───── Reflexivos a infinitivo base (2026-05-13) ───────────────
+        // El usuario: "si le digo dormirme a las 8 que el evento no se llame
+        // dormirme sino dormir". Whitelist explícita normaliza la familia
+        // común. Falsos positivos (palabras que terminan en -arme/-erme/
+        // -irme sin ser verbos reflexivos) NO deben tocarse.
+
+        check(
+            label: "reflexive: 'dormirme a las 8' → 'Dormir'",
+            actual: NovaActionNormalizer.cleanTitle("dormirme a las 8"),
+            expected: "Dormir",
+            failures: &failures
+        )
+        check(
+            label: "reflexive: 'levantarme a las 7' → 'Levantar'",
+            actual: NovaActionNormalizer.cleanTitle("levantarme a las 7"),
+            expected: "Levantar",
+            failures: &failures
+        )
+        check(
+            label: "reflexive: 'ducharme a las 9' → 'Duchar'",
+            actual: NovaActionNormalizer.cleanTitle("ducharme a las 9"),
+            expected: "Duchar",
+            failures: &failures
+        )
+        check(
+            label: "reflexive: 'acostarme a las 11' → 'Acostar'",
+            actual: NovaActionNormalizer.cleanTitle("acostarme a las 11"),
+            expected: "Acostar",
+            failures: &failures
+        )
+        check(
+            label: "reflexive: 'prepararme para la reunión' → 'Preparar para la reunión'",
+            actual: NovaActionNormalizer.cleanTitle("prepararme para la reunión"),
+            expected: "Preparar para la reunión",
+            failures: &failures
+        )
+        // Falsos positivos que NO deben tocarse:
+        check(
+            label: "reflexive (no match): 'firme el contrato' queda 'Firme el contrato'",
+            actual: NovaActionNormalizer.cleanTitle("firme el contrato"),
+            expected: "Firme el contrato",
+            failures: &failures
+        )
+        check(
+            label: "reflexive (no match): 'llamar a Carme' queda 'Llamar a Carme'",
+            actual: NovaActionNormalizer.cleanTitle("llamar a Carme"),
+            expected: "Llamar a Carme",
+            failures: &failures
+        )
+
         // ───── extractReminderOffset ───────────────────────────────────
 
         check(
@@ -346,21 +396,23 @@ enum NovaActionNormalizerTests {
 
         // ───── AM/PM contextual por verbo (los 10 casos del usuario) ──
 
-        // 1. "despertarme a las 7" → "Despertarme" 07:00, recordatorio puntual
+        // 1. "despertarme a las 7" → "Despertar" 07:00, recordatorio puntual.
+        //    2026-05-13: el reflexivo -me se normaliza a infinitivo base —
+        //    el evento se ve mejor como "Despertar" que como "Despertarme".
         checkAction(
             "case 1: despertarme a las 7",
             text: "despertarme a las 7",
-            expectedTitle: "Despertarme",
+            expectedTitle: "Despertar",
             expectedHour: 7,
             expectedReminder: true,
             failures: &failures
         )
 
-        // 2. "levantarme a las 7" → "Levantarme" 07:00
+        // 2. "levantarme a las 7" → "Levantar" 07:00 (idem: reflexivo a base).
         checkAction(
             "case 2: levantarme a las 7",
             text: "levantarme a las 7",
-            expectedTitle: "Levantarme",
+            expectedTitle: "Levantar",
             expectedHour: 7,
             expectedReminder: true,
             failures: &failures

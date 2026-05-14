@@ -260,12 +260,80 @@ enum NovaActionNormalizer {
         result = result.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // 8b. Verbos reflexivos → infinitivo base. "Dormirme" → "Dormir",
+        //     "Despertarme" → "Despertar", "Levantarme" → "Levantar", etc.
+        //     El usuario reportó: "si le digo dormirme a las 8 que el evento
+        //     no se llame dormirme sino dormir". Whitelist explícita —
+        //     evitar falsos positivos con palabras que casualmente terminen
+        //     en -arme/-erme/-irme (ej. "Carme", "firme", "duerme"). Se
+        //     aplica word-boundary, case-insensitive, preservando el resto
+        //     del título. La capitalización final la hace step 9.
+        result = stripReflexiveMe(in: result)
+
         // 9. Capitalize primera letra del título si no lo está.
         guard let firstChar = result.first else { return "" }
         if firstChar.isLowercase {
             result = firstChar.uppercased() + result.dropFirst()
         }
 
+        return result
+    }
+
+    /// Mapa de verbos reflexivos comunes (1ª persona singular) a su forma
+    /// infinitiva base. Whitelist explícita para evitar romper palabras
+    /// como "Carme" (nombre), "firme", "duerme" — cosas que casualmente
+    /// terminan en -arme/-erme/-irme pero no son verbos reflexivos.
+    ///
+    /// Cubre las cinco familias más comunes en eventos del día a día:
+    /// dormir/despertar/levantar/acostar (descanso), duchar/bañar/lavar/
+    /// peinar/vestir/afeitar/cambiar (higiene y arreglo), preparar/
+    /// concentrar/relajar/calmar (foco), mover/ejercitar/estirar (cuerpo),
+    /// salir/ir (transición — sólo cuando el usuario dice "salirme" o
+    /// "irme" como acción puntual).
+    private static let reflexiveVerbMap: [String: String] = [
+        // Descanso
+        "dormirme":     "dormir",
+        "despertarme":  "despertar",
+        "levantarme":   "levantar",
+        "acostarme":    "acostar",
+        // Higiene
+        "ducharme":     "duchar",
+        "bañarme":      "bañar",
+        "banarme":      "bañar",       // sin tilde
+        "lavarme":      "lavar",
+        "peinarme":     "peinar",
+        "vestirme":     "vestir",
+        "afeitarme":    "afeitar",
+        "cambiarme":    "cambiar",
+        // Foco / mente
+        "prepararme":   "preparar",
+        "concentrarme": "concentrar",
+        "relajarme":    "relajar",
+        "calmarme":     "calmar",
+        // Cuerpo
+        "moverme":      "mover",
+        "ejercitarme":  "ejercitar",
+        "estirarme":    "estirar",
+        // Transición (sólo si vino así literalmente)
+        "irme":         "ir",
+        "salirme":      "salir",
+        "volverme":     "volver",
+    ]
+
+    /// Sustituye cualquier ocurrencia (case-insensitive) de un verbo
+    /// reflexivo del map por su infinitivo base, preservando el resto del
+    /// título. Solo word-boundary — no toca substrings (ej. "carme" en
+    /// "carmen" NO matchea porque "carmen" tiene una letra extra).
+    private static func stripReflexiveMe(in input: String) -> String {
+        var result = input
+        for (reflexive, base) in reflexiveVerbMap {
+            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: reflexive) + "\\b"
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: base,
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
         return result
     }
 

@@ -44,19 +44,48 @@ struct ContentView: View {
         return .login
     }
 
-    @ViewBuilder
     var body: some View {
-        switch route {
-        case .boot:
-            BootView()
-                .onAppear(perform: scheduleBootEnd)
-        case .onboarding:
-            OnboardingView()
-        case .login:
-            LoginView()
-        case .main:
-            MainTabView()
+        // 2026-05-13: transición suave entre pantallas root.
+        // Antes el switch hacía swap atómico instantáneo — al pasar de
+        // login → main se sentía "brusco" (el usuario lo reportó: "no es
+        // como en otras apps que es más tranquilo y visualmente agradable,
+        // acá salta de una pantalla a otra"). Ahora cada pantalla tiene
+        // su `.transition()` y el outer ZStack anima `value: route` —
+        // una sola animación sobre un único valor evita el bug histórico
+        // de capas duplicadas (que ocurría con 3 `.animation(value:)`
+        // separados disparando crossfades simultáneos). El crossfade es
+        // opacity 0.45s + scale sutil 0.98→1.0 al entrar en MainTabView,
+        // que da la sensación de "asentar" en la app sin chocar.
+        ZStack {
+            if route == .boot {
+                BootView()
+                    .onAppear(perform: scheduleBootEnd)
+                    .transition(.opacity)
+            }
+            if route == .onboarding {
+                OnboardingView()
+                    .transition(.opacity)
+            }
+            if route == .login {
+                LoginView()
+                    .transition(.opacity)
+            }
+            if route == .main {
+                MainTabView()
+                    .transition(
+                        .asymmetric(
+                            // Al entrar: opacity + escala muy sutil hacia 1.0.
+                            // Da feeling de "se asienta" sin que parezca rebote.
+                            insertion: .opacity.combined(with: .scale(scale: 0.985)),
+                            // Al salir (logout): solo opacity, sin escala —
+                            // no queremos animar "out" agresivamente cuando
+                            // el usuario cierra sesión, debe ser limpio.
+                            removal: .opacity
+                        )
+                    )
+            }
         }
+        .animation(.easeInOut(duration: 0.45), value: route)
     }
 
     /// Termina el boot rápidamente — 0.6s. Antes era 1.8s, lo que se
