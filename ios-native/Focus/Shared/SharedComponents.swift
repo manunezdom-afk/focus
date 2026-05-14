@@ -756,6 +756,11 @@ struct EmptyStateView: View {
     let message: String
     var actionLabel: String? = nil
     var action: (() -> Void)? = nil
+    /// Cuando `true` el botón de acción usa look "AI": gradient violeta→azul
+    /// (estilo Gemini), sparkle leading, glow más fuerte. Solo se prende
+    /// para acciones que abren Nova/chat — no para acciones neutras como
+    /// "Crear evento". Default false mantiene el look sólido cobalto.
+    var aiStyledAction: Bool = false
 
     var body: some View {
         VStack(spacing: Theme.Spacing.lg) {
@@ -784,15 +789,52 @@ struct EmptyStateView: View {
                     HapticManager.shared.tap()
                     action()
                 }) {
-                    Text(actionLabel)
-                        .font(Theme.Typography.bodyBold)
-                        .foregroundStyle(.white)
+                    if aiStyledAction {
+                        // Botón "AI" estilo Gemini: gradient violeta→azul
+                        // + sparkles icon leading. Para "Hablar con Nova"
+                        // u otras acciones que abren la IA — el degrade
+                        // comunica "esto va al asistente inteligente".
+                        HStack(spacing: 8) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text(actionLabel)
+                                .font(Theme.Typography.bodyBold)
+                                .foregroundStyle(.white)
+                        }
                         .padding(.horizontal, Theme.Spacing.xl)
                         .padding(.vertical, Theme.Spacing.md)
                         .background(
-                            Capsule().fill(Theme.Colors.focusAccent)
+                            Capsule().fill(
+                                LinearGradient(
+                                    gradient: Gradient(stops: [
+                                        // Multi-stop violeta → púrpura
+                                        // intermedio → cobalto. El final
+                                        // azul es lo que el usuario pidió:
+                                        // "degrade hacia azul, estilo
+                                        // Gemini, más IA". 3 stops dan
+                                        // profundidad sin gritar.
+                                        .init(color: Theme.Colors.novaAccent, location: 0.00),
+                                        .init(color: Color(red: 0.42, green: 0.42, blue: 0.97), location: 0.55),
+                                        .init(color: Theme.Colors.focusAccent, location: 1.00),
+                                    ]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
                         )
-                        .focusCardShadow()
+                        .shadow(color: Theme.Colors.novaAccent.opacity(0.32), radius: 16, y: 6)
+                    } else {
+                        Text(actionLabel)
+                            .font(Theme.Typography.bodyBold)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, Theme.Spacing.xl)
+                            .padding(.vertical, Theme.Spacing.md)
+                            .background(
+                                Capsule().fill(Theme.Colors.focusAccent)
+                            )
+                            .focusCardShadow()
+                    }
                 }
                 .buttonStyle(.plain)
                 .padding(.top, Theme.Spacing.xs)

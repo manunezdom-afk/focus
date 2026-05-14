@@ -2028,12 +2028,20 @@ struct MiDiaView: View {
             .padding(.horizontal, Theme.Spacing.xl)
 
             if displayEvents.isEmpty {
+                // 2026-05-14: el botón ahora navega directo al CHAT de Nova
+                // (no a Bandeja). Antes `nav.openNova()` sin args caía en el
+                // segmento por defecto `.bandeja` — un usuario que toca
+                // "Hablar con Nova" espera abrir conversación, no inbox de
+                // sugerencias. `aiStyledAction: true` aplica el degrade
+                // violeta→azul (estilo Gemini) que pidió el usuario para
+                // comunicar visualmente "esto va a la IA".
                 EmptyStateView(
                     symbol: "sun.max",
                     title: "Tu día está libre",
                     message: "Agrega un bloque o pídele a Nova que lo organice.",
                     actionLabel: "Hablar con Nova",
-                    action: { nav.openNova() }
+                    action: { nav.openNova(segment: .chat) },
+                    aiStyledAction: true
                 )
                 .frame(minHeight: 260)
                 .padding(.horizontal, Theme.Spacing.xl)
