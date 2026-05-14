@@ -1,7 +1,7 @@
 // Cliente Nova hacia /api/focus-assistant.
 //
-// Mismo contrato que la web (src/components/NovaWidget.jsx):
-// - POST /api/focus-assistant con { message, events, tasks, history, ... }
+// Contrato mobile:
+// - POST /api/focus-assistant con { message, events, history, ... }
 // - Recibe { message, ... } o errores tipados (quota_exceeded, rate_limit, ...)
 //
 // La sesión Supabase se inyecta como Bearer automáticamente vía apiFetch.
@@ -24,7 +24,7 @@ export type ChatMessage = {
   errorCode?: string;
   // Etiquetas humanas de las acciones que Nova aplicó tras este mensaje.
   // Solo se setea en mensajes assistant; el ChatBubble las renderiza como
-  // chips primary debajo del texto. Ej: ["Agregado: Gym", "Tarea agregada: Llamar a Juan"].
+  // chips primary debajo del texto. Ej: ["Agregado: Gym", "Recordatorio: Llamar a Juan"].
   appliedActions?: string[];
 };
 
@@ -65,12 +65,12 @@ function getTimezone(): string {
 export async function sendNovaMessage(opts: {
   message: string;
   events: EventItem[];
-  tasks: Task[];
+  tasks?: Task[];
   history: ChatMessage[];
   memories?: Memory[];
   novaPersonality?: string;
 }): Promise<NovaReply> {
-  const { message, events, tasks, history, memories = [], novaPersonality = 'focus' } = opts;
+  const { message, events, history, memories = [], novaPersonality = 'focus' } = opts;
 
   // Mantener solo los últimos 20 turnos (igual que web).
   const trimmedHistory = history.slice(-20).map((m) => ({
@@ -84,7 +84,9 @@ export async function sendNovaMessage(opts: {
     body: JSON.stringify({
       message,
       events,
-      tasks,
+      // La versión mobile actual no expone tareas como módulo principal para Nova.
+      // El backend interpreta pendientes como recordatorios o eventos; no le
+      // enviamos tasks para evitar que el modelo dependa de ese flujo legacy.
       history: trimmedHistory,
       // Pasamos memories para que Nova las use como contexto. location/
       // profile/behavior aún no están — la respuesta será un poco menos

@@ -127,7 +127,7 @@ export function useWhisperDictation({ onFinal, onVolume }: Options) {
       }
 
       const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: 'base64',
       });
 
       const res = await apiFetch('/api/transcribe', {

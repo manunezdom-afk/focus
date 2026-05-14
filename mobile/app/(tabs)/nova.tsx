@@ -21,7 +21,6 @@ import {
   View,
 } from 'react-native';
 import Animated, {
-  FadeInDown,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -43,11 +42,9 @@ import { sendNovaMessage, type ChatMessage } from '@/src/data/nova';
 import { analyzePhoto } from '@/src/data/photo';
 import { loadNovaHistory, saveNovaHistory } from '@/src/data/novaPersist';
 import { consumeNovaSeed } from '@/src/data/novaSeedStore';
-import type { CreateTaskInput } from '@/src/data/tasks';
 import { todayISO } from '@/src/data/today';
 import { useEvents } from '@/src/data/useEvents';
 import { useMemories } from '@/src/data/useMemories';
-import { useTasks } from '@/src/data/useTasks';
 import { useUserProfile } from '@/src/data/useUserProfile';
 import { expandRecurrence } from '@/src/utils/expandRecurrence';
 
@@ -56,11 +53,9 @@ import { expandRecurrence } from '@/src/utils/expandRecurrence';
 // Estructura: header con NovaOrb + título → empty state (orb hero + pills)
 // O FlatList de chat → composer fijo abajo.
 //
-// Action processor: aplica add_event/add_task con shape válida via hooks
-// existentes (useEvents.addEvent / useTasks.addTask). Otros tipos quedan
-// como mensaje sin acción aplicada — no inventamos datos. Tras cada
-// respuesta refrescamos events+tasks por si Nova ejecutó algo server-side
-// (delete/edit que no procesamos en cliente todavía).
+// Action processor: aplica eventos y recordatorios vía useEvents. En la
+// versión mobile actual Nova no opera el módulo legacy de tareas; cualquier
+// add_task antiguo se degrada a recordatorio seguro.
 
 type SuggestedPrompt = {
   label: string;
@@ -74,10 +69,7 @@ function formatContextDate(): string {
   return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}, ${dayMonth}`;
 }
 
-function useContextualPrompts(
-  evts: import('@/src/data/types').EventItem[],
-  tsks: import('@/src/data/types').Task[],
-): SuggestedPrompt[] {
+function useContextualPrompts(evts: import('@/src/data/types').EventItem[]): SuggestedPrompt[] {
   return useMemo(() => {
     const hour = new Date().getHours();
     const today = new Date().toISOString().split('T')[0];
@@ -85,29 +77,20 @@ function useContextualPrompts(
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowISO = tomorrow.toISOString().split('T')[0];
 
-    const pendingToday = tsks.filter((t) => !t.done && t.category === 'hoy');
     const todayEvts = evts.filter((e) => e.date === today);
     const tomorrowEvts = evts.filter((e) => e.date === tomorrowISO);
 
     const result: SuggestedPrompt[] = [];
 
     if (hour >= 5 && hour < 12) {
-      if (pendingToday.length > 0) {
-        result.push({ label: `Prioriza mis ${pendingToday.length} tareas de hoy`, icon: 'sparkles' });
-      } else if (todayEvts.length > 0) {
+      if (todayEvts.length > 0) {
         result.push({ label: `Repasa mis ${todayEvts.length} eventos de hoy`, icon: 'calendar' });
       } else {
         result.push({ label: 'Organiza mi mañana', icon: 'sparkles' });
       }
-      result.push({ label: '2h enfocadas esta mañana', icon: 'checklist' });
+      result.push({ label: 'Agenda 2h enfocadas esta mañana', icon: 'calendar' });
     } else if (hour >= 12 && hour < 19) {
-      if (pendingToday.length > 0) {
-        const lbl = pendingToday[0].label;
-        const short = lbl.length > 22 ? lbl.slice(0, 22) + '…' : lbl;
-        result.push({ label: `¿Termino "${short}"?`, icon: 'sparkles' });
-      } else {
-        result.push({ label: '¿Qué me falta hoy?', icon: 'sparkles' });
-      }
+      result.push({ label: '¿Qué me falta hoy?', icon: 'sparkles' });
       result.push({ label: 'Mueve algo a mañana', icon: 'calendar' });
     } else {
       if (tomorrowEvts.length > 0) {
@@ -122,17 +105,44 @@ function useContextualPrompts(
     result.push({ label: 'Agenda algo nuevo', icon: 'calendar' });
 
     return result.slice(0, 4);
-  }, [evts, tsks]);
+  }, [evts]);
 }
 
 // Lectura defensiva de las acciones que devuelve Nova. Tolerantes a
 // `a.event` (legacy) o `a.payload.event` (forma nueva). Si la shape es
 // inválida, devuelven null y NO se aplica nada.
 function tryEventFromAction(a: any): CreateEventInput | null {
+  if (a?.type === 'event') {
+    if (typeof a.title !== 'string' || !a.title.trim()) return null;
+    const start = normalizeActionTime(a.start_time ?? a.startTime);
+    const end = normalizeActionTime(a.end_time ?? a.endTime);
+    return {
+      title: a.title.trim(),
+      date: typeof a.date === 'string' && a.date.trim() ? a.date : todayISO(),
+      time: start && end ? `${start}-${end}` : start,
+      description: typeof a.description === 'string' ? a.description : undefined,
+      section: typeof a.section === 'string' ? a.section : undefined,
+      icon: typeof a.icon === 'string' ? a.icon : 'event',
+    };
+  }
+
+  if (a?.type === 'reminder') {
+    if (typeof a.title !== 'string' || !a.title.trim()) return null;
+    return {
+      title: a.title.trim(),
+      date: typeof a.date === 'string' && a.date.trim() ? a.date : todayISO(),
+      time: normalizeActionTime(a.reminder_time ?? a.reminderTime ?? a.start_time ?? a.startTime),
+      section: 'reminder',
+      icon: 'alarm',
+    };
+  }
+
   const e = a?.event ?? a?.payload?.event ?? a?.data?.event;
   if (!e || typeof e.title !== 'string' || !e.title.trim()) return null;
   const rawDate = typeof e.date === 'string' && e.date.trim() ? e.date : null;
-  const rawTime = typeof e.time === 'string' && e.time.trim() ? e.time : null;
+  const start = normalizeActionTime(e.time ?? e.start_time ?? e.startTime);
+  const end = normalizeActionTime(e.endTime ?? e.end_time);
+  const rawTime = start && end ? `${start}-${end}` : start;
   // Si Nova omite date pero hay time o es un "Recordatorio:" → default hoy.
   // Sin esto, el evento se inserta con date=null y nunca aparece en Mi Día
   // (el filtro fetchTodayEvents pide date=todayISO() exacto).
@@ -144,17 +154,29 @@ function tryEventFromAction(a: any): CreateEventInput | null {
     time: rawTime,
     description: typeof e.description === 'string' ? e.description : undefined,
     section: typeof e.section === 'string' ? e.section : undefined,
+    icon: typeof e.icon === 'string' ? e.icon : isReminder ? 'alarm' : 'event',
   };
 }
 
-function tryTaskFromAction(a: any): CreateTaskInput | null {
+function normalizeActionTime(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const value = raw.trim();
+  const range = value.match(/^(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})$/);
+  if (range) return `${range[1]}-${range[2]}`;
+  const m = value.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM|am|pm)?$/);
+  if (!m) return value;
+  let h = parseInt(m[1], 10);
+  const min = m[2] ? parseInt(m[2], 10) : 0;
+  const meridiem = m[3]?.toLowerCase();
+  if (meridiem === 'pm' && h < 12) h += 12;
+  if (meridiem === 'am' && h === 12) h = 0;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
+function legacyReminderTitleFromAction(a: any): string | null {
   const t = a?.task ?? a?.payload?.task ?? a?.data?.task;
   if (!t || typeof t.label !== 'string' || !t.label.trim()) return null;
-  return {
-    label: t.label,
-    priority: t.priority,
-    category: typeof t.category === 'string' ? t.category : 'hoy',
-  };
+  return t.label.trim();
 }
 
 function tryMemoryFromAction(a: any): CreateMemoryInput | null {
@@ -178,6 +200,10 @@ function tryEventPatchFromAction(a: any): EventPatch | null {
   if (typeof u.date === 'string') patch.date = u.date;
   if (u.date === null) patch.date = null;
   if (typeof u.time === 'string') patch.time = u.time;
+  const start = normalizeActionTime(u.start_time ?? u.startTime);
+  const end = normalizeActionTime(u.end_time ?? u.endTime);
+  if (start && end) patch.time = `${start}-${end}`;
+  else if (start) patch.time = start;
   if (u.time === null) patch.time = null;
   if (typeof u.description === 'string') patch.description = u.description;
   if (u.description === null) patch.description = null;
@@ -186,9 +212,20 @@ function tryEventPatchFromAction(a: any): EventPatch | null {
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
-function describeApplied(action: any, eventTitleById?: Map<string, string>, taskLabelById?: Map<string, string>): string | null {
+function describeApplied(action: any, eventTitleById?: Map<string, string>): string | null {
   const any = action as any;
   switch (action.type) {
+    case 'event':
+      return any?.title ? `Agregado: ${any.title}` : 'Evento agregado';
+    case 'reminder':
+      return any?.title ? `Recordatorio: ${any.title}` : 'Recordatorio agregado';
+    case 'linked_reminder':
+      return any?.title ? `Vinculado: ${any.title}` : 'Recordatorio vinculado';
+    case 'update_event': {
+      const id = any?.id ?? any?.payload?.id;
+      const t = id ? eventTitleById?.get(id) : undefined;
+      return t ? `Evento actualizado: ${t}` : 'Evento actualizado';
+    }
     case 'add_event': {
       const title = any?.event?.title ?? any?.payload?.event?.title;
       return title ? `Agregado: ${title}` : 'Evento agregado';
@@ -199,7 +236,7 @@ function describeApplied(action: any, eventTitleById?: Map<string, string>, task
     }
     case 'add_task': {
       const label = any?.task?.label ?? any?.payload?.task?.label;
-      return label ? `Tarea agregada: ${label}` : 'Tarea agregada';
+      return label ? `Recordatorio: ${label}` : 'Recordatorio agregado';
     }
     case 'edit_event': {
       const id = any?.id ?? any?.payload?.id;
@@ -211,29 +248,18 @@ function describeApplied(action: any, eventTitleById?: Map<string, string>, task
       const t = id ? eventTitleById?.get(id) : undefined;
       return t ? `Evento eliminado: ${t}` : 'Evento eliminado';
     }
-    case 'mark_task_done':
-    case 'toggle_task': {
-      const id = any?.id ?? any?.payload?.id;
-      const l = id ? taskLabelById?.get(id) : undefined;
-      return l ? `Tarea marcada: ${l}` : 'Tarea marcada';
-    }
-    case 'delete_task': {
-      const id = any?.id ?? any?.payload?.id;
-      const l = id ? taskLabelById?.get(id) : undefined;
-      return l ? `Tarea eliminada: ${l}` : 'Tarea eliminada';
-    }
     default:
       return null;
   }
 }
 
-const DESTRUCTIVE_TYPES = new Set(['delete_event', 'delete_task']);
+const DESTRUCTIVE_TYPES = new Set(['delete_event']);
+const BLOCKED_TASK_MUTATIONS = new Set(['mark_task_done', 'toggle_task', 'delete_task']);
 
 // Resumen humano de una lista de acciones destructivas para el Alert de
-// confirmación. Devuelve "Eliminar 2 eventos y 1 tarea?" o similar.
-function destructiveSummary(actions: any[], eventTitleById: Map<string, string>, taskLabelById: Map<string, string>): string {
+// confirmación. Devuelve "Eliminar 2 eventos" o similar.
+function destructiveSummary(actions: any[], eventTitleById: Map<string, string>): string {
   const events = actions.filter((a) => a.type === 'delete_event');
-  const tasks = actions.filter((a) => a.type === 'delete_task');
   const parts: string[] = [];
   if (events.length === 1) {
     const id = events[0].id ?? events[0].payload?.id;
@@ -241,13 +267,6 @@ function destructiveSummary(actions: any[], eventTitleById: Map<string, string>,
     parts.push(title ? `el evento "${title}"` : '1 evento');
   } else if (events.length > 1) {
     parts.push(`${events.length} eventos`);
-  }
-  if (tasks.length === 1) {
-    const id = tasks[0].id ?? tasks[0].payload?.id;
-    const label = id ? taskLabelById.get(id) : undefined;
-    parts.push(label ? `la tarea "${label}"` : '1 tarea');
-  } else if (tasks.length > 1) {
-    parts.push(`${tasks.length} tareas`);
   }
   return parts.join(' y ');
 }
@@ -266,7 +285,6 @@ export default function NovaScreen() {
   const userId = user?.id ?? null;
 
   const events = useEvents('all');
-  const tasks = useTasks();
   const memoriesHook = useMemories();
   const userProfile = useUserProfile();
   const novaPersonality = userProfile.profile?.novaPersonality ?? 'focus';
@@ -363,16 +381,15 @@ export default function NovaScreen() {
     shadowRadius: 12 + focus.value * 5,
   }));
 
-  // Aplica una lista de acciones contra los hooks de tasks/events. Las
+  // Aplica una lista de acciones contra eventos/recordatorios. Las
   // destructivas ya pasaron por confirmación antes de llegar acá.
   const applyActions = useCallback(
     async (actions: any[]): Promise<string[]> => {
       const applied: string[] = [];
       const eventTitleById = new Map(events.events.map((e) => [e.id, e.title]));
-      const taskLabelById = new Map(tasks.tasks.map((t) => [t.id, t.label]));
 
       for (const a of actions) {
-        if (a.type === 'add_event') {
+        if (a.type === 'event' || a.type === 'reminder' || a.type === 'add_event') {
           const input = tryEventFromAction(a);
           if (input) {
             await events.addEvent(input);
@@ -386,55 +403,43 @@ export default function NovaScreen() {
             const d = describeApplied(a);
             if (d) applied.push(`${d} (${expanded.length})`);
           }
-        } else if (a.type === 'add_task') {
-          const input = tryTaskFromAction(a);
-          if (input) {
-            await tasks.addTask(input);
-            const d = describeApplied(a);
+        } else if (a.type === 'linked_reminder') {
+          const id = String(a?.target_event_id ?? a?.targetEventId ?? '');
+          const title = typeof a?.title === 'string' ? a.title.trim() : '';
+          const target = events.events.find((e) => e.id === id);
+          if (id && title && target) {
+            const line = `Recordatorio: ${title}`;
+            const current = target.description?.trim() ?? '';
+            const nextDescription = current.includes(line) ? current : [current, line].filter(Boolean).join('\n');
+            await events.patchEvent(id, { description: nextDescription });
+            const d = describeApplied(a, eventTitleById);
             if (d) applied.push(d);
           }
-        } else if (a.type === 'edit_event') {
+        } else if (a.type === 'add_task') {
+          const title = legacyReminderTitleFromAction(a);
+          if (title) {
+            await events.addEvent({
+              title,
+              date: todayISO(),
+              time: null,
+              section: 'reminder',
+              icon: 'alarm',
+            });
+            applied.push(`Recordatorio: ${title}`);
+          }
+        } else if (a.type === 'edit_event' || a.type === 'update_event') {
           const id = a?.id ?? a?.payload?.id;
           const patch = tryEventPatchFromAction(a);
           if (id && patch) {
             await events.patchEvent(id, patch);
-            const d = describeApplied(a, eventTitleById, taskLabelById);
+            const d = describeApplied(a, eventTitleById);
             if (d) applied.push(d);
           }
         } else if (a.type === 'delete_event') {
           const id = a?.id ?? a?.payload?.id;
           if (id) {
             await events.removeEvent(id);
-            const d = describeApplied(a, eventTitleById, taskLabelById);
-            if (d) applied.push(d);
-          }
-        } else if (a.type === 'mark_task_done') {
-          // Idempotente: si la tarea ya está done, no la destogglee.
-          // Nova pide marcar como hecha; si ya lo está, NO-OP en backend
-          // pero sí emitimos el chip "Tarea marcada" para que el usuario
-          // confirme visualmente que la acción fue procesada.
-          const id = a?.id ?? a?.payload?.id;
-          if (id) {
-            const t = tasks.tasks.find((x) => x.id === id);
-            if (t && !t.done) {
-              await tasks.toggleTask(id);
-            }
-            const d = describeApplied(a, eventTitleById, taskLabelById);
-            if (d) applied.push(d);
-          }
-        } else if (a.type === 'toggle_task') {
-          // Toggle explícito: invierte el estado actual sin importar cuál sea.
-          const id = a?.id ?? a?.payload?.id;
-          if (id) {
-            await tasks.toggleTask(id);
-            const d = describeApplied(a, eventTitleById, taskLabelById);
-            if (d) applied.push(d);
-          }
-        } else if (a.type === 'delete_task') {
-          const id = a?.id ?? a?.payload?.id;
-          if (id) {
-            await tasks.removeTask(id);
-            const d = describeApplied(a, eventTitleById, taskLabelById);
+            const d = describeApplied(a, eventTitleById);
             if (d) applied.push(d);
           }
         }
@@ -449,13 +454,13 @@ export default function NovaScreen() {
       }
       // Feedback táctil cuando Nova efectivamente aplicó algo. Las acciones
       // destructivas tienen su propio haptic en el flujo de confirmación; este
-      // cubre add_event/add_task/edit_task/toggle_task/remember.
+      // cubre eventos, recordatorios, vinculaciones y memories.
       if (applied.length > 0 && Platform.OS === 'ios') {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
       return applied;
     },
-    [events, tasks, memoriesHook],
+    [events, memoriesHook],
   );
 
   // Procesa una foto: analiza con backend, muestra los eventos detectados
@@ -694,13 +699,14 @@ export default function NovaScreen() {
         const reply = await sendNovaMessage({
           message: text,
           events: events.events,
-          tasks: tasks.tasks,
           memories: memoriesHook.memories,
           history,
           novaPersonality,
         });
 
-        const actions = Array.isArray(reply.actions) ? reply.actions : [];
+        const actions = (Array.isArray(reply.actions) ? reply.actions : []).filter(
+          (a) => !BLOCKED_TASK_MUTATIONS.has(String(a?.type ?? '')),
+        );
         const safeActions = actions.filter(
           (a) => !DESTRUCTIVE_TYPES.has(a?.type),
         );
@@ -731,8 +737,7 @@ export default function NovaScreen() {
         // Propose mode para destructivas: una sola confirmación cubre todas.
         if (destructive.length > 0) {
           const eventTitleById = new Map(events.events.map((e) => [e.id, e.title]));
-          const taskLabelById = new Map(tasks.tasks.map((t) => [t.id, t.label]));
-          const summary = destructiveSummary(destructive, eventTitleById, taskLabelById);
+          const summary = destructiveSummary(destructive, eventTitleById);
           Alert.alert(
             '¿Confirmar eliminación?',
             `Vas a eliminar ${summary}. Esto no se puede deshacer.`,
@@ -769,7 +774,6 @@ export default function NovaScreen() {
 
         // Refrescar para reflejar cambios reales (en caso de algún server-side).
         void events.refresh();
-        void tasks.refresh();
       } catch (err: any) {
         const errCode = err?.code as string | undefined;
         const errText: string =
@@ -788,7 +792,7 @@ export default function NovaScreen() {
         setSending(false);
       }
     },
-    [draft, sending, messages, events, tasks, memoriesHook.memories, novaPersonality, applyActions],
+    [draft, sending, messages, events, memoriesHook.memories, novaPersonality, applyActions],
   );
 
   // Auto-scroll al final cuando llega un mensaje nuevo.
@@ -815,10 +819,10 @@ export default function NovaScreen() {
   }, [sending, messages, lastMsg, handleSend]);
 
   const isEmpty = messages.length === 0;
-  const suggestedPrompts = useContextualPrompts(events.events, tasks.tasks);
-  const pendingTodayCount = useMemo(
-    () => tasks.tasks.filter((t) => !t.done && t.category === 'hoy').length,
-    [tasks.tasks],
+  const suggestedPrompts = useContextualPrompts(events.events);
+  const todayEventCount = useMemo(
+    () => events.events.filter((e) => e.date === todayISO()).length,
+    [events.events],
   );
   const contextDate = useMemo(() => formatContextDate(), []);
 
@@ -838,8 +842,8 @@ export default function NovaScreen() {
         <Animated.View style={styles.contextBar}>
           <Text style={[styles.contextDate, { color: c.text }]}>{contextDate}</Text>
           <Text style={[styles.contextSub, { color: c.textMuted }]}>
-            {pendingTodayCount > 0
-              ? `${pendingTodayCount} tarea${pendingTodayCount > 1 ? 's' : ''} pendiente${pendingTodayCount > 1 ? 's' : ''}`
+            {todayEventCount > 0
+              ? `${todayEventCount} evento${todayEventCount > 1 ? 's' : ''} hoy`
               : 'Día despejado'}
           </Text>
         </Animated.View>

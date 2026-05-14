@@ -270,6 +270,7 @@ export default function CalendarScreen() {
             tasks={tasks.tasks}
             onAddEvent={events.addEvent}
             onAddTask={tasks.addTask}
+            onPatchEvent={events.patchEvent}
             onRemoveEvent={events.removeEvent}
             onRemoveTask={tasks.removeTask}
             onRefresh={() => {

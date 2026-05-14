@@ -27,8 +27,10 @@ export function isReminderTitle(title: string | null | undefined): boolean {
 export function detectEventKind(opts: {
   title: string;
   section?: string | null;
+  icon?: string | null;
 }): BlockKind {
   if (isReminderTitle(opts.title)) return 'reminder';
+  if (opts.section === 'reminder' || opts.icon === 'alarm') return 'reminder';
   if (opts.section === 'focus') return 'focus';
   return 'event';
 }

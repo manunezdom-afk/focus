@@ -5,7 +5,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Platform,
@@ -27,7 +26,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useWhisperDictation } from '@/src/lib/useWhisperDictation';
-import type { CreateEventInput } from '@/src/data/events';
+import type { CreateEventInput, EventPatch } from '@/src/data/events';
 import { sendNovaMessage, type NovaActionShape } from '@/src/data/nova';
 import { analyzePhoto } from '@/src/data/photo';
 import { setNovaSeed } from '@/src/data/novaSeedStore';
@@ -38,10 +37,8 @@ import { useMemories } from '@/src/data/useMemories';
 import { useUserProfile } from '@/src/data/useUserProfile';
 
 // Contexto por pantalla — Nova ajusta placeholder y agrega un hint sutil
-// al prompt cuando lo que el usuario dice es ambiguo. La intención es que
-// "comprar leche" desde Tareas se cree como tarea, mientras que "comprar
-// leche a las 5pm" desde Calendario se cree como evento (el system
-// prompt sigue mandando para el caso obvio; el hint solo desempata).
+// al prompt cuando lo que el usuario dice es ambiguo. En mobile Nova no
+// crea tareas: usa eventos o recordatorios según intención.
 export type NovaInputContext =
   | { type: 'day' }
   | { type: 'calendar'; selectedDate?: string }
@@ -55,10 +52,10 @@ type Props = {
   tasks: Task[];
   onAddEvent: (input: CreateEventInput) => Promise<EventItem | null>;
   onAddTask: (input: CreateTaskInput) => Promise<Task | null>;
+  onPatchEvent?: (id: string, patch: EventPatch) => Promise<void>;
   // Acciones destructivas: si el padre las pasa, NovaInputBar las ejecuta
-  // cuando Nova devuelve delete_event/delete_task. Sin esto, "borra el
-  // recordatorio" desde Mi Día se ignora silenciosamente — bug visible
-  // al usuario que dice "Nova no hizo nada".
+  // cuando Nova devuelve delete_event. Sin esto, "borra el evento" desde
+  // Mi Día se ignora silenciosamente.
   onRemoveEvent?: (id: string) => Promise<void>;
   onRemoveTask?: (id: string) => Promise<void>;
   onRefresh: () => void;
@@ -75,7 +72,7 @@ type ReplyState = {
 function placeholderFor(ctx: NovaInputContext): string {
   switch (ctx.type) {
     case 'tasks':
-      return 'Añade una tarea, prioriza, organiza…';
+      return 'Añade un recordatorio, prioriza, organiza…';
     case 'calendar':
       return 'Agenda un evento, mueve, libera tiempo…';
     case 'day':
@@ -87,12 +84,12 @@ function placeholderFor(ctx: NovaInputContext): string {
 }
 
 // Inyecta una pista contextual al user message. El system prompt del
-// backend ya tiene reglas claras sobre tarea vs evento; el hint solo
+// backend ya tiene reglas claras sobre recordatorio vs evento; el hint solo
 // rompe el empate cuando lo que dice el usuario es ambiguo.
 function buildContextualPrompt(ctx: NovaInputContext, message: string): string {
   switch (ctx.type) {
     case 'tasks':
-      return `[Vista actual: Tareas. Si lo siguiente es ambiguo entre tarea y evento, prefiere crearlo como tarea sin hora.] ${message}`;
+      return `[Vista actual: Recordatorios. Si lo siguiente es ambiguo entre recordatorio y evento, prefiere recordatorio sin duración. No crees tareas.] ${message}`;
     case 'calendar': {
       const date = ctx.selectedDate;
       return date
@@ -107,11 +104,57 @@ function buildContextualPrompt(ctx: NovaInputContext, message: string): string {
   }
 }
 
+function normalizeActionTime(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const value = raw.trim();
+  const range = value.match(/^(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})$/);
+  if (range) return `${range[1]}-${range[2]}`;
+  const m = value.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM|am|pm)?$/);
+  if (!m) return value;
+  let h = parseInt(m[1], 10);
+  const min = m[2] ? parseInt(m[2], 10) : 0;
+  const meridiem = m[3]?.toLowerCase();
+  if (meridiem === 'pm' && h < 12) h += 12;
+  if (meridiem === 'am' && h === 12) h = 0;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
+function joinTimeRange(start: unknown, end: unknown): string | null {
+  const startTime = normalizeActionTime(start);
+  const endTime = normalizeActionTime(end);
+  if (!startTime) return null;
+  if (!endTime || startTime.includes('-')) return startTime;
+  return `${startTime}-${endTime}`;
+}
+
 function tryEventFromAction(a: any): CreateEventInput | null {
+  if (a?.type === 'event') {
+    if (typeof a.title !== 'string' || !a.title.trim()) return null;
+    return {
+      title: a.title.trim(),
+      date: typeof a.date === 'string' && a.date.trim() ? a.date : todayISO(),
+      time: joinTimeRange(a.start_time ?? a.startTime, a.end_time ?? a.endTime),
+      description: typeof a.description === 'string' ? a.description : undefined,
+      section: typeof a.section === 'string' ? a.section : undefined,
+      icon: typeof a.icon === 'string' ? a.icon : 'event',
+    };
+  }
+
+  if (a?.type === 'reminder') {
+    if (typeof a.title !== 'string' || !a.title.trim()) return null;
+    return {
+      title: a.title.trim(),
+      date: typeof a.date === 'string' && a.date.trim() ? a.date : todayISO(),
+      time: normalizeActionTime(a.reminder_time ?? a.reminderTime ?? a.start_time ?? a.startTime),
+      section: 'reminder',
+      icon: 'alarm',
+    };
+  }
+
   const e = a?.event ?? a?.payload?.event ?? a?.data?.event;
   if (!e || typeof e.title !== 'string' || !e.title.trim()) return null;
   const rawDate = typeof e.date === 'string' && e.date.trim() ? e.date : null;
-  const rawTime = typeof e.time === 'string' && e.time.trim() ? e.time : null;
+  const rawTime = joinTimeRange(e.time ?? e.start_time ?? e.startTime, e.endTime ?? e.end_time);
   // Si Nova omite date pero hay time o es un "Recordatorio:" → default hoy.
   // Sin esto, el evento se inserta con date=null, fetchTodayEvents filtra
   // por date=todayISO() y nunca aparece en Mi Día (chip dice "Agregado"
@@ -124,29 +167,34 @@ function tryEventFromAction(a: any): CreateEventInput | null {
     time: rawTime,
     description: typeof e.description === 'string' ? e.description : undefined,
     section: typeof e.section === 'string' ? e.section : undefined,
+    icon: typeof e.icon === 'string' ? e.icon : isReminder ? 'alarm' : 'event',
   };
 }
 
-function tryTaskFromAction(a: any): CreateTaskInput | null {
+function legacyReminderTitleFromAction(a: any): string | null {
   const t = a?.task ?? a?.payload?.task ?? a?.data?.task;
   if (!t || typeof t.label !== 'string' || !t.label.trim()) return null;
-  return {
-    label: t.label,
-    priority: t.priority,
-    category: typeof t.category === 'string' ? t.category : 'hoy',
-  };
+  return t.label.trim();
 }
 
 function describeApplied(a: NovaActionShape): string | null {
   const any = a as any;
   switch (a.type) {
+    case 'event':
+      return any?.title ? `Agregado: ${any.title}` : 'Evento agregado';
+    case 'reminder':
+      return any?.title ? `Recordatorio: ${any.title}` : 'Recordatorio agregado';
+    case 'linked_reminder':
+      return any?.title ? `Vinculado: ${any.title}` : 'Recordatorio vinculado';
+    case 'update_event':
+      return 'Evento actualizado';
     case 'add_event': {
       const title = any?.event?.title ?? any?.payload?.event?.title;
       return title ? `Agregado: ${title}` : 'Evento agregado';
     }
     case 'add_task': {
       const label = any?.task?.label ?? any?.payload?.task?.label;
-      return label ? `Tarea agregada: ${label}` : 'Tarea agregada';
+      return label ? `Recordatorio: ${label}` : 'Recordatorio agregado';
     }
     default:
       return null;
@@ -158,11 +206,9 @@ function describeApplied(a: NovaActionShape): string | null {
 // de la tab bar via wrapper con `position: absolute`).
 export function NovaInputBar({
   events,
-  tasks,
   onAddEvent,
-  onAddTask,
+  onPatchEvent,
   onRemoveEvent,
-  onRemoveTask,
   onRefresh,
   context,
   seed,
@@ -339,18 +385,19 @@ export function NovaInputBar({
       const res = await sendNovaMessage({
         message: finalMessage,
         events,
-        tasks,
         history: [],
         // Mismo contexto que la pantalla principal de Nova: pasamos las
         // memorias del usuario para que las respuestas cortas del mini-input
-        // (Mi Día / Calendario / Tareas) tengan el mismo grado de contexto.
+        // (Mi Día / Calendario / Recordatorios) tengan el mismo grado de contexto.
         memories: memoriesHook.memories,
         novaPersonality: userProfile.profile?.novaPersonality ?? 'focus',
       });
 
       const applied: string[] = [];
       const failed: string[] = [];
-      const actions = Array.isArray(res.actions) ? res.actions : [];
+      const actions = (Array.isArray(res.actions) ? res.actions : []).filter(
+        (a) => !['mark_task_done', 'toggle_task', 'delete_task'].includes(String(a?.type ?? '')),
+      );
       for (const a of actions) {
         if (a.type === 'add_event') {
           const input = tryEventFromAction(a);
@@ -366,15 +413,63 @@ export function NovaInputBar({
               failed.push(desc.replace(/^Agregado: /, ''));
             }
           }
-        } else if (a.type === 'add_task') {
-          const input = tryTaskFromAction(a);
+        } else if (a.type === 'reminder' || a.type === 'event') {
+          const input = tryEventFromAction(a);
           if (input) {
-            const created = await onAddTask(input);
+            const created = await onAddEvent(input);
             const desc = describeApplied(a);
             if (created) {
               if (desc) applied.push(desc);
             } else if (desc) {
-              failed.push(desc.replace(/^Tarea agregada: /, ''));
+              failed.push(desc.replace(/^Agregado: /, '').replace(/^Recordatorio: /, ''));
+            }
+          }
+        } else if (a.type === 'linked_reminder' && onPatchEvent) {
+          const any = a as any;
+          const id = String(any.target_event_id ?? any.targetEventId ?? '');
+          const title = typeof any.title === 'string' ? any.title.trim() : '';
+          const target = events.find((e) => e.id === id);
+          if (id && title && target) {
+            const line = `Recordatorio: ${title}`;
+            const current = target.description?.trim() ?? '';
+            const nextDescription = current.includes(line) ? current : [current, line].filter(Boolean).join('\n');
+            await onPatchEvent(id, { description: nextDescription });
+            const desc = describeApplied(a);
+            if (desc) applied.push(desc);
+          } else {
+            failed.push('No pude vincular el recordatorio');
+          }
+        } else if ((a.type === 'update_event' || a.type === 'edit_event') && onPatchEvent) {
+          const any = a as any;
+          const id = String(any.id ?? any.payload?.id ?? '');
+          const updates = any.updates ?? any.payload?.updates ?? {};
+          const patch: EventPatch = {};
+          if (typeof updates.title === 'string') patch.title = updates.title;
+          if (typeof updates.date === 'string' || updates.date === null) patch.date = updates.date;
+          const time = joinTimeRange(updates.start_time ?? updates.startTime ?? updates.time, updates.end_time ?? updates.endTime);
+          if (time) patch.time = time;
+          if (typeof updates.description === 'string' || updates.description === null) patch.description = updates.description;
+          if (typeof updates.section === 'string') patch.section = updates.section;
+          if (id && Object.keys(patch).length > 0) {
+            await onPatchEvent(id, patch);
+            const desc = describeApplied(a);
+            if (desc) applied.push(desc);
+          }
+        } else if (a.type === 'add_task') {
+          const title = legacyReminderTitleFromAction(a);
+          if (title) {
+            const created = await onAddEvent({
+              title,
+              date: todayISO(),
+              time: null,
+              section: 'reminder',
+              icon: 'alarm',
+            });
+            const desc = `Recordatorio: ${title}`;
+            if (created) {
+              applied.push(desc);
+            } else {
+              failed.push(title);
             }
           }
         } else if (a.type === 'delete_event' && onRemoveEvent) {
@@ -388,18 +483,6 @@ export function NovaInputBar({
               applied.push(ev?.title ? `Eliminado: ${ev.title}` : 'Evento eliminado');
             } catch {
               failed.push('No pude eliminar el evento');
-            }
-          }
-        } else if (a.type === 'delete_task' && onRemoveTask) {
-          const any = a as any;
-          const id = String(any.id ?? any.payload?.id ?? any.task?.id ?? '');
-          if (id) {
-            try {
-              await onRemoveTask(id);
-              const t = tasks.find((tk) => tk.id === id);
-              applied.push(t?.label ? `Eliminada: ${t.label}` : 'Tarea eliminada');
-            } catch {
-              failed.push('No pude eliminar la tarea');
             }
           }
         }
@@ -431,7 +514,7 @@ export function NovaInputBar({
     } finally {
       setSending(false);
     }
-  }, [draft, sending, events, tasks, onAddEvent, onAddTask, onRefresh, context, userProfile.profile, memoriesHook.memories]);
+  }, [draft, sending, events, onAddEvent, onPatchEvent, onRemoveEvent, onRefresh, context, userProfile.profile, memoriesHook.memories]);
 
   // Tap en el chevron del reply o en el bubble: salta a la pantalla Nova
   // con el último mensaje + reply ya enviado (vía seedStore). Permite

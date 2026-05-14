@@ -72,6 +72,7 @@ export type CreateEventInput = {
   time: string | null; // "HH:MM" o "HH:MM-HH:MM"
   description?: string;
   section?: string;
+  icon?: string;
   featured?: boolean;
 };
 
@@ -95,7 +96,7 @@ export async function createEvent(userId: string, input: CreateEventInput): Prom
     time: input.time,
     description: (input.description ?? '').trim() || null,
     section: input.section ?? 'focus',
-    icon: 'event',
+    icon: input.icon ?? 'event',
     featured: !!input.featured,
   };
   const { data, error } = await supabase

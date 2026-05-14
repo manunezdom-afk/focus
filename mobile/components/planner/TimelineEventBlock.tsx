@@ -23,6 +23,21 @@ function startTimeStr(time: string): string {
   return time.split('-')[0].trim();
 }
 
+function splitDescription(description: string) {
+  const lines = description
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const reminders: string[] = [];
+  const body: string[] = [];
+  for (const line of lines) {
+    const match = line.match(/^Recordatorio:\s*(.+)$/i);
+    if (match?.[1]) reminders.push(match[1].trim());
+    else body.push(line);
+  }
+  return { body: body.join('\n'), reminders };
+}
+
 const DOT_SIZE = 8;
 const COL_GAP = 20;
 const DELETE_WIDTH = 80;
@@ -40,13 +55,14 @@ export function TimelineEventBlock({
   const c = Colors[scheme];
   const timeLabel = startTimeStr(event.time) || '—';
 
+  const descriptionParts = splitDescription(event.description ?? '');
   const hasDescription =
-    !!event.description &&
-    !/^\d{4}-\d{2}-\d{2}$/.test(event.description.trim());
+    !!descriptionParts.body &&
+    !/^\d{4}-\d{2}-\d{2}$/.test(descriptionParts.body.trim());
 
   const dim = done || isPast;
 
-  const kind = detectEventKind({ title: event.title, section: event.section });
+  const kind = detectEventKind({ title: event.title, section: event.section, icon: event.icon });
   const kindColors = getBlockColors(kind, scheme);
   const dotColor = done ? c.success : kindColors.accent;
   const accentColor = done ? c.success : kindColors.accent;
@@ -154,8 +170,21 @@ export function TimelineEventBlock({
 
           {hasDescription ? (
             <Text style={[styles.description, { color: c.textMuted }]} numberOfLines={2}>
-              {event.description}
+              {descriptionParts.body}
             </Text>
+          ) : null}
+
+          {descriptionParts.reminders.length > 0 ? (
+            <View style={styles.linkedReminderList}>
+              {descriptionParts.reminders.map((reminder, idx) => (
+                <View key={`${reminder}-${idx}`} style={styles.linkedReminderRow}>
+                  <IconSymbol name="bell.fill" size={11} color="#d97706" />
+                  <Text style={styles.linkedReminderText} numberOfLines={2}>
+                    {reminder}
+                  </Text>
+                </View>
+              ))}
+            </View>
           ) : null}
         </View>
       </View>
@@ -277,6 +306,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     marginTop: 2,
+  },
+  linkedReminderList: {
+    gap: 3,
+    marginTop: 2,
+  },
+  linkedReminderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 5,
+  },
+  linkedReminderText: {
+    flex: 1,
+    color: '#b45309',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
   },
   // Acción swipe roja — estilo iOS nativo
   swipeAction: {

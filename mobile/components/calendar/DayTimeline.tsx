@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -37,6 +37,21 @@ function parseTimeRange(time: string): { start: string | null; end: string | nul
   const match = cleaned.match(/^(\d{1,2}:\d{2})(?:-(\d{1,2}:\d{2}))?$/);
   if (!match) return { start: null, end: null };
   return { start: match[1], end: match[2] ?? null };
+}
+
+function splitDescription(description: string) {
+  const lines = description
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const reminders: string[] = [];
+  const body: string[] = [];
+  for (const line of lines) {
+    const match = line.match(/^Recordatorio:\s*(.+)$/i);
+    if (match?.[1]) reminders.push(match[1].trim());
+    else body.push(line);
+  }
+  return { body: body.join('\n'), reminders };
 }
 
 // Si no hay end time asumimos 60 min de duración para decidir si está
@@ -84,7 +99,7 @@ export function DayTimeline({ dateISO, events, onDeleteEvent }: Props) {
 
   return (
     <View style={styles.list}>
-      {sorted.map((event, idx) => {
+      {sorted.map((event) => {
         const window = classify(event, isCurrentDay, nowMinutes);
         return (
           <TimelineRow
@@ -93,7 +108,6 @@ export function DayTimeline({ dateISO, events, onDeleteEvent }: Props) {
             window={window}
             c={c}
             scheme={scheme}
-            enterIndex={idx}
             onDeletePress={
               onDeleteEvent ? () => onDeleteEvent(event.id, event.title) : undefined
             }
@@ -109,14 +123,12 @@ function TimelineRow({
   window,
   c,
   scheme,
-  enterIndex,
   onDeletePress,
 }: {
   event: EventItem;
   window: Window;
   c: typeof Colors.light;
   scheme: 'light' | 'dark';
-  enterIndex: number;
   onDeletePress?: () => void;
 }) {
   const { start } = parseTimeRange(event.time);
@@ -124,11 +136,11 @@ function TimelineRow({
   const isNow = window === 'now';
   const isUntimed = window === 'untimed';
   const timeLabel = isUntimed ? 'Todo' : start ?? '';
-  const enterDelay = Math.min(60 + enterIndex * 24, 160);
 
   // Color por tipo de bloque — evento azul, recordatorio ámbar, focus cyan.
-  const kind = detectEventKind({ title: event.title, section: event.section });
+  const kind = detectEventKind({ title: event.title, section: event.section, icon: event.icon });
   const kindColors = getBlockColors(kind, scheme);
+  const descriptionParts = splitDescription(event.description ?? '');
 
   const cardBg = isNow ? c.primaryContainer : c.surface;
   const cardBorder = isNow ? c.primary : c.border;
@@ -229,7 +241,7 @@ function TimelineRow({
             </Pressable>
           ) : null}
         </View>
-        {event.description ? (
+        {descriptionParts.body ? (
           <Text
             style={[
               styles.description,
@@ -240,8 +252,20 @@ function TimelineRow({
             ]}
             numberOfLines={2}
           >
-            {event.description}
+            {descriptionParts.body}
           </Text>
+        ) : null}
+        {descriptionParts.reminders.length > 0 ? (
+          <View style={styles.linkedReminderList}>
+            {descriptionParts.reminders.map((reminder, idx) => (
+              <View key={`${reminder}-${idx}`} style={styles.linkedReminderRow}>
+                <IconSymbol name="bell.fill" size={11} color="#d97706" />
+                <Text style={styles.linkedReminderText} numberOfLines={2}>
+                  {reminder}
+                </Text>
+              </View>
+            ))}
+          </View>
         ) : null}
       </View>
     </Animated.View>
@@ -339,5 +363,21 @@ const styles = StyleSheet.create({
     ...Typography.caption,
     fontSize: 13,
     lineHeight: 18,
+  },
+  linkedReminderList: {
+    gap: 3,
+    marginTop: 2,
+  },
+  linkedReminderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 5,
+  },
+  linkedReminderText: {
+    flex: 1,
+    color: '#b45309',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
   },
 });
