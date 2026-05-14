@@ -123,10 +123,8 @@ enum NovaActionValidator {
         guard !trimmed.isEmpty else { return "título vacío" }
         let lower = trimmed.lowercased()
 
-        // Patrón A — verbos encadenados: "X que (verb)" / "X y (verb)" /
-        // "X luego (de) (verb)". Solo capturamos verbos comunes de
-        // acción del calendario para no falsos-positivos en títulos
-        // legítimos como "Almuerzo con Juan y Pedro".
+        // Patrón A — verbos encadenados con palabra-puente explícita:
+        // "X que (verb)" / "X luego (de) (verb)" / "X después (de) (verb)".
         let chainVerbs = "(llevar|volver|comer|cenar|almorzar|salir|ir|hacer|tomar|traer|estudiar|trabajar|jugar|leer)"
         let concatPatterns = [
             "\\bque \(chainVerbs)\\b",
@@ -137,6 +135,22 @@ enum NovaActionValidator {
             if lower.range(of: pattern, options: .regularExpression) != nil {
                 return "título con verbo encadenado de otra acción"
             }
+        }
+
+        // Patrón A2 — VERBO DE ACCIÓN HUÉRFANO. Detecta el caso del bug
+        // 2026-05-13: "Ir a buscar a mi hermano   jugar counter" — dos
+        // acciones se fusionaron en un solo título sin conector. La señal
+        // es un verbo de acción común (jugar/comer/dormir/etc.) en MEDIO
+        // del título sin ir precedido de una preposición ligadora
+        // ("a"/"para"/"de"). En títulos sanos, esos verbos solo aparecen
+        // al inicio o como complemento ("ir A buscar", "salir A comer").
+        if let reason = orphanActionVerbReason(in: lower) { return reason }
+
+        // Patrón A3 — ESPACIOS MÚLTIPLES. Dos o más espacios consecutivos
+        // dentro del título son una señal fuerte de mala concatenación
+        // de cláusulas (el modelo pegó dos strings con un buffer extra).
+        if trimmed.range(of: #"\s{2,}"#, options: .regularExpression) != nil {
+            return "título tiene espacios múltiples — concatenación"
         }
 
         // Patrón B — hora pegada en el título. La hora va en `time`,
@@ -157,6 +171,53 @@ enum NovaActionValidator {
             return "título demasiado largo (\(trimmed.count) chars)"
         }
 
+        return nil
+    }
+
+    /// Tokeniza el título y busca verbos de acción "huérfanos" — verbos
+    /// que en español típicamente SON la acción principal (no
+    /// complemento de otra). Si aparecen en medio del título sin estar
+    /// precedidos por una preposición que los introduce como complemento
+    /// ("a", "para", "de", "con", "sin", "y", "o"), es señal de
+    /// concatenación.
+    ///
+    /// Ejemplos:
+    /// - "Ir a buscar a mi hermano" → "buscar" precedido de "a" ✓ OK.
+    /// - "Salir a comer" → "comer" precedido de "a" ✓ OK.
+    /// - "Comprar pan y leche" → no contiene verbos huérfanos ✓ OK.
+    /// - "Ir a buscar a mi hermano jugar counter" → "jugar" precedido
+    ///   de "hermano" (sustantivo) ✗ RECHAZAR.
+    /// - "Dormir Volver a casa" → "Volver" precedido de "Dormir"
+    ///   (otro verbo huérfano) ✗ RECHAZAR.
+    private static func orphanActionVerbReason(in lower: String) -> String? {
+        // Verbos cuya aparición en medio del título suele indicar OTRA
+        // acción independiente. Excluimos verbos auxiliares/ligeros como
+        // "ir", "hacer", "tomar" que suelen ser complemento ("ir a Y",
+        // "hacer la X", "tomar café").
+        let orphanVerbs: Set<String> = [
+            "jugar", "comer", "cenar", "almorzar", "dormir", "salir",
+            "volver", "estudiar", "trabajar", "leer", "escribir",
+            "llamar", "comprar", "pagar", "responder", "preparar",
+            "revisar", "limpiar",
+        ]
+        // Conectores que VÁLIDAMENTE introducen un verbo como complemento.
+        let validConnectors: Set<String> = [
+            "a", "para", "de", "del", "con", "sin", "y", "o", "u",
+            "que", "luego", "después", "despues",  // ya cubiertos por concatPatterns, doble red
+        ]
+
+        // Tokeniza por espacios. Conservamos solo tokens "palabra".
+        let tokens = lower
+            .components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: CharacterSet.punctuationCharacters) }
+            .filter { !$0.isEmpty }
+
+        for i in 1..<tokens.count where orphanVerbs.contains(tokens[i]) {
+            let prev = tokens[i - 1]
+            if !validConnectors.contains(prev) {
+                return "título tiene verbo huérfano '\(tokens[i])' sin conector — concatenación"
+            }
+        }
         return nil
     }
 
@@ -310,6 +371,59 @@ enum NovaActionValidatorTests {
               actual: r8.safeActions.count, expected: 0, failures: &failures)
         check(label: "validator: mix → shouldAsk true",
               actual: r8.shouldAsk, expected: true, failures: &failures)
+
+        // ───── Bug del screenshot 2026-05-13 ──────────────────────────
+        //
+        // Sonnet emitió título "Ir a buscar a mi hermano   jugar counter"
+        // que concatena dos acciones distintas. El validator anterior NO
+        // lo detectaba porque no contiene "que jugar" ni "luego jugar"
+        // (los patrones explícitos). Ahora detectamos:
+        //   - verbo de acción huérfano (jugar precedido por "hermano")
+        //   - espacios múltiples ("hermano   jugar")
+
+        // 9. Verbo huérfano "jugar" sin conector después de sustantivo.
+        let orphanCase = mockEvent(
+            title: "Ir a buscar a mi hermano jugar counter", icon: "event"
+        )
+        let r9 = NovaActionValidator.validate(
+            actions: [.addEvent(orphanCase)],
+            userText: "ir a buscar a mi hermano luego jugar counter"
+        )
+        check(label: "validator: 'hermano jugar' verbo huérfano rechazado",
+              actual: r9.shouldAsk, expected: true, failures: &failures)
+        check(label: "validator: 'hermano jugar' safeActions vacío",
+              actual: r9.safeActions.count, expected: 0, failures: &failures)
+
+        // 10. Espacios múltiples se rechazan.
+        let doubleSpaceCase = mockEvent(
+            title: "Ir a buscar a mi hermano   jugar counter", icon: "event"
+        )
+        let r10 = NovaActionValidator.validate(
+            actions: [.addEvent(doubleSpaceCase)],
+            userText: "ir a buscar a mi hermano luego jugar counter"
+        )
+        check(label: "validator: 'hermano   jugar' espacios múltiples rechazado",
+              actual: r10.shouldAsk, expected: true, failures: &failures)
+
+        // 11. NO REGRESIÓN — títulos legítimos con verbos ligados a
+        //     través de "a", "para", "de", "y", "o" pasan tal cual.
+        let legitCases = [
+            "Ir a buscar a mi hermano",
+            "Salir a comer",
+            "Comprar pan y leche",
+            "Llamar a mamá",
+            "Reunión con Juan",
+            "Estudiar para el examen",
+            "Salir a jugar fútbol",   // "salir a jugar" — válido
+        ]
+        for legit in legitCases {
+            let evt = mockEvent(title: legit, icon: "event")
+            let res = NovaActionValidator.validate(
+                actions: [.addEvent(evt)], userText: legit.lowercased()
+            )
+            check(label: "validator: legit '\(legit)' pasa",
+                  actual: res.safeActions.count, expected: 1, failures: &failures)
+        }
 
         return failures.count - countBefore
     }

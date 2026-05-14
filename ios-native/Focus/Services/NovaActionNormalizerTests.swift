@@ -741,7 +741,13 @@ enum NovaActionNormalizerTests {
                   actual: complex[0].title, expected: "Ir a buscar a mi hermano", failures: &failures)
             check(label: "complex[1] title 'Salir a jugar fútbol'",
                   actual: complex[1].title, expected: "Salir a jugar fútbol", failures: &failures)
-            check(label: "complex[1] hour 10", actual: complex[1].hour, expected: 10, failures: &failures)
+            // Hora 10 → 10 AM si tests corren de día, 22 PM si corren de
+            // noche (night-context rule). Ambas son interpretaciones
+            // correctas del input "a las 10".
+            let complexHour1 = complex[1].hour ?? -1
+            check(label: "complex[1] hour ∈ {10, 22}",
+                  actual: complexHour1 == 10 || complexHour1 == 22,
+                  expected: true, failures: &failures)
             check(label: "complex[2] title 'Llevar la pelota' (NO concatenado)",
                   actual: complex[2].title, expected: "Llevar la pelota", failures: &failures)
             // Hora 11 → 11 AM si tests corren de día, 23 PM si corren de noche
@@ -824,7 +830,10 @@ enum NovaActionNormalizerTests {
                   actual: caso4[0].title, expected: "Ir a buscar a mi hermano", failures: &failures)
             check(label: "caso4[1] title 'Salir a jugar fútbol'",
                   actual: caso4[1].title, expected: "Salir a jugar fútbol", failures: &failures)
-            check(label: "caso4[1] hour 10", actual: caso4[1].hour, expected: 10, failures: &failures)
+            let caso4Hour1 = caso4[1].hour ?? -1
+            check(label: "caso4[1] hour ∈ {10, 22}",
+                  actual: caso4Hour1 == 10 || caso4Hour1 == 22,
+                  expected: true, failures: &failures)
             check(label: "caso4[2] title 'Llevar la pelota'",
                   actual: caso4[2].title, expected: "Llevar la pelota", failures: &failures)
             // Hora 11 → 11 AM o 23 PM según runtime (night-context).
