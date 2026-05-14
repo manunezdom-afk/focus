@@ -134,9 +134,11 @@ enum NovaActionNormalizer {
             // dejaba "Ir a buscar a mi hermano a las tres" intacto y el step
             // 7 (artículos+nombres propios) capitalizaba "tres" → "a Tres".
             #"\b(a la?s?|tipo (las? )?|como a la?s?|a eso de la?s?|cerca de la?s?|alrededor de la?s?)\s+(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)(\s+y\s+(media|cuarto|diez|quince|veinte|veinticinco|treinta))?(\s+(treinta|quince))?(\s+de la (mañana|manana|tarde|noche))?\b"#,
-            // Relativos
-            #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\b"#,
-            #"\ben\s+\d{1,2}\b"#,
+            // Relativos. El "más" coloquial ("en 10 minutos más", "en dos horas más")
+            // es redundante — se consume junto con la expresión temporal para evitar
+            // que quede huérfano en el título ("Ir a buscar a mi hermano  más").
+            #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)(\s+m[aá]s)?\b"#,
+            #"\ben\s+\d{1,2}(\s+m[aá]s)?\b"#,
             #"\b\d{1,2}\s*hrs?\b"#,
             #"\b\d{1,2}\s*hs\b"#,
             // Días

@@ -39,6 +39,20 @@ enum NovaActionNormalizerTests {
         )
 
         check(
+            label: "cleanTitle: 'ir a buscar a mi hermano en 10 minutos más' → 'Ir a buscar a mi hermano'",
+            actual: NovaActionNormalizer.cleanTitle("ir a buscar a mi hermano en 10 minutos más"),
+            expected: "Ir a buscar a mi hermano",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'hacer ejercicio en 20 min más' → 'Hacer ejercicio'",
+            actual: NovaActionNormalizer.cleanTitle("hacer ejercicio en 20 min más"),
+            expected: "Hacer ejercicio",
+            failures: &failures
+        )
+
+        check(
             label: "cleanTitle: 'acuérdame llamar a Juan' → 'Llamar a Juan'",
             actual: NovaActionNormalizer.cleanTitle("acuérdame llamar a Juan"),
             expected: "Llamar a Juan",
