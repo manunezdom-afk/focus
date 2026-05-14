@@ -1,6 +1,6 @@
 # Focus — Beta cerrada (TestFlight)
 
-Build **1.0 (2)** — primer build de beta cerrada. 2–5 testers.
+Build **1.0 (3)** — beta cerrada. 2–5 testers.
 
 ---
 
@@ -60,7 +60,7 @@ Esta es la funcionalidad nueva más importante a probar:
 ### Nova (texto) — frases obligatorias del usuario
 - [ ] **"tengo que seguir trabajando a las 3:30 y comer a las 4"** → debe crear **dos** bloques: "Seguir trabajando" 15:30 y "Comer" 16:00. Ninguno marcado como "reunión".
 - [ ] **"necesito ir a buscar a mi hermano a las tres"** → un bloque "Ir a buscar a mi hermano" hoy 15:00. **No** debe preguntar "¿Cuándo?".
-- [ ] **"en una hora voy a jugar fútbol, en dos horas vuelvo y a las 12 me acuesto"** → tres bloques: jugar fútbol (+1 h), volver (+2 h), acostarme (00:00 o pregunta noon/medianoche).
+- [ ] **"en una hora voy a jugar fútbol, en dos horas vuelvo y a las 12 me acuesto"** → tres bloques: jugar fútbol (+1 h), volver (+2 h), acostar (00:00 o pregunta noon/medianoche).
 - [ ] **De noche** (≥19h), "ir a buscar a mi hermano a las 11" → 23:00 hoy (NO mañana 11:00 AM).
 
 ### Nova (voz) — micrófono inline
@@ -116,7 +116,7 @@ Si ves algo más que parezca "a medias" o "Próximamente", **no es bug, es ocult
 
 1. **Frases con muchas acciones encadenadas sin estar logueado**: en modo demo, si escribes algo tipo "en una hora X y en dos horas Y", Nova te pide que envíes una acción por mensaje. Es a propósito — sin sesión no podemos llamar al modelo fuerte.
 2. **Hora ambigua "a las 12"**: Nova preguntará si te refieres a medianoche o mediodía. Es la conducta esperada.
-3. **Verbos puntuales** ("despertarme", "levantarme") crean recordatorios con notificación. Si no quieres alerta, di "agenda despertarme…" o desactiva el toggle de notificaciones del bloque.
+3. **Verbos puntuales** ("despertarme", "levantarme") crean recordatorios con notificación. El título del bloque se normaliza ("dormirme" → "Dormir", "levantarme" → "Levantar"). Si no quieres alerta, di "agenda dormirme…" o desactiva el toggle de notificaciones del bloque.
 4. **Edición en demo**: si modificas un evento ejemplo, ese cambio puede no persistir al cerrar la app (los ejemplos son read-only). Para probar persistencia, **inicia sesión**.
 5. **El primer evento real reemplaza los ejemplos demo**: no es bug, así fue diseñado — apenas creas tu primer evento o tarea, los ejemplos desaparecen.
 6. **Sin conexión, cambios pendientes de subir**: los eventos/tareas que crees offline se guardan en este iPhone, pero **no se reintenta** subirlos automáticamente cuando vuelves a tener red. Reabrir la app o cambiar de pestaña fuerza el sync. Si algo creado offline no aparece en otro device, abre Focus de nuevo.
