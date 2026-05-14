@@ -83,6 +83,57 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
+        // Prefijos coloquiales adicionales (paso 3c expandido).
+        check(
+            label: "cleanTitle: 'Necesito ir al dentista' → 'Ir al dentista'",
+            actual: NovaActionNormalizer.cleanTitle("Necesito ir al dentista"),
+            expected: "Ir al dentista",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'Quiero estudiar matemáticas' → 'Estudiar matemáticas'",
+            actual: NovaActionNormalizer.cleanTitle("Quiero estudiar matemáticas"),
+            expected: "Estudiar matemáticas",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'Voy a comer con Pedro' → 'Comer con Pedro'",
+            actual: NovaActionNormalizer.cleanTitle("Voy a comer con Pedro"),
+            expected: "Comer con Pedro",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'Me toca la reunión semanal' → 'Reunión semanal'",
+            actual: NovaActionNormalizer.cleanTitle("Me toca la reunión semanal"),
+            expected: "Reunión semanal",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'Me agendaron entrevista con HR' → 'Entrevista con HR'",
+            actual: NovaActionNormalizer.cleanTitle("Me agendaron entrevista con HR"),
+            expected: "Entrevista con HR",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'tengo ganas de salir a correr' → 'Salir a correr'",
+            actual: NovaActionNormalizer.cleanTitle("tengo ganas de salir a correr"),
+            expected: "Salir a correr",
+            failures: &failures
+        )
+
+        // No tocar título legítimo que CONTIENE 'tengo' pero no como prefijo.
+        check(
+            label: "cleanTitle: 'Reunión donde tengo que hablar' (intacto, no prefijo)",
+            actual: NovaActionNormalizer.cleanTitle("Reunión donde tengo que hablar"),
+            expected: "Reunión donde tengo que hablar",
+            failures: &failures
+        )
+
         check(
             label: "cleanTitle: 'acuérdame llamar a Juan' → 'Llamar a Juan'",
             actual: NovaActionNormalizer.cleanTitle("acuérdame llamar a Juan"),

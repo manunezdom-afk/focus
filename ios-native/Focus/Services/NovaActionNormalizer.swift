@@ -210,19 +210,47 @@ enum NovaActionNormalizer {
             )
         }
 
-        // 3c. Strip prefijo "tengo (que|una?|un|el|la|los|las|mi)" — el usuario
-        //     suele introducir eventos como "Tengo una comida a las 3:30" o
-        //     "tengo que estudiar cálculo". El backend a veces echa esa
-        //     frase entera al título cuando debería extraer solo la acción.
-        //     "Tengo una comida" → "comida"; "tengo que estudiar X" → "estudiar X";
-        //     "Tengo reunión con Juan" → "Reunión con Juan".
-        //     Solo aplica AL INICIO para no romper títulos tipo "Reunión donde
-        //     tengo que hablar".
-        let tengoPrefix = #"^\s*tengo(\s+(que|una?|un|el|la|los|las|mi))?\s+"#
-        if let tengoRegex = try? NSRegularExpression(pattern: tengoPrefix, options: [.caseInsensitive]) {
-            let ns = result as NSString
-            let range = NSRange(location: 0, length: ns.length)
-            result = tengoRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
+        // 3c. Strip prefijos coloquiales de eventos. Cubre las construcciones
+        //     más comunes en español donde el usuario introduce un evento con
+        //     una frase de obligación/posesión/intención. Estos prefijos
+        //     NUNCA forman parte del título — describen la relación del
+        //     usuario con el evento.
+        //
+        //     - "Tengo (una|un|el|la|los|las|mi)? X" → X.
+        //         "Tengo una comida" → "comida".
+        //         "Tengo reunión con Juan" → "reunión con Juan".
+        //     - "Tengo que X" → X. "Tengo que estudiar cálculo" → "estudiar cálculo".
+        //     - "Necesito (que)? X" → X. "Necesito ir al dentista" → "ir al dentista".
+        //     - "Quiero X" / "Voy a X" / "Tengo ganas de X" → X.
+        //         "Voy a comer con Pedro" → "comer con Pedro".
+        //     - "Me toca X" / "Me agendaron X" / "Me programaron X" → X.
+        //
+        //     Solo aplica AL INICIO. Eso evita romper títulos legítimos como
+        //     "Reunión donde tengo que hablar" — ahí "tengo que" no es prefijo.
+        let eventoPrefixPatterns: [String] = [
+            // ORDEN: más específico primero. Cada patrón consume el artículo
+            // determinado o indeterminado opcional que sigue ("la reunión" →
+            // "reunión", "un café" → "café") para evitar dejar "la"/"un" suelto.
+            // El grupo de artículos es OPCIONAL — si el verbo va directo al
+            // sustantivo ("voy a correr") no se rompe.
+            //
+            // 1. "Tengo ganas de X" → X (antes que "tengo X" para evitar que
+            //    el patrón general consuma solo "tengo ").
+            #"^\s*tengo\s+ganas\s+de\s+(la|el|los|las|una|un)?\s*"#,
+            // 2. "Tengo (que|una?|un|el|la|los|las|mi)? X" → X.
+            #"^\s*tengo(\s+(que|una?|un|el|la|los|las|mi))?\s+"#,
+            // 3. "Necesito (que)? X" → X.
+            #"^\s*necesito(\s+que)?\s+(la|el|los|las|una|un)?\s*"#,
+            // 4. "Quiero X" / "Voy a X" / "Me toca X" / "Me agendaron X" /
+            //    "Me programaron X". Consumen artículo opcional siguiente.
+            #"^\s*(quiero|voy\s+a|me\s+toca|me\s+agendaron|me\s+programaron)\s+(la|el|los|las|una|un)?\s*"#
+        ]
+        for pattern in eventoPrefixPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+                let ns = result as NSString
+                let range = NSRange(location: 0, length: ns.length)
+                result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
+            }
         }
 
         // 4. Strip fillers comunes.
