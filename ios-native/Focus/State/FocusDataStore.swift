@@ -882,12 +882,115 @@ enum NovaResponder {
                 options: [.caseInsensitive]
             )
         }
-        // Segunda pasada: " y " con heurística de hora-en-ambos-lados.
+        // Pasada 1b: trigger de recordatorio mid-sentence preserva el trigger.
+        // "tengo clase a las 5 acuérdame de salir" → ["tengo clase a las 5",
+        // "acuérdame de salir"]. Distinto a `strongConnectors` que CONSUME el
+        // conector — acá lo CONSERVAMOS para que el segmento 2 mantenga el
+        // trigger y se interprete como reminder.
+        working = applyReminderTriggerSplit(working, marker: marker)
+        // Pasada 2: " y " con heurística de hora-en-ambos-lados.
         working = applySmartYSplit(working, marker: marker)
         return working
             .components(separatedBy: marker)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    /// Splittea cuando aparece un trigger de recordatorio mid-sentence,
+    /// **preservando** el trigger en el segmento siguiente. Cubre el caso
+    /// del usuario (Caso A del spec):
+    ///   "tengo clases tipo 5:30 acuérdame de salir en 10 min"
+    /// debe partirse a:
+    ///   - "tengo clases tipo 5:30" (evento clase)
+    ///   - "acuérdame de salir en 10 min" (reminder salir +10m)
+    ///
+    /// Solo activa cuando el trigger aparece DESPUÉS del primer caracter
+    /// (no al inicio) y va seguido de una acción reconocible — para no
+    /// romper frases simples tipo "acuérdame llamar a mamá".
+    private static func applyReminderTriggerSplit(_ text: String, marker: String) -> String {
+        let triggers = [
+            "acuérdame", "acuerdame", "acordame",
+            "acuérdate", "acuerdate",
+            "recuérdame", "recuerdame", "recordame",
+            "avísame", "avisame",
+        ]
+        var result = text
+        // Para cada trigger, busca su PRIMERA ocurrencia que no esté al
+        // inicio. Si está precedida por al menos N caracteres de "contenido"
+        // (no solo whitespace/markers), inserta marker antes del trigger.
+        // Procesamos en orden de longitud descendente para evitar matches
+        // parciales (recuérdame vs recordame).
+        let sortedTriggers = triggers.sorted { $0.count > $1.count }
+        for trigger in sortedTriggers {
+            let lower = result.lowercased()
+            let triggerPattern = "\\b" + NSRegularExpression.escapedPattern(for: trigger) + "\\b"
+            guard let regex = try? NSRegularExpression(pattern: triggerPattern, options: [.caseInsensitive]) else {
+                continue
+            }
+            let ns = lower as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            guard let match = regex.firstMatch(in: lower, options: [], range: range) else { continue }
+            // Si el trigger empieza dentro de los primeros 4 chars del texto
+            // (después de trim), no es mid-sentence — es el inicio de la
+            // intención. NO splitear.
+            let leftBeforeTrigger = ns.substring(
+                with: NSRange(location: 0, length: match.range.location)
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            if leftBeforeTrigger.count < 8 { continue }
+            // El segmento izquierdo debe tener al menos UN marcador de
+            // hora — si no, probablemente es una sola frase larga.
+            let hourRegex = try? NSRegularExpression(pattern: hourMarkerPattern, options: [.caseInsensitive])
+            let hasHourLeft = hourRegex?.firstMatch(
+                in: leftBeforeTrigger,
+                range: NSRange(location: 0, length: (leftBeforeTrigger as NSString).length)
+            ) != nil
+            // Si la izquierda no tiene hora, es probable que el trigger sea
+            // parte de la intención principal — NO splitear.
+            if !hasHourLeft { continue }
+            // Excepción crítica: NO splitear cuando el trigger introduce un
+            // OFFSET DE AVISO ("acuérdame 40 minutos antes", "recuérdame
+            // media hora antes", "acuérdame a las 12:50") — esos son
+            // modificadores del mismo bloque, no acciones separadas.
+            //   - "X a las 6:30 acuérdame 40 minutos antes" → 1 evento + offset
+            //   - "X a las 6:30 acuérdame de salir en 10 min" → 2 acciones
+            let rightAfterTrigger = ns.substring(
+                from: match.range.location + match.range.length
+            )
+            let rightLower = rightAfterTrigger.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Excepción: el trigger AL FINAL ("buscar a la Agustina tipo 3
+            // acuérdate") es solo una confirmación tonal, no una acción
+            // nueva. Sin contenido sustantivo después no hay segmento 2.
+            // Threshold conservador: <6 chars de "right" → NO splitear.
+            if rightLower.count < 6 { continue }
+            // Patrones que indican "modificador de offset", no acción nueva:
+            //   - "N min/hora antes [de X]"
+            //   - "palabra-numérica min/hora antes [de X]"
+            //   - "a las HH(:MM)" (reminder absoluto)
+            let offsetPatterns: [String] = [
+                #"^\s*\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#,
+                #"^\s*(un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|media|medio)\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#,
+                #"^\s*a la?s?\s+\d{1,2}(:\d{2})?\b"#,
+            ]
+            var looksLikeOffset = false
+            for pattern in offsetPatterns {
+                if rightLower.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil {
+                    looksLikeOffset = true
+                    break
+                }
+            }
+            if looksLikeOffset { continue }
+            // Inserta marker justo antes del trigger.
+            let resultNs = result as NSString
+            result = resultNs.replacingCharacters(
+                in: NSRange(location: match.range.location, length: 0),
+                with: marker + " "
+            )
+            // Solo splitamos por el PRIMER trigger encontrado; bajar a uno
+            // solo split mantiene baja la complejidad para beta. Si hay
+            // 3 acciones encadenadas con triggers, el backend las maneja.
+            break
+        }
+        return result
     }
 
     /// Patrón regex que detecta una **hora** en español. Cubre:
@@ -1909,11 +2012,28 @@ enum NovaResponder {
             return "\(normalizedVerb) \(rest)"
         }
 
-        // Caso B: trigger tipo "tengo X" — el título es X.
+        // Caso B: trigger tipo "tengo X" — el título es X + qualifier opcional.
+        //
+        // "tengo clase" → "Clase". "tengo clase de historia" → "Clase de historia".
+        // "tengo reunión con Juan" → "Reunión con Juan". Preservar el qualifier
+        // es crítico cuando el usuario tiene varios eventos del mismo tipo
+        // (dos clases en el día → necesitamos distinguir lenguaje vs historia).
         if tengoLikeTriggers.contains(matchedLower) {
             let keyword = matchedLower
                 .replacingOccurrences(of: "tengo ", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Buscar texto restante DESPUÉS del trigger en el original.
+            // Usamos `lower` para el match-by-substring; `text` (original)
+            // para preservar mayúsculas del qualifier.
+            let triggerRange = lower.range(of: matchedLower)
+            if let triggerRange {
+                let afterIdx = triggerRange.upperBound
+                let afterText = String(text[afterIdx...])
+                let qualifier = extractTengoQualifier(in: afterText)
+                if !qualifier.isEmpty {
+                    return "\(capitalizeFirst(keyword)) \(qualifier)"
+                }
+            }
             return capitalizeFirst(keyword)
         }
 
@@ -1931,6 +2051,71 @@ enum NovaResponder {
         raw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
         return cleanupTitle(raw)
+    }
+
+    /// Extrae el qualifier de una frase tipo "tengo X [qualifier]".
+    /// Limpia marcadores temporales y devuelve "de Y" o "con Y" si los hay.
+    ///
+    /// Ejemplos:
+    ///   "s a las 5:30 de historia"           → "de historia"
+    ///   " con Juan a las 3"                  → "con Juan"
+    ///   " a las 8:30"                        → ""
+    ///   " de matemáticas el viernes"         → "de matemáticas"
+    ///
+    /// Excluye explícitamente "de la mañana/tarde/noche" (son hora-period,
+    /// no qualifiers semánticos). También excluye "con Juan a las 3"
+    /// donde "a las 3" debe strippearse antes para no contaminar el match.
+    private static func extractTengoQualifier(in text: String) -> String {
+        // Strip temporal markers ANTES de buscar qualifier.
+        var clean = text.lowercased()
+        let temporalPatterns: [String] = [
+            #"\ba la?s? \d{1,2}(:\d{2})?(\s*(am|pm|hrs?))?\b"#,
+            #"\b\d{1,2}:\d{2}\b"#,
+            #"\btipo (las? )?\d{1,2}(:\d{2})?\b"#,
+            #"\bde la (mañana|manana|tarde|noche|madrugada)\b"#,
+            #"\b(hoy|mañana|manana|pasado mañana|pasado manana)\b"#,
+            #"\bel (lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b"#,
+            #"\ben la (mañana|manana|tarde|noche)\b"#,
+            #"\bal mediod[ií]a\b"#,
+        ]
+        for pattern in temporalPatterns {
+            clean = clean.replacingOccurrences(of: pattern, with: " ",
+                                                options: [.regularExpression, .caseInsensitive])
+        }
+        // Buscar "de <palabra>" — qualifier de TEMA (clase de X).
+        if let regex = try? NSRegularExpression(
+            pattern: #"\bde\s+([a-záéíóúñ]+)\b"#,
+            options: [.caseInsensitive]
+        ) {
+            let ns = clean as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            if let match = regex.firstMatch(in: clean, range: range),
+               match.numberOfRanges >= 2 {
+                let topic = ns.substring(with: match.range(at: 1))
+                // Excluir prepositions/articles que puedan haber colado.
+                let blacklist: Set<String> = ["la", "el", "los", "las", "un", "una", "lo"]
+                if !blacklist.contains(topic) {
+                    return "de \(topic)"
+                }
+            }
+        }
+        // Buscar "con <Nombre>" — qualifier de PARTICIPANTE.
+        if let regex = try? NSRegularExpression(
+            pattern: #"\bcon\s+([a-záéíóúñ]+)\b"#,
+            options: [.caseInsensitive]
+        ) {
+            let ns = clean as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            if let match = regex.firstMatch(in: clean, range: range),
+               match.numberOfRanges >= 2 {
+                let person = ns.substring(with: match.range(at: 1))
+                let blacklist: Set<String> = ["la", "el", "los", "las", "un", "una"]
+                if !blacklist.contains(person) {
+                    return "con \(capitalizeFirst(person))"
+                }
+            }
+        }
+        return ""
     }
 
     /// "la agustina" → "Agustina". "el carlos" → "Carlos". Solo si el artículo
@@ -2033,20 +2218,24 @@ enum NovaResponder {
 
     /// Frases que activan recordatorio. Las quitamos del título porque no son
     /// parte de la acción, son metadata ("acuérdame" = "manda notificación").
+    /// Patrones para strippear triggers de recordatorio del texto al
+    /// extraer título. CONSUMEN el conector opcional "de"/"que" para no
+    /// dejar partícula huérfana ("acuérdame de salir" → " salir", no
+    /// " de salir").
     private static let reminderTriggerPatterns: [String] = [
-        #"\bacu(é|e)rdame\b"#,
-        #"\bacu(é|e)rdate\b"#,
-        #"\bacu(é|e)rdalo\b"#,
-        #"\bacordarme\b"#,
-        #"\bacordame\b"#,
-        #"\brecu(é|e)rdame\b"#,
-        #"\brecuerdame\b"#,
-        #"\brecordame\b"#,
-        #"\brecordarme\b"#,
+        #"\bacu(é|e)rdame( (de|que))?\b"#,
+        #"\bacu(é|e)rdate( (de|que))?\b"#,
+        #"\bacu(é|e)rdalo( (de|que))?\b"#,
+        #"\bacordarme( (de|que))?\b"#,
+        #"\bacordame( (de|que))?\b"#,
+        #"\brecu(é|e)rdame( (de|que))?\b"#,
+        #"\brecuerdame( (de|que))?\b"#,
+        #"\brecordame( (de|que))?\b"#,
+        #"\brecordarme( (de|que))?\b"#,
         #"\bno (te )?olvides( de)?\b"#,
         #"\bque no se me olvide\b"#,
         #"\bque me acuerde\b"#,
-        #"\bav(í|i)same( que)?\b"#
+        #"\bav(í|i)same( (de|que))?\b"#
     ]
 
     /// Fillers que se quitan del título por amabilidad ("porfa", "oye"…).
@@ -2218,10 +2407,57 @@ enum NovaResponder {
             }
             return base
         }
-        // Día sin hora → 9:00 (placeholder; el caller debería detectarlo
+        // Día sin hora explícita: si el usuario nombró una FRANJA HORARIA
+        // ("en la tarde", "esta noche", "al mediodía"), usamos esa franja
+        // como hora default. Sin esto, "estudiar mañana en la tarde" caía
+        // a 09:00 (mañana) — al revés de lo que dijo el usuario.
+        if let (h, m) = defaultHourForTimeframe(in: lower) {
+            let start = cal.startOfDay(for: base)
+            return cal.date(bySettingHour: h, minute: m, second: 0, of: start) ?? start
+        }
+        // Día sin franja → 9:00 (placeholder; el caller debería detectarlo
         // como "necesita hora" vía `isAtDayDefault`).
         let start = cal.startOfDay(for: base)
         return cal.date(bySettingHour: 9, minute: 0, second: 0, of: start)
+    }
+
+    /// Default hour para franjas horarias coloquiales cuando el usuario NO
+    /// dio una hora numérica. Cubre los marcadores que también se usan en
+    /// `extractDateTime` para detectar día. Mapeo:
+    ///   - "mañana" / "esta mañana" / "en la mañana" → 09:00
+    ///   - "al mediodía" → 12:00
+    ///   - "después de almuerzo" → 15:00
+    ///   - "tarde" / "esta tarde" / "en la tarde" → 16:00
+    ///   - "después del trabajo" → 19:00
+    ///   - "noche" / "esta noche" / "en la noche" → 20:00
+    ///   - "al final del día" → 21:00
+    static func defaultHourForTimeframe(in lower: String) -> (Int, Int)? {
+        if lower.contains("al mediod") {
+            return (12, 0)  // 12:00
+        }
+        if lower.contains("al final del d") {
+            return (21, 0)
+        }
+        if lower.contains("después del trabajo") || lower.contains("despues del trabajo") {
+            return (19, 0)
+        }
+        if lower.contains("después de almuerzo") || lower.contains("despues de almuerzo") {
+            return (15, 0)
+        }
+        if lower.contains("esta noche") || lower.contains("en la noche")
+            || lower.contains("por la noche") || lower.contains("en la madrugada") {
+            return (20, 0)
+        }
+        if lower.contains("esta tarde") || lower.contains("en la tarde")
+            || lower.contains("por la tarde") {
+            return (16, 0)
+        }
+        if lower.contains("esta mañana") || lower.contains("esta manana")
+            || lower.contains("en la mañana") || lower.contains("en la manana")
+            || lower.contains("por la mañana") || lower.contains("por la manana") {
+            return (9, 0)
+        }
+        return nil
     }
 
     /// Extrae el nuevo título de frases como "era con Pedro", "era Pedro",
@@ -2571,7 +2807,30 @@ enum NovaResponder {
             // clase de TARDE — no debe colapsar a 01:30. En esos casos
             // dejamos pasar a la regla coloquial 1-7 → PM más abajo.
             if hour >= 6 && hour <= 12 {
-                return hour == 12 ? 0 : hour
+                let amHour = (hour == 12) ? 0 : hour
+                // ──────────────────────────────────────────────────────
+                // FUTURE-FIRST OVERRIDE (Caso F del spec):
+                // "hoy tengo clase a las 7" a las 14:00 → 19:00, NO 07:00.
+                //
+                // Cuando el usuario dice EXPLÍCITAMENTE "hoy" y la versión
+                // AM ya pasó, preferimos la PM equivalente si está en el
+                // futuro. Sin "hoy" explícito mantenemos AM (default
+                // escolar matutino — "clase a las 8" normalmente es 8 AM
+                // aunque sean las 14).
+                //
+                // El threshold del nightContext (≥19h) ya cubre noche;
+                // este override cubre la franja 7-18h cuando "hoy" es
+                // explícito.
+                // ──────────────────────────────────────────────────────
+                let lowerText = text.lowercased()
+                let saysExplicitToday = lowerText.range(of: #"\bhoy\b"#, options: .regularExpression) != nil
+                if saysExplicitToday && hour >= 6 && hour <= 11 && amHour < currentHour {
+                    let pmHour = hour + 12
+                    if pmHour > currentHour {
+                        return pmHour
+                    }
+                }
+                return amHour
             }
             // hour ∈ 1..5 con school context → fall-through a colloquial
             break

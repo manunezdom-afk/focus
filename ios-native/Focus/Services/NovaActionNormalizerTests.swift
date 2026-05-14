@@ -1279,6 +1279,237 @@ enum NovaActionNormalizerTests {
                   actual: first.section, expected: .reunion, failures: &failures)
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        //  BETA SPEC: CASOS A-J (auditoría 2026-05-14)
+        //
+        //  Estos son los casos que el usuario exige que Nova maneje SÍ O SÍ
+        //  antes de subir a beta. Cubren título limpio, AM/PM coherente,
+        //  future-first, separación evento vs reminder, multi-acción.
+        //
+        //  Algunos casos dependen de currentHour real del simulator. Los
+        //  marcados como "(non-deterministic hour)" no verifican la hora
+        //  específica, sino que el intent sea correcto en estructura
+        //  (título limpio, kind, día). Los tests específicos de hora
+        //  llaman a `adjustAmPm(hour:, in:, currentHour:)` directo.
+        // ═══════════════════════════════════════════════════════════════
+
+        // ───── Caso A: evento + reminder mid-sentence ─────────────────
+        // "tengo clases tipo 5:30 acuérdame de salir en 10 min"
+        // → 2 intents: Clase 17:30 + Salir (reminder) en 10 min
+        let casoA = runPipeline("tengo clases tipo 5:30 acuérdame de salir en 10 min")
+        check(label: "casoA: 2 intents (evento + reminder)",
+              actual: casoA.count, expected: 2, failures: &failures)
+        if casoA.count == 2 {
+            // Intent 1: Clase a las 17:30
+            check(label: "casoA[0] title contains 'lase' (Clase/Clases)",
+                  actual: casoA[0].title.lowercased().contains("lase"),
+                  expected: true, failures: &failures)
+            check(label: "casoA[0] hour 17",
+                  actual: casoA[0].hour, expected: 17, failures: &failures)
+            check(label: "casoA[0] minute 30",
+                  actual: casoA[0].minute, expected: 30, failures: &failures)
+            // Intent 2: Salir reminder (en 10 min relative)
+            check(label: "casoA[1] title 'Salir'",
+                  actual: casoA[1].title, expected: "Salir", failures: &failures)
+            check(label: "casoA[1] isReminder",
+                  actual: casoA[1].isReminder, expected: true, failures: &failures)
+        }
+
+        // ───── Caso B: doble acción con " y ", sequence context ───────
+        // "tengo clases a las 5:30 de historia y salgo a las 7"
+        // → 2 intents: Clase de historia 17:30 + Salir/Salgo 19:00
+        let casoB = runPipeline("tengo clases a las 5:30 de historia y salgo a las 7")
+        check(label: "casoB: 2 intents",
+              actual: casoB.count, expected: 2, failures: &failures)
+        if casoB.count == 2 {
+            check(label: "casoB[0] title contiene 'historia'",
+                  actual: casoB[0].title.lowercased().contains("historia"),
+                  expected: true, failures: &failures)
+            check(label: "casoB[0] hour 17",
+                  actual: casoB[0].hour, expected: 17, failures: &failures)
+            check(label: "casoB[0] minute 30",
+                  actual: casoB[0].minute, expected: 30, failures: &failures)
+            check(label: "casoB[1] hour 19 (PM por coloquial 1-7)",
+                  actual: casoB[1].hour, expected: 19, failures: &failures)
+            // CRÍTICO: el segundo evento NO debe quedar como 07:00 (mañana)
+            check(label: "casoB[1] NO es 7 AM (future-first)",
+                  actual: casoB[1].hour != 7, expected: true, failures: &failures)
+        }
+
+        // ───── Caso C: buscar a la X tipo N (sin "ir a") ──────────────
+        // "buscar a la Agustina tipo 3 acuérdate"
+        // → 1 intent reminder: "Buscar a Agustina" 15:00
+        let casoC = runPipeline("buscar a la Agustina tipo 3 acuérdate")
+        check(label: "casoC: 1 intent",
+              actual: casoC.count, expected: 1, failures: &failures)
+        if let first = casoC.first {
+            check(label: "casoC title 'Buscar a Agustina'",
+                  actual: first.title, expected: "Buscar a Agustina", failures: &failures)
+            check(label: "casoC hour 15 (tipo 3 → PM)",
+                  actual: first.hour, expected: 15, failures: &failures)
+            check(label: "casoC isReminder (por 'acuérdate')",
+                  actual: first.isReminder, expected: true, failures: &failures)
+        }
+
+        // ───── Caso D: reminder puntual relativo ──────────────────────
+        // "recuérdame llamar a mi mamá en 20 minutos"
+        // → 1 intent reminder: "Llamar a mi mamá" en +20 min
+        let casoD = runPipeline("recuérdame llamar a mi mamá en 20 minutos")
+        check(label: "casoD: 1 intent",
+              actual: casoD.count, expected: 1, failures: &failures)
+        if let first = casoD.first {
+            check(label: "casoD title 'Llamar a mi mamá'",
+                  actual: first.title, expected: "Llamar a mi mamá", failures: &failures)
+            check(label: "casoD isReminder",
+                  actual: first.isReminder, expected: true, failures: &failures)
+            check(label: "casoD day = today (relative +20m)",
+                  actual: first.day, expected: .today, failures: &failures)
+        }
+
+        // ───── Caso E: "mañana" respetado, AM 8 razonable ─────────────
+        // "mañana tengo reunión a las 8"
+        // → 1 event mañana 08:00, NO mover a hoy
+        let casoE = runPipeline("mañana tengo reunión a las 8")
+        check(label: "casoE: 1 intent",
+              actual: casoE.count, expected: 1, failures: &failures)
+        if let first = casoE.first {
+            check(label: "casoE title 'Reunión'",
+                  actual: first.title, expected: "Reunión", failures: &failures)
+            check(label: "casoE hour 8 (AM, sin override night)",
+                  actual: first.hour, expected: 8, failures: &failures)
+            check(label: "casoE day = mañana",
+                  actual: first.day, expected: .tomorrow, failures: &failures)
+        }
+
+        // ───── Caso F: future-first con "hoy" + "clase" + AM pasada ───
+        // Llama `adjustAmPm` directamente para fijar currentHour.
+        // "hoy tengo clase a las 7" a las 14:00 → 19:00, NO 07:00 (vencido)
+        check(label: "casoF (hoy+clase+7, currentHour=14): 19",
+              actual: NovaResponder.adjustAmPm(hour: 7, in: "hoy tengo clase a las 7", currentHour: 14),
+              expected: 19, failures: &failures)
+        // Mismo input a las 06:00 → 7 AM (futuro AM válido)
+        check(label: "casoF (hoy+clase+7, currentHour=6): 7 AM",
+              actual: NovaResponder.adjustAmPm(hour: 7, in: "hoy tengo clase a las 7", currentHour: 6),
+              expected: 7, failures: &failures)
+        // SIN "hoy" — "tengo clase a las 7" a las 14:00 → 7 AM (default escolar)
+        check(label: "casoF (sin 'hoy', clase+7, currentHour=14): 7 AM",
+              actual: NovaResponder.adjustAmPm(hour: 7, in: "tengo clase a las 7", currentHour: 14),
+              expected: 7, failures: &failures)
+        // "hoy clase a las 8" a las 14:00 → 20 PM (future-first)
+        check(label: "casoF (hoy+clase+8, currentHour=14): 20",
+              actual: NovaResponder.adjustAmPm(hour: 8, in: "hoy tengo clase a las 8", currentHour: 14),
+              expected: 20, failures: &failures)
+        // "hoy clase a las 8" a las 7:00 → 8 AM (futuro AM aún válido)
+        check(label: "casoF (hoy+clase+8, currentHour=7): 8 AM",
+              actual: NovaResponder.adjustAmPm(hour: 8, in: "hoy tengo clase a las 8", currentHour: 7),
+              expected: 8, failures: &failures)
+
+        // ───── Caso G: evento + tarea con conector " y después " ──────
+        // "tengo dentista el viernes a las 4 y después comprar remedios"
+        // → 2 intents: Dentista viernes 16:00 + Comprar remedios (task)
+        let casoG = runPipeline("tengo dentista el viernes a las 4 y después comprar remedios")
+        check(label: "casoG: 2 intents",
+              actual: casoG.count, expected: 2, failures: &failures)
+        if casoG.count == 2 {
+            check(label: "casoG[0] title 'Dentista'",
+                  actual: casoG[0].title, expected: "Dentista", failures: &failures)
+            check(label: "casoG[0] hour 16",
+                  actual: casoG[0].hour, expected: 16, failures: &failures)
+            // El día depende de hoy: si hoy es jueves, viernes = tomorrow;
+            // cualquier otro día, otherDay. Aceptamos ambos.
+            let viernesOk = casoG[0].day == .otherDay || casoG[0].day == .tomorrow
+            check(label: "casoG[0] day = viernes (tomorrow u otherDay)",
+                  actual: viernesOk, expected: true, failures: &failures)
+            check(label: "casoG[1] title contains 'remedios'",
+                  actual: casoG[1].title.lowercased().contains("remedios"),
+                  expected: true, failures: &failures)
+            check(label: "casoG[1] kind = task (sin hora)",
+                  actual: casoG[1].kind, expected: .task, failures: &failures)
+        }
+
+        // ───── Caso H: "antes de la clase" sin offset → clarify/task ───
+        // "recuérdame antes de la clase comprar una bebida"
+        // → 1 intent (no debe crear "Antes de la clase Comprar una bebida"
+        //   como evento — extractReminderAttachIntent NO matchea sin offset
+        //   numérico explícito y caemos al flujo normal: tarea o clarify).
+        let casoH = runPipeline("recuérdame antes de la clase comprar una bebida")
+        check(label: "casoH: 1 intent",
+              actual: casoH.count, expected: 1, failures: &failures)
+        if let first = casoH.first {
+            // NO debe contener "antes de" en el título (basura)
+            check(label: "casoH title NO contains 'antes de'",
+                  actual: first.title.lowercased().contains("antes de"),
+                  expected: false, failures: &failures)
+        }
+
+        // ───── Caso I: "el lunes" sin hora → clarify (pedir hora) ─────
+        // "tengo prueba de historia el lunes"
+        // → clarify: no inventar hora absurda. El default 9:00 es placeholder
+        //   y el parser detecta `isAtDayDefault` → pide hora al usuario.
+        let casoI = runPipeline("tengo prueba de historia el lunes")
+        check(label: "casoI: 1 intent",
+              actual: casoI.count, expected: 1, failures: &failures)
+        if let first = casoI.first {
+            check(label: "casoI kind = clarify (pedir hora)",
+                  actual: first.kind, expected: .clarify, failures: &failures)
+        }
+
+        // ───── Caso J: timeframe "en la tarde" mapea a 16:00 ──────────
+        // "acuérdame de estudiar mañana en la tarde"
+        // → reminder "Estudiar" mañana 16:00 (NO 9:00)
+        let casoJ = runPipeline("acuérdame de estudiar mañana en la tarde")
+        check(label: "casoJ: 1 intent",
+              actual: casoJ.count, expected: 1, failures: &failures)
+        if let first = casoJ.first {
+            check(label: "casoJ title 'Estudiar'",
+                  actual: first.title, expected: "Estudiar", failures: &failures)
+            check(label: "casoJ hour 16 (tarde)",
+                  actual: first.hour, expected: 16, failures: &failures)
+            check(label: "casoJ day = mañana",
+                  actual: first.day, expected: .tomorrow, failures: &failures)
+            check(label: "casoJ isReminder",
+                  actual: first.isReminder, expected: true, failures: &failures)
+        }
+
+        // ───── defaultHourForTimeframe direct unit tests ──────────────
+        check(label: "timeframe 'esta noche' → 20:00",
+              actual: NovaResponder.defaultHourForTimeframe(in: "estudiar esta noche")?.0,
+              expected: 20, failures: &failures)
+        check(label: "timeframe 'en la tarde' → 16:00",
+              actual: NovaResponder.defaultHourForTimeframe(in: "comer en la tarde")?.0,
+              expected: 16, failures: &failures)
+        check(label: "timeframe 'en la mañana' → 9:00",
+              actual: NovaResponder.defaultHourForTimeframe(in: "salir en la mañana")?.0,
+              expected: 9, failures: &failures)
+        check(label: "timeframe 'al mediodía' → 12:00",
+              actual: NovaResponder.defaultHourForTimeframe(in: "comer al mediodía")?.0,
+              expected: 12, failures: &failures)
+        check(label: "timeframe 'al final del día' → 21:00",
+              actual: NovaResponder.defaultHourForTimeframe(in: "tarea al final del día")?.0,
+              expected: 21, failures: &failures)
+        check(label: "timeframe sin marcador → nil",
+              actual: NovaResponder.defaultHourForTimeframe(in: "estudiar mañana") == nil,
+              expected: true, failures: &failures)
+
+        // ───── future-first NO sobre-aplica sin "hoy" ─────────────────
+        // Caso de NO regresión: "clase a las 8" sin "hoy", currentHour=14
+        // debe seguir siendo 8 AM (default escolar). El override solo
+        // dispara con "hoy" explícito.
+        check(label: "future-first NO sobre-aplica: 'clase a las 8' currentHour=14 → 8 AM",
+              actual: NovaResponder.adjustAmPm(hour: 8, in: "tengo clase a las 8", currentHour: 14),
+              expected: 8, failures: &failures)
+        // "mañana clase a las 7" currentHour=14 → 7 AM (mañana es futuro)
+        check(label: "future-first NO sobre-aplica con 'mañana': → 7 AM",
+              actual: NovaResponder.adjustAmPm(hour: 7, in: "mañana tengo clase a las 7", currentHour: 14),
+              expected: 7, failures: &failures)
+
+        // ───── Reminder absoluto: el splitter NO debe partir ──────────
+        // Bug fix: "ir a buscar a mi hermano a las 6:30 acuérdame 40 minutos antes"
+        // debe seguir siendo UN solo intent (newBlock con offset).
+        let regBlock = runPipeline("ir a buscar a mi hermano a las 6:30 acuérdame 40 minutos antes")
+        check(label: "reminder absoluto: 1 intent (no split)",
+              actual: regBlock.count, expected: 1, failures: &failures)
+
         // ───── Validador post-IA ──────────────────────────────────────
         NovaActionValidatorTests.runAll(into: &failures)
 

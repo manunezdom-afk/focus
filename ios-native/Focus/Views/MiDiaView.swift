@@ -591,6 +591,25 @@ struct MiDiaView: View {
             )
             return await applyBackendResult(result, userText: trimmed)
         } catch let error as NovaServiceError {
+            // ──────────────────────────────────────────────────────────
+            // SESIÓN EXPIRADA: honestidad sobre "Listo". El user spec
+            // exige: NO ejecutar el local como si hubiera guardado en la
+            // nube, NO decir "Listo", NO mostrar la card como si se
+            // hubiera creado. Mostrar mensaje claro: "Tu sesión expiró".
+            //
+            // El usuario NO pierde el texto: queda en el input y puede
+            // reintentar tras iniciar sesión. Esto es más honesto que
+            // crear localmente y dejar un huevo de pascua sin sync que
+            // confunde al usuario cuando vuelva al servidor.
+            // ──────────────────────────────────────────────────────────
+            if case .unauthorized = error {
+                return InlineNovaResponse(
+                    userText: trimmed,
+                    summary: "Tu sesión expiró.",
+                    details: "Vuelve a iniciar sesión para guardar esto.",
+                    isError: true
+                )
+            }
             // Política 2026-05-13 v3: aunque la frase sea compleja, si el
             // backend falla intentamos el parser local. `runLocalFallback`
             // tiene multi-intent + smart " y " split + reordenamiento de

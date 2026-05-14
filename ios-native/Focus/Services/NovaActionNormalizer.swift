@@ -112,6 +112,32 @@ enum NovaActionNormalizer {
         }
 
         // 2. Strip reminder triggers embebidos.
+        //    a) Primero las versiones LARGAS con "de" / "que" trailing
+        //    ("acuérdame de salir" → " salir"), para no dejar "de" huérfano
+        //    cuando solo se strippea el trigger corto. Ordenar por longitud
+        //    descendente garantiza que el patrón más específico gane.
+        let extendedReminderPrefixes: [String] = [
+            // Pattern: [trigger] [de|que] — consume el conector que une
+            // el trigger con la acción real.
+            #"\bacu[eé]rdame\s+(?:de|que)\b"#,
+            #"\bacu[eé]rdate\s+(?:de|que)\b"#,
+            #"\bacu[eé]rdalo\s+(?:de|que)\b"#,
+            #"\bacordarme\s+(?:de|que)\b"#,
+            #"\brecu[eé]rdame\s+(?:de|que)\b"#,
+            #"\brecordame\s+(?:de|que)\b"#,
+            #"\brecordarme\s+(?:de|que)\b"#,
+            #"\bav[ií]same\s+(?:de|que)\b"#,
+            #"\bque\s+no\s+se\s+me\s+olvide\s+(?:de|que)?\b"#,
+            #"\bno\s+(?:te\s+)?olvides\s+(?:de|que)?\b"#,
+        ]
+        for pattern in extendedReminderPrefixes {
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+        //    b) Luego los triggers cortos sueltos (sin "de" trailing).
         for trigger in reminderTriggers {
             result = result.replacingOccurrences(
                 of: "\\b" + NSRegularExpression.escapedPattern(for: trigger) + "\\b",
@@ -191,6 +217,34 @@ enum NovaActionNormalizer {
                     options: [.regularExpression, .caseInsensitive]
                 )
             }
+        }
+
+        // 3a-bis. Strip "antes de(l) [art opcional] [sustantivo]" — es
+        //         CONTEXTO temporal del recordatorio, no parte del título.
+        //         "recuérdame antes de la clase comprar una bebida" →
+        //         tras eliminar "recuérdame" y "antes de la clase", queda
+        //         "comprar una bebida". El cliente decide si asociar a un
+        //         evento existente o crear como tarea.
+        //         Solo strippeamos el patrón de tipo "antes de [art] noun";
+        //         no tocamos "antes de las 5" (eso ya cae en temporalPatterns).
+        let antesDePatterns: [String] = [
+            // "antes de(l) [art] [palabra]" — consume artículo y palabra siguiente.
+            #"\bantes de(?:l)?\s+(?:la|el|los|las|mi|tu|su)\s+[A-Za-zÁ-úÑñ]+\b"#,
+            // "antes de [Palabra-capitalizada]" — tras parser haber quitado
+            // el artículo y capitalizado ("antes de la clase" → "antes de
+            // Clase" tras normalizeProperNounsAfterArticles upstream). El
+            // requisito de inicial mayúscula evita strippear "antes de las"
+            // y otras frases temporales legítimas.
+            #"\bantes de(?:l)?\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\b"#,
+            // "antes de [verbo]" sin artículo (ej. "antes de comer").
+            #"\bantes de(?:l)?\s+(?:salir|llegar|empezar|comer|estudiar|trabajar|llamar|ir|dormir)\b"#,
+        ]
+        for pattern in antesDePatterns {
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
         }
 
         // 3b. Strip frases de "X minutos antes" / "media hora antes" /
@@ -278,6 +332,27 @@ enum NovaActionNormalizer {
 
         // 6. "salir a buscar a X" → "Buscar a X"
         result = stripVerboseGoVerb(result, verb: "salir a buscar")
+
+        // 6b. "buscar a la X" (sin "ir a" / "salir a") → "Buscar a X".
+        //     Caso C del spec: "buscar a la Agustina tipo 3 acuérdate"
+        //     debe quedar como "Buscar a Agustina" — el artículo "la"
+        //     antes de nombre propio es coloquial y se descarta. Como
+        //     el verbo principal ya es "buscar" (no "ir a buscar"), no
+        //     necesitamos prefix-stripear — solo el artículo + capitalizar.
+        if let regex = try? NSRegularExpression(
+            pattern: #"^\s*buscar\s+a\s+(la|el|los|las)\s+([a-záéíóúñA-ZÁÉÍÓÚÑ]+)"#,
+            options: [.caseInsensitive]
+        ) {
+            let ns = result as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            if let match = regex.firstMatch(in: result, range: range),
+               match.numberOfRanges >= 3 {
+                let noun = ns.substring(with: match.range(at: 2))
+                let cap = noun.prefix(1).uppercased() + noun.dropFirst()
+                let rest = ns.substring(from: match.range.location + match.range.length)
+                result = "Buscar a \(cap)\(rest)"
+            }
+        }
 
         // 7. Quitar artículos antes de nombres propios: "con la Agustina"
         //    → "con Agustina". Solo aplica cuando el sustantivo EMPIEZA EN
