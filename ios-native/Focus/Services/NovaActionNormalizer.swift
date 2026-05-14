@@ -210,6 +210,21 @@ enum NovaActionNormalizer {
             )
         }
 
+        // 3c. Strip prefijo "tengo (que|una?|un|el|la|los|las|mi)" — el usuario
+        //     suele introducir eventos como "Tengo una comida a las 3:30" o
+        //     "tengo que estudiar cálculo". El backend a veces echa esa
+        //     frase entera al título cuando debería extraer solo la acción.
+        //     "Tengo una comida" → "comida"; "tengo que estudiar X" → "estudiar X";
+        //     "Tengo reunión con Juan" → "Reunión con Juan".
+        //     Solo aplica AL INICIO para no romper títulos tipo "Reunión donde
+        //     tengo que hablar".
+        let tengoPrefix = #"^\s*tengo(\s+(que|una?|un|el|la|los|las|mi))?\s+"#
+        if let tengoRegex = try? NSRegularExpression(pattern: tengoPrefix, options: [.caseInsensitive]) {
+            let ns = result as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            result = tengoRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
+        }
+
         // 4. Strip fillers comunes.
         let fillerPatterns: [String] = [
             #"\bporfa(vor)?\b"#,

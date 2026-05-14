@@ -52,6 +52,37 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
+        // BUG REPORTADO POR USUARIO (2026-05-14): "Tengo una comida a las 3:30 acuérdame
+        // 20 minutos antes" terminó como evento titulado "Tengo una comida 20 minutos
+        // antes". Esperado: "Comer" o "Comida" sin el sufijo de reminder ni "Tengo una".
+        check(
+            label: "cleanTitle: 'Tengo una comida 20 minutos antes' → 'Comida'",
+            actual: NovaActionNormalizer.cleanTitle("Tengo una comida 20 minutos antes"),
+            expected: "Comida",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'tengo que estudiar cálculo' → 'Estudiar cálculo'",
+            actual: NovaActionNormalizer.cleanTitle("tengo que estudiar cálculo"),
+            expected: "Estudiar cálculo",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'tengo reunión con Juan' → 'Reunión con Juan'",
+            actual: NovaActionNormalizer.cleanTitle("tengo reunión con Juan"),
+            expected: "Reunión con Juan",
+            failures: &failures
+        )
+
+        check(
+            label: "cleanTitle: 'Tengo una clase de lenguaje' → 'Clase de lenguaje'",
+            actual: NovaActionNormalizer.cleanTitle("Tengo una clase de lenguaje"),
+            expected: "Clase de lenguaje",
+            failures: &failures
+        )
+
         check(
             label: "cleanTitle: 'acuérdame llamar a Juan' → 'Llamar a Juan'",
             actual: NovaActionNormalizer.cleanTitle("acuérdame llamar a Juan"),
