@@ -1642,9 +1642,10 @@ enum NovaActionNormalizerTests {
                   expected: "Ir a buscar a mi hermano", failures: &failures)
             check(label: "reorden[0] hour 14",
                   actual: reorderResults[0].hour, expected: 14, failures: &failures)
-            // Intent 2: "Ducharme" hora 15 (PM colloquial)
-            check(label: "reorden[1] title 'Ducharme'",
-                  actual: reorderResults[1].title, expected: "Ducharme", failures: &failures)
+            // Intent 2: "Duchar" hora 15 (PM colloquial).
+            // "Ducharme" → stripReflexiveMe → "Duchar" (reflejo correcto).
+            check(label: "reorden[1] title 'Duchar'",
+                  actual: reorderResults[1].title, expected: "Duchar", failures: &failures)
             check(label: "reorden[1] hour 15",
                   actual: reorderResults[1].hour, expected: 15, failures: &failures)
             // Crítico: ninguno debe ser .clarify

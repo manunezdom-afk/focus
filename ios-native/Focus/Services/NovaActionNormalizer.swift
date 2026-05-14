@@ -279,11 +279,14 @@ enum NovaActionNormalizer {
         // 6. "salir a buscar a X" → "Buscar a X"
         result = stripVerboseGoVerb(result, verb: "salir a buscar")
 
-        // 7. Quitar artículos antes de nombres propios: "a la agustina"
-        //    → "a Agustina". Capitaliza el nombre propio.
+        // 7. Quitar artículos antes de nombres propios: "con la Agustina"
+        //    → "con Agustina". Solo aplica cuando el sustantivo EMPIEZA EN
+        //    MAYÚSCULA — señal de que es nombre propio ya capitalizado.
+        //    Si el sustantivo es minúscula (ej. "para la reunión"), NO se
+        //    toca: el artículo forma parte del español neutro correcto.
         if let regex = try? NSRegularExpression(
-            pattern: #"\b(a|con|de|para|por) (la|las|el|los) ([a-záéíóúñ]+)\b"#,
-            options: [.caseInsensitive]
+            pattern: #"\b(a|con|de|para|por) (la|las|el|los) ([a-záéíóúñA-ZÁÉÍÓÚÑ]+)\b"#,
+            options: []  // case-sensitive: necesitamos ver la caja real del sustantivo
         ) {
             let ns = result as NSString
             let matches = regex.matches(in: result, range: NSRange(location: 0, length: ns.length))
@@ -291,9 +294,12 @@ enum NovaActionNormalizer {
                 guard match.numberOfRanges >= 4 else { continue }
                 let prep = ns.substring(with: match.range(at: 1))
                 let noun = ns.substring(with: match.range(at: 3))
-                let cap = noun.prefix(1).uppercased() + noun.dropFirst()
+                // Solo nombres propios (primera letra mayúscula).
+                // "la reunión", "la clase" → lowercase → skip.
+                // "la Agustina", "el Juan" → uppercase → strip artículo.
+                guard noun.first?.isUppercase == true else { continue }
                 result = (result as NSString)
-                    .replacingCharacters(in: match.range, with: "\(prep) \(cap)")
+                    .replacingCharacters(in: match.range, with: "\(prep) \(noun)")
             }
         }
 
