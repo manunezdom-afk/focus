@@ -123,7 +123,13 @@ struct MiDiaView: View {
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: 300)
+                // 2026-05-13: altura 300 → 220. El gradient anterior se
+                // extendía detrás del FocusBar y del primer bloque del
+                // timeline, lo que hacía que con 1 evento la pantalla
+                // se sintiera "azul gigante". Ahora termina más arriba,
+                // queda como halo del header + FocusBar y libera el
+                // tono al primer evento para que respire en bg neutro.
+                .frame(height: 220)
                 Spacer()
             }
             .ignoresSafeArea()
@@ -320,7 +326,40 @@ struct MiDiaView: View {
             Text("Mi Día")
                 .font(Theme.Typography.title)
                 .foregroundStyle(Theme.Colors.textPrimary)
+            // 2026-05-13: subtítulo sutil con el ESTADO del día.
+            // La fecha ya vive en `FocusBrandRow` arriba ("Miércoles, 13 de
+            // mayo") — repetirla en el subtítulo duplicaba data. Acá solo
+            // el contador de bloques + pendientes, o "Día libre" cuando no
+            // hay nada. Sirve como ancla rápida sin obligar al usuario a
+            // leer abajo, y deja a los bloques relajarse a tamaño normal
+            // (ahora `balanced` siempre que sean ≤5) sin sentirse vacío.
+            Text(headerSubtitle)
+                .font(Theme.Typography.subhead)
+                .foregroundStyle(Theme.Colors.textSecondary)
         }
+    }
+
+    /// Subtítulo del header: solo el estado del día, sin fecha (la fecha
+    /// la pone `FocusBrandRow` arriba). Ejemplos:
+    /// - 0 bloques, 0 pendientes → "Día libre"
+    /// - 1 bloque, 0 pendientes  → "1 bloque"
+    /// - 3 bloques, 2 pendientes → "3 bloques · 2 pendientes"
+    private var headerSubtitle: String {
+        let blocks = displayEvents.count
+        let pendings = displayPendingTasks.count
+
+        if blocks == 0 && pendings == 0 {
+            return "Día libre"
+        }
+
+        var pieces: [String] = []
+        if blocks > 0 {
+            pieces.append(blocks == 1 ? "1 bloque" : "\(blocks) bloques")
+        }
+        if pendings > 0 {
+            pieces.append(pendings == 1 ? "1 pendiente" : "\(pendings) pendientes")
+        }
+        return pieces.joined(separator: " · ")
     }
 
     private var bandejaButton: some View {
@@ -1977,16 +2016,14 @@ struct MiDiaView: View {
 
     private var timelineSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            // El conteo "N bloques" ya aparece en el subtítulo del header
+            // ("Martes 13 · 2 bloques · 1 pendiente"). Si lo repitiéramos
+            // acá quedaría redundante. Dejamos sólo la etiqueta "TU DÍA"
+            // como ancla de sección. Misma decisión en PENDIENTES.
             HStack(alignment: .firstTextBaseline) {
                 Text("TU DÍA")
                     .sectionLabelStyle()
                 Spacer()
-                if !displayEvents.isEmpty {
-                    Text("\(displayEvents.count) bloques")
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.Colors.textTertiary)
-                        .tracking(0.3)
-                }
             }
             .padding(.horizontal, Theme.Spacing.xl)
 
@@ -2089,14 +2126,14 @@ struct MiDiaView: View {
         let extra = pending.count - shown.count
 
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            // Conteo "N pendientes" / "Todo listo" se omite — el subtítulo
+            // del header ya tiene el dato. Si el usuario terminó todo,
+            // el pendingClearedCard de abajo da el feedback visual de
+            // "Lista al día" / "Cerraste el día".
             HStack(alignment: .firstTextBaseline) {
                 Text("PENDIENTES DE HOY")
                     .sectionLabelStyle()
                 Spacer()
-                Text(pendingHeaderTrailing(count: pending.count))
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(Theme.Colors.textTertiary)
-                    .tracking(0.3)
             }
             .padding(.horizontal, Theme.Spacing.xl)
 
@@ -2167,12 +2204,6 @@ struct MiDiaView: View {
                 }
             }
         }
-    }
-
-    private func pendingHeaderTrailing(count: Int) -> String {
-        if count == 0 { return "Todo listo" }
-        if count == 1 { return "1 pendiente" }
-        return "\(count) pendientes"
     }
 
     // MARK: - Pendientes despejados (sustituye el viejo "check verde")
@@ -2386,7 +2417,15 @@ enum TimelineRowDensity {
     }
 
     static func of(eventCount n: Int) -> TimelineRowDensity {
-        if n <= 2 { return .spacious }
+        // 2026-05-13: matamos `spacious`. Antes 1-2 eventos disparaba un
+        // tratamiento hero (22pt title, gradient sobre la card, padding xxl)
+        // que se sentía sobredimensionado para un solo bloque. El usuario
+        // explícito: "se ve demasiado grande cuando hay solo una cosa".
+        // Ahora 1-5 eventos comparten densidad `balanced` (17pt bodyBold,
+        // 12pt padding, surface plano). La identidad del primer item ya
+        // se da con el badge "PRÓXIMO" + la banda lateral de color, no
+        // hace falta inflar la card. `spacious` queda en la enum por si
+        // alguna sección futura la quiere, pero el día no la activa.
         if n <= 5 { return .balanced }
         return .compact
     }
