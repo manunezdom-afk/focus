@@ -191,8 +191,24 @@ enum NovaResponseTone: Equatable {
     case chat
 }
 
-/// Chip de respuesta rápida que aparece en estado `.clarify`. Permite al
-/// usuario completar un dato faltante sin escribir.
+/// Acción que dispara un chip de propuesta. Si está seteado, el chip NO
+/// envía texto — el caller (MiDiaView) ejecuta la acción correspondiente.
+enum NovaProposalAction: Equatable {
+    /// Aplica las propuestas pendientes (mode=proposal). El caller ejecuta
+    /// `proposedActions` del último Result via applyBackendActions.
+    case apply
+    /// Descarta la propuesta sin hacer nada. Cierra la card.
+    case dismiss
+    /// Abre Nova chat para que el user edite/elabore la propuesta.
+    case edit
+}
+
+/// Chip de respuesta rápida que aparece en estado `.clarify` o como
+/// acción rápida de una propuesta. Tres modos:
+/// 1. `sendText` no-nil: el chip "escribe" ese texto en nombre del user.
+/// 2. `proposalAction` no-nil: el chip dispara una acción de propuesta
+///    (Aplicar / Editar / Descartar).
+/// 3. Ambos nil: el chip solo dispara un callback custom del caller.
 struct NovaQuickChip: Equatable {
     let id: UUID
     let label: String
@@ -200,11 +216,17 @@ struct NovaQuickChip: Equatable {
     /// Si es `nil`, el chip solo dispara un callback custom (manejado por
     /// el caller que setea el chip).
     let sendText: String?
+    /// Acción de propuesta (Aplicar / Editar / Descartar). Solo se usa
+    /// cuando InlineNovaResponse tiene una proposal pendiente en
+    /// MiDiaView. Si es no-nil, `sendText` debe ser nil.
+    let proposalAction: NovaProposalAction?
 
-    init(label: String, sendText: String? = nil) {
+    init(label: String, sendText: String? = nil,
+         proposalAction: NovaProposalAction? = nil) {
         self.id = UUID()
         self.label = label
         self.sendText = sendText
+        self.proposalAction = proposalAction
     }
 }
 

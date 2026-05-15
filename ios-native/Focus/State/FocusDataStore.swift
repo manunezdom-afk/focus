@@ -459,11 +459,20 @@ enum NovaResponder {
     /// confirmación al usuario.
     static func extractReminderAttachIntent(from text: String) -> ReminderAttachIntent? {
         let lower = text.lowercased()
-        // 1. Trigger de recordatorio
+        // 1. Trigger de recordatorio — incluimos también las formas
+        //    "ponle/ponme/agrégale/agregale + recordatorio" porque son
+        //    expresiones equivalentes que el usuario usa naturalmente.
+        //    Sin esto "Ponle recordatorio media hora antes al fútbol"
+        //    no matcheaba el flujo de attach-reminder y caía a parser
+        //    genérico (que creaba evento nuevo o pedía aclaración).
         let hasTrigger = matchesAny(lower, [
             "acuérdame", "acuerdame", "acordame",
             "recuérdame", "recuerdame", "recordame",
-            "avísame", "avisame"
+            "avísame", "avisame",
+            "ponle recordatorio", "ponme recordatorio",
+            "agrégale recordatorio", "agregale recordatorio",
+            "agrégame recordatorio", "agregame recordatorio",
+            "ponle aviso", "ponme aviso", "agrégale aviso", "agregale aviso",
         ])
         guard hasTrigger else { return nil }
 
@@ -474,7 +483,12 @@ enum NovaResponder {
         // 3. Extraer "antes de X" — captura todo después de "antes de" hasta
         // el final del segmento (puntuación o fin).
         // Soporta "antes de", "antes del", "antes de la/el/los/las".
-        let activityPattern = #"\bantes de(?:l)?\s+(?:(?:la|el|los|las|mi|tu|su)\s+)?(.+?)\s*(?:$|[.,;!?]|\bpor favor\b)"#
+        // Pattern acepta "antes de(l) X" Y "antes al X" — el "al" es
+        // contracción coloquial común ("antes al fútbol"). NO permitimos
+        // "antes a X" suelto: eso colisiona con "antes a las 5" donde
+        // "a las 5" sería capturado erróneamente. Solo "antes de" /
+        // "antes del" / "antes al" son válidos.
+        let activityPattern = #"\bantes (?:de(?:l)?|al)\s+(?:(?:la|el|los|las|mi|tu|su)\s+)?(.+?)\s*(?:$|[.,;!?]|\bpor favor\b)"#
         guard let regex = try? NSRegularExpression(
             pattern: activityPattern,
             options: [.caseInsensitive]
@@ -759,6 +773,63 @@ enum NovaResponder {
                 < abs(b.event.startTime.timeIntervalSinceNow)
         }
         return sorted.first?.event
+    }
+
+    /// Busca un evento que matchee por **referencia temporal** dentro
+    /// del texto. Útil para "el evento de las 3" / "lo de las 7" /
+    /// "la reunión de las 5". Cuando el user nombra una hora sin
+    /// nombrar el evento, intentamos resolver al evento que arranca
+    /// en ese horario.
+    ///
+    /// Estrategia:
+    /// 1. Extrae horas mencionadas en el texto vía `extractHourMinute`.
+    /// 2. Busca eventos cuya `startTime` esté dentro de ±15 min de la
+    ///    hora extraída.
+    /// 3. Si hay 1 match → devuelve. Si hay 0 o ≥2 → nil (el caller
+    ///    pide aclaración).
+    ///
+    /// Pensado para ser usado por `tryAttachReminderToExistingEvent`
+    /// como segundo intento cuando el title-matching falla.
+    static func findEventByTimeReference(
+        _ text: String,
+        in events: [FocusEvent]
+    ) -> FocusEvent? {
+        // Normalizamos variantes coloquiales antes de extraer la hora:
+        //   "de las X" / "el evento de las X" → "a las X" (el extractor
+        //   espera "a las X" como anchor). Permite frases tipo "el
+        //   evento de las 3", "lo de las 7", "la reunión de las 5".
+        var lower = text.lowercased()
+        lower = lower.replacingOccurrences(
+            of: #"\bde\s+(la|las)\s+(\d{1,2})\b"#,
+            with: "a las $2",
+            options: .regularExpression
+        )
+        // Reusamos el extractor del parser (NovaResponder.extractHourMinute
+        // está expuesto al mismo módulo).
+        guard let (hour, minute) = NovaResponder.extractHourMinute(from: lower) else {
+            return nil
+        }
+        let cal = Calendar.current
+        let now = Date()
+        let candidates = events.filter { ev in
+            let evH = cal.component(.hour, from: ev.startTime)
+            let evM = cal.component(.minute, from: ev.startTime)
+            let evMinutes = evH * 60 + evM
+            let targetMinutes = hour * 60 + minute
+            return abs(evMinutes - targetMinutes) <= 15
+        }
+        // Si hay varios, prefiere el más FUTURO (no estamos hablando
+        // de un evento que ya pasó si hay opción).
+        guard !candidates.isEmpty else { return nil }
+        if candidates.count == 1 { return candidates.first }
+        let sorted = candidates.sorted { a, b in
+            let aFuture = a.startTime > now
+            let bFuture = b.startTime > now
+            if aFuture != bFuture { return aFuture }
+            return abs(a.startTime.timeIntervalSinceNow)
+                < abs(b.startTime.timeIntervalSinceNow)
+        }
+        return sorted.first
     }
 
     /// Normaliza un string para fuzzy match: sin acentos, lowercase, sin

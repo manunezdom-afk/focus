@@ -273,6 +273,105 @@ enum NovaActionValidator {
         for t in triggers where lower.contains(t) { return true }
         return false
     }
+
+    // MARK: - Anti-basura client-side (input emocional / contextual)
+
+    /// True cuando el mensaje del user es claramente CONVERSACIONAL,
+    /// EMOCIONAL o CONTEXTUAL — no un comando de acción. Si el backend
+    /// (a pesar del system prompt) emite actions para este tipo de input,
+    /// el cliente las degrada a proposed_actions o las bloquea.
+    ///
+    /// Esta es la última red contra el patrón antiguo de Nova ("convierte
+    /// TODO en evento"). Sin esta capa, "estoy colapsado" podría generar
+    /// un evento "Saturación" si el modelo cae a Haiku y no respeta mode.
+    ///
+    /// Patrones detectados:
+    /// - Estados emocionales: "estoy cansado/colapsado/saturado/agotado".
+    /// - Preguntas reflexivas: "qué debería", "no sé si", "cómo me organizo".
+    /// - Pensamiento en voz alta: "creo que", "tal vez", "quizás".
+    /// - Pedidos genéricos de ayuda: "ayúdame a ordenar", "organizame el día".
+    static func isEmotionalOrContextual(_ userText: String) -> Bool {
+        let lower = userText.lowercased()
+            .folding(options: .diacriticInsensitive, locale: .current)
+        let cues: [String] = [
+            "estoy colapsado", "estoy saturado", "estoy cansado",
+            "estoy agotado", "estoy estresado", "estoy abrumado",
+            "no se por donde", "no doy mas", "no llego",
+            "no voy a alcanzar", "no se si voy",
+            "me siento ", "que deberia", "que hago",
+            "como me organizo", "como lo hago", "como hago",
+            "ayudame a ordenar", "ayudame a organizar",
+            "organizame el dia", "ordename el dia",
+            "que priorizo", "mil cosas", "tengo mucho",
+            "no se si", "creo que", "tal vez", "quizas",
+            "podria", "pienso que", "siento que",
+        ]
+        for c in cues where lower.contains(c) { return true }
+        return false
+    }
+
+    /// Resultado de aplicar anti-basura a una respuesta del backend.
+    struct AntiBasuraDecision {
+        /// Acciones que pasan al store (vacío si todo fue bloqueado).
+        let safeActions: [BackendAction]
+        /// Acciones que se degradaron a "propuesta" — el cliente debe
+        /// mostrarlas como proposal (UI con Apply/Dismiss).
+        let demotedToProposal: [BackendAction]
+        /// True si hicimos alguna degradación (el caller logguea).
+        let didDemote: Bool
+        /// Razón legible para logs.
+        let reason: String?
+    }
+
+    /// Aplica anti-basura a un par (mode, actions) cuando el user input
+    /// es claramente emocional/contextual. Reglas:
+    ///
+    /// 1. Si el user dijo algo emocional Y el backend devolvió
+    ///    `chat_with_action` con add_event/add_task → degradamos a
+    ///    proposal (cliente muestra "Aplicar / No por ahora", no ejecuta).
+    /// 2. Si el user dijo algo emocional Y el backend devolvió mode
+    ///    apropiado (`chat_only` o `proposal`) → no tocamos nada.
+    /// 3. edit/delete actions sobre eventos existentes NUNCA se degradan
+    ///    — esos son correcciones legítimas aunque el wording sea suave
+    ///    ("creo que muevo lo de fútbol a las 5" puede tener "creo que"
+    ///    al inicio pero la acción es clara). Solo degradamos CREATEs.
+    static func applyAntiBasura(
+        userText: String,
+        mode: String?,
+        actions: [BackendAction]
+    ) -> AntiBasuraDecision {
+        let isEmotional = isEmotionalOrContextual(userText)
+        let isExecutableMode = (mode == "chat_with_action") || (mode == nil)
+        guard isEmotional && isExecutableMode && !actions.isEmpty else {
+            return AntiBasuraDecision(
+                safeActions: actions,
+                demotedToProposal: [],
+                didDemote: false,
+                reason: nil
+            )
+        }
+        // Separar creates (degradan a proposal) vs edits/deletes (pasan).
+        var safe: [BackendAction] = []
+        var demoted: [BackendAction] = []
+        for action in actions {
+            switch action {
+            case .addEvent, .addTask, .addRecurringEvent:
+                demoted.append(action)
+            case .editEvent, .deleteEvent, .toggleTask, .deleteTask,
+                 .remember, .unsupported:
+                safe.append(action)
+            }
+        }
+        let didDemote = !demoted.isEmpty
+        return AntiBasuraDecision(
+            safeActions: safe,
+            demotedToProposal: demoted,
+            didDemote: didDemote,
+            reason: didDemote
+                ? "input emocional/contextual + add_event/add_task → demote a propuesta"
+                : nil
+        )
+    }
 }
 
 #if DEBUG

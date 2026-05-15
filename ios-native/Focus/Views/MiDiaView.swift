@@ -23,6 +23,13 @@ struct MiDiaView: View {
     /// Última respuesta inline de Nova. Se reemplaza al enviar otra petición
     /// y se puede cerrar manualmente. NO está en el store; es estado de UI.
     @State private var inlineResponse: InlineNovaResponse? = nil
+    /// Acciones propuestas pendientes — cuando Nova devuelve mode=proposal
+    /// (o el cliente degrada vía anti-basura), guardamos las actions aquí
+    /// para que los botones "Aplicar / Editar / No por ahora" sepan qué
+    /// ejecutar. Se limpia al aplicar, editar o descartar.
+    @State private var pendingProposalActions: [BackendAction] = []
+    /// userText original que generó la propuesta — sirve cuando aplicamos.
+    @State private var pendingProposalUserText: String = ""
     // Descartes de demo viven ahora en `FocusDataStore` (persisten a disco).
     // Acceso: `store.dismissedDemoEventTitles` / `store.dismissedDemoTaskTitles`
     // y `store.dismissDemoEvent(title:)` / `store.dismissDemoTask(title:)`.
@@ -149,13 +156,18 @@ struct MiDiaView: View {
                                 }
                             },
                             onChipTap: { chip in
-                                // El chip envía su texto como si el usuario
-                                // hubiera escrito. Cierra la card y procesa.
+                                // Tres modos posibles según el chip:
+                                // 1) sendText: el chip "escribe" texto.
+                                // 2) proposalAction: aplica/edita/descarta
+                                //    la propuesta pendiente.
+                                // 3) Ambos nil: no-op (placeholder).
                                 if let send = chip.sendText {
                                     withAnimation(.easeOut(duration: 0.18)) {
                                         inlineResponse = nil
                                     }
                                     processNovaInline(text: send)
+                                } else if let action = chip.proposalAction {
+                                    handleProposalChip(action)
                                 }
                             }
                         )
@@ -569,17 +581,45 @@ struct MiDiaView: View {
         // IA recibe el topic focus actualizado.
         store.detectAndPromoteMentions(in: trimmed)
 
+        // Logging: arranca el turno. El ID nos sigue hasta el outcome final.
+        let eventsForContext = visibleEventsForContext()
+        let tasksForContext = visibleTasksForContext()
+        let history = recentNovaHistory()
+        let discussedIds = store.novaContext.freshDiscussedEvents.map { $0.eventId }
+        let logId = await MainActor.run {
+            NovaDevLog.shared.startRequest(
+                source: .inlineMiDia,
+                userText: trimmed,
+                eventsCount: eventsForContext.count,
+                tasksCount: tasksForContext.count,
+                discussedEventsCount: discussedIds.count,
+                historyTurns: history.count
+            )
+        }
+
         do {
             let result = try await NovaService.send(
                 message: trimmed,
-                events: visibleEventsForContext(),
-                tasks: visibleTasksForContext(),
-                history: recentNovaHistory(),
+                events: eventsForContext,
+                tasks: tasksForContext,
+                history: history,
                 accessToken: creds.accessToken,
                 surface: .inlineMiDia,
-                discussedEventIds: store.novaContext.freshDiscussedEvents.map { $0.eventId }
+                discussedEventIds: discussedIds
             )
-            return await applyBackendResult(result, userText: trimmed)
+            // Registrar la respuesta del backend.
+            await MainActor.run {
+                NovaDevLog.shared.recordModelResponse(
+                    id: logId,
+                    mode: result.mode.rawValue,
+                    confidence: result.confidence,
+                    shouldAskUser: result.shouldAskUser,
+                    actionsCount: result.actions.count,
+                    proposedActionsCount: result.proposedActions.count,
+                    assistantMessage: result.reply
+                )
+            }
+            return await applyBackendResult(result, userText: trimmed, logId: logId)
         } catch let error as NovaServiceError {
             // ──────────────────────────────────────────────────────────
             // SESIÓN EXPIRADA: honestidad sobre "Listo". El user spec
@@ -593,6 +633,9 @@ struct MiDiaView: View {
             // confunde al usuario cuando vuelva al servidor.
             // ──────────────────────────────────────────────────────────
             if case .unauthorized = error {
+                await MainActor.run {
+                    NovaDevLog.shared.finishRequest(id: logId, outcome: .error, error: "unauthorized")
+                }
                 return InlineNovaResponse(
                     userText: trimmed,
                     summary: "Tu sesión expiró.",
@@ -607,10 +650,20 @@ struct MiDiaView: View {
             // ni eso logra, devuelve un mensaje útil mostrando lo que SÍ
             // entendió en vez del genérico "no pude separar".
             if error.canFallbackToLocal {
+                await MainActor.run {
+                    NovaDevLog.shared.recordModelSelection(id: logId, model: .localFallback,
+                                                          reason: "backend error: \(error)")
+                    NovaDevLog.shared.finishRequest(id: logId, outcome: .actionApplied,
+                                                    error: nil)
+                }
                 let note = humanFallbackNote(for: error)
                 return runLocalFallback(for: trimmed, withNote: note)
             }
             // Errores sin fallback (mensaje vacío, demasiado largo).
+            await MainActor.run {
+                NovaDevLog.shared.finishRequest(id: logId, outcome: .error,
+                                                error: error.errorDescription ?? "no_fallback")
+            }
             return InlineNovaResponse(
                 userText: trimmed,
                 summary: error.errorDescription ?? "No pude procesar tu mensaje.",
@@ -622,6 +675,11 @@ struct MiDiaView: View {
             // que hubo un error técnico si la acción se ejecutó. Si el
             // local tampoco entiende, `runLocalFallback` ya devuelve un
             // mensaje humano pidiendo aclaración.
+            await MainActor.run {
+                NovaDevLog.shared.recordModelSelection(id: logId, model: .localFallback,
+                                                      reason: "unknown error fallback")
+                NovaDevLog.shared.finishRequest(id: logId, outcome: .actionApplied)
+            }
             return runLocalFallback(for: trimmed, withNote: nil)
         }
     }
@@ -1067,8 +1125,42 @@ struct MiDiaView: View {
     /// clarification basado en el texto del usuario — así el siguiente
     /// turno corto ("a las 3", "mañana", "en 20") puede completar la
     /// acción aunque el local parser no haya detectado clarify.
-    private func applyBackendResult(_ result: NovaService.Result, userText: String) async -> InlineNovaResponse {
+    private func applyBackendResult(_ result: NovaService.Result, userText: String,
+                                     logId: UUID? = nil) async -> InlineNovaResponse {
         let replyText = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // ═══════════════════════════════════════════════════════════════
+        //  ANTI-BASURA CLIENT-SIDE (2026-05-15 — beta closure)
+        //
+        //  Última red contra el patrón antiguo "convierte TODO en evento".
+        //  Si el user dijo algo emocional/contextual ("estoy colapsado",
+        //  "no sé si voy a alcanzar") Y el backend (a pesar del prompt)
+        //  devolvió chat_with_action con creates → degradamos a proposal.
+        //  Edits/deletes legítimos pasan tal cual aunque el wording sea
+        //  "creo que muevo lo de fútbol".
+        // ═══════════════════════════════════════════════════════════════
+        let antiBasura = NovaActionValidator.applyAntiBasura(
+            userText: userText,
+            mode: result.mode.rawValue,
+            actions: result.actions
+        )
+        let effectiveActions = antiBasura.safeActions
+        let demotedActions = antiBasura.demotedToProposal
+        if antiBasura.didDemote, let reason = antiBasura.reason, let logId {
+            await MainActor.run {
+                NovaDevLog.shared.recordAntiBasuraDemotion(id: logId, reason: reason)
+            }
+        }
+        // Si hubo demotion Y el mode ORIGINAL era chat_with_action, lo
+        // forzamos a proposal: el cliente mostrará buttons en vez de
+        // ejecutar silencioso.
+        let effectiveMode: NovaService.Mode = {
+            if antiBasura.didDemote && !demotedActions.isEmpty {
+                return .proposal
+            }
+            return result.mode
+        }()
+        let effectiveProposedActions = result.proposedActions + demotedActions
 
         // ═══════════════════════════════════════════════════════════════
         //  MODE-BASED ROUTING (introducido 2026-05-15)
@@ -1079,13 +1171,18 @@ struct MiDiaView: View {
         //  ("Estoy saturado") generen respuesta de chat sin crear eventos.
         // ═══════════════════════════════════════════════════════════════
 
-        switch result.mode {
+        switch effectiveMode {
         case .chatOnly:
             // Conversación abierta: NO ejecutar nada, solo mostrar reply.
             // Si el reply está vacío, tono neutral con texto fallback.
             let parts = splitReplyForUI(replyText.isEmpty
                 ? "Aquí estoy si necesitas algo."
                 : replyText)
+            if let logId {
+                await MainActor.run {
+                    NovaDevLog.shared.finishRequest(id: logId, outcome: .chatOnly)
+                }
+            }
             return InlineNovaResponse(
                 userText: userText,
                 summary: parts.summary,
@@ -1095,36 +1192,33 @@ struct MiDiaView: View {
                 tone: .chat
             )
         case .proposal:
-            // Propuesta: el backend sugiere una acción pero NO la ejecuta.
-            // MVP de la UI: mostramos el reply como mensaje + un detalle
-            // resumiendo qué propone. El user vuelve a escribir "sí" /
-            // "aplícalo" si quiere aplicarla (gestionado por el flujo de
-            // pendingClarification que reutiliza el next-turn). Para no
-            // perder la propuesta, persistimos un pending con la actions.
-            //
-            // FUTURO: UI con botones "Aplicar / Editar / No por ahora".
-            // Por ahora una sola fuente de truth (chat) + texto.
-            if !result.proposedActions.isEmpty, !store.novaContext.pendingIsActive {
-                // Persistimos el userText original como pending — el
-                // user puede decir "sí" en el próximo turno y el local
-                // parser lo trata como confirmación.
-                persistBackendQuestionAsPending(
-                    userText: userText,
-                    question: replyText.isEmpty
-                        ? "Te propongo aplicar este cambio. ¿Lo dejo listo?"
-                        : replyText
-                )
-            }
+            // Propuesta: NO ejecutar — mostrar reply + botones Apply/Edit/
+            // Dismiss para que el user decida. Persistimos las actions
+            // propuestas en `pendingProposal` (state local) para que el
+            // chip de "Aplicar" sepa qué ejecutar.
+            self.pendingProposalActions = effectiveProposedActions
+            self.pendingProposalUserText = userText
             let parts = splitReplyForUI(replyText.isEmpty
-                ? "Te propongo un ajuste. ¿Lo dejo listo?"
+                ? "Te propongo un ajuste. ¿Lo aplico?"
                 : replyText)
+            let chips: [NovaQuickChip] = [
+                NovaQuickChip(label: "Aplicar", proposalAction: .apply),
+                NovaQuickChip(label: "Editar", proposalAction: .edit),
+                NovaQuickChip(label: "No por ahora", proposalAction: .dismiss),
+            ]
+            if let logId {
+                await MainActor.run {
+                    NovaDevLog.shared.finishRequest(id: logId, outcome: .proposalShown)
+                }
+            }
             return InlineNovaResponse(
                 userText: userText,
                 summary: parts.summary,
                 details: parts.details,
                 action: .dismiss,
                 isError: false,
-                tone: .clarify
+                tone: .clarify,
+                quickChips: chips
             )
         case .clarification, .chatWithAction:
             // Pasan al flujo existente abajo. Clarification cae al gate de
@@ -1160,7 +1254,7 @@ struct MiDiaView: View {
         // Es la segunda red — el primer filtro es la confianza del modelo;
         // este atrapa modelos sobreconfiados.
         let validation = NovaActionValidator.validate(
-            actions: result.actions,
+            actions: effectiveActions,
             userText: userText
         )
         if validation.shouldAsk {
@@ -1173,6 +1267,12 @@ struct MiDiaView: View {
             for (_, reason) in validation.rejected {
                 print("[NovaValidator] rechazo: \(reason)")
             }
+            if let logId {
+                await MainActor.run {
+                    NovaDevLog.shared.finishRequest(id: logId, outcome: .blockedByValidator,
+                                                    error: validation.rejected.first?.reason)
+                }
+            }
             return InlineNovaResponse(
                 userText: userText,
                 summary: question,
@@ -1184,6 +1284,13 @@ struct MiDiaView: View {
         }
 
         let outcome = store.applyBackendActions(validation.safeActions, userText: userText)
+        // Loggear evento matcheado (si lo hubo) — para diagnosticar edits.
+        if let logId, let eid = outcome.primaryEventId,
+           let event = store.events.first(where: { $0.id == eid }) {
+            await MainActor.run {
+                NovaDevLog.shared.recordMatchedEvent(id: logId, eventId: eid, eventTitle: event.title)
+            }
+        }
         // Cuota de smart actions agotada: pegar nota humana al final.
         let blockedNote: String? = result.smartActionsBlocked
             ? (result.smartActionsMessage ?? "Llegaste al límite diario de acciones de Nova.")
@@ -1218,6 +1325,11 @@ struct MiDiaView: View {
                 if outcome.primaryTaskId != nil { return .openTasksList }
                 return .dismiss
             }()
+            if let logId {
+                await MainActor.run {
+                    NovaDevLog.shared.finishRequest(id: logId, outcome: .actionApplied)
+                }
+            }
             return InlineNovaResponse(
                 userText: userText,
                 summary: summary,
@@ -1245,6 +1357,14 @@ struct MiDiaView: View {
             guard let note = blockedNote else { return details }
             return [details, note].compactMap { $0 }.joined(separator: "\n\n")
         }()
+        if let logId {
+            await MainActor.run {
+                // No hubo mutación pero la respuesta no era clarification
+                // según mode — la categorizamos como clarification para que
+                // el log sea claro (Nova respondió texto sin ejecutar).
+                NovaDevLog.shared.finishRequest(id: logId, outcome: .clarificationAsked)
+            }
+        }
         return InlineNovaResponse(
             userText: userText,
             summary: summary,
@@ -2036,6 +2156,84 @@ struct MiDiaView: View {
         case .openChat:
             nav.openNova(segment: .chat)
         case .dismiss:
+            withAnimation(.easeOut(duration: 0.20)) {
+                inlineResponse = nil
+            }
+        }
+    }
+
+    /// Maneja el tap en los chips de una propuesta (mode=proposal).
+    /// - .apply → ejecuta `pendingProposalActions` via applyBackendActions.
+    /// - .edit → abre Nova chat para que el user elabore (mantiene contexto).
+    /// - .dismiss → limpia la propuesta y cierra la card.
+    private func handleProposalChip(_ action: NovaProposalAction) {
+        HapticManager.shared.tap()
+        let actions = pendingProposalActions
+        let originalUserText = pendingProposalUserText
+
+        switch action {
+        case .apply:
+            guard !actions.isEmpty else {
+                // No hay nada que aplicar — solo cerrar.
+                withAnimation(.easeOut(duration: 0.20)) {
+                    inlineResponse = nil
+                }
+                return
+            }
+            // Aplicamos pasando por el validator post-IA (mismo gate que
+            // chat_with_action) — si el modelo se equivocó proponiendo
+            // basura, el validator la frena.
+            let validation = NovaActionValidator.validate(
+                actions: actions,
+                userText: originalUserText
+            )
+            if validation.shouldAsk {
+                inlineResponse = InlineNovaResponse(
+                    userText: originalUserText,
+                    summary: validation.suggestedQuestion ?? "Mejor revisamos antes.",
+                    details: "La propuesta tenía algo que no me cuadró.",
+                    action: .dismiss,
+                    isError: false,
+                    tone: .clarify
+                )
+                pendingProposalActions = []
+                pendingProposalUserText = ""
+                return
+            }
+            let outcome = store.applyBackendActions(validation.safeActions,
+                                                   userText: originalUserText)
+            pendingProposalActions = []
+            pendingProposalUserText = ""
+            let summary = outcome.summary ?? "Listo, apliqué la propuesta."
+            let details = outcome.details
+            let resultAction: InlineNovaAction = {
+                if outcome.primaryEventId != nil { return .openCalendar }
+                if outcome.primaryTaskId != nil { return .openTasksList }
+                return .dismiss
+            }()
+            withAnimation(.easeOut(duration: 0.20)) {
+                inlineResponse = InlineNovaResponse(
+                    userText: originalUserText,
+                    summary: summary,
+                    details: details,
+                    action: resultAction,
+                    isError: false,
+                    tone: .success
+                )
+            }
+
+        case .edit:
+            // Abre Nova chat — el user puede elaborar/corregir con todo
+            // el contexto de la propuesta a la vista. Mantenemos la
+            // propuesta pendiente por si decide aplicarla después.
+            nav.openNova(segment: .chat)
+            withAnimation(.easeOut(duration: 0.20)) {
+                inlineResponse = nil
+            }
+
+        case .dismiss:
+            pendingProposalActions = []
+            pendingProposalUserText = ""
             withAnimation(.easeOut(duration: 0.20)) {
                 inlineResponse = nil
             }

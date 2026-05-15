@@ -556,6 +556,25 @@ Editar/mover evento:
 { "type": "edit_event", "id": "id-del-evento", "updates": { campos } }
 - Para cambiar recordatorios, usa updates.reminderOffsets. Ej: { "reminderOffsets": [5] }.
 
+REGLA CRÍTICA — INCLUIR SOLO LOS CAMPOS QUE SE PIDIERON CAMBIAR:
+Cuando el usuario pide AGREGAR/CAMBIAR SOLO un recordatorio a un evento
+existente ("ponle aviso media hora antes al fútbol"), el JSON debe ser:
+
+  { "type": "edit_event", "id": "<id real>", "updates": { "reminderOffsets": [30] } }
+
+NO INCLUYAS time, endTime, date, title, location, etc. en updates si el
+user NO los pidió cambiar. Eso cambiaría la duración o hora del evento
+sin que el user lo pidiera.
+
+ANTI-PATRÓN (BUG REAL del usuario):
+"Ponle recordatorio media hora antes al fútbol" + evento "Salir a jugar
+fútbol" 15:00–16:30
+→ INCORRECTO: edit_event con updates { reminderOffsets:[30], time:"3:00 PM", endTime:"4:30 PM" }
+  ↑ los campos time/endTime hacen que applyUpdates recompute la duración
+  y a veces termine en 1h30m extendido.
+→ CORRECTO: edit_event con updates { reminderOffsets:[30] } SOLO.
+  ↑ el cliente preserva la duración intacta.
+
 Eliminar evento:
 { "type": "delete_event", "id": "id-del-evento" }
 

@@ -1593,6 +1593,199 @@ enum NovaActionNormalizerTests {
               expected: "Cocinar pasta", failures: &failures)
 
         // ═══════════════════════════════════════════════════════════════
+        //  BETA CLOSURE — Anti-basura, proposal mode, matching semántico
+        //  (refactor 2026-05-15)
+        //
+        //  Estos tests validan las piezas LOCALES del refactor de Nova
+        //  como IA conversacional. El comportamiento mode-classification
+        //  end-to-end requiere backend real (Claude) — esos casos se
+        //  prueban manualmente desde la app.
+        // ═══════════════════════════════════════════════════════════════
+
+        // ── Anti-basura: detección de input emocional/contextual ──────
+        do {
+            // Detector: estados emocionales
+            check(label: "antibasura-1: 'estoy colapsado' es emocional",
+                  actual: NovaActionValidator.isEmotionalOrContextual("estoy colapsado, no sé qué hacer"),
+                  expected: true, failures: &failures)
+            check(label: "antibasura-2: 'me siento cansado' es emocional",
+                  actual: NovaActionValidator.isEmotionalOrContextual("me siento cansado pero tengo que avanzar"),
+                  expected: true, failures: &failures)
+            check(label: "antibasura-3: 'qué debería priorizar' es contextual",
+                  actual: NovaActionValidator.isEmotionalOrContextual("qué debería priorizar"),
+                  expected: true, failures: &failures)
+            check(label: "antibasura-4: 'creo que debería estudiar' es contextual",
+                  actual: NovaActionValidator.isEmotionalOrContextual("creo que debería estudiar antes de fútbol"),
+                  expected: true, failures: &failures)
+            // NO regresión: comandos directos NO se marcan
+            check(label: "antibasura-5: 'agéndame estudiar mañana' NO es emocional",
+                  actual: NovaActionValidator.isEmotionalOrContextual("agéndame estudiar mañana a las 12"),
+                  expected: false, failures: &failures)
+            check(label: "antibasura-6: 'reunión con Juan' NO es emocional",
+                  actual: NovaActionValidator.isEmotionalOrContextual("reunión con Juan mañana a las 5"),
+                  expected: false, failures: &failures)
+        }
+
+        // ── Anti-basura: degradación de add_event en input emocional ───
+        do {
+            // Caso A: input emocional + actions con add_event → degrade.
+            let addEventAction: BackendAction = .addEvent(BackendEventCreate(
+                title: "Saturación", timeString: "3:00 PM", endTimeString: nil,
+                dateString: nil, section: nil, icon: nil,
+                reminderOffsets: nil, reminderNotes: nil,
+                location: nil, notes: nil
+            ))
+            let decision = NovaActionValidator.applyAntiBasura(
+                userText: "estoy colapsado, no sé qué hacer",
+                mode: "chat_with_action",
+                actions: [addEventAction]
+            )
+            check(label: "antibasura-degrade-1: didDemote = true",
+                  actual: decision.didDemote, expected: true, failures: &failures)
+            check(label: "antibasura-degrade-1: safeActions vacío",
+                  actual: decision.safeActions.count, expected: 0, failures: &failures)
+            check(label: "antibasura-degrade-1: demoted 1 action",
+                  actual: decision.demotedToProposal.count, expected: 1, failures: &failures)
+
+            // Caso B: input directo + add_event → NO degrade.
+            let directDecision = NovaActionValidator.applyAntiBasura(
+                userText: "agéndame estudiar mañana a las 12",
+                mode: "chat_with_action",
+                actions: [addEventAction]
+            )
+            check(label: "antibasura-degrade-2: input directo NO degrade",
+                  actual: directDecision.didDemote, expected: false, failures: &failures)
+            check(label: "antibasura-degrade-2: safeActions intacto",
+                  actual: directDecision.safeActions.count, expected: 1, failures: &failures)
+
+            // Caso C: input emocional + edit_event → NO degrade (edits OK).
+            let editAction: BackendAction = .editEvent(
+                id: "abc", updates: BackendEventUpdates(
+                    title: nil, timeString: nil, endTimeString: nil,
+                    dateString: nil, location: nil,
+                    reminderOffsets: [30], reminderNotes: nil
+                )
+            )
+            let editDecision = NovaActionValidator.applyAntiBasura(
+                userText: "creo que muevo lo de fútbol",
+                mode: "chat_with_action",
+                actions: [editAction]
+            )
+            check(label: "antibasura-degrade-3: edit no se degrada (acción clara)",
+                  actual: editDecision.didDemote, expected: false, failures: &failures)
+            check(label: "antibasura-degrade-3: edit pasa a safe",
+                  actual: editDecision.safeActions.count, expected: 1, failures: &failures)
+        }
+
+        // ── Matching semántico: findEventByApproxTitle ───────────────
+        do {
+            // Crear eventos mock con títulos del spec.
+            let now = Date()
+            let cal = Calendar.current
+            let arteId = UUID()
+            let focusId = UUID()
+            let futbolId = UUID()
+            let arte = FocusEvent(
+                id: arteId, title: "Clase de arte",
+                startTime: cal.date(bySettingHour: 10, minute: 30, second: 0, of: now)!,
+                endTime: cal.date(bySettingHour: 12, minute: 0, second: 0, of: now)!,
+                section: .estudio
+            )
+            let focusEv = FocusEvent(
+                id: focusId, title: "Trabajar con Focus",
+                startTime: cal.date(bySettingHour: 13, minute: 0, second: 0, of: now)!,
+                endTime: cal.date(bySettingHour: 14, minute: 0, second: 0, of: now)!,
+                section: .foco
+            )
+            let futbol = FocusEvent(
+                id: futbolId, title: "Salir a jugar fútbol",
+                startTime: cal.date(bySettingHour: 15, minute: 0, second: 0, of: now)!,
+                endTime: cal.date(bySettingHour: 16, minute: 30, second: 0, of: now)!,
+                section: .descanso
+            )
+            let mockEvents = [arte, focusEv, futbol]
+
+            check(label: "match-sem-1: 'futbol' → 'Salir a jugar fútbol'",
+                  actual: NovaResponder.findEventByApproxTitle("futbol", in: mockEvents)?.id,
+                  expected: futbolId as UUID?, failures: &failures)
+            check(label: "match-sem-2: 'fútbol' (con tilde) → mismo",
+                  actual: NovaResponder.findEventByApproxTitle("fútbol", in: mockEvents)?.id,
+                  expected: futbolId as UUID?, failures: &failures)
+            check(label: "match-sem-3: 'arte' → 'Clase de arte'",
+                  actual: NovaResponder.findEventByApproxTitle("arte", in: mockEvents)?.id,
+                  expected: arteId as UUID?, failures: &failures)
+            check(label: "match-sem-4: 'focus' → 'Trabajar con Focus'",
+                  actual: NovaResponder.findEventByApproxTitle("focus", in: mockEvents)?.id,
+                  expected: focusId as UUID?, failures: &failures)
+            // Frases más naturales
+            check(label: "match-sem-5: 'el evento de fútbol' → futbol",
+                  actual: NovaResponder.findEventByApproxTitle("el evento de fútbol", in: mockEvents)?.id,
+                  expected: futbolId as UUID?, failures: &failures)
+        }
+
+        // ── Matching por referencia temporal: findEventByTimeReference ─
+        do {
+            let now = Date()
+            let cal = Calendar.current
+            let futbolId = UUID()
+            let futbol = FocusEvent(
+                id: futbolId, title: "Salir a jugar fútbol",
+                startTime: cal.date(bySettingHour: 15, minute: 0, second: 0, of: now)!,
+                endTime: cal.date(bySettingHour: 16, minute: 30, second: 0, of: now)!,
+                section: .descanso
+            )
+            let mock = [futbol]
+            // "a las 3" en contexto coloquial chileno → 15:00 PM.
+            check(label: "match-time-1: 'el evento de las 3' → fútbol 15:00",
+                  actual: NovaResponder.findEventByTimeReference("el evento de las 3", in: mock)?.id,
+                  expected: futbolId as UUID?, failures: &failures)
+            // Hora explícita PM
+            check(label: "match-time-2: 'lo de las 15:00' → fútbol",
+                  actual: NovaResponder.findEventByTimeReference("lo de las 15:00", in: mock)?.id,
+                  expected: futbolId as UUID?, failures: &failures)
+            // Sin match temporal
+            check(label: "match-time-3: 'estoy cansado' (sin hora) → nil",
+                  actual: NovaResponder.findEventByTimeReference("estoy cansado", in: mock) == nil,
+                  expected: true, failures: &failures)
+        }
+
+        // ── Variante "antes al X" (contracción coloquial) ──────────────
+        do {
+            let intent = NovaResponder.extractReminderAttachIntent(
+                from: "Ponle recordatorio media hora antes al fútbol"
+            )
+            check(label: "attach-al-1: 'antes al fútbol' matchea",
+                  actual: intent != nil, expected: true, failures: &failures)
+            if let i = intent {
+                check(label: "attach-al-2: offset = 30 min",
+                      actual: i.offsetMinutes, expected: 30, failures: &failures)
+                check(label: "attach-al-3: activity = 'fútbol'",
+                      actual: i.activity, expected: "fútbol", failures: &failures)
+            }
+        }
+
+        // ── NovaService.Mode fallback ─────────────────────────────────
+        do {
+            // Si actions vacío + shouldAskUser=true → clarification.
+            let m1 = NovaService.Mode.fallback(actions: [], shouldAskUser: true)
+            check(label: "mode-fallback-1: empty + ask → clarification",
+                  actual: m1, expected: .clarification, failures: &failures)
+            // Si actions vacío + shouldAskUser=false → chatOnly.
+            let m2 = NovaService.Mode.fallback(actions: [], shouldAskUser: false)
+            check(label: "mode-fallback-2: empty + no ask → chatOnly",
+                  actual: m2, expected: .chatOnly, failures: &failures)
+            // Si actions presentes → chatWithAction.
+            let addAction: BackendAction = .addEvent(BackendEventCreate(
+                title: "Test", timeString: nil, endTimeString: nil, dateString: nil,
+                section: nil, icon: nil, reminderOffsets: nil, reminderNotes: nil,
+                location: nil, notes: nil
+            ))
+            let m3 = NovaService.Mode.fallback(actions: [addAction], shouldAskUser: false)
+            check(label: "mode-fallback-3: con actions → chatWithAction",
+                  actual: m3, expected: .chatWithAction, failures: &failures)
+        }
+
+        // ═══════════════════════════════════════════════════════════════
         //  NAMED REMINDERS — Spec del usuario (2026-05-15):
         //
         //  "Le digo a Nova que tengo un partido tipo 3 y que me acuerde
