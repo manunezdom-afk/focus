@@ -1258,15 +1258,15 @@ struct FocusLogoMark: View {
                     y: shadow ? size * 0.06 : 0
                 )
 
-            // HALO RADIAL — luz blanca difusa detrás del diamante. Da
+            // HALO RADIAL — luz blanca difusa detrás del símbolo. Da
             // sensación de "símbolo vivo" sin caer en el target/crosshair
-            // de Gemini. Sin estos pixels el diamante se ve pegado plano.
+            // de Gemini. Sin estos pixels el centro se ve pegado plano.
             Circle()
                 .fill(
                     RadialGradient(
                         gradient: Gradient(stops: [
-                            .init(color: Color.white.opacity(0.38), location: 0.0),
-                            .init(color: Color(red: 0.65, green: 0.80, blue: 1.0).opacity(0.18), location: 0.55),
+                            .init(color: Color.white.opacity(0.32), location: 0.0),
+                            .init(color: Color(red: 0.65, green: 0.80, blue: 1.0).opacity(0.16), location: 0.55),
                             .init(color: Color.white.opacity(0.0), location: 1.0),
                         ]),
                         center: .center,
@@ -1276,45 +1276,81 @@ struct FocusLogoMark: View {
                 )
                 .frame(width: size * 0.92, height: size * 0.92)
 
-            // NOVA DIAMOND — símbolo único de la app. Mismo rombo que se
-            // usa en FocusBar, Nova tab, Nova chat, Nova Live: identidad
-            // unificada de Nova como asistente. Reemplazó el engranaje
-            // (FocusGearMark) en 2026-05-13 — antes Focus y Nova lucían
-            // como dos productos distintos.
-            NovaSpark()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white,
-                            Color(red: 0.92, green: 0.96, blue: 1.0)  // ice blue tail
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: size * 0.46 * 0.62, height: size * 0.46)
-                .shadow(
-                    color: Color(red: 0.60, green: 0.75, blue: 1.0).opacity(shadow ? 0.55 : 0.25),
-                    radius: size * 0.06,
-                    x: 0,
-                    y: 0
-                )
+            // ─── FOCUS MARK: autofocus brackets + center dot ──────────
+            // Identidad propia de Focus (la app), distinta del diamond
+            // de Nova (la IA). Lectura: "punto de foco enmarcado" — la
+            // app es sobre concentración, mientras Nova es el asistente.
+            // Cambio 2026-05-15 desde NovaSpark a este mark.
+            FocusBracketsMark(size: size)
 
-            // Highlight superior del rombo — pixel de luz sobre la arista
-            // superior para que el diamante se lea como volumen, no plano.
-            NovaSpark()
-                .stroke(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.85), Color.white.opacity(0.0)],
-                        startPoint: .top,
-                        endPoint: .center
-                    ),
-                    lineWidth: max(0.6, size * 0.010)
+            // Center dot con glow blanco premium.
+            Circle()
+                .fill(Color.white)
+                .frame(width: size * 0.186, height: size * 0.186)
+                .shadow(
+                    color: Color.white.opacity(shadow ? 0.70 : 0.45),
+                    radius: size * 0.07,
+                    x: 0, y: 0
                 )
-                .frame(width: size * 0.46 * 0.62, height: size * 0.46)
-                .blendMode(.plusLighter)
         }
         .frame(width: size, height: size)
+    }
+}
+
+/// Cuatro corchetes en las esquinas de un cuadrado invisible centrado.
+/// Reproduce los autofocus brackets del AppIcon. Implementación con Canvas
+/// — coordenadas absolutas, sin scaleEffect ni alignment frames que se
+/// confundían con flips. Más predecible y rinde igual de bien.
+private struct FocusBracketsMark: View {
+    let size: CGFloat
+
+    /// Tamaño del cuadrado invisible que enmarca el dot central.
+    private var boxSize: CGFloat { size * 0.58 }
+    private var bracketLen: CGFloat { size * 0.137 }
+    private var bracketThickness: CGFloat { max(1.5, size * 0.022) }
+
+    var body: some View {
+        Canvas { context, canvasSize in
+            let cx = canvasSize.width / 2
+            let cy = canvasSize.height / 2
+            let half = boxSize / 2
+            let t = bracketThickness
+            let len = bracketLen
+            let r = t / 2
+
+            func roundedRect(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat) {
+                let rect = CGRect(x: x, y: y, width: w, height: h)
+                let path = Path(roundedRect: rect, cornerSize: CGSize(width: r, height: r))
+                context.fill(path, with: .color(.white))
+            }
+
+            // TOP-LEFT: H-arm va hacia la derecha desde la esquina TL;
+            //           V-arm va hacia abajo desde la esquina TL.
+            let tlX = cx - half
+            let tlY = cy - half
+            roundedRect(x: tlX, y: tlY, w: len, h: t)            // ─
+            roundedRect(x: tlX, y: tlY, w: t, h: len)            // │
+
+            // TOP-RIGHT: H-arm va hacia la izquierda; V-arm va hacia abajo.
+            let trX = cx + half
+            let trY = cy - half
+            roundedRect(x: trX - len, y: trY, w: len, h: t)      // ─
+            roundedRect(x: trX - t, y: trY, w: t, h: len)        // │
+
+            // BOTTOM-LEFT: H-arm va hacia la derecha; V-arm va hacia arriba.
+            let blX = cx - half
+            let blY = cy + half
+            roundedRect(x: blX, y: blY - t, w: len, h: t)        // ─
+            roundedRect(x: blX, y: blY - len, w: t, h: len)      // │
+
+            // BOTTOM-RIGHT: H-arm hacia izquierda; V-arm hacia arriba.
+            let brX = cx + half
+            let brY = cy + half
+            roundedRect(x: brX - len, y: brY - t, w: len, h: t)  // ─
+            roundedRect(x: brX - t, y: brY - len, w: t, h: len)  // │
+        }
+        .frame(width: size, height: size)
+        .shadow(color: Color.white.opacity(0.5), radius: size * 0.025, x: 0, y: 0)
     }
 }
 

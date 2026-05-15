@@ -30,9 +30,6 @@ struct MiDiaView: View {
     /// 3 bloques visibles por defecto — más allá de eso es ruido.
     private let visibleEventsLimit: Int = 3
 
-    /// 3 tareas pendientes visibles en Mi Día — el resto vive en Nova.
-    private let visiblePendingTasksLimit: Int = 3
-
     // MARK: - Source of truth
 
     /// Eventos visibles: del usuario si tiene, demo si NO tiene Y está en
@@ -55,17 +52,6 @@ struct MiDiaView: View {
     private var overdueReminders: [FocusEvent] {
         guard store.hasUserEvents else { return [] }
         return store.overdueRemindersToday()
-    }
-
-    /// Pendientes visibles: reales si hay, demo solo si está en modo demo
-    /// (no logueado). Cuenta real con 0 tareas → vacío real.
-    private var displayPendingTasks: [FocusTask] {
-        if store.hasUserTasks {
-            return store.pendingTodayTasks
-        }
-        guard store.isInDemoMode else { return [] }
-        return DemoDataProvider.shared.exampleTodayTasks()
-            .filter { !$0.done && !store.dismissedDemoTaskTitles.contains($0.title) }
     }
 
     /// Eventos del día siguiente del usuario. Demo NO tiene datos para
@@ -189,9 +175,15 @@ struct MiDiaView: View {
                             .padding(.horizontal, Theme.Spacing.xl)
                     }
 
-                    timelineSection
+                    // Mi Día = SOLO eventos del calendario (con sus chips de
+                    // reminder anclados). La sección "Pendientes de hoy" se
+                    // retiró 2026-05-15 porque duplicaba la pestaña Tareas
+                    // sin agregar valor — los pendientes viven ahí, no en
+                    // la vista de timeline. Los reminders custom (texto
+                    // anclado al evento) se ven dentro del card del evento
+                    // padre, así que la sección de pendientes no aportaba.
 
-                    pendingTasksSection
+                    timelineSection
 
                     nextDayPreviewSection
 
@@ -339,27 +331,19 @@ struct MiDiaView: View {
         }
     }
 
-    /// Subtítulo del header: solo el estado del día, sin fecha (la fecha
-    /// la pone `FocusBrandRow` arriba). Ejemplos:
-    /// - 0 bloques, 0 pendientes → "Día libre"
-    /// - 1 bloque, 0 pendientes  → "1 bloque"
-    /// - 3 bloques, 2 pendientes → "3 bloques · 2 pendientes"
+    /// Subtítulo del header: solo el estado del día con el conteo de
+    /// bloques (eventos). Después de retirar "Pendientes de hoy" (2026-05-15),
+    /// el contador de pendientes ya no aparece acá — vive en la pestaña
+    /// Tareas. Ejemplos:
+    /// - 0 bloques → "Día libre"
+    /// - 1 bloque  → "1 bloque"
+    /// - 3 bloques → "3 bloques"
     private var headerSubtitle: String {
         let blocks = displayEvents.count
-        let pendings = displayPendingTasks.count
-
-        if blocks == 0 && pendings == 0 {
+        if blocks == 0 {
             return "Día libre"
         }
-
-        var pieces: [String] = []
-        if blocks > 0 {
-            pieces.append(blocks == 1 ? "1 bloque" : "\(blocks) bloques")
-        }
-        if pendings > 0 {
-            pieces.append(pendings == 1 ? "1 pendiente" : "\(pendings) pendientes")
-        }
-        return pieces.joined(separator: " · ")
+        return blocks == 1 ? "1 bloque" : "\(blocks) bloques"
     }
 
     private var bandejaButton: some View {
@@ -2199,177 +2183,6 @@ struct MiDiaView: View {
                 }
             }
         }
-    }
-
-    // MARK: - Pendientes de hoy (compacto)
-
-    /// Sección compacta — máximo 3 pendientes. Si hay más o el usuario quiere
-    /// la lista completa, se delega a Nova → Acciones → Todas las tareas.
-    @ViewBuilder
-    private var pendingTasksSection: some View {
-        let pending = displayPendingTasks
-        let shown = Array(pending.prefix(visiblePendingTasksLimit))
-        let extra = pending.count - shown.count
-
-        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            // Conteo "N pendientes" / "Todo listo" se omite — el subtítulo
-            // del header ya tiene el dato. Si el usuario terminó todo,
-            // el pendingClearedCard de abajo da el feedback visual de
-            // "Lista al día" / "Cerraste el día".
-            HStack(alignment: .firstTextBaseline) {
-                Text("PENDIENTES DE HOY")
-                    .sectionLabelStyle()
-                Spacer()
-            }
-            .padding(.horizontal, Theme.Spacing.xl)
-
-            if shown.isEmpty {
-                pendingClearedCard
-                    .padding(.horizontal, Theme.Spacing.xl)
-            } else {
-                VStack(spacing: Theme.Spacing.sm) {
-                    ForEach(shown) { task in
-                        SwipeToDelete(enabled: true) {
-                            if store.hasUserTasks {
-                                store.deleteTask(task.id)
-                            } else {
-                                withAnimation(.easeOut(duration: 0.22)) {
-                                    store.dismissDemoTask(title: task.title)
-                                }
-                            }
-                            toast.success("Tarea eliminada", symbol: "trash.fill")
-                        } content: {
-                            MiDiaTaskRow(task: task) {
-                                store.toggleTask(task.id)
-                            }
-                        }
-                        .contextMenu {
-                            if store.hasUserTasks {
-                                Button {
-                                    editingTask = task
-                                } label: {
-                                    Label("Editar", systemImage: "pencil")
-                                }
-                            }
-                            Button(role: .destructive) {
-                                if store.hasUserTasks {
-                                    store.deleteTask(task.id)
-                                } else {
-                                    store.dismissDemoTask(title: task.title)
-                                }
-                                toast.success("Tarea eliminada", symbol: "trash.fill")
-                            } label: {
-                                Label("Eliminar", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, Theme.Spacing.xl)
-
-                if extra > 0 {
-                    Button {
-                        HapticManager.shared.tap()
-                        nav.openNova(segment: .acciones)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(extra == 1
-                                 ? "Ver 1 más en Nova"
-                                 : "Ver \(extra) más en Nova")
-                                .font(Theme.Typography.subheadEmphasized)
-                                .foregroundStyle(Theme.Colors.focusAccent)
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.focusAccent)
-                        }
-                        .padding(.vertical, Theme.Spacing.md - 2)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, Theme.Spacing.xl)
-                    .padding(.top, Theme.Spacing.xs)
-                }
-            }
-        }
-    }
-
-    // MARK: - Pendientes despejados (sustituye el viejo "check verde")
-
-    /// Card que aparece cuando no quedan pendientes. Cambia el tono según
-    /// la hora — un detalle pequeño que aleja la card del "checkmark
-    /// genérico" hacia algo más de marca: gradient cobalto→violeta, un
-    /// glyph contextual (sparkle de día, luna de noche), y dos líneas con
-    /// jerarquía clara en vez de una sola frase de éxito.
-    private var pendingClearedCard: some View {
-        let hour = Calendar.current.component(.hour, from: Date())
-        let isNight = hour >= 20 || hour < 5
-        let isEvening = hour >= 17 && hour < 20
-
-        let glyph: String
-        let title: String
-        let sub: String
-
-        if isNight {
-            glyph = "moon.stars.fill"
-            title = "Cerraste el día"
-            sub = "No quedan pendientes para hoy."
-        } else if isEvening {
-            glyph = "sparkles"
-            title = "Lista al día"
-            sub = "Terminaste tus pendientes."
-        } else {
-            glyph = "sparkle"
-            title = "Sin pendientes"
-            sub = "Tu lista de hoy está despejada."
-        }
-
-        return HStack(spacing: Theme.Spacing.md + 2) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Theme.Colors.focusAccent.opacity(0.14),
-                                Theme.Colors.novaAccent.opacity(0.14)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 44, height: 44)
-                Circle()
-                    .strokeBorder(Theme.Colors.focusAccent.opacity(0.22), lineWidth: 1)
-                    .frame(width: 44, height: 44)
-                Image(systemName: glyph)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [Theme.Colors.focusAccent, Theme.Colors.novaAccent],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(Theme.Typography.bodyBold)
-                    .foregroundStyle(Theme.Colors.textPrimary)
-                Text(sub)
-                    .font(Theme.Typography.subhead)
-                    .foregroundStyle(Theme.Colors.textSecondary)
-            }
-            Spacer()
-        }
-        .padding(Theme.Spacing.md + 2)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                .fill(Theme.Colors.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                        .strokeBorder(Theme.Colors.focusAccent.opacity(0.16), lineWidth: 1)
-                )
-                .focusCardShadow()
-        )
     }
 
     // MARK: - Preview "Para mañana"
