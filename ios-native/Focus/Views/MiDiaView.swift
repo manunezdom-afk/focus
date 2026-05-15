@@ -2490,7 +2490,11 @@ struct MiDiaView: View {
     private var nextDayPreviewBody: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm + 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: "sunrise.fill")
+                // Glyph organizacional, no sun/Nova-themed. `calendar` ata el
+                // preview a su destino (tab Calendario) y refuerza la
+                // identidad Focus de "agenda y planificación" sin pisar la
+                // marca (autofocus brackets del AppIcon).
+                Image(systemName: "calendar")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.Colors.textTertiary)
                 Text("Mañana")
