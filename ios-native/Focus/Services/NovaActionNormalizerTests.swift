@@ -674,7 +674,7 @@ enum NovaActionNormalizerTests {
             actual: bug1.count, expected: 2, failures: &failures
         )
         if bug1.count == 2 {
-            check(label: "bug1[0] title", actual: bug1[0].title, expected: "Seguir trabajando", failures: &failures)
+            check(label: "bug1[0] title", actual: bug1[0].title, expected: "Trabajar", failures: &failures)
             check(label: "bug1[0] hour 15", actual: bug1[0].hour, expected: 15, failures: &failures)
             // El día depende de la hora a la que corren los tests. Si son
             // antes de 19:30, 15:30 cae hoy futuro; si son después, el
@@ -942,8 +942,8 @@ enum NovaActionNormalizerTests {
         let caso2 = runPipeline("tengo que seguir trabajando a las 3:30 y comer a las 4")
         check(label: "caso2: 2 intents", actual: caso2.count, expected: 2, failures: &failures)
         if caso2.count == 2 {
-            check(label: "caso2[0] title 'Seguir trabajando'",
-                  actual: caso2[0].title, expected: "Seguir trabajando", failures: &failures)
+            check(label: "caso2[0] title 'Trabajar' (post 2026-05-15: seguir+gerund stripped)",
+                  actual: caso2[0].title, expected: "Trabajar", failures: &failures)
             check(label: "caso2[0] hour 15", actual: caso2[0].hour, expected: 15, failures: &failures)
             check(label: "caso2[0] minute 30", actual: caso2[0].minute, expected: 30, failures: &failures)
             check(label: "caso2[0] no reunión", actual: caso2[0].section != .reunion, expected: true, failures: &failures)
@@ -1228,8 +1228,8 @@ enum NovaActionNormalizerTests {
         check(label: "user-caso-4: 2 intents",
               actual: u4.count, expected: 2, failures: &failures)
         if u4.count == 2 {
-            check(label: "user-caso-4: [0] title 'Seguir trabajando'",
-                  actual: u4[0].title, expected: "Seguir trabajando", failures: &failures)
+            check(label: "user-caso-4: [0] title 'Trabajar' (post 2026-05-15)",
+                  actual: u4[0].title, expected: "Trabajar", failures: &failures)
             check(label: "user-caso-4: [0] hour 15", actual: u4[0].hour, expected: 15, failures: &failures)
             check(label: "user-caso-4: [0] minute 30", actual: u4[0].minute, expected: 30, failures: &failures)
             check(label: "user-caso-4: [0] no reunión",
@@ -1509,6 +1509,88 @@ enum NovaActionNormalizerTests {
         let regBlock = runPipeline("ir a buscar a mi hermano a las 6:30 acuérdame 40 minutos antes")
         check(label: "reminder absoluto: 1 intent (no split)",
               actual: regBlock.count, expected: 1, failures: &failures)
+
+        // ═══════════════════════════════════════════════════════════════
+        //  INTENT REFACTOR — Bug user 2026-05-15:
+        //
+        //  Nova interpretaba mensajes humanos como comandos rígidos de
+        //  calendario. La fix incluye:
+        //  - Strip "luego" y "seguir" en cleanTitle.
+        //  - Gerundios → infinitivo ("trabajando" → "trabajar").
+        //  - Mode classification en backend (chat_only / proposal / etc).
+        //
+        //  Estos tests cubren las piezas LOCALES (cleanTitle). El comportamiento
+        //  chat_only/proposal vive en el backend (system prompt + Sonnet
+        //  routing) y se valida manualmente con casos reales.
+        // ═══════════════════════════════════════════════════════════════
+
+        // Bug literal del user: "luego tengo que seguir trabajando con focus"
+        // ANTES quedaba como título "Luego tengo que seguir trabajando con focus".
+        // DESPUÉS debe quedar "Trabajar con focus".
+        check(
+            label: "intent-1: 'luego tengo que seguir trabajando con focus' → 'Trabajar con focus'",
+            actual: NovaActionNormalizer.cleanTitle("luego tengo que seguir trabajando con focus"),
+            expected: "Trabajar con focus",
+            failures: &failures
+        )
+
+        // Variantes: solo "luego tengo que X"
+        check(
+            label: "intent-2: 'luego tengo que estudiar matemáticas' → 'Estudiar matemáticas'",
+            actual: NovaActionNormalizer.cleanTitle("luego tengo que estudiar matemáticas"),
+            expected: "Estudiar matemáticas",
+            failures: &failures
+        )
+
+        // Solo "seguir + gerundio"
+        check(
+            label: "intent-3: 'tengo que seguir leyendo el libro' → 'Leer el libro'",
+            actual: NovaActionNormalizer.cleanTitle("tengo que seguir leyendo el libro"),
+            expected: "Leer el libro",
+            failures: &failures
+        )
+
+        // Gerundio sin "seguir" — solo convertir gerund → infinitive
+        check(
+            label: "intent-4: 'tengo que ir corriendo al banco' → 'Ir correr al banco'",
+            actual: NovaActionNormalizer.cleanTitle("tengo que ir corriendo al banco"),
+            // El gerundio "corriendo" se convierte a infinitivo "correr".
+            // "Ir corriendo" es coloquial pero queda como "Ir correr" —
+            // imperfecto pero mejor que el literal.
+            expected: "Ir correr al banco",
+            failures: &failures
+        )
+
+        // "después tengo que X" — mismo patrón con "después"
+        check(
+            label: "intent-5: 'después tengo que llamar a Juan' → 'Llamar a Juan'",
+            actual: NovaActionNormalizer.cleanTitle("después tengo que llamar a Juan"),
+            expected: "Llamar a Juan",
+            failures: &failures
+        )
+
+        // NO REGRESIÓN: "seguir" NO debe strippearse si NO es prefix
+        // (ej. "ir a seguir trabajando" → mantener; "club seguir" → mantener).
+        check(
+            label: "intent-6 NO regresión: 'seguir' en medio del título no strippeado",
+            actual: NovaActionNormalizer.cleanTitle("club de seguir"),
+            // Si el regex agresivo strippeara "seguir" en cualquier posición,
+            // "club de seguir" quedaría "Club de" o "Club de " — debemos
+            // mantenerlo. El patrón requiere ^seguir al inicio.
+            expected: "Club de seguir",
+            failures: &failures
+        )
+
+        // Gerundios populares mapeados.
+        check(label: "intent-gerund: 'estudiando' → 'Estudiar'",
+              actual: NovaActionNormalizer.cleanTitle("estudiando para el examen"),
+              expected: "Estudiar para el examen", failures: &failures)
+        check(label: "intent-gerund: 'jugando fútbol' → 'Jugar fútbol'",
+              actual: NovaActionNormalizer.cleanTitle("jugando fútbol con amigos"),
+              expected: "Jugar fútbol con amigos", failures: &failures)
+        check(label: "intent-gerund: 'cocinando' → 'Cocinar'",
+              actual: NovaActionNormalizer.cleanTitle("cocinando pasta"),
+              expected: "Cocinar pasta", failures: &failures)
 
         // ═══════════════════════════════════════════════════════════════
         //  NAMED REMINDERS — Spec del usuario (2026-05-15):

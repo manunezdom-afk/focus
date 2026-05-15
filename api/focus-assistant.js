@@ -35,6 +35,50 @@ function detectComplexInput(text) {
   if (typeof text !== 'string') return false
   const lower = text.toLowerCase()
 
+  // 0) CONVERSACIÓN ABIERTA / ESTADO HUMANO. Estos mensajes NO son
+  //    comandos — son desahogue/consejo/reflexión. Haiku tiende a
+  //    convertirlos en eventos erróneos ("Estoy colapsado" → evento
+  //    "Saturación"). Sonnet entiende el matiz humano y devuelve
+  //    mode="chat_only". Introducido 2026-05-15 con el refactor
+  //    intent-classification.
+  const conversationalCues = [
+    'estoy colapsado', 'estoy saturado', 'estoy cansado', 'estoy agotado',
+    'estoy estresado', 'estoy abrumado', 'no sé por dónde', 'no se por donde',
+    'no doy más', 'no doy mas', 'no llego', 'no alcanzo', 'no voy a alcanzar',
+    'me siento', 'qué debería', 'que deberia', 'qué hago', 'que hago',
+    'cómo me organizo', 'como me organizo', 'cómo lo hago', 'como lo hago',
+    'ayúdame a ordenar', 'ayudame a ordenar', 'ayúdame a organizar',
+    'organizame el día', 'organízame el día', 'organizame el dia',
+    'ordéname el día', 'ordename el dia',
+    'qué priorizo', 'que priorizo',
+    'mil cosas', 'tengo mucho',
+    'me siento', 'no sé si', 'no se si',
+    'creo que', 'tal vez', 'quizás', 'quizas', 'podría', 'podria',
+    'pienso que', 'siento que',
+  ]
+  for (const c of conversationalCues) {
+    if (lower.includes(c)) return true
+  }
+
+  // 0b) CORRECCIONES / EDICIONES. Verbos que indican que el user está
+  //     ajustando un evento existente (no creando). Haiku a veces falla
+  //     resolviéndolo contra "Eventos actuales" — Sonnet lo hace mejor.
+  const editCues = [
+    'arréglalo', 'arreglalo', 'arregla',
+    'eso era', 'eso es', 'eso no era', 'no era',
+    'ponle recordatorio', 'agrégale recordatorio', 'agregale recordatorio',
+    'muévelo', 'muevelo', 'movelo', 'cámbialo', 'cambialo',
+    'reagéndalo', 'reagendalo', 'pásalo', 'pasalo',
+    'no es así', 'no es asi', 'mal',
+    'mejor déjalo', 'mejor dejalo',
+    'el recordatorio es', 'el recordatorio era',
+    'lo de fútbol', 'lo de futbol', 'lo de arte', 'lo de la reunión',
+    'lo de la clase', 'lo de la prueba', 'lo de mañana',
+  ]
+  for (const c of editCues) {
+    if (lower.includes(c)) return true
+  }
+
   // 1) Conectores fuertes = casi seguro multi-acción.
   const strongHints = [
     ' y luego ', ' y después ', ' y despues ',

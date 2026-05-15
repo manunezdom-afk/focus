@@ -1070,6 +1070,68 @@ struct MiDiaView: View {
     private func applyBackendResult(_ result: NovaService.Result, userText: String) async -> InlineNovaResponse {
         let replyText = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // ═══════════════════════════════════════════════════════════════
+        //  MODE-BASED ROUTING (introducido 2026-05-15)
+        //
+        //  El backend ahora clasifica la intención del mensaje en un campo
+        //  `mode`. Antes de validar/aplicar acciones, respetamos esa
+        //  clasificación. Esto permite que mensajes conversacionales
+        //  ("Estoy saturado") generen respuesta de chat sin crear eventos.
+        // ═══════════════════════════════════════════════════════════════
+
+        switch result.mode {
+        case .chatOnly:
+            // Conversación abierta: NO ejecutar nada, solo mostrar reply.
+            // Si el reply está vacío, tono neutral con texto fallback.
+            let parts = splitReplyForUI(replyText.isEmpty
+                ? "Aquí estoy si necesitas algo."
+                : replyText)
+            return InlineNovaResponse(
+                userText: userText,
+                summary: parts.summary,
+                details: parts.details,
+                action: .dismiss,
+                isError: false,
+                tone: .chat
+            )
+        case .proposal:
+            // Propuesta: el backend sugiere una acción pero NO la ejecuta.
+            // MVP de la UI: mostramos el reply como mensaje + un detalle
+            // resumiendo qué propone. El user vuelve a escribir "sí" /
+            // "aplícalo" si quiere aplicarla (gestionado por el flujo de
+            // pendingClarification que reutiliza el next-turn). Para no
+            // perder la propuesta, persistimos un pending con la actions.
+            //
+            // FUTURO: UI con botones "Aplicar / Editar / No por ahora".
+            // Por ahora una sola fuente de truth (chat) + texto.
+            if !result.proposedActions.isEmpty, !store.novaContext.pendingIsActive {
+                // Persistimos el userText original como pending — el
+                // user puede decir "sí" en el próximo turno y el local
+                // parser lo trata como confirmación.
+                persistBackendQuestionAsPending(
+                    userText: userText,
+                    question: replyText.isEmpty
+                        ? "Te propongo aplicar este cambio. ¿Lo dejo listo?"
+                        : replyText
+                )
+            }
+            let parts = splitReplyForUI(replyText.isEmpty
+                ? "Te propongo un ajuste. ¿Lo dejo listo?"
+                : replyText)
+            return InlineNovaResponse(
+                userText: userText,
+                summary: parts.summary,
+                details: parts.details,
+                action: .dismiss,
+                isError: false,
+                tone: .clarify
+            )
+        case .clarification, .chatWithAction:
+            // Pasan al flujo existente abajo. Clarification cae al gate de
+            // shouldAskUser. chatWithAction valida + aplica acciones.
+            break
+        }
+
         // Planner gate: si el backend pidió no ejecutar (shouldAskUser=true
         // o confidence < 0.55), NO aplicamos las acciones — mostramos sólo
         // la pregunta y guardamos un pending para que el próximo turno

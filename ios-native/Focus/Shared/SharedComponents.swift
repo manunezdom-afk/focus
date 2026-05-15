@@ -185,6 +185,10 @@ enum NovaResponseTone: Equatable {
     /// Nova está procesando la petición (spinner reemplazado por diamante
     /// breathing).
     case processing
+    /// Nova respondió en modo conversación abierta — sin ejecutar nada,
+    /// solo charlando o dando consejo. Tono neutral, sin badge de
+    /// acción. Introducido 2026-05-15 con el mode classification.
+    case chat
 }
 
 /// Chip de respuesta rápida que aparece en estado `.clarify`. Permite al
@@ -371,6 +375,9 @@ struct InlineNovaResponseView: View {
         case .clarify:    return Theme.Colors.novaAccent
         case .error:      return Theme.Colors.warning
         case .processing: return Theme.Colors.novaAccent
+        // Chat: tinte neutral textSecondary — no enfatiza acción.
+        // Para el user es una respuesta de "conversación", no de "logro".
+        case .chat:       return Theme.Colors.textSecondary
         }
     }
 

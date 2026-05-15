@@ -323,6 +323,13 @@ enum NovaActionNormalizer {
             // El grupo de artículos es OPCIONAL — si el verbo va directo al
             // sustantivo ("voy a correr") no se rompe.
             //
+            // 0. ADVERBIOS DE SECUENCIA — "luego", "después" al INICIO son
+            //    relleno temporal coloquial ("luego tengo que X" → "tengo
+            //    que X"). Strippeamos primero para que el patrón #2 ("tengo
+            //    que X") matchee aunque haya "luego" delante. Reportado
+            //    por user 2026-05-15: "luego tengo que seguir trabajando
+            //    con focus" quedaba como título literal.
+            #"^\s*(luego|después|despues|ahora|más tarde|mas tarde|después de eso|despues de eso)\s+"#,
             // 1. "Tengo ganas de X" → X (antes que "tengo X" para evitar que
             //    el patrón general consuma solo "tengo ").
             #"^\s*tengo\s+ganas\s+de\s+(la|el|los|las|una|un)?\s*"#,
@@ -332,8 +339,32 @@ enum NovaActionNormalizer {
             #"^\s*necesito(\s+que)?\s+(la|el|los|las|una|un)?\s*"#,
             // 4. "Quiero X" / "Voy a X" / "Me toca X" / "Me agendaron X" /
             //    "Me programaron X". Consumen artículo opcional siguiente.
-            #"^\s*(quiero|voy\s+a|me\s+toca|me\s+agendaron|me\s+programaron)\s+(la|el|los|las|una|un)?\s*"#
+            #"^\s*(quiero|voy\s+a|me\s+toca|me\s+agendaron|me\s+programaron)\s+(la|el|los|las|una|un)?\s*"#,
+            // 5. "Seguir + [gerund]" → strip "seguir" para dejar el verbo
+            //    activo ("seguir trabajando" → "trabajando"). Apunta al
+            //    caso del user: "tengo que seguir trabajando con focus"
+            //    debe quedar como "Trabajar con focus" tras pasar también
+            //    por el gerund-to-infinitive map abajo. "Seguir" solo
+            //    cuando va inmediatamente seguido de un verbo terminado
+            //    en -ando/-iendo/-yendo (gerund) o un -ar/-er/-ir
+            //    (infinitivo). "yendo" cubre gerundios irregulares
+            //    ("leyendo" de leer, "cayendo" de caer, "yendo" de ir).
+            #"^\s*seguir\s+(?=\S+(?:ando|iendo|yendo|ar|er|ir)\b)"#
         ]
+        for pattern in eventoPrefixPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+                let ns = result as NSString
+                let range = NSRange(location: 0, length: ns.length)
+                result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
+            }
+        }
+
+        // 3c-bis. RE-APLICACIÓN: después de strippear "luego" en step 0,
+        //         el siguiente prefijo ("tengo que") quedó al inicio. El
+        //         patrón #2 ya no matcheó porque corrió antes de que "luego"
+        //         se fuera. Re-ejecutamos los prefix patterns una vez más
+        //         para cubrir esa cadena. Idempotente: si no hay nada que
+        //         strippear, no cambia el texto.
         for pattern in eventoPrefixPatterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
                 let ns = result as NSString
@@ -431,6 +462,16 @@ enum NovaActionNormalizer {
         //     del título. La capitalización final la hace step 9.
         result = stripReflexiveMe(in: result)
 
+        // 8c. Gerundios → infinitivo base. "Trabajando" → "Trabajar",
+        //     "Estudiando" → "Estudiar". Reportado por user 2026-05-15:
+        //     "luego tengo que seguir trabajando con focus" tras strippear
+        //     "luego" y "tengo que seguir" debería quedar "trabajar con
+        //     focus" en infinitivo, no "trabajando con focus" en gerundio.
+        //     Los títulos de eventos son acciones — infinitivo es lo
+        //     idiomático. Whitelist conservadora para evitar romper
+        //     palabras no-verbales que terminen en -ando/-iendo.
+        result = stripGerunds(in: result)
+
         // 9. Capitalize primera letra del título si no lo está.
         guard let firstChar = result.first else { return "" }
         if firstChar.isLowercase {
@@ -480,6 +521,60 @@ enum NovaActionNormalizer {
         "salirme":      "salir",
         "volverme":     "volver",
     ]
+
+    /// Gerundios comunes (ando/iendo) mapeados a su infinitivo. Whitelist
+    /// — solo cubre verbos frecuentes de actividades para evitar tocar
+    /// palabras no-verbales. Si el user dice un gerundio raro que no está
+    /// acá, queda como está (no rompe nada, solo el título sigue en gerund).
+    private static let gerundToInfinitiveMap: [String: String] = [
+        // Trabajo / foco
+        "trabajando":   "trabajar",
+        "estudiando":   "estudiar",
+        "leyendo":      "leer",
+        "escribiendo":  "escribir",
+        "revisando":    "revisar",
+        "preparando":   "preparar",
+        "practicando":  "practicar",
+        "investigando": "investigar",
+        "programando":  "programar",
+        "diseñando":    "diseñar",
+        "disenando":    "diseñar",
+        "planificando": "planificar",
+        // Cuerpo / ejercicio
+        "corriendo":    "correr",
+        "caminando":    "caminar",
+        "entrenando":   "entrenar",
+        "haciendo":     "hacer",
+        "jugando":      "jugar",
+        "nadando":      "nadar",
+        // Social / comida
+        "comiendo":     "comer",
+        "cenando":      "cenar",
+        "almorzando":   "almorzar",
+        "tomando":      "tomar",
+        "hablando":     "hablar",
+        "conversando":  "conversar",
+        "llamando":     "llamar",
+        // Casa / mantenimiento
+        "limpiando":    "limpiar",
+        "ordenando":    "ordenar",
+        "lavando":      "lavar",
+        "cocinando":    "cocinar",
+    ]
+
+    /// Reemplaza gerundios del map por su infinitivo base usando word-boundary.
+    private static func stripGerunds(in input: String) -> String {
+        var result = input
+        for (gerund, infinitive) in gerundToInfinitiveMap {
+            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: gerund) + "\\b"
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: infinitive,
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+        return result
+    }
 
     /// Sustituye cualquier ocurrencia (case-insensitive) de un verbo
     /// reflexivo del map por su infinitivo base, preservando el resto del

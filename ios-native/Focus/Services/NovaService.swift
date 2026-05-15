@@ -32,6 +32,33 @@ enum NovaService {
         case estrategica
     }
 
+    /// Modo de respuesta de Nova — clasifica la intención del mensaje
+    /// del user (introducido 2026-05-15 — refactor de Nova para que NO
+    /// fuerce toda conversación a una acción de calendario).
+    enum Mode: String {
+        /// Conversación abierta / desahogue / consejo. NO ejecutar actions.
+        /// Solo mostrar el reply como mensaje de chat. Ejemplo:
+        /// "Estoy saturado" → Nova responde con consejo, no crea evento.
+        case chatOnly = "chat_only"
+        /// Acción directa clara — el user pidió ejecutar algo concreto.
+        /// El cliente aplica `actions` y muestra `reply` como confirmación.
+        case chatWithAction = "chat_with_action"
+        /// Propuesta — Nova sugiere una acción pero NO la ejecuta. Las
+        /// acciones están en `proposedActions`. El cliente muestra UI con
+        /// botones "Aplicar / Editar / No por ahora".
+        case proposal
+        /// Falta info crítica. NO ejecutar nada. El reply tiene una
+        /// pregunta concreta para el user.
+        case clarification
+
+        /// Fallback cuando el backend no envía el campo o envía algo no
+        /// reconocido. Inferimos por la presencia de actions/pregunta.
+        static func fallback(actions: [BackendAction], shouldAskUser: Bool) -> Mode {
+            if shouldAskUser { return .clarification }
+            return actions.isEmpty ? .chatOnly : .chatWithAction
+        }
+    }
+
     /// Resultado exitoso de una llamada. El `reply` es texto plano corto
     /// para mostrar al usuario. `actions` son mutaciones estructuradas
     /// que el caller aplica al `FocusDataStore`. `confidence` y
@@ -50,6 +77,12 @@ enum NovaService {
         /// Si true, el backend pidió no ejecutar y mostrar la pregunta
         /// del reply. Las `actions` deberían venir vacías cuando es true.
         let shouldAskUser: Bool
+        /// Clasificación de intención del mensaje del user — define cómo
+        /// el cliente debe renderizar la respuesta.
+        let mode: Mode
+        /// Acciones PROPUESTAS (no ejecutadas). Solo no-vacío cuando
+        /// `mode == .proposal`. El cliente muestra UI para aplicar/descartar.
+        let proposedActions: [BackendAction]
     }
 
     /// Llama al backend. Lanza `NovaServiceError` para que el caller
@@ -115,13 +148,23 @@ enum NovaService {
         case 200:
             do {
                 let decoded = try jsonDecoder.decode(BackendResponsePayload.self, from: data)
+                let shouldAsk = decoded.shouldAskUser ?? false
+                let modeRaw = decoded.mode
+                let resolvedMode: Mode = {
+                    if let raw = modeRaw, let m = Mode(rawValue: raw) {
+                        return m
+                    }
+                    return Mode.fallback(actions: decoded.actions, shouldAskUser: shouldAsk)
+                }()
                 return Result(
                     reply: decoded.reply,
                     actions: decoded.actions,
                     smartActionsBlocked: decoded.smartActionsBlocked ?? false,
                     smartActionsMessage: decoded.smartActionsMessage,
                     confidence: decoded.confidence ?? 1.0,
-                    shouldAskUser: decoded.shouldAskUser ?? false
+                    shouldAskUser: shouldAsk,
+                    mode: resolvedMode,
+                    proposedActions: decoded.proposedActions
                 )
             } catch {
                 throw NovaServiceError.decoding(error)
@@ -304,18 +347,22 @@ private struct BackendTaskDTO: Encodable {
 private struct BackendResponsePayload: Decodable {
     let reply: String
     let actions: [BackendAction]
+    let proposedActions: [BackendAction]
     let smartActionsBlocked: Bool?
     let smartActionsMessage: String?
     let confidence: Double?
     let shouldAskUser: Bool?
+    let mode: String?
 
     enum CodingKeys: String, CodingKey {
         case reply
         case actions
+        case proposedActions = "proposed_actions"
         case smartActionsBlocked = "smart_actions_blocked"
         case smartActionsMessage = "smart_actions_message"
         case confidence
         case shouldAskUser
+        case mode
     }
 
     init(from decoder: Decoder) throws {
@@ -325,12 +372,19 @@ private struct BackendResponsePayload: Decodable {
         self.smartActionsMessage = try c.decodeIfPresent(String.self, forKey: .smartActionsMessage)
         self.confidence = try c.decodeIfPresent(Double.self, forKey: .confidence)
         self.shouldAskUser = try c.decodeIfPresent(Bool.self, forKey: .shouldAskUser)
+        self.mode = try c.decodeIfPresent(String.self, forKey: .mode)
         // Decodificar actions de forma resiliente: si un item falla por type
         // desconocido o shape inesperado, lo saltamos en vez de tumbar todo.
         if let raw = try? c.decode([RawAction].self, forKey: .actions) {
             self.actions = raw.compactMap { $0.decoded }
         } else {
             self.actions = []
+        }
+        // Mismo decoder resiliente para proposed_actions.
+        if let raw = try? c.decode([RawAction].self, forKey: .proposedActions) {
+            self.proposedActions = raw.compactMap { $0.decoded }
+        } else {
+            self.proposedActions = []
         }
     }
 }
