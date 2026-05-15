@@ -227,30 +227,65 @@ enum NovaActionNormalizer {
         //         evento existente o crear como tarea.
         //         Solo strippeamos el patrón de tipo "antes de [art] noun";
         //         no tocamos "antes de las 5" (eso ya cae en temporalPatterns).
-        let antesDePatterns: [String] = [
+        // Patrones case-INSENSITIVE (artículo y verbo conocido):
+        let antesDePatternsInsensitive: [String] = [
             // "antes de(l) [art] [palabra]" — consume artículo y palabra siguiente.
-            #"\bantes de(?:l)?\s+(?:la|el|los|las|mi|tu|su)\s+[A-Za-zÁ-úÑñ]+\b"#,
-            // "antes de [Palabra-capitalizada]" — tras parser haber quitado
-            // el artículo y capitalizado ("antes de la clase" → "antes de
-            // Clase" tras normalizeProperNounsAfterArticles upstream). El
-            // requisito de inicial mayúscula evita strippear "antes de las"
-            // y otras frases temporales legítimas.
-            #"\bantes de(?:l)?\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\b"#,
+            #"\bantes de(?:l)?\s+(?:la|el|los|las|mi|tu|su)\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+\b"#,
             // "antes de [verbo]" sin artículo (ej. "antes de comer").
             #"\bantes de(?:l)?\s+(?:salir|llegar|empezar|comer|estudiar|trabajar|llamar|ir|dormir)\b"#,
         ]
-        for pattern in antesDePatterns {
+        for pattern in antesDePatternsInsensitive {
             result = result.replacingOccurrences(
                 of: pattern,
                 with: " ",
                 options: [.regularExpression, .caseInsensitive]
             )
         }
+        // Patrón case-SENSITIVE para el SUSTANTIVO: "[Aa]ntes de Capitalized"
+        // — captura el caso post-parser ("antes de la clase" → "antes de
+        // Clase" tras normalizeProperNounsAfterArticles upstream).
+        //
+        // El leading `[Aa]ntes` admite "antes" o "Antes" (porque el parser
+        // capitaliza la primera letra del título). El `[A-Z][a-z]+` para el
+        // sustantivo es case-SENSITIVE — eso garantiza que NO matchee
+        // "antes de echar" (lowercase) que es texto legítimo de una nota
+        // custom de reminder ("acuérdame 20 min antes de echar zapatillas").
+        if let regex = try? NSRegularExpression(
+            pattern: #"\b[Aa]ntes de(?:l)?\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\b"#,
+            options: []  // case-SENSITIVE en el sustantivo
+        ) {
+            let ns = result as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: " ")
+        }
 
         // 3b. Strip frases de "X minutos antes" / "media hora antes" /
         //     "una hora antes" / "cinco min antes" — son metadata de
         //     notificación, no parte del título.
+        //
+        //     IMPORTANTE: cada patrón consume OPCIONALMENTE el "de <resto>"
+        //     trailing — caso del user spec: "tengo partido tipo 3 acuérdame
+        //     20 min antes de echar las zapatillas a la mochila" debe quedar
+        //     como título "Partido" sin "20 min antes de echar las zapatillas
+        //     a la mochila" embebido. La nota se extrae en paralelo vía
+        //     `extractReminderOffsetAndNote` para anclarla al evento como
+        //     `reminderNotes[i]`.
+        // ORDEN CRÍTICO: primero aplicamos los patrones que CONSUMEN el
+        // trailing "de [nota]" (greedy hasta puntuación/fin), luego los
+        // patrones sin "de" para los casos sin nota custom.
+        //
+        // Por qué dividir en lugar de hacer `(...)?` opcional: el regex
+        // engine con grupo opcional prefería el match más corto, dejando
+        // "de echar las zapatillas..." intacto en el título. Dividir lo
+        // hace determinista.
         let offsetPatterns: [String] = [
+            // CON nota custom — "N min antes de X" → strip todo.
+            #"\b(con|y)?\s*(acu(é|e)rdame|recu(é|e)rdame|av(í|i)same|recordame|recu(é|e)rdate|acu(é|e)rdate)\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\s+de\s+[^.,;!?]+"#,
+            #"\b(con|y)?\s*(acu(é|e)rdame|recu(é|e)rdame|av(í|i)same|recordame|recu(é|e)rdate|acu(é|e)rdate)\s+(un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|media|medio)\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\s+de\s+[^.,;!?]+"#,
+            #"\b\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\s+de\s+[^.,;!?]+"#,
+            #"\b(un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|media|medio)\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\s+de\s+[^.,;!?]+"#,
+            // SIN nota custom — "N min antes" solo (catch-all para casos
+            // donde el reminder no tiene trailing "de X").
             #"\b(con|y)?\s*(acu(é|e)rdame|recu(é|e)rdame|av(í|i)same|recordame|recu(é|e)rdate|acu(é|e)rdate)\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#,
             #"\b(con|y)?\s*(acu(é|e)rdame|recu(é|e)rdame|av(í|i)same|recordame|recu(é|e)rdate|acu(é|e)rdate)\s+(un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|media|medio)\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#,
             #"\b\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\s+antes\b"#,
@@ -588,6 +623,76 @@ enum NovaActionNormalizer {
         }
 
         return nil
+    }
+
+    /// Extrae el offset Y la nota custom de una frase tipo "acuérdame N min
+    /// antes de [acción]". El user spec lo pide así: "tengo partido tipo 3
+    /// acuérdame 20 min antes de echar las zapatillas a la mochila" debe
+    /// resultar en:
+    ///   - evento "Partido" 15:00
+    ///   - reminderOffset = 20 min
+    ///   - reminderNote = "Echar las zapatillas a la mochila"
+    ///
+    /// Devuelve `(offsetMinutes, note?)`:
+    ///   - `offsetMinutes` es el offset detectado (igual que extractReminderOffset).
+    ///   - `note` es el texto LIMPIO después de "antes de" si existe, nil si no.
+    ///
+    /// Si no encuentra un patrón válido, devuelve `nil`. Si encuentra offset
+    /// pero NO hay "de X" después, devuelve `(offset, nil)` (compatible con
+    /// `extractReminderOffset` plano).
+    static func extractReminderOffsetAndNote(from text: String) -> (offsetMinutes: Int, note: String?)? {
+        guard let offset = extractReminderOffset(from: text) else { return nil }
+        let lower = text.lowercased()
+        let ns = lower as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        // Buscamos "N min/hora antes de <captura>" hasta fin o puntuación.
+        let patterns: [String] = [
+            #"\d{1,3}\s+(?:min|minutos?|h|hs|hrs?|horas?)\s+antes\s+de\s+(.+?)\s*(?:$|[.,;!?])"#,
+            #"(?:un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|media|medio)\s+(?:min|minutos?|h|hs|hrs?|horas?)\s+antes\s+de\s+(.+?)\s*(?:$|[.,;!?])"#,
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            guard let match = regex.firstMatch(in: lower, range: range),
+                  match.numberOfRanges >= 2,
+                  match.range(at: 1).location != NSNotFound else { continue }
+            // Usamos el TEXTO ORIGINAL (no lower) para preservar mayúsculas.
+            let originalNS = text as NSString
+            let rawNote = originalNS.substring(with: match.range(at: 1))
+            let cleanedNote = cleanReminderNote(rawNote)
+            return (offset, cleanedNote.isEmpty ? nil : cleanedNote)
+        }
+        return (offset, nil)
+    }
+
+    /// Limpia el texto del reminder note. Capitaliza primera letra, strippea
+    /// fillers comunes y artículos sueltos al inicio, conserva acentos y
+    /// preposiciones legítimas en medio. NO aplica las reglas duras de
+    /// cleanTitle (no es título de evento, es nota libre).
+    private static func cleanReminderNote(_ raw: String) -> String {
+        var note = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Quitar artículos sueltos al inicio si son redundantes: "de la
+        // mochila" → "La mochila" se vería raro, pero el "de" inicial puede
+        // ocurrir si el regex captura un overflow inesperado. Conservador:
+        // solo trim el "de " inicial duplicado.
+        if note.lowercased().hasPrefix("de ") {
+            note = String(note.dropFirst(3))
+        }
+        // Strip fillers comunes residuales.
+        let fillers = [#"\bpor favor\b"#, #"\bporfa(vor)?\b"#]
+        for pattern in fillers {
+            note = note.replacingOccurrences(of: pattern, with: " ",
+                                             options: [.regularExpression, .caseInsensitive])
+        }
+        // Collapse whitespace + trim final.
+        note = note.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }.joined(separator: " ")
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Capitalizar primera letra.
+        if let first = note.first, first.isLowercase {
+            note = first.uppercased() + note.dropFirst()
+        }
+        return note
     }
 
     // MARK: - Validation

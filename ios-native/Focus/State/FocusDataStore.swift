@@ -4337,21 +4337,29 @@ final class FocusDataStore: ObservableObject {
             inferredFlag = endResolution.inferredDuration
         }
 
-        // PASO 6: Offsets de aviso. Prioridad:
-        //   1. Si el backend devolvió `reminderOffsets`, usamos esos.
-        //   2. Si no, intentamos extraer del userText con el normalizer
-        //      ("X minutos antes" → [X]).
-        //   3. Si tampoco, queda nil → notif al startTime (comportamiento
-        //      legacy).
-        // Solo aplica cuando isReminder=true; para eventos comunes no
-        // programamos notif local todavía.
+        // PASO 6: Offsets de aviso + notas custom. Prioridad:
+        //   1. Si el backend devolvió `reminderOffsets`/`reminderNotes`,
+        //      usamos esos (single source of truth cuando hay IA).
+        //   2. Si no, intentamos extraer del userText con el normalizer.
+        //      Caso del user spec: "tengo partido tipo 3 acuérdame 20 min
+        //      antes de echar las zapatillas a la mochila" extrae offset=20
+        //      Y note="Echar las zapatillas a la mochila".
+        //   3. Si tampoco, queda nil → notif al startTime.
         let resolvedOffsets: [Int]?
+        let resolvedNotes: [String]?
         if let fromBackend = payload.reminderOffsets, !fromBackend.isEmpty {
             resolvedOffsets = fromBackend
-        } else if isReminderHint, let extracted = NovaActionNormalizer.extractReminderOffset(from: userText) {
-            resolvedOffsets = [extracted]
+            resolvedNotes = payload.reminderNotes
+        } else if let extracted = NovaActionNormalizer.extractReminderOffsetAndNote(from: userText) {
+            resolvedOffsets = [extracted.offsetMinutes]
+            if let note = extracted.note, !note.isEmpty {
+                resolvedNotes = [note]
+            } else {
+                resolvedNotes = nil
+            }
         } else {
             resolvedOffsets = nil
+            resolvedNotes = nil
         }
 
         return FocusEvent(
@@ -4363,7 +4371,8 @@ final class FocusDataStore: ObservableObject {
             location: payload.location,
             isReminder: isReminderFlag,
             inferredDuration: inferredFlag,
-            reminderOffsets: resolvedOffsets
+            reminderOffsets: resolvedOffsets,
+            reminderNotes: resolvedNotes
         )
     }
 
@@ -4432,6 +4441,12 @@ final class FocusDataStore: ObservableObject {
         }
         if let newOffsets = updates.reminderOffsets, !newOffsets.isEmpty {
             event.reminderOffsets = newOffsets
+            // Si el update trae notes paralelas, las preservamos. Si no, dejamos
+            // las viejas (puede que el backend solo actualice offsets sin tocar
+            // las notas existentes).
+            if let newNotes = updates.reminderNotes {
+                event.reminderNotes = newNotes
+            }
         }
     }
 
@@ -4498,6 +4513,7 @@ final class FocusDataStore: ObservableObject {
                     section: payload.section,
                     icon: payload.icon,
                     reminderOffsets: payload.reminderOffsets,
+                    reminderNotes: payload.reminderNotes,
                     location: payload.location,
                     notes: payload.notes
                 )
@@ -4947,13 +4963,22 @@ final class FocusDataStore: ObservableObject {
                 return "Ya tenía «\(title)» agendado a esa hora — no lo duplico."
             }
 
-            // PASO 5: Offsets ("X minutos antes") desde userText. Solo
-            // tiene sentido si es recordatorio.
+            // PASO 5: Offsets + notas custom desde userText.
+            //   "X min antes" → offset.
+            //   "X min antes de Y" → offset + note "Y" (acción concreta que
+            //   el user quiere recordar; va anclada al evento padre).
             let extractedOffsets: [Int]?
-            if isReminderHint, let mins = NovaActionNormalizer.extractReminderOffset(from: userText) {
-                extractedOffsets = [mins]
+            let extractedNotes: [String]?
+            if let detail = NovaActionNormalizer.extractReminderOffsetAndNote(from: userText) {
+                extractedOffsets = [detail.offsetMinutes]
+                if let note = detail.note, !note.isEmpty {
+                    extractedNotes = [note]
+                } else {
+                    extractedNotes = nil
+                }
             } else {
                 extractedOffsets = nil
+                extractedNotes = nil
             }
 
             let event = FocusEvent(
@@ -4964,7 +4989,8 @@ final class FocusDataStore: ObservableObject {
                 location: location,
                 isReminder: isReminderFlag,
                 inferredDuration: inferredFlag,
-                reminderOffsets: extractedOffsets
+                reminderOffsets: extractedOffsets,
+                reminderNotes: extractedNotes
             )
             addEvent(event)
             updateNovaContext(
@@ -4988,6 +5014,11 @@ final class FocusDataStore: ObservableObject {
                 let offsetLabel = mins < 60
                     ? "\(mins) min antes"
                     : (mins % 60 == 0 ? "\(mins/60) h antes" : "\(mins/60) h \(mins%60) min antes")
+                // Si hay nota custom, la mostramos para que el user vea
+                // que entendimos la acción concreta del reminder.
+                if let note = extractedNotes?.first, !note.isEmpty {
+                    return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel) y te aviso \(offsetLabel) para «\(note)»."
+                }
                 return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel) con aviso \(offsetLabel)."
             }
             return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel)."

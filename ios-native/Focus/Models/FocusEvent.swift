@@ -102,6 +102,16 @@ struct FocusEvent: Identifiable, Codable, Hashable {
     /// o nil y `isReminder == true`, se notifica al `startTime`. Permite
     /// múltiples avisos en el futuro (ej. `[60, 10]`) sin romper API.
     var reminderOffsets: [Int]?
+    /// Texto custom POR cada offset — array paralelo a `reminderOffsets`.
+    /// `reminderNotes[i]` es la acción concreta que el usuario quiere que
+    /// le recuerden (ej. "Echar las zapatillas a la mochila") para el
+    /// offset `reminderOffsets[i]`. Si es `nil`, "" o el array es más
+    /// corto que offsets, la notificación usa el título del evento como
+    /// texto genérico ("Recordatorio: Partido"). Permite el caso del user:
+    /// "tengo partido tipo 3 acuérdame 20 min antes de echar las zapatillas
+    /// a la mochila" → offset=20, note="Echar las zapatillas a la mochila"
+    /// anclado al evento "Partido" 15:00.
+    var reminderNotes: [String]?
 
     /// Origen efectivo del evento. Si `source` es nil (data legacy) lo
     /// tratamos como `.local`.
@@ -132,7 +142,8 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         lastSyncedAt: Date? = nil,
         isReminder: Bool? = nil,
         inferredDuration: Bool? = nil,
-        reminderOffsets: [Int]? = nil
+        reminderOffsets: [Int]? = nil,
+        reminderNotes: [String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -152,6 +163,16 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         self.isReminder = isReminder
         self.inferredDuration = inferredDuration
         self.reminderOffsets = reminderOffsets
+        self.reminderNotes = reminderNotes
+    }
+
+    /// Devuelve la nota custom para el offset en posición `index`. Maneja
+    /// arrays desincronizados (notes más corto que offsets) y strings vacíos.
+    /// Si no hay nota válida, devuelve `nil` → la notif usa el título genérico.
+    func reminderNote(at index: Int) -> String? {
+        guard let notes = reminderNotes, index < notes.count else { return nil }
+        let trimmed = notes[index].trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     var timeRangeLabel: String {

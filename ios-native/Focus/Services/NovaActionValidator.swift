@@ -251,6 +251,7 @@ enum NovaActionValidator {
             section: evt.section,
             icon: iconOut,
             reminderOffsets: evt.reminderOffsets,
+            reminderNotes: evt.reminderNotes,
             location: evt.location,
             notes: evt.notes
         )
@@ -441,6 +442,7 @@ enum NovaActionValidatorTests {
             section: nil,
             icon: icon,
             reminderOffsets: nil,
+            reminderNotes: nil,
             location: nil,
             notes: nil
         )

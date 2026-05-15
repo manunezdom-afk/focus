@@ -1510,6 +1510,135 @@ enum NovaActionNormalizerTests {
         check(label: "reminder absoluto: 1 intent (no split)",
               actual: regBlock.count, expected: 1, failures: &failures)
 
+        // ═══════════════════════════════════════════════════════════════
+        //  NAMED REMINDERS — Spec del usuario (2026-05-15):
+        //
+        //  "Le digo a Nova que tengo un partido tipo 3 y que me acuerde
+        //   20 min antes de echar las zapatillas a la mochila" debe crear:
+        //   - Evento "Partido" 15:00
+        //   - Reminder offset 20 min anclado al evento
+        //   - Reminder note = "Echar las zapatillas a la mochila"
+        //
+        //  La notif a las 14:40 mostrará la nota como title y el evento
+        //  padre como subtitle.
+        // ═══════════════════════════════════════════════════════════════
+
+        // 1. extractReminderOffsetAndNote — patrón principal del user
+        if let detail = NovaActionNormalizer.extractReminderOffsetAndNote(
+            from: "tengo partido tipo 3 acuérdame 20 min antes de echar las zapatillas a la mochila"
+        ) {
+            check(label: "named-1: offset = 20",
+                  actual: detail.offsetMinutes, expected: 20, failures: &failures)
+            check(label: "named-1: note = 'Echar las zapatillas a la mochila'",
+                  actual: detail.note,
+                  expected: "Echar las zapatillas a la mochila" as String?,
+                  failures: &failures)
+        } else {
+            failures.append("  ✗ named-1: extractReminderOffsetAndNote devolvió nil")
+        }
+
+        // 2. extractReminderOffsetAndNote — sin "de X" trailing
+        if let detail = NovaActionNormalizer.extractReminderOffsetAndNote(
+            from: "acuérdame 10 min antes"
+        ) {
+            check(label: "named-2: offset = 10",
+                  actual: detail.offsetMinutes, expected: 10, failures: &failures)
+            check(label: "named-2: note = nil (sin 'de X')",
+                  actual: detail.note == nil, expected: true, failures: &failures)
+        } else {
+            failures.append("  ✗ named-2: extractReminderOffsetAndNote devolvió nil")
+        }
+
+        // 3. extractReminderOffsetAndNote — número en palabra
+        if let detail = NovaActionNormalizer.extractReminderOffsetAndNote(
+            from: "recuérdame media hora antes de salir de casa"
+        ) {
+            check(label: "named-3: offset = 30 (media hora)",
+                  actual: detail.offsetMinutes, expected: 30, failures: &failures)
+            check(label: "named-3: note = 'Salir de casa'",
+                  actual: detail.note,
+                  expected: "Salir de casa" as String?,
+                  failures: &failures)
+        } else {
+            failures.append("  ✗ named-3: extractReminderOffsetAndNote devolvió nil")
+        }
+
+        // 4. cleanTitle del input completo — título limpio sin "antes de X"
+        check(
+            label: "named-4: cleanTitle 'tengo partido...' → 'Partido' limpio",
+            actual: NovaActionNormalizer.cleanTitle(
+                "tengo partido tipo 3 acuérdame 20 min antes de echar las zapatillas a la mochila"
+            ),
+            expected: "Partido",
+            failures: &failures
+        )
+
+        // 5. cleanTitle del input completo — el note NO debe quedar en title
+        let cleanedTitle5 = NovaActionNormalizer.cleanTitle(
+            "tengo partido tipo 3 acuérdame 20 min antes de echar las zapatillas a la mochila"
+        ).lowercased()
+        check(label: "named-5: title NO contiene 'echar'",
+              actual: cleanedTitle5.contains("echar"), expected: false, failures: &failures)
+        check(label: "named-5: title NO contiene 'zapatillas'",
+              actual: cleanedTitle5.contains("zapatillas"), expected: false, failures: &failures)
+        check(label: "named-5: title NO contiene 'antes'",
+              actual: cleanedTitle5.contains("antes"), expected: false, failures: &failures)
+
+        // 6. Caso parser → reminderNotes propagado a FocusEvent vía local
+        //    flow. Probamos creando el evento directamente y verificando
+        //    que la nota va al campo correcto.
+        do {
+            let event = FocusEvent(
+                title: "Partido",
+                startTime: Date().addingTimeInterval(3600),  // 1h en futuro
+                endTime: Date().addingTimeInterval(7200),
+                section: .personal,
+                reminderOffsets: [20],
+                reminderNotes: ["Echar las zapatillas a la mochila"]
+            )
+            check(label: "named-6: reminderOffsets [20]",
+                  actual: event.reminderOffsets ?? [], expected: [20], failures: &failures)
+            check(label: "named-6: reminderNote(at: 0) = 'Echar las zapatillas a la mochila'",
+                  actual: event.reminderNote(at: 0),
+                  expected: "Echar las zapatillas a la mochila" as String?,
+                  failures: &failures)
+            check(label: "named-6: reminderNote(at: 1) = nil (fuera de rango)",
+                  actual: event.reminderNote(at: 1) == nil,
+                  expected: true, failures: &failures)
+        }
+
+        // 7. cleanReminderNote helper — strip "de " redundante y capitalize
+        if let detail = NovaActionNormalizer.extractReminderOffsetAndNote(
+            from: "avísame 5 minutos antes de la reunión con el cliente"
+        ) {
+            // El "de la" inicial se trim porque la captura empieza después
+            // de "antes de " ya. La nota efectiva es "la reunión con el
+            // cliente" — el cleaner respeta artículos legítimos.
+            check(label: "named-7: offset = 5",
+                  actual: detail.offsetMinutes, expected: 5, failures: &failures)
+            // Aceptamos cualquier variación que contenga "reunión con el cliente"
+            let noteLower = (detail.note ?? "").lowercased()
+            check(label: "named-7: note contiene 'reunión con el cliente'",
+                  actual: noteLower.contains("reunión con el cliente"),
+                  expected: true, failures: &failures)
+        }
+
+        // 8. Compatibilidad backward — evento con offsets pero SIN notes
+        //    no debe crashear ni alucinar nota.
+        do {
+            let legacyEvent = FocusEvent(
+                title: "Ducharme",
+                startTime: Date().addingTimeInterval(3600),
+                endTime: Date().addingTimeInterval(3900),
+                section: .personal,
+                reminderOffsets: [10]
+                // sin reminderNotes
+            )
+            check(label: "named-8: backward-compat reminderNote(at: 0) = nil",
+                  actual: legacyEvent.reminderNote(at: 0) == nil,
+                  expected: true, failures: &failures)
+        }
+
         // ───── Validador post-IA ──────────────────────────────────────
         NovaActionValidatorTests.runAll(into: &failures)
 

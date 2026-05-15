@@ -367,6 +367,7 @@ struct BackendEventCreate {
     let section: String?         // "focus" / "evening"
     let icon: String?            // fitness_center | groups | …
     let reminderOffsets: [Int]?
+    let reminderNotes: [String]?  // texto custom por offset (paralelo)
     let location: String?
     let notes: String?
 }
@@ -387,6 +388,7 @@ struct BackendEventUpdates {
     let dateString: String?
     let location: String?
     let reminderOffsets: [Int]?
+    let reminderNotes: [String]?
 }
 
 /// Datos para crear una tarea.
@@ -485,12 +487,14 @@ private struct RawAction: Decodable {
         let section: String?
         let icon: String?
         let reminderOffsets: [Int]?
+        let reminderNotes: [String]?
         let location: String?
         let notes: String?
 
         enum CodingKeys: String, CodingKey {
             case title, time, endTime, date, section, icon
             case reminderOffsets
+            case reminderNotes
             case location, notes
         }
 
@@ -503,6 +507,7 @@ private struct RawAction: Decodable {
                 section: section,
                 icon: icon,
                 reminderOffsets: reminderOffsets,
+                reminderNotes: reminderNotes,
                 location: location,
                 notes: notes
             )
@@ -516,10 +521,11 @@ private struct RawAction: Decodable {
         let date: String?
         let location: String?
         let reminderOffsets: [Int]?
+        let reminderNotes: [String]?
 
         init() {
             title = nil; time = nil; endTime = nil; date = nil
-            location = nil; reminderOffsets = nil
+            location = nil; reminderOffsets = nil; reminderNotes = nil
         }
 
         init(from decoder: Decoder) throws {
@@ -530,10 +536,11 @@ private struct RawAction: Decodable {
             self.date = try c.decodeIfPresent(String.self, forKey: .date)
             self.location = try c.decodeIfPresent(String.self, forKey: .location)
             self.reminderOffsets = try c.decodeIfPresent([Int].self, forKey: .reminderOffsets)
+            self.reminderNotes = try c.decodeIfPresent([String].self, forKey: .reminderNotes)
         }
 
         enum CodingKeys: String, CodingKey {
-            case title, time, endTime, date, location, reminderOffsets
+            case title, time, endTime, date, location, reminderOffsets, reminderNotes
         }
 
         func toModel() -> BackendEventUpdates {
@@ -543,7 +550,8 @@ private struct RawAction: Decodable {
                 endTimeString: endTime,
                 dateString: date,
                 location: location,
-                reminderOffsets: reminderOffsets
+                reminderOffsets: reminderOffsets,
+                reminderNotes: reminderNotes
             )
         }
     }

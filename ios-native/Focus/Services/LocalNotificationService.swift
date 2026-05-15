@@ -123,17 +123,37 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
 
         let center = UNUserNotificationCenter.current()
         let cleanTitle = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayTitle = cleanTitle.isEmpty ? "Focus" : cleanTitle
+
+        // Mapeamos cada fireDate a su offset original para poder anclar
+        // la nota custom (reminderNotes[i] está alineado a reminderOffsets[i]).
+        let noteForFire = noteMapForFires(event: event, fireDates: fireDates)
 
         for (index, fireDate) in fireDates.enumerated() {
             let content = UNMutableNotificationContent()
-            // Title = título del evento (limpio). Es lo más prominente que
-            // muestra iOS en la lock screen / banner.
-            content.title = cleanTitle.isEmpty ? "Focus" : cleanTitle
-            // Subtitle dinámico: "En X min" si la notif dispara antes del
-            // evento; "Empieza a las HH:MM" si dispara al mismo tiempo.
-            content.subtitle = subtitle(forFireDate: fireDate, eventStart: event.startTime)
+            // Si hay nota custom para esta fire date, ESA es el título de la
+            // notif (la ACCIÓN concreta que el user quiere recordar). El
+            // título del evento pasa al subtitle como contexto. Caso user:
+            // "tengo partido 3 PM acuérdame 20 min antes de echar zapatillas":
+            //   - title = "Echar las zapatillas a la mochila"
+            //   - subtitle = "Partido — En 20 min"
+            //   - body = location si la hay
+            // Si NO hay nota custom → comportamiento legacy:
+            //   - title = título del evento (ej. "Ducharme")
+            //   - subtitle = "En 10 min"
+            //   - body = location
+            // Dictionary[Int: String?] devuelve String?? por nested optional;
+            // doble flatMap → String? con la nota efectiva.
+            let note = noteForFire[index].flatMap { $0 }
+            if let note = note, !note.isEmpty {
+                content.title = note
+                content.subtitle = "\(displayTitle) — \(subtitle(forFireDate: fireDate, eventStart: event.startTime))"
+            } else {
+                content.title = displayTitle
+                content.subtitle = subtitle(forFireDate: fireDate, eventStart: event.startTime)
+            }
             // Body = ubicación (si la hay) o vacío. NO repetimos el título
-            // porque ya está en `content.title`.
+            // porque ya está en `content.title` o `subtitle`.
             if let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines),
                !location.isEmpty {
                 content.body = location
@@ -186,6 +206,27 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
             }
             .filter { $0 > now }
             .sorted()
+    }
+
+    /// Mapea cada índice de la lista de fireDates (ya filtradas + ordenadas)
+    /// al note custom correspondiente. Por la complejidad de filtrar
+    /// (futuras) y reordenar, mapeamos cada fireDate de vuelta al offset
+    /// original y luego al note en `reminderNotes[i]`. Si el evento no
+    /// tiene offsets ni notas, retorna [:] vacío.
+    private func noteMapForFires(event: FocusEvent, fireDates: [Date]) -> [Int: String?] {
+        guard let offsets = event.reminderOffsets, !offsets.isEmpty else { return [:] }
+        var map: [Int: String?] = [:]
+        for (fireIdx, fireDate) in fireDates.enumerated() {
+            let deltaMinutes = Int(round(event.startTime.timeIntervalSince(fireDate) / 60))
+            // Buscar offset original que matchee ese delta. Si hay duplicados
+            // (raro), tomamos el primero.
+            if let offsetIdx = offsets.firstIndex(of: deltaMinutes) {
+                map[fireIdx] = event.reminderNote(at: offsetIdx)
+            } else {
+                map[fireIdx] = nil
+            }
+        }
+        return map
     }
 
     /// Genera el subtitle según la relación entre el fireDate y el startTime

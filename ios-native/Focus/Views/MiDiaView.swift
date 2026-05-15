@@ -2499,6 +2499,13 @@ private struct TimelineEventRow: View {
         return extraCount > 0 ? "\(base) (+\(extraCount))" : base
     }
 
+    /// Texto custom del primer reminder (si existe). Usado para mostrar la
+    /// acción concreta debajo del chip cuando el user dijo algo como
+    /// "acuérdame 20 min antes de echar las zapatillas a la mochila".
+    private var primaryReminderNote: String? {
+        event.reminderNote(at: 0)
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
             // Hora a la izquierda
@@ -2586,19 +2593,32 @@ private struct TimelineEventRow: View {
                     // Misma regla para eventos puntuales con offset y eventos
                     // con duración con offset.
                     if let chipLabel = reminderChipLabel {
-                        HStack(spacing: 4) {
-                            Image(systemName: "bell.fill")
-                                .font(.system(size: density == .spacious ? 11 : 10, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.sectionReminder)
-                            Text(chipLabel)
-                                .font(density.metaFont)
-                                .foregroundStyle(Theme.Colors.sectionReminder)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "bell.fill")
+                                    .font(.system(size: density == .spacious ? 11 : 10, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.sectionReminder)
+                                Text(chipLabel)
+                                    .font(density.metaFont)
+                                    .foregroundStyle(Theme.Colors.sectionReminder)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule().fill(Theme.Colors.sectionReminder.opacity(0.12))
+                            )
+                            // Nota custom debajo del chip si el user pidió
+                            // un reminder con acción concreta (ej. "echar
+                            // las zapatillas a la mochila"). Wrap multilinea
+                            // si la nota es larga — el card crece.
+                            if let note = primaryReminderNote {
+                                Text(note)
+                                    .font(density.metaFont)
+                                    .foregroundStyle(Theme.Colors.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.leading, 2)
+                            }
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule().fill(Theme.Colors.sectionReminder.opacity(0.12))
-                        )
                     }
 
                     // Contador live solo si: evento EN CURSO o empieza en
