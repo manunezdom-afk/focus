@@ -2382,7 +2382,7 @@ struct MiDiaView: View {
                                 event: event,
                                 isLast: idx == shown.count - 1 && hiddenCount == 0,
                                 density: density,
-                                isNext: idx == 0
+                                isNext: event.id == store.nextBlock?.id
                             )
                         }
                         .contextMenu {
@@ -2718,9 +2718,14 @@ private struct TimelineEventRow: View {
                     .frame(width: density.sidebarWidth)
 
                 VStack(alignment: .leading, spacing: density == .spacious ? 8 : 6) {
-                    // Badge "PRÓXIMO" + título. El badge solo aparece en el
-                    // primer evento upcoming del día — reemplaza la antigua
-                    // ProximoBloqueCard sin duplicar el contenido.
+                    // Badges de estado. Solo uno puede estar visible a la vez.
+                    // • PRÓXIMO  — siguiente bloque real que aún no empezó.
+                    // • EN CURSO — bloque actualmente en progreso (isNow).
+                    // • TERMINADO — bloque cuyo end (o start si es puntual)
+                    //   ya pasó. Color muted: es info contextual, no urgente.
+                    let effectiveEnd = event.endTime ?? event.startTime
+                    let hasPassed = effectiveEnd < Date()
+
                     if isNext && !event.isNow {
                         Text("PRÓXIMO")
                             .font(.system(size: 10, weight: .bold))
@@ -2730,6 +2735,11 @@ private struct TimelineEventRow: View {
                         Text("EN CURSO")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(Theme.Colors.success)
+                            .tracking(1.2)
+                    } else if hasPassed {
+                        Text("TERMINADO")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.textTertiary)
                             .tracking(1.2)
                     }
                     Text(event.title)
