@@ -110,6 +110,17 @@ struct CalendarioView: View {
             // que solo presente cuando realmente entró acá.
             .task(id: nav.selectedTab) {
                 if nav.selectedTab == .calendario {
+                    // Consumir una fecha pendiente (ej. usuario tocó el
+                    // preview "Mañana" de Mi Día). Salto inmediato al día
+                    // pedido + modo `.day` para que el usuario aterrice en
+                    // la agenda concreta y no en el selector de semana.
+                    if let pending = nav.pendingCalendarDate {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            selectedDate = Calendar.current.startOfDay(for: pending)
+                            viewMode = .day
+                        }
+                        nav.pendingCalendarDate = nil
+                    }
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     coachMarks.presentIfNeeded(.calendar)
                 }

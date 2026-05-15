@@ -62,6 +62,10 @@ final class NavigationCoordinator: ObservableObject {
     /// Mensaje pendiente para enviar a Nova cuando se abra Chat. Se consume y
     /// limpia en `NovaView.onAppear`.
     @Published var pendingNovaPrompt: String? = nil
+    /// Fecha pendiente a la que el Calendario debe saltar al cargarse. La
+    /// setea quien navegue (ej. el preview "Mañana" de Mi Día → mañana en
+    /// calendario) y `CalendarioView` la consume y la limpia en su `.task`.
+    @Published var pendingCalendarDate: Date? = nil
 
     /// Lleva al usuario a la tab Nova, opcionalmente seteando el segmento y un
     /// prompt inicial. Si se pasa un prompt no nulo, Nova arranca en .chat.
@@ -74,6 +78,17 @@ final class NavigationCoordinator: ObservableObject {
         }
         withAnimation(.easeInOut(duration: 0.28)) {
             selectedTab = .nova
+        }
+        HapticManager.shared.tick()
+    }
+
+    /// Lleva al usuario a la tab Calendario seleccionando una fecha concreta.
+    /// `CalendarioView` consume `pendingCalendarDate` y lo limpia para que el
+    /// usuario pueda navegar después con normalidad.
+    func openCalendar(on date: Date) {
+        pendingCalendarDate = Calendar.current.startOfDay(for: date)
+        withAnimation(.easeInOut(duration: 0.28)) {
+            selectedTab = .calendario
         }
         HapticManager.shared.tick()
     }

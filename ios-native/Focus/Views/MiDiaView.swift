@@ -62,7 +62,9 @@ struct MiDiaView: View {
     }
 
     /// Eventos del día siguiente del usuario. Demo NO tiene datos para
-    /// mañana — mostrarlos confundiría, así que devolvemos vacío.
+    /// mañana — mostrarlos confundiría, así que devolvemos vacío. Filtramos
+    /// cancelados defensivamente (en práctica eliminar = borrar físicamente,
+    /// pero respetamos el contrato del enum) y ordenamos por hora.
     private var tomorrowEvents: [FocusEvent] {
         guard store.hasUserEvents else { return [] }
         let cal = Calendar.current
@@ -70,29 +72,16 @@ struct MiDiaView: View {
             return []
         }
         return store.eventsFor(date: tomorrow)
+            .filter { $0.status != .cancelled }
     }
 
-    /// Bloques de hoy que aún no terminaron — los que están "por venir".
-    /// Usado para detectar cuándo el día está terminando.
-    private var remainingTodayEvents: [FocusEvent] {
-        let now = Date()
-        return displayEvents.filter { event in
-            let end = event.endTime ?? event.startTime
-            return end >= now
-        }
-    }
-
-    /// Preview de mañana: solo aparece de noche real (≥20h, antes de
-    /// medianoche) cuando el día está prácticamente terminado (0–2 bloques
-    /// aún por venir hoy) y hay al menos un evento mañana. Es un guiño
-    /// sutil, no una sección activa. Pasada la medianoche NO aparece —
-    /// el "hoy" del usuario rolló de calendario y mostrar "tomorrow" en
-    /// ese contexto confunde.
+    /// Preview de mañana: aparece siempre que el usuario tenga al menos un
+    /// evento real agendado para el día siguiente. El usuario necesita
+    /// feedback inmediato cuando Nova agenda algo "para mañana" — antes lo
+    /// gatebamos a horario nocturno y eso ocultaba la confirmación visual
+    /// si el evento se creaba de día.
     private var shouldShowTomorrowPreview: Bool {
-        let hour = Calendar.current.component(.hour, from: Date())
-        guard hour >= 20 else { return false }
-        guard remainingTodayEvents.count <= 2 else { return false }
-        return !tomorrowEvents.isEmpty
+        !tomorrowEvents.isEmpty
     }
 
     var body: some View {
@@ -2447,64 +2436,103 @@ struct MiDiaView: View {
 
     // MARK: - Preview "Para mañana"
 
-    /// Vista previa muy sutil de los eventos de mañana — solo aparece de
-    /// noche cuando el día ya está terminando. Diseñada para sentirse
-    /// como un "recordatorio amable" y NO como otra sección activa:
-    /// header en lowercase con sunrise glyph, filas en colores muted,
-    /// fondo en tinte sutil con borde apenas visible.
+    /// Cantidad máxima de eventos de mañana visibles en la preview. Más
+    /// que esto compite con los bloques de hoy y la sección deja de
+    /// sentirse como "vista previa" — pasa a "segunda agenda". Ver
+    /// `tomorrowExtraCount` para el cómputo del "y X más".
+    private static let tomorrowPreviewLimit: Int = 2
+
+    /// Eventos de mañana efectivamente renderizados (cap 2).
+    private var tomorrowShownEvents: [FocusEvent] {
+        Array(tomorrowEvents.prefix(Self.tomorrowPreviewLimit))
+    }
+
+    /// Cantidad de eventos de mañana que NO entran en la preview — alimenta
+    /// el texto "y N más". 0 si todos los eventos caben en `prefix(2)`.
+    private var tomorrowExtraCount: Int {
+        max(0, tomorrowEvents.count - Self.tomorrowPreviewLimit)
+    }
+
+    /// Vista previa pequeña y elegante de los eventos de mañana. Aparece
+    /// siempre que haya al menos un evento agendado para el día siguiente
+    /// (cualquier hora del día actual) — el usuario necesita confirmación
+    /// visual inmediata cuando Nova agenda algo "para mañana".
+    ///
+    /// Diseño:
+    /// - Header tipográfico, sin card hero — el contenedor es un tinte
+    ///   azul muy suave con borde apenas visible, NO una card sólida.
+    /// - Máximo 2 filas + "y N más" en azul acento (insinúa que es
+    ///   tappable). Toda la sección abre el Calendario en la fecha de
+    ///   mañana al tocarla.
+    /// - Tipografía un punto debajo del timeline real para que no compita
+    ///   con la jerarquía de "hoy".
     @ViewBuilder
     private var nextDayPreviewSection: some View {
         if shouldShowTomorrowPreview {
-            let shown = Array(tomorrowEvents.prefix(3))
-            let extra = tomorrowEvents.count - shown.count
-
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm + 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: "sunrise.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.textTertiary)
-                    Text("Mañana")
-                        .font(Theme.Typography.subheadEmphasized)
-                        .foregroundStyle(Theme.Colors.textTertiary)
-                    Spacer()
-                    Text(tomorrowEvents.count == 1
-                         ? "1 bloque"
-                         : "\(tomorrowEvents.count) bloques")
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.Colors.textQuaternary)
-                        .tracking(0.3)
+            Button {
+                let cal = Calendar.current
+                if let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) {
+                    nav.openCalendar(on: tomorrow)
                 }
-                .padding(.horizontal, Theme.Spacing.xl)
-
-                VStack(spacing: Theme.Spacing.xs) {
-                    ForEach(shown) { event in
-                        tomorrowPreviewRow(event)
-                    }
-                    if extra > 0 {
-                        Text(extra == 1 ? "y 1 más" : "y \(extra) más")
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.textTertiary)
-                            .padding(.top, 4)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                }
-                .padding(Theme.Spacing.md + 2)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                        .fill(Theme.Colors.surfaceTinted.opacity(0.55))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                                .strokeBorder(Theme.Colors.border.opacity(0.45), lineWidth: 0.5)
-                        )
-                )
-                .padding(.horizontal, Theme.Spacing.xl)
+            } label: {
+                nextDayPreviewBody
             }
+            .buttonStyle(.plain)
+            .padding(.horizontal, Theme.Spacing.xl)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Abre el calendario en el día de mañana")
+            .transition(.opacity.combined(with: .move(edge: .top)))
         }
     }
 
-    /// Fila individual del preview de mañana. Tipografía un punto más
-    /// chica que el timeline real + colores muted para que se vea
-    /// claramente como "vista previa", no como un bloque accionable.
+    /// Contenido visual del preview — separado para que el Button padre
+    /// solo aplique tap/hint sin alterar la jerarquía.
+    private var nextDayPreviewBody: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm + 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "sunrise.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.textTertiary)
+                Text("Mañana")
+                    .font(Theme.Typography.subheadEmphasized)
+                    .foregroundStyle(Theme.Colors.textTertiary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.focusAccent.opacity(0.65))
+            }
+
+            VStack(spacing: Theme.Spacing.xs) {
+                ForEach(tomorrowShownEvents) { event in
+                    tomorrowPreviewRow(event)
+                }
+                if tomorrowExtraCount > 0 {
+                    Text(tomorrowExtraCount == 1
+                         ? "y 1 más"
+                         : "y \(tomorrowExtraCount) más")
+                        .font(Theme.Typography.captionEmphasized)
+                        .foregroundStyle(Theme.Colors.focusAccent)
+                        .padding(.top, 4)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+        }
+        .padding(.vertical, Theme.Spacing.md)
+        .padding(.horizontal, Theme.Spacing.md + 2)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .fill(Theme.Colors.surfaceTinted.opacity(0.55))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                        .strokeBorder(Theme.Colors.border.opacity(0.45), lineWidth: 0.5)
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous))
+    }
+
+    /// Fila individual del preview. Si el evento es punto en el tiempo
+    /// (recordatorio o duración inferida) mostramos solo la hora; si no,
+    /// la hora de inicio. Si el título es muy largo, se trunca con `…`.
     private func tomorrowPreviewRow(_ event: FocusEvent) -> some View {
         HStack(spacing: Theme.Spacing.md) {
             Text(DateFormatters.hourMinute.string(from: event.startTime))
@@ -2518,6 +2546,7 @@ struct MiDiaView: View {
                 .font(Theme.Typography.subhead)
                 .foregroundStyle(Theme.Colors.textSecondary)
                 .lineLimit(1)
+                .truncationMode(.tail)
             Spacer()
         }
         .padding(.vertical, 3)
