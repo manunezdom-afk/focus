@@ -32,16 +32,16 @@ enum NovaActionNormalizerTests {
         )
 
         check(
-            label: "cleanTitle: 'salir a buscar a mi hermano en 5 min' → 'Salir a buscar a mi hermano'",
+            label: "cleanTitle: 'salir a buscar a mi hermano en 5 min' → 'Buscar a mi hermano'",
             actual: NovaActionNormalizer.cleanTitle("salir a buscar a mi hermano en 5 min"),
-            expected: "Salir a buscar a mi hermano",
+            expected: "Buscar a mi hermano",
             failures: &failures
         )
 
         check(
-            label: "cleanTitle: 'ir a buscar a mi hermano en 10 minutos más' → 'Ir a buscar a mi hermano'",
+            label: "cleanTitle: 'ir a buscar a mi hermano en 10 minutos más' → 'Buscar a mi hermano'",
             actual: NovaActionNormalizer.cleanTitle("ir a buscar a mi hermano en 10 minutos más"),
-            expected: "Ir a buscar a mi hermano",
+            expected: "Buscar a mi hermano",
             failures: &failures
         )
 
@@ -85,9 +85,9 @@ enum NovaActionNormalizerTests {
 
         // Prefijos coloquiales adicionales (paso 3c expandido).
         check(
-            label: "cleanTitle: 'Necesito ir al dentista' → 'Ir al dentista'",
+            label: "cleanTitle: 'Necesito ir al dentista' → 'Dentista'",
             actual: NovaActionNormalizer.cleanTitle("Necesito ir al dentista"),
-            expected: "Ir al dentista",
+            expected: "Dentista",
             failures: &failures
         )
 
@@ -164,9 +164,9 @@ enum NovaActionNormalizerTests {
 
         // Sanity: la frase "X minutos antes" se va del título.
         check(
-            label: "cleanTitle: 'salir a buscar a mi hermano a las 10 acuérdame 5 minutos antes' → 'Salir a buscar a mi hermano'",
+            label: "cleanTitle: 'salir a buscar a mi hermano a las 10 acuérdame 5 minutos antes' → 'Buscar a mi hermano'",
             actual: NovaActionNormalizer.cleanTitle("salir a buscar a mi hermano a las 10 acuérdame 5 minutos antes"),
-            expected: "Salir a buscar a mi hermano",
+            expected: "Buscar a mi hermano",
             failures: &failures
         )
 
@@ -174,6 +174,102 @@ enum NovaActionNormalizerTests {
             label: "cleanTitle: 'reunión con Juan a las 3 recuérdame media hora antes' → 'Reunión con Juan'",
             actual: NovaActionNormalizer.cleanTitle("reunión con Juan a las 3 recuérdame media hora antes"),
             expected: "Reunión con Juan",
+            failures: &failures
+        )
+
+        // ───── 8 CASOS OBLIGATORIOS BETA (2026-05-15) ──────────────────
+        // Bugs reportados por usuario: Nova guardaba frases crudas como
+        // título de evento. Esta tanda valida que el normalizer extrae
+        // un título humano y limpio en cada uno de los 8 inputs reales.
+
+        // Test 1: cumpleaños de Urrutia — sentence completa
+        check(
+            label: "BETA-1: 'Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes' → 'Cumpleaños de Urrutia'",
+            actual: NovaActionNormalizer.cleanTitle("Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes"),
+            expected: "Cumpleaños de Urrutia",
+            failures: &failures
+        )
+
+        // Test 1b: backend devolvió solo "Salir" — preferBetterTitle debe
+        // reextraer del userText completo.
+        check(
+            label: "BETA-1b: preferBetterTitle(backend='Salir', user='Tengo que salir al cumpleaños...') → 'Cumpleaños de Urrutia'",
+            actual: NovaActionNormalizer.preferBetterTitle(
+                backendCleaned: "Salir",
+                userText: "Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes"
+            ),
+            expected: "Cumpleaños de Urrutia",
+            failures: &failures
+        )
+
+        // Test 2: buscar a mi polola — sentence con doble hora y location
+        check(
+            label: "BETA-2: 'Tengo que ir a buscar a mi polola tipo 6 a su casa para estar tipo 6:30 acá acuérdame 20 minutos antes' → 'Buscar a mi polola'",
+            actual: NovaActionNormalizer.cleanTitle("Tengo que ir a buscar a mi polola tipo 6 a su casa para estar tipo 6:30 acá acuérdame 20 minutos antes"),
+            expected: "Buscar a mi polola",
+            failures: &failures
+        )
+
+        // Test 3: agendar mañana
+        check(
+            label: "BETA-3: 'Para mañana quiero que agendes estudiar historia a las 12' → 'Estudiar historia'",
+            actual: NovaActionNormalizer.cleanTitle("Para mañana quiero que agendes estudiar historia a las 12"),
+            expected: "Estudiar historia",
+            failures: &failures
+        )
+
+        // Test 4: recordatorio simple
+        check(
+            label: "BETA-4: 'Recuérdame llamar a mi papá a las 8' → 'Llamar a mi papá'",
+            actual: NovaActionNormalizer.cleanTitle("Recuérdame llamar a mi papá a las 8"),
+            expected: "Llamar a mi papá",
+            failures: &failures
+        )
+
+        // Test 5: "luego tengo que seguir + gerund"
+        check(
+            label: "BETA-5: 'Luego tengo que seguir trabajando en Focus' → 'Trabajar en Focus'",
+            actual: NovaActionNormalizer.cleanTitle("Luego tengo que seguir trabajando en Focus"),
+            expected: "Trabajar en Focus",
+            failures: &failures
+        )
+
+        // Test 6: motion + médico — debería caer en eventoPrefixPattern 4d
+        check(
+            label: "BETA-6: 'Tengo que salir al médico tipo 5' → 'Médico'",
+            actual: NovaActionNormalizer.cleanTitle("Tengo que salir al médico tipo 5"),
+            expected: "Médico",
+            failures: &failures
+        )
+
+        // Test 7: ya viene limpio el sustantivo, solo strippear hora/recordatorio
+        check(
+            label: "BETA-7: 'Cumpleaños de Urrutia tipo 9 acuérdame una hora antes' → 'Cumpleaños de Urrutia'",
+            actual: NovaActionNormalizer.cleanTitle("Cumpleaños de Urrutia tipo 9 acuérdame una hora antes"),
+            expected: "Cumpleaños de Urrutia",
+            failures: &failures
+        )
+
+        // Test 8: title ya viene en formato correcto + hora numérica
+        check(
+            label: "BETA-8: 'Buscar a mi polola a las 6' → 'Buscar a mi polola'",
+            actual: NovaActionNormalizer.cleanTitle("Buscar a mi polola a las 6"),
+            expected: "Buscar a mi polola",
+            failures: &failures
+        )
+
+        // EXTRA: regresiones puntuales del fix anterior (tipo + word)
+        check(
+            label: "BETA-extra: 'salir al cumpleaños tipo nueve' → 'Cumpleaños' (verifica tipo+word ya no es bug)",
+            actual: NovaActionNormalizer.cleanTitle("salir al cumpleaños tipo nueve"),
+            expected: "Cumpleaños",
+            failures: &failures
+        )
+
+        check(
+            label: "BETA-extra: 'tipo seis' como hora cuelga sola → '' (collapse vacío después)",
+            actual: NovaActionNormalizer.cleanTitle("evento tipo seis"),
+            expected: "Evento",
             failures: &failures
         )
 
@@ -761,7 +857,7 @@ enum NovaActionNormalizerTests {
 
         // Caso real iPhone: "necesito ir a buscar a mi hermano a las tres"
         // Antes: Nova preguntaba "¿Cuándo?" con título "Buscar a Mi hermano a Tres".
-        // Esperado: "Ir a buscar a mi hermano" hoy 15:00, sin preguntar.
+        // Esperado: "Buscar a mi hermano" hoy 15:00, sin preguntar.
         let wordBug = runPipeline("necesito ir a buscar a mi hermano a las tres")
         check(
             label: "wordBug: 1 intent (no clarify)",
@@ -769,7 +865,7 @@ enum NovaActionNormalizerTests {
         )
         if let first = wordBug.first {
             check(label: "wordBug kind ≠ clarify", actual: first.kind != .clarify, expected: true, failures: &failures)
-            check(label: "wordBug title = 'Ir a buscar a mi hermano'", actual: first.title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "wordBug title = 'Buscar a mi hermano'", actual: first.title, expected: "Buscar a mi hermano", failures: &failures)
             check(label: "wordBug hour 15", actual: first.hour, expected: 15, failures: &failures)
             check(label: "wordBug HOY", actual: first.day, expected: .today, failures: &failures)
         }
@@ -856,7 +952,7 @@ enum NovaActionNormalizerTests {
             check(label: "block2 hour 18", actual: first.hour, expected: 18, failures: &failures)
             check(label: "block2 minute 30", actual: first.minute, expected: 30, failures: &failures)
             check(label: "block2 offset = 40 min", actual: first.reminderOffsetMinutes, expected: 40, failures: &failures)
-            check(label: "block2 title sin 'acuérdame'", actual: first.title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "block2 title sin 'acuérdame'", actual: first.title, expected: "Buscar a mi hermano", failures: &failures)
         }
 
         // Bloque 3: "reunión con Juan de 5 a 6 acuérdame 15 minutos antes"
@@ -885,8 +981,8 @@ enum NovaActionNormalizerTests {
         let complex = runPipeline("tengo que ir a buscar a mi hermano en 20 min luego salir a jugar fútbol a las 10 y llevar la pelota a las 11")
         check(label: "complex: 3 intents", actual: complex.count, expected: 3, failures: &failures)
         if complex.count == 3 {
-            check(label: "complex[0] title 'Ir a buscar a mi hermano'",
-                  actual: complex[0].title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "complex[0] title 'Buscar a mi hermano'",
+                  actual: complex[0].title, expected: "Buscar a mi hermano", failures: &failures)
             check(label: "complex[1] title 'Salir a jugar fútbol'",
                   actual: complex[1].title, expected: "Salir a jugar fútbol", failures: &failures)
             // Hora 10 → 10 AM si tests corren de día, 22 PM si corren de
@@ -961,8 +1057,8 @@ enum NovaActionNormalizerTests {
         if let first = caso3.first {
             check(label: "caso3 NO es clarify",
                   actual: first.kind != .clarify, expected: true, failures: &failures)
-            check(label: "caso3 title 'Ir a buscar a mi hermano'",
-                  actual: first.title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "caso3 title 'Buscar a mi hermano'",
+                  actual: first.title, expected: "Buscar a mi hermano", failures: &failures)
             check(label: "caso3 hour 15", actual: first.hour, expected: 15, failures: &failures)
             check(label: "caso3 HOY", actual: first.day, expected: .today, failures: &failures)
         }
@@ -974,8 +1070,8 @@ enum NovaActionNormalizerTests {
         let caso4 = runPipeline("tengo que ir a buscar a mi hermano en 20 min luego salir a jugar fútbol a las 10 y llevar la pelota a las 11")
         check(label: "caso4: 3 intents", actual: caso4.count, expected: 3, failures: &failures)
         if caso4.count == 3 {
-            check(label: "caso4[0] title 'Ir a buscar a mi hermano'",
-                  actual: caso4[0].title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "caso4[0] title 'Buscar a mi hermano'",
+                  actual: caso4[0].title, expected: "Buscar a mi hermano", failures: &failures)
             check(label: "caso4[1] title 'Salir a jugar fútbol'",
                   actual: caso4[1].title, expected: "Salir a jugar fútbol", failures: &failures)
             let caso4Hour1 = caso4[1].hour ?? -1
@@ -1184,8 +1280,8 @@ enum NovaActionNormalizerTests {
         if let first = u1.first {
             check(label: "user-caso-1: kind ≠ clarify",
                   actual: first.kind != .clarify, expected: true, failures: &failures)
-            check(label: "user-caso-1: title 'Ir a buscar a mi hermano'",
-                  actual: first.title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "user-caso-1: title 'Buscar a mi hermano'",
+                  actual: first.title, expected: "Buscar a mi hermano", failures: &failures)
             check(label: "user-caso-1: hour 15", actual: first.hour, expected: 15, failures: &failures)
             check(label: "user-caso-1: today", actual: first.day, expected: .today, failures: &failures)
         }
@@ -1246,8 +1342,8 @@ enum NovaActionNormalizerTests {
         check(label: "user-caso-5: 3 intents",
               actual: u5.count, expected: 3, failures: &failures)
         if u5.count == 3 {
-            check(label: "user-caso-5: [0] title 'Ir a buscar a mi hermano'",
-                  actual: u5[0].title, expected: "Ir a buscar a mi hermano", failures: &failures)
+            check(label: "user-caso-5: [0] title 'Buscar a mi hermano'",
+                  actual: u5[0].title, expected: "Buscar a mi hermano", failures: &failures)
             check(label: "user-caso-5: [1] title 'Salir a jugar fútbol'",
                   actual: u5[1].title, expected: "Salir a jugar fútbol", failures: &failures)
             check(label: "user-caso-5: [2] title 'Llevar la pelota'",
@@ -2118,7 +2214,7 @@ enum NovaActionNormalizerTests {
             section: .personal
         )
         let mockBuscarHermano = FocusEvent(
-            title: "Ir a buscar a mi hermano",
+            title: "Buscar a mi hermano",
             startTime: Date().addingTimeInterval(60 * 60 * 2), // +2h
             section: .personal
         )
@@ -2159,11 +2255,11 @@ enum NovaActionNormalizerTests {
             print(msg); failures.append(msg)
         }
 
-        // Match parcial: "buscar hermano" → "Ir a buscar a mi hermano"
+        // Match parcial: "buscar hermano" → "Buscar a mi hermano"
         if let m = NovaResponder.findEventByApproxTitle(
             "buscar hermano", in: mockEvents
         ) {
-            check(label: "fuzzy: 'buscar hermano' → Ir a buscar a mi hermano",
+            check(label: "fuzzy: 'buscar hermano' → Buscar a mi hermano",
                   actual: m.id, expected: mockBuscarHermano.id, failures: &failures)
         } else {
             let msg = "  ✗ fuzzy: 'buscar hermano' no matcheó"
@@ -2413,10 +2509,10 @@ enum NovaActionNormalizerTests {
         check(label: "reorden runPipeline: 2 intents",
               actual: reorderResults.count, expected: 2, failures: &failures)
         if reorderResults.count == 2 {
-            // Intent 1: "Ir a buscar a mi hermano" hora 14 (PM colloquial)
-            check(label: "reorden[0] title 'Ir a buscar a mi hermano'",
+            // Intent 1: "Buscar a mi hermano" hora 14 (PM colloquial)
+            check(label: "reorden[0] title 'Buscar a mi hermano'",
                   actual: reorderResults[0].title,
-                  expected: "Ir a buscar a mi hermano", failures: &failures)
+                  expected: "Buscar a mi hermano", failures: &failures)
             check(label: "reorden[0] hour 14",
                   actual: reorderResults[0].hour, expected: 14, failures: &failures)
             // Intent 2: "Duchar" hora 15 (PM colloquial).

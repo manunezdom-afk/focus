@@ -148,6 +148,11 @@ enum NovaActionNormalizer {
 
         // 3. Strip marcadores temporales sueltos.
         let temporalPatterns: [String] = [
+            // "Para [temporal]" leading — debe ir PRIMERO para que
+            // strippee la unidad "Para mañana" / "Para el martes" antes que
+            // los patrones generales se coman solo "mañana"/"martes" y dejen
+            // un "Para  " huérfano al inicio.
+            #"^\s*para\s+(mañana|manana|hoy|esta\s+(tarde|noche|mañana|manana)|en\s+la\s+(tarde|noche|mañana|manana)|el\s+(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)|pasado\s+mañana|pasado\s+manana|al\s+mediod[ií]a)\b"#,
             // Horas en dígitos.
             #"\ba la?s? \d{1,2}(:\d{2})?\s*(am|pm|hrs?|de la (mañana|manana|tarde|noche))?\b"#,
             #"\b\d{1,2}:\d{2}\b"#,
@@ -159,7 +164,15 @@ enum NovaActionNormalizer {
             // "como a las seis de la tarde". Sin este patrón el cleanTitle
             // dejaba "Ir a buscar a mi hermano a las tres" intacto y el step
             // 7 (artículos+nombres propios) capitalizaba "tres" → "a Tres".
-            #"\b(a la?s?|tipo (las? )?|como a la?s?|a eso de la?s?|cerca de la?s?|alrededor de la?s?)\s+(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)(\s+y\s+(media|cuarto|diez|quince|veinte|veinticinco|treinta))?(\s+(treinta|quince))?(\s+de la (mañana|manana|tarde|noche))?\b"#,
+            //
+            // FIX 2026-05-15: el patrón anterior `tipo (las? )?` consumía el
+            // espacio trailing y dejaba a `\s+` sin nada que matchear, lo
+            // que rompía "tipo nueve"/"tipo seis"/etc en palabras (los
+            // dígitos seguían funcionando por la línea separada de arriba).
+            // Reformulado: el grupo de prefijos ya NO incluye espacio final;
+            // el `\s+` después del grupo lo absorbe; y el opcional "las/la"
+            // pasa a un grupo dedicado `(la?s?\s+)?` entre `\s+` y el número.
+            #"\b(a\s+la?s?|tipo|como\s+a\s+la?s?|a\s+eso\s+de\s+la?s?|cerca\s+de\s+la?s?|alrededor\s+de\s+la?s?)\s+(la?s?\s+)?(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)(\s+y\s+(media|cuarto|diez|quince|veinte|veinticinco|treinta))?(\s+(treinta|quince))?(\s+de la (mañana|manana|tarde|noche))?\b"#,
             // Relativos. El "más" coloquial ("en 10 minutos más", "en dos horas más")
             // es redundante — se consume junto con la expresión temporal para evitar
             // que quede huérfano en el título ("Ir a buscar a mi hermano  más").
@@ -188,6 +201,22 @@ enum NovaActionNormalizer {
                 options: [.regularExpression, .caseInsensitive]
             )
         }
+
+        // 3-bis. Cleanup "tipo" huérfano. Si tras strippear horas, "tipo"
+        //        quedó solo (sin número ni palabra-número adyacente), es
+        //        residuo. Detectamos por whitespace doble en algún lado
+        //        (señal de que algo se removió pegado a "tipo"). Versión
+        //        narrow para NO romper "tipo de X" (compuestos legítimos
+        //        donde "tipo" mantiene espaciado simple).
+        //
+        //        Caso real (BETA-2): "para estar tipo 6:30 acá" — strip de
+        //        "6:30" deja "para estar tipo  acá" con doble espacio →
+        //        este cleanup lo limpia.
+        result = result.replacingOccurrences(
+            of: #"\s{2,}tipo\s+|\s+tipo\s{2,}"#,
+            with: " ",
+            options: [.regularExpression, .caseInsensitive]
+        )
 
         // 3a. Strip destinos educacionales trailing tipo "para la universidad".
         //     "salir de mi casa a las 8 para la universidad" → tras strip
@@ -299,6 +328,53 @@ enum NovaActionNormalizer {
             )
         }
 
+        // 3b-bis. Strip trailing "para estar/llegar [tipo|a las] X [acá|aquí|allá]".
+        //         Es contexto secundario de timing — "buscar a mi polola tipo
+        //         6 a su casa para estar tipo 6:30 acá" debe quedar como
+        //         "Buscar a mi polola"; la segunda hora ("estar 6:30 acá") y
+        //         el destino ("a su casa") son metadata, no el título.
+        //
+        //         Importante: corre DESPUÉS de los temporal patterns para que,
+        //         si "tipo 6:30" ya fue strippeado, este patrón limpie el
+        //         "para estar acá" que queda. También cubre el caso donde el
+        //         temporal NO fue strippeado por venir en palabras post-fix.
+        let trailingContextPatterns: [String] = [
+            // Word-based hours: "para estar [listo] tipo seis [y treinta] acá"
+            #"\s+para\s+(estar(\s+listo)?|llegar)(\s+(tipo|a\s+la?s?|como\s+a\s+la?s?|sobre\s+la?s?)\s+(?:una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)(\s+y\s+(media|cuarto|treinta|quince))?)?(\s+(ac[aá]|aqu[ií]|all[aá]))?\b"#,
+            // Digit-based hours: "para estar [listo] tipo 6:30 acá"
+            #"\s+para\s+(estar(\s+listo)?|llegar)(\s+(tipo|a\s+la?s?|como\s+a\s+la?s?|sobre\s+la?s?)\s+\d{1,2}(:\d{2})?)?(\s+(ac[aá]|aqu[ií]|all[aá]))?\b"#,
+            // Sin temporal: "para estar [listo] acá/aquí/allá" o solo "para llegar"
+            #"\s+para\s+(estar(\s+listo)?|llegar)(\s+(ac[aá]|aqu[ií]|all[aá]))?\b"#,
+        ]
+        for pattern in trailingContextPatterns {
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+
+        // 3b-ter. Strip trailing "a (su|mi|tu|nuestra) [lugar]" cuando el
+        //         título contiene un verbo de movimiento/recogida. Es location,
+        //         pertenece a `notes`/`location`, no al título visible.
+        //         No se aplica sin verbo de movimiento para evitar romper
+        //         "Cena en su casa" o "Reunión en mi oficina" si llegaran
+        //         como título completo.
+        let lowerForLocStrip = result.lowercased()
+        let hasMoveOrFetchVerb = lowerForLocStrip.range(
+            of: #"\b(ir|salir|voy|vamos|buscar|llevar|recoger|pasar|me\s+voy)\b"#,
+            options: .regularExpression
+        ) != nil
+        if hasMoveOrFetchVerb {
+            // Solo lugares — NO incluir personas ("a mi polola" se queda
+            // porque es el objeto directo del verbo "buscar").
+            result = result.replacingOccurrences(
+                of: #"\s+a\s+(su|mi|tu|nuestra|nuestro)\s+(casa|depto|departamento|oficina|trabajo|pega|pieza|jard[ií]n|patio|escuela|colegio|liceo|gimnasio|gym|consulta|consultorio)\b"#,
+                with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+
         // 3c. Strip prefijos coloquiales de eventos. Cubre las construcciones
         //     más comunes en español donde el usuario introduce un evento con
         //     una frase de obligación/posesión/intención. Estos prefijos
@@ -340,6 +416,28 @@ enum NovaActionNormalizer {
             // 4. "Quiero X" / "Voy a X" / "Me toca X" / "Me agendaron X" /
             //    "Me programaron X". Consumen artículo opcional siguiente.
             #"^\s*(quiero|voy\s+a|me\s+toca|me\s+agendaron|me\s+programaron)\s+(la|el|los|las|una|un)?\s*"#,
+            // 4b. "que (me)? agendes/pongas/programes/anotes/crees/añadas" —
+            //     queda como residuo después de strippear "quiero"/"necesito".
+            //     Ej. "quiero que agendes estudiar" → tras #4 queda "que
+            //     agendes estudiar" → este pattern → "estudiar".
+            #"^\s*que\s+(me\s+)?(agendes|pongas|programes|anotes|crees|a[ñn]adas|registres|guardes)\s+(la|el|los|las|una|un)?\s*"#,
+            // 4c. Imperativos de agenda — "Agéndame X" / "Anota X" / "Ponme X"
+            //     / "Programa X" / "Crea X" / "Añade X". El usuario los usa
+            //     como verbo directo para pedir crear evento. Nunca son parte
+            //     del título.
+            #"^\s*(ag[eé]ndame|ag[eé]ndamelo|anota|anotame|a[ñn]ade|a[ñn]ademe|ponme|p[oó]ngame|p[oó]nme|programa(me|melo)?|crea(me)?|cr[eé]ame|registra(me)?|guarda(me)?)\s+(la|el|los|las|una|un|que)?\s*"#,
+            // 4d. "salir/ir/me voy + (al|a la|a los|a las) + EVENT_NOUN" — el
+            //     verbo de movimiento es contexto, el sustantivo es el evento
+            //     real. Ejemplos:
+            //         "salir al cumpleaños de Urrutia" → "cumpleaños de Urrutia"
+            //         "ir al matrimonio de Pedro" → "matrimonio de Pedro"
+            //         "voy a la cena de fin de año" → "cena de fin de año"
+            //     Lookahead `(?=...)` para NO consumir el sustantivo — sólo
+            //     el verbo + artículo. La whitelist cubre los nouns más
+            //     frecuentes en eventos sociales/profesionales. NO incluye
+            //     "casa/oficina/trabajo" porque ya van por la regla 3b-ter
+            //     (location stripping cuando hay verbo de movimiento).
+            #"^\s*(salir|ir|me\s+voy|me\s+salgo|voy|vamos)\s+(al?|a\s+la|a\s+los|a\s+las)\s+(?=(cumplea[ñn]os|fiesta|reuni[oó]n|matrimonio|boda|funeral|entrenamiento|clase|clases|concierto|partido|cena|almuerzo|cita|m[eé]dico|doctor|dentista|peluquer[ií]?a?|gym|gimnasio|hospital|cl[ií]nica|misa|onom[aá]stico|aeropuerto|mall|cine|teatro|consulta|consultorio))\b"#,
             // 5. "Seguir + [gerund]" → strip "seguir" para dejar el verbo
             //    activo ("seguir trabajando" → "trabajando"). Apunta al
             //    caso del user: "tengo que seguir trabajando con focus"
@@ -481,6 +579,55 @@ enum NovaActionNormalizer {
         return result
     }
 
+    // MARK: - Fallback: backend devolvió título demasiado pobre
+
+    /// Verbos de movimiento que NUNCA deberían ser el título completo —
+    /// son contextuales ("voy a", "salgo al", "me voy a"). Cuando el
+    /// backend devuelve uno de estos como título único, significa que
+    /// extrajo mal: el evento real está en el sustantivo que sigue
+    /// ("salir al cumpleaños de X" → backend devolvió "Salir", el evento
+    /// real es "Cumpleaños de X").
+    private static let motionOnlyTitles: Set<String> = [
+        "salir", "salgo", "ir", "voy", "vamos", "vámonos",
+        "me voy", "me salgo", "iré", "ire", "irme", "salirme"
+    ]
+
+    /// Decide qué título usar después de pasar el del backend por `cleanTitle`.
+    /// Si el resultado del backend es solo un verbo de movimiento (caso real
+    /// del user 2026-05-15: "Tengo que salir al cumpleaños de Urrutia" → el
+    /// backend devolvía "Salir"), re-extraemos el título limpiando el
+    /// `userText` completo — eso captura el sustantivo verdadero del evento.
+    ///
+    /// Reglas:
+    /// - Si `backendCleaned` NO es motion-only y NO está vacío → se conserva.
+    /// - Si SÍ es motion-only (o vacío), re-corremos `cleanTitle(userText)`.
+    ///   Si la re-extracción produce algo distinto y NO motion-only → se usa.
+    ///   Si no, se conserva el original como último recurso.
+    ///
+    /// Privacy: no logueamos contenidos. Devuelve el título a usar.
+    static func preferBetterTitle(
+        backendCleaned: String,
+        userText: String
+    ) -> String {
+        let trimmed = backendCleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        let isMotionOnly = motionOnlyTitles.contains(lower)
+
+        if !trimmed.isEmpty && !isMotionOnly {
+            return trimmed
+        }
+
+        // Backend devolvió pobre — reextraer desde userText.
+        let fromUser = cleanTitle(userText)
+        let fromUserLower = fromUser.lowercased()
+        if !fromUser.isEmpty
+            && !motionOnlyTitles.contains(fromUserLower)
+            && fromUserLower != lower {
+            return fromUser
+        }
+        return trimmed
+    }
+
     /// Mapa de verbos reflexivos comunes (1ª persona singular) a su forma
     /// infinitiva base. Whitelist explícita para evitar romper palabras
     /// como "Carme" (nombre), "firme", "duerme" — cosas que casualmente
@@ -604,22 +751,43 @@ enum NovaActionNormalizer {
     ///    mi hermano" se conserve. Antes lo cortábamos a "Buscar a mi
     ///    hermano" que sonaba seco.
     private static func stripVerboseGoVerb(_ input: String, verb: String) -> String {
-        let pattern = "^\\s*\(NSRegularExpression.escapedPattern(for: verb))\\s+a\\s+(la|el|los|las)\\s+"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-            return input
-        }
+        let escaped = NSRegularExpression.escapedPattern(for: verb)
         let ns = input as NSString
-        guard let match = regex.firstMatch(in: input, range: NSRange(location: 0, length: ns.length)) else {
-            // No matched "verb a (la|el|los|las)" → no shortening. Mantener
-            // verbo original. Caller seguirá con su limpieza normal.
-            return input
+        let fullRange = NSRange(location: 0, length: ns.length)
+
+        // Case 1: definite article (la|el|los|las) → strip "verbo a artículo "
+        // y capitalize el sustantivo (es nombre propio coloquial, ej. "la
+        // Agustina" → "Agustina").
+        let articlePattern = "^\\s*\(escaped)\\s+a\\s+(la|el|los|las)\\s+"
+        if let regex = try? NSRegularExpression(pattern: articlePattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: input, range: fullRange) {
+            var rest = ns.substring(from: match.range.length)
+            if let firstChar = rest.first, firstChar.isLowercase {
+                rest = firstChar.uppercased() + rest.dropFirst()
+            }
+            return "Buscar a " + rest
         }
-        // hadArticle = true. Capitalize primera palabra después del artículo.
-        var rest = ns.substring(from: match.range.length)
-        if let firstChar = rest.first, firstChar.isLowercase {
-            rest = firstChar.uppercased() + rest.dropFirst()
+
+        // Case 2: posesivo (mi|tu|su|...) → strip SÓLO el verbo de
+        // movimiento ("ir a buscar "/"salir a buscar "), DEJANDO INTACTO
+        // el "a (poss) noun". Caso real del user: "ir a buscar a mi polola"
+        // → "Buscar a mi polola" (no se capitaliza "polola", es un noun
+        // común, no nombre propio).
+        //
+        // Antes (2026-05-15) descartábamos el shortening cuando no había
+        // artículo definido para evitar que "Buscar a mi hermano" sonara
+        // "seco". Pero el caso polola demostró que cuando el verbo es
+        // explícitamente verboso ("ir a buscar a mi X"), el usuario quiere
+        // "Buscar a mi X" — más limpio, más natural, sin el "Ir a" redundante.
+        let possessivePattern = "^\\s*\(escaped)\\s+(?=a\\s+(mi|tu|su|mis|tus|sus|nuestra|nuestro)\\s+)"
+        if let regex = try? NSRegularExpression(pattern: possessivePattern, options: [.caseInsensitive]),
+           regex.firstMatch(in: input, range: fullRange) != nil {
+            let stripped = regex.stringByReplacingMatches(in: input, range: fullRange, withTemplate: "")
+            return "Buscar " + stripped
         }
-        return "Buscar a " + rest
+
+        // No matched → keep input as-is (verbo se mantiene). Caller continúa.
+        return input
     }
 
     // MARK: - endTime rules

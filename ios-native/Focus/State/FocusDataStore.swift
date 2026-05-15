@@ -4437,8 +4437,18 @@ final class FocusDataStore: ObservableObject {
         // — el normalizer quita reminder triggers, fillers, marcadores
         // temporales sueltos, normaliza nombres propios, y simplifica
         // "Ir a buscar X" → "Buscar a X".
+        //
+        // FALLBACK 2026-05-15: si el backend devolvió solo un verbo de
+        // movimiento ("Salir", "Ir"), re-extraemos del userText completo.
+        // Caso real reportado: "Tengo que salir al cumpleaños de Urrutia"
+        // → backend devolvía "Salir" → preferBetterTitle reextrae →
+        // "Cumpleaños de Urrutia".
         let rawTitle = payload.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanedTitle = NovaActionNormalizer.cleanTitle(rawTitle)
+        let backendCleaned = NovaActionNormalizer.cleanTitle(rawTitle)
+        let cleanedTitle = NovaActionNormalizer.preferBetterTitle(
+            backendCleaned: backendCleaned,
+            userText: userText
+        )
         guard !cleanedTitle.isEmpty else { return nil }
 
         let cal = Calendar.current
