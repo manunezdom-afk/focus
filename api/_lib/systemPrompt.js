@@ -88,7 +88,7 @@ function buildContactsContext(contacts) {
 
 export function buildSystemPrompt({
   dateContext, weatherContext, contacts, profile, behavior, memories, events, tasks,
-  novaPersonality = 'focus',
+  novaPersonality = 'focus', discussedEventIds = [],
 }) {
   const { tz, todayISO, tomorrow, dayAfter, currentTime24, currentTime12, todayStr, weekDates } = dateContext
 
@@ -125,6 +125,27 @@ week_dates: ${JSON.stringify(weekDates)}
         reminderOffsets: Array.isArray(e.reminderOffsets) ? e.reminderOffsets : null,
       })), null, 2)
     : 'Sin eventos aún.'
+
+  // Eventos "en discusión" — orden por recencia (más reciente primero).
+  // El cliente promueve este array cuando el user crea/edita/menciona
+  // un evento. Sirve para resolver referencias implícitas: si el user
+  // pide "acuérdame de X" sin nombrar evento, anclamos al primero de
+  // esta lista en lugar de preguntar.
+  const discussedEventIdsSet = new Set(discussedEventIds || [])
+  const discussedEventsBlock = (() => {
+    if (discussedEventIdsSet.size === 0) return 'No hay tema en discusión.'
+    const map = new Map(events.map(e => [e.id, e]))
+    const ordered = (discussedEventIds || [])
+      .map(id => map.get(id))
+      .filter(Boolean)
+    if (ordered.length === 0) return 'No hay tema en discusión.'
+    return JSON.stringify(ordered.map(e => ({
+      id: e.id,
+      title: e.title,
+      time: e.time || '',
+      date: e.date || null,
+    })), null, 2)
+  })()
 
   const tasksBlock = tasks.length > 0
     ? JSON.stringify(tasks.map(t => ({
@@ -540,6 +561,9 @@ Fecha y hora actual del sistema:
 Eventos actuales en el calendario del usuario:
 ${eventsBlock}
 
+Eventos EN DISCUSIÓN (topic focus — orden por recencia, más reciente primero):
+${discussedEventsBlock}
+
 Tareas actuales del usuario (pestaña Tareas):
 ${tasksBlock}
 
@@ -598,6 +622,58 @@ Distinguir Caso A/B (aviso previo) vs Caso C (recordatorio propio):
 - Frases "X minutos antes de Y", "avísame antes de Y" → es aviso previo de Y → Caso A o B.
 - Frases "avísame en X min que Z", "recuérdame Z a las H", "ponme un recordatorio para Z" → es el compromiso en sí → Caso C.
 - Si hay duda real, prefiere Caso C (evento real), pero si la frase dice "antes de Y" no dupliques: usa reminderOffsets del evento.
+
+MEMORIA TEMPORAL Y TOPIC FOCUS (REGLA CRÍTICA — feature pedida por usuario 2026-05-15):
+
+El usuario tiene una memoria conversacional corta. La sección "Eventos EN
+DISCUSIÓN" arriba lista los eventos sobre los que el user habló recientemente
+— en orden de recencia, máximo 5. El primero es el TEMA ACTUAL.
+
+REGLA DE ORO: cuando el user te pida un recordatorio o referencia AMBIGUA
+sin nombrar explícitamente el evento, **resolve al primer evento de la lista
+"Eventos EN DISCUSIÓN"** antes de preguntar. La lista NO está vacía solo si
+hablamos de algo recientemente — confía en ella.
+
+CASOS CANÓNICOS DEL USUARIO:
+
+1. Topic focus al último mencionado:
+   Turno previo: user dijo "tengo partido tipo 3" → Partido en discusión.
+   Turno actual: user dice "acuérdame 20 min antes de echar las zapatillas
+   a la mochila".
+   → Anclar al Partido con reminderOffsets:[20], reminderNotes:["Echar las
+     zapatillas a la mochila"]. NO preguntar a qué evento es — es obvio.
+
+2. Topic switch:
+   Turno previo: "tengo muestra de arte el viernes 7 PM" → Muestra de arte
+   ahora es el tema en discusión (más reciente).
+   Turno actual: user dice "acuérdame 1 hora antes de revisar los flyers".
+   → Anclar a Muestra de arte aunque Partido también esté en la lista. El
+     orden de la lista marca recencia.
+
+3. Mención explícita override:
+   Si el user nombra otro evento del calendario por título o keyword
+   ("revisar mis slides de la presentación"), buscas ese evento entre
+   los eventos actuales. Si lo encuentras, ese gana sobre el topic focus.
+
+4. Sin topic focus y sin evento explícito:
+   Si "Eventos EN DISCUSIÓN" dice "No hay tema en discusión." y el user no
+   nombra evento → trata como tarea independiente o pide aclaración con
+   shouldAskUser=true. NO inventes un evento.
+
+5. Keywords ambiguos (zapatillas, flyers, apuntes):
+   Estos NO son nombres de eventos. Son ACCIONES o ítems relacionados.
+   Cuando aparecen sin "antes de [evento]" explícito, usar el topic focus
+   como evento padre del reminder.
+
+REGLA DURA: NUNCA preguntes "¿a qué evento se refiere?" si el topic focus
+tiene un evento futuro que es razonablemente compatible. Pregunta SOLO si:
+- Topic focus vacío + no hay evento mencionado, O
+- Topic focus contiene eventos del PASADO (todos ya ocurrieron), O
+- Hay 2+ eventos en topic focus y los keywords del user matchean
+  ambos por igual sin señal de cuál es el correcto.
+
+EFECTO ESPERADO: el user siente que Nova "recuerda de qué estábamos
+hablando" — porque sí, lo recuerda durante 30 min.
 
 RECORDATORIOS CON NOMBRE CUSTOM (REGLA CRÍTICA — feature pedida por usuario):
 

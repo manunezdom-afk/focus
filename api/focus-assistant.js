@@ -163,9 +163,17 @@ export default async function handler(req, res) {
   const dateContext = buildDateContext(body.clientNow, body.clientTimezone)
   const weatherContext = await buildWeatherContext(location)
 
+  // discussedEventIds: lista de event UUIDs en orden de recencia (más
+  // reciente primero) — el cliente lo manda para que Nova resuelva
+  // referencias implícitas ("acuérdame de X") al evento "en discusión"
+  // sin preguntar a cuál se refiere. Defensivo: solo arrays de strings.
+  const discussedEventIds = Array.isArray(body.discussedEventIds)
+    ? body.discussedEventIds.filter(s => typeof s === 'string' && s.trim()).slice(0, 5)
+    : []
+
   const systemPrompt = buildSystemPrompt({
     dateContext, weatherContext, contacts, profile, behavior, memories, events, tasks,
-    novaPersonality,
+    novaPersonality, discussedEventIds,
   })
 
   // Timeout del SDK 45s para aprovechar maxDuration=60s sin agotarlo. Antes

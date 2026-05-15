@@ -63,7 +63,8 @@ enum NovaService {
         personality: Personality = .focus,
         surface: Surface = .inlineMiDia,
         timezone: TimeZone = .current,
-        now: Date = Date()
+        now: Date = Date(),
+        discussedEventIds: [UUID] = []
     ) async throws -> Result {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw NovaServiceError.emptyMessage }
@@ -85,7 +86,8 @@ enum NovaService {
             tasks: tasks.map { BackendTaskDTO(local: $0) },
             history: history.map { BackendHistoryEntry(role: $0.role.rawValue, content: $0.content) },
             clientNow: Int(now.timeIntervalSince1970 * 1000),
-            clientTimezone: timezone.identifier
+            clientTimezone: timezone.identifier,
+            discussedEventIds: discussedEventIds.map { $0.uuidString }
         )
 
         do {
@@ -237,6 +239,11 @@ private struct BackendRequestPayload: Encodable {
     let history: [BackendHistoryEntry]
     let clientNow: Int
     let clientTimezone: String
+    /// IDs de eventos discutidos recientemente (más reciente primero).
+    /// Sirve al backend para resolver referencias implícitas: si el user
+    /// pide "acuérdame de X" sin nombrar evento, anclamos al primero de
+    /// esta lista que coincida por contexto temático.
+    let discussedEventIds: [String]
 
     enum CodingKeys: String, CodingKey {
         case message
@@ -247,6 +254,7 @@ private struct BackendRequestPayload: Encodable {
         case history
         case clientNow
         case clientTimezone
+        case discussedEventIds
     }
 }
 

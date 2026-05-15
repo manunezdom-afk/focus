@@ -161,6 +161,30 @@ enum EventCorrection: Hashable {
 
 // MARK: - Contexto de sesión de Nova (memoria corta)
 
+/// Evento que estuvo en discusión recientemente. Forma parte de
+/// `NovaContext.discussedEvents` para resolver referencias implícitas.
+///
+/// Ejemplo de uso (user spec 2026-05-15):
+///   Turno 1: "tengo partido el sábado tipo 3" → discussedEvents = [Partido].
+///   Turno 2: "acuérdame 20 min antes de echar las zapatillas a la mochila"
+///     → Sin match exacto del activity contra eventos. Pero discussedEvents[0]
+///       es Partido (recién hablamos de eso) → anclar reminder a Partido
+///       con note "Echar las zapatillas a la mochila". NO preguntar
+///       "¿a qué evento?" — es obvio dado el contexto.
+struct DiscussedEvent: Equatable, Hashable {
+    let eventId: UUID
+    let title: String
+    /// Cuándo fue la última vez que el user habló de este evento (creó,
+    /// editó o lo mencionó por título/fuzzy match).
+    let mentionedAt: Date
+
+    /// Tiempo de vida del topic focus: 30 minutos sin mención. Después
+    /// asumimos que el user cambió de tema y limpiamos.
+    var isFresh: Bool {
+        Date().timeIntervalSince(mentionedAt) < 30 * 60
+    }
+}
+
 /// Memoria local de la última interacción con Nova. Permite resolver
 /// referencias tipo "agéndalo como tarea recurrente" — "lo" remite al título
 /// más reciente. NO se persiste en disco: vive solo en RAM durante la sesión.
@@ -178,6 +202,15 @@ struct NovaContext: Equatable {
     /// "sí", "mañana") puede usarlo para completar la acción sin que el
     /// usuario tenga que repetir título/contexto. Auto-expira a los 10 min.
     var pendingClarification: PendingClarification?
+    /// Eventos discutidos recientemente, ordenados por recencia (más
+    /// reciente primero). Max 5 entradas. Permite que reminders y
+    /// referencias ambiguas se resuelvan al evento "en foco" sin
+    /// preguntarle al user a qué evento se refiere.
+    ///
+    /// Se promueven (movidos al frente) cuando el user CREA, EDITA o
+    /// MENCIONA un evento (por título fuzzy match). Auto-expira por
+    /// item después de 30 min sin actividad.
+    var discussedEvents: [DiscussedEvent] = []
     var updatedAt: Date = Date()
 
     enum Kind: Hashable {
@@ -195,6 +228,17 @@ struct NovaContext: Equatable {
     var pendingIsActive: Bool {
         guard let p = pendingClarification else { return false }
         return Date() < p.expiresAt && isFresh
+    }
+
+    /// Eventos discutidos NO expirados, ordenados por recencia.
+    var freshDiscussedEvents: [DiscussedEvent] {
+        discussedEvents.filter { $0.isFresh }
+    }
+
+    /// El evento más recientemente discutido (si está vivo). Punto de
+    /// entrada principal para resolución implícita de reminders.
+    var topicEvent: DiscussedEvent? {
+        freshDiscussedEvents.first
     }
 }
 
@@ -3350,6 +3394,12 @@ final class FocusDataStore: ObservableObject {
     /// Actualiza el contexto después de procesar un intent. Permite que el
     /// siguiente turno resuelva referencias ("agéndalo como tarea") sin
     /// pedirle al usuario que repita.
+    ///
+    /// **Topic focus**: si pasamos `eventId`, lo PROMOVEMOS al frente de
+    /// `discussedEvents` — eso permite que un reminder pedido en el
+    /// siguiente turno se resuelva implícitamente a este evento.
+    /// Conservamos los otros items discutidos para que el user pueda
+    /// volver a un tema anterior sin perder contexto. Cap en 5 items.
     func updateNovaContext(
         from input: String,
         title: String,
@@ -3360,6 +3410,16 @@ final class FocusDataStore: ObservableObject {
         eventId: UUID? = nil,
         taskId: UUID? = nil
     ) {
+        var newDiscussed = novaContext.discussedEvents.filter { $0.isFresh }
+        if let eid = eventId {
+            // Remueve duplicados y reinsertala adelante con timestamp nuevo.
+            newDiscussed.removeAll { $0.eventId == eid }
+            newDiscussed.insert(
+                DiscussedEvent(eventId: eid, title: title, mentionedAt: Date()),
+                at: 0
+            )
+            newDiscussed = Array(newDiscussed.prefix(5))
+        }
         novaContext = NovaContext(
             lastInputText: input,
             lastTitle: title,
@@ -3370,8 +3430,56 @@ final class FocusDataStore: ObservableObject {
             lastEventId: eventId,
             lastTaskId: taskId,
             pendingClarification: nil,
+            discussedEvents: newDiscussed,
             updatedAt: Date()
         )
+    }
+
+    /// Promueve un evento al frente de `discussedEvents` sin cambiar el
+    /// resto del contexto. Útil cuando el user MENCIONA un evento
+    /// existente (sin crearlo/editarlo) — eso también lo pone "en foco"
+    /// para resolución de futuras referencias ambiguas.
+    func promoteDiscussedEvent(eventId: UUID, title: String) {
+        var ctx = novaContext
+        var newDiscussed = ctx.discussedEvents.filter { $0.isFresh }
+        newDiscussed.removeAll { $0.eventId == eventId }
+        newDiscussed.insert(
+            DiscussedEvent(eventId: eventId, title: title, mentionedAt: Date()),
+            at: 0
+        )
+        ctx.discussedEvents = Array(newDiscussed.prefix(5))
+        ctx.updatedAt = Date()
+        novaContext = ctx
+    }
+
+    /// Detecta menciones de eventos existentes en el texto del user y
+    /// promueve cada match al frente de `discussedEvents`. Llamar antes
+    /// de procesar el intent — así el parser ya tiene el topic focus
+    /// correcto para resolver referencias implícitas en el MISMO turno.
+    ///
+    /// Match: substring case-insensitive entre el texto y title de cada
+    /// evento. Mínimo 4 chars de overlap para evitar falsos positivos
+    /// (palabras cortas como "ir", "de" no cuentan).
+    func detectAndPromoteMentions(in userText: String) {
+        let lowerText = userText.lowercased()
+            .folding(options: .diacriticInsensitive, locale: .current)
+        for event in events {
+            let lowerTitle = event.title.lowercased()
+                .folding(options: .diacriticInsensitive, locale: .current)
+            guard !lowerTitle.isEmpty, lowerTitle.count >= 4 else { continue }
+            // Match A: el título entero aparece en el texto.
+            // Match B: ≥1 palabra "fuerte" del título (≥4 chars) aparece en el texto.
+            let directMatch = lowerText.contains(lowerTitle)
+            let wordMatch: Bool = {
+                let words = lowerTitle.split(separator: " ")
+                    .map(String.init)
+                    .filter { $0.count >= 4 && !["clase", "evento", "tarea", "reunion"].contains($0) }
+                return words.contains { lowerText.contains($0) }
+            }()
+            if directMatch || wordMatch {
+                promoteDiscussedEvent(eventId: event.id, title: event.title)
+            }
+        }
     }
 
     /// Guarda una aclaración pendiente. El siguiente turno del usuario

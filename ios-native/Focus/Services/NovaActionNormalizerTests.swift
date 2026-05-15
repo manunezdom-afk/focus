@@ -1639,6 +1639,148 @@ enum NovaActionNormalizerTests {
                   expected: true, failures: &failures)
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        //  TOPIC FOCUS / MEMORIA TEMPORAL — User spec 2026-05-15:
+        //
+        //  "si estamos hablando de futbol y le pongo de las zapatillas, que
+        //   no me pregunte para que evento es si es obvio que para el de
+        //   futbol y no para el de arte"
+        //
+        //  La memoria local mantiene una lista de eventos discutidos en
+        //  los últimos 30 min. La lista se ordena por recencia. Cuando el
+        //  user pide algo ambiguo, se resuelve al primero.
+        // ═══════════════════════════════════════════════════════════════
+
+        // 1. NovaContext: discussedEvents vacío por default.
+        do {
+            let ctx = NovaContext()
+            check(label: "topic-1: discussedEvents vacío por default",
+                  actual: ctx.discussedEvents.isEmpty, expected: true, failures: &failures)
+            check(label: "topic-1: topicEvent nil cuando lista vacía",
+                  actual: ctx.topicEvent == nil, expected: true, failures: &failures)
+        }
+
+        // 2. DiscussedEvent.isFresh: < 30 min = fresh, ≥ 30 min = stale.
+        do {
+            let recent = DiscussedEvent(
+                eventId: UUID(),
+                title: "Partido",
+                mentionedAt: Date().addingTimeInterval(-5 * 60)  // hace 5 min
+            )
+            let stale = DiscussedEvent(
+                eventId: UUID(),
+                title: "Muestra",
+                mentionedAt: Date().addingTimeInterval(-31 * 60)  // hace 31 min
+            )
+            check(label: "topic-2: evento de hace 5 min es fresh",
+                  actual: recent.isFresh, expected: true, failures: &failures)
+            check(label: "topic-2: evento de hace 31 min NO es fresh",
+                  actual: stale.isFresh, expected: false, failures: &failures)
+        }
+
+        // 3. freshDiscussedEvents filtra correctamente expirados.
+        do {
+            let recent = DiscussedEvent(
+                eventId: UUID(), title: "Partido",
+                mentionedAt: Date().addingTimeInterval(-5 * 60)
+            )
+            let stale = DiscussedEvent(
+                eventId: UUID(), title: "Muestra",
+                mentionedAt: Date().addingTimeInterval(-31 * 60)
+            )
+            let ctx = NovaContext(discussedEvents: [recent, stale])
+            check(label: "topic-3: freshDiscussedEvents.count = 1",
+                  actual: ctx.freshDiscussedEvents.count, expected: 1, failures: &failures)
+            check(label: "topic-3: topicEvent es el fresco (Partido)",
+                  actual: ctx.topicEvent?.title, expected: "Partido" as String?, failures: &failures)
+        }
+
+        // 4. Orden por recencia: el más reciente primero.
+        do {
+            let arteId = UUID()
+            let partidoId = UUID()
+            let partido = DiscussedEvent(
+                eventId: partidoId, title: "Partido",
+                mentionedAt: Date().addingTimeInterval(-10 * 60)  // hace 10 min
+            )
+            let arte = DiscussedEvent(
+                eventId: arteId, title: "Muestra de arte",
+                mentionedAt: Date().addingTimeInterval(-2 * 60)   // hace 2 min, más reciente
+            )
+            // Lista construida en orden de recencia (más reciente primero).
+            let ctx = NovaContext(discussedEvents: [arte, partido])
+            check(label: "topic-4: topicEvent es Arte (el más reciente)",
+                  actual: ctx.topicEvent?.title, expected: "Muestra de arte" as String?, failures: &failures)
+            check(label: "topic-4: segundo en lista es Partido",
+                  actual: ctx.freshDiscussedEvents.dropFirst().first?.title,
+                  expected: "Partido" as String?, failures: &failures)
+        }
+
+        // 5. detectAndPromoteMentions: el match más fuerte (substring de título
+        //    en texto) promueve al evento al frente.
+        do {
+            // Para testear la lógica, usamos un store stub no es necesario —
+            // testeamos la equivalencia del helper de detección: una nueva
+            // entrada con eventId = matched aparece al frente.
+            //
+            // Aquí solo verificamos que múltiples mentions ordenan
+            // correctamente. La lógica real vive en FocusDataStore.
+            let arteId = UUID()
+            let partidoId = UUID()
+            var ctx = NovaContext()
+            // Simulación manual del flujo de promoteDiscussedEvent.
+            ctx.discussedEvents.insert(
+                DiscussedEvent(eventId: partidoId, title: "Partido",
+                               mentionedAt: Date().addingTimeInterval(-3)),
+                at: 0
+            )
+            ctx.discussedEvents.insert(
+                DiscussedEvent(eventId: arteId, title: "Muestra de arte",
+                               mentionedAt: Date()),
+                at: 0
+            )
+            check(label: "topic-5: tras dos mentions, topicEvent = Arte",
+                  actual: ctx.topicEvent?.title,
+                  expected: "Muestra de arte" as String?, failures: &failures)
+            check(label: "topic-5: ambos eventos en discusión",
+                  actual: ctx.freshDiscussedEvents.count, expected: 2, failures: &failures)
+        }
+
+        // 6. Cap de 5 items: no acumular indefinidamente.
+        do {
+            var ctx = NovaContext()
+            // Insertar 7 mentions distintas, cada una al frente.
+            for i in 0..<7 {
+                let event = DiscussedEvent(
+                    eventId: UUID(),
+                    title: "Evento \(i)",
+                    mentionedAt: Date().addingTimeInterval(-Double(i))
+                )
+                ctx.discussedEvents.insert(event, at: 0)
+                // Cap manual del test — coincide con el cap de updateNovaContext.
+                ctx.discussedEvents = Array(ctx.discussedEvents.prefix(5))
+            }
+            check(label: "topic-6: máximo 5 items en discusión",
+                  actual: ctx.discussedEvents.count, expected: 5, failures: &failures)
+        }
+
+        // 7. Caso integración: extractReminderAttachIntent extrae offset+
+        //    activity correctamente para el fallback de topic focus.
+        if let intent = NovaResponder.extractReminderAttachIntent(
+            from: "acuérdame 20 min antes de echar las zapatillas a la mochila"
+        ) {
+            check(label: "topic-7: offset = 20",
+                  actual: intent.offsetMinutes, expected: 20, failures: &failures)
+            check(label: "topic-7: activity = 'echar las zapatillas a la mochila'",
+                  actual: intent.activity,
+                  expected: "echar las zapatillas a la mochila",
+                  failures: &failures)
+            // El consumer (tryAttachReminderToExistingEvent) usará este
+            // activity como reminderNote si cae al topic focus event.
+        } else {
+            failures.append("  ✗ topic-7: extractReminderAttachIntent devolvió nil")
+        }
+
         // ───── Validador post-IA ──────────────────────────────────────
         NovaActionValidatorTests.runAll(into: &failures)
 

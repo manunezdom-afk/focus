@@ -580,6 +580,11 @@ struct MiDiaView: View {
             return runLocalFallback(for: trimmed, withNote: nil)
         }
 
+        // Antes de mandar al backend, promover en discussedEvents
+        // cualquier evento mencionado por título en este mensaje. Así Nova
+        // IA recibe el topic focus actualizado.
+        store.detectAndPromoteMentions(in: trimmed)
+
         do {
             let result = try await NovaService.send(
                 message: trimmed,
@@ -587,7 +592,8 @@ struct MiDiaView: View {
                 tasks: visibleTasksForContext(),
                 history: recentNovaHistory(),
                 accessToken: creds.accessToken,
-                surface: .inlineMiDia
+                surface: .inlineMiDia,
+                discussedEventIds: store.novaContext.freshDiscussedEvents.map { $0.eventId }
             )
             return await applyBackendResult(result, userText: trimmed)
         } catch let error as NovaServiceError {
@@ -688,11 +694,36 @@ struct MiDiaView: View {
         guard let intent = NovaResponder.extractReminderAttachIntent(from: userText) else {
             return nil
         }
+        // Antes de matchear, promover en discussedEvents cualquier evento
+        // mencionado por título en el texto del user — eso refresca el
+        // topic focus para el fallback de abajo.
+        store.detectAndPromoteMentions(in: userText)
+
         let todayEvents = store.todayEvents()
-        guard let matched = NovaResponder.findEventByApproxTitle(
+        // 1) Match por título aproximado contra eventos de hoy.
+        var matched = NovaResponder.findEventByApproxTitle(
             intent.activity, in: todayEvents
-        ) else {
-            // Patrón matcheó pero no hay evento con ese título — pregunta.
+        )
+        // 2) Topic-focus fallback: si NO hay match en hoy, pero hay un
+        //    evento "en discusión" reciente (creado/editado/mencionado en
+        //    los últimos 30 min), anclamos a ese. El "activity" pasa a
+        //    ser una NOTA del reminder, no el título del evento.
+        //
+        //    Caso del user spec (2026-05-15):
+        //      Turno 1: "tengo partido tipo 3" → partido.
+        //      Turno 2: "acuérdame 20 min antes de echar las zapatillas"
+        //              → activity="echar las zapatillas". No matchea ningún
+        //                evento por título. Pero topicEvent = Partido →
+        //                anclar reminder a Partido con note="Echar las zapatillas".
+        var attachedViaTopicFocus = false
+        if matched == nil, let topic = store.novaContext.topicEvent,
+           let topicEvent = store.events.first(where: { $0.id == topic.eventId }),
+           topicEvent.startTime > Date() {
+            matched = topicEvent
+            attachedViaTopicFocus = true
+        }
+        guard let matched else {
+            // Sin match ni topic focus — pregunta.
             return missingEventForAttachReminder(
                 activity: intent.activity,
                 offset: intent.offsetMinutes,
@@ -714,19 +745,47 @@ struct MiDiaView: View {
         }
 
         // Aplicar: añadir offset al evento (sin tocar título / hora /
-        // categoría). El store dispara sync remoto + reprograma la
-        // notificación local.
+        // categoría). Si caímos vía topic focus, el activity pasa a ser
+        // la NOTA del nuevo offset — array paralelo de reminderNotes
+        // alineado con reminderOffsets.
         var updated = matched
-        updated.reminderOffsets = (existing + [intent.offsetMinutes]).sorted()
+        let newOffsets = (existing + [intent.offsetMinutes]).sorted()
+        updated.reminderOffsets = newOffsets
+        if attachedViaTopicFocus {
+            // Capitalizar primera letra del activity para que sea legible
+            // como texto de notif ("Echar las zapatillas a la mochila").
+            let noteText: String = {
+                guard let first = intent.activity.first else { return intent.activity }
+                return first.uppercased() + intent.activity.dropFirst()
+            }()
+            // Reconstruir notes alineadas al nuevo orden de offsets.
+            var notesByOffset: [Int: String] = [:]
+            for (i, off) in existing.enumerated() {
+                if let oldNote = matched.reminderNote(at: i) {
+                    notesByOffset[off] = oldNote
+                }
+            }
+            notesByOffset[intent.offsetMinutes] = noteText
+            updated.reminderNotes = newOffsets.map { notesByOffset[$0] ?? "" }
+        }
         store.updateEvent(updated)
         HapticManager.shared.success()
 
         let fireTime = matched.startTime.addingTimeInterval(-Double(intent.offsetMinutes) * 60)
         let fireLabel = DateFormatters.hourMinute.string(from: fireTime)
 
+        // Si caímos vía topic focus, mencionamos el evento padre para que
+        // el user vea que adivinamos bien (y pueda corregir si no).
+        let summary: String
+        if attachedViaTopicFocus {
+            summary = "Listo. Te aviso \(humanReminderLabel(intent.offsetMinutes)) antes de «\(matched.title)»."
+        } else {
+            summary = "Listo. Añadí un aviso a «\(matched.title)»."
+        }
+
         return InlineNovaResponse(
             userText: userText,
-            summary: "Listo. Añadí un aviso a «\(matched.title)».",
+            summary: summary,
             details: "🔔 \(humanReminderLabel(intent.offsetMinutes)) · \(fireLabel)",
             action: .openCalendar,
             isError: false,
