@@ -101,26 +101,26 @@ final class NavigationCoordinator: ObservableObject {
 struct MainTabView: View {
     @StateObject private var nav = NavigationCoordinator()
     @StateObject private var toast = ToastManager()
+    @State private var isKeyboardVisible = false
 
     var body: some View {
         VStack(spacing: 0) {
             pagingContent
-            customTabBar
+            if !isKeyboardVisible {
+                customTabBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .animation(.easeInOut(duration: 0.22), value: isKeyboardVisible)
         .background(Theme.Colors.background.ignoresSafeArea())
         .environmentObject(nav)
         .environmentObject(toast)
-        // NO usamos `.ignoresSafeArea(.keyboard)` global: rompía el chat de
-        // Nova. El TextField del chat usa `safeAreaInset(edge: .bottom)`,
-        // que necesita que la jerarquía padre RESPETE el inset del teclado
-        // para anclar la barra de input arriba del teclado. Con el ignore
-        // global activo, la barra quedaba escondida debajo del teclado y
-        // el usuario no veía lo que escribía.
-        //
-        // Tradeoff: la tab bar se desliza un poco cuando aparece el teclado.
-        // Aceptable — Mi Día y Calendario rara vez necesitan teclado, y
-        // cuando aparece (FocusBar en Mi Día, edición de eventos), prefirimos
-        // que el usuario vea su input antes de que la tab bar quede fija.
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            isKeyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
+        }
         .overlay(alignment: .top) {
             if let current = toast.current {
                 ToastBanner(toast: current)
