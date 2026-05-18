@@ -179,6 +179,65 @@ test('parsea evento con recordatorio antes del evento', () => {
   assert.equal(out.actions[1].reminder_time, '18:30')
 })
 
+test('NO le inventa hora a un recordatorio sin reminder_time cuando hay otro intent con hora', () => {
+  const out = normalize({
+    reply: 'Listo.',
+    actions: [
+      {
+        type: 'event',
+        title: 'Prueba de artes e ideas',
+        date: '2026-05-14',
+        start_time: '10:30',
+        end_time: '12:00',
+        confidence: 0.9,
+      },
+      {
+        type: 'reminder',
+        title: 'Avisar al profe que voy a salir de teorías de comunicación',
+        date: '2026-05-14',
+        reminder_time: null,
+        confidence: 0.88,
+      },
+    ],
+  }, 'tengo prueba de artes e ideas a las 10:30 acuérdame avisarle a mi profe que voy a salir de teorías de comunicación')
+
+  assert.equal(out.actions.length, 2)
+  assert.equal(out.actions[0].type, 'event')
+  assert.equal(out.actions[0].start_time, '10:30')
+  assert.equal(out.actions[1].type, 'reminder')
+  // El bug previo dejaba reminder_time = "10:30" (robado del evento). Ahora null.
+  assert.equal(out.actions[1].reminder_time, null)
+})
+
+test('respeta reminder_time:null aun cuando el mensaje menciona "mañana"', () => {
+  const out = normalize({
+    reply: 'Listo.',
+    actions: [{
+      type: 'reminder',
+      title: 'comprar pan',
+      date: '2026-05-15',
+      reminder_time: null,
+      confidence: 0.9,
+    }],
+  }, 'mañana comprar pan')
+
+  assert.equal(out.actions[0].reminder_time, null)
+})
+
+test('escala a Sonnet cuando hay verbo de evento + verbo de recordatorio sin conector', () => {
+  // El caso real que reportó el usuario en mayo 2026: sin "y/después/coma"
+  // de por medio, Haiku tendía a mezclar los intents.
+  assert.equal(
+    shouldRouteToSonnetFirst(
+      'tengo prueba de artes a las 10:30 acuérdame avisar al profe',
+      [],
+    ),
+    true,
+  )
+  // Solo reminder (sin verbo de evento) sigue yendo a Haiku.
+  assert.equal(shouldRouteToSonnetFirst('acuérdame comprar pan', []), false)
+})
+
 test('marca como escalable una respuesta incompleta de Haiku', () => {
   const out = normalize({
     reply: 'Listo.',

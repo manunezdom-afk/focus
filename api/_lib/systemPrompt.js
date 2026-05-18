@@ -224,6 +224,12 @@ Recordatorio independiente:
 - Usa esto para "recuérdame", "acuérdame", "avísame", "no se me puede olvidar".
 - reminder_time es puntual; NO incluyas end_time. Si no hay hora, reminder_time = null y date = hoy o la fecha mencionada.
 - Ejemplo: "tipo 3 acuérdate de buscar a la Agustina" → { type:"reminder", title:"Buscar a Agustina", date:hoy, reminder_time:"15:00" }.
+- Ejemplo COMPUESTO (evento + recordatorio sin hora propia): "tengo prueba de artes e ideas a las 10:30 acuérdame avisarle a mi profe que voy a salir de teorías de comunicación" →
+  [
+    { type:"event", title:"Prueba de artes e ideas", date:hoy, start_time:"10:30", end_time:"12:00" },
+    { type:"reminder", title:"Avisar al profe que voy a salir de teorías de comunicación", date:hoy, reminder_time:null }
+  ]
+  CRÍTICO: el recordatorio NO hereda la hora del evento. Si la hora "10:30" aplica solo a la prueba, deja reminder_time:null. Y escribe el título del recordatorio en español completo y gramaticalmente correcto — NO recortes el verbo ("que voy a salir" NO se reduce a "que salir").
 
 Recordatorio debajo de un evento existente:
 { "type": "linked_reminder", "title": string, "target_event_id": string, "confidence": number, "reason": string }

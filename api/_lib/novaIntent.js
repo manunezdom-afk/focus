@@ -76,9 +76,18 @@ export function cleanNovaTitle(input) {
 }
 
 function parseHourMinute(raw, preferPM = false) {
-  const value = normalizeText(raw)
+  // NO usamos normalizeText acá: strippea el ':' (lo trata como puntuación),
+  // y "10:30" quedaba como "10 30", lo que hacía que el regex capturara solo
+  // "10" y devolviera "10:00" — perdiendo los minutos. Bug silencioso: todos
+  // los eventos con minutos exactos (10:30, 14:45, 9:15) quedaban en la hora
+  // redonda. Hacemos lowercasing simple y normalizamos a.m./a m → am sin
+  // tocar los dos puntos.
+  const value = String(raw ?? '')
+    .toLowerCase()
+    .replace(/\./g, '')
     .replace(/\ba m\b/g, 'am')
     .replace(/\bp m\b/g, 'pm')
+    .trim()
   const match = value.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/)
   if (!match) return null
 
@@ -254,7 +263,11 @@ function normalizeReminderAction(raw, ctx, issues) {
   const rawTitle = extractTitle(raw)
   const title = cleanNovaTitle(rawTitle)
   const date = extractDate(raw, ctx.dateContext, ctx.dateContext.todayISO) ?? ctx.dateContext.todayISO
-  const reminderTime = extractStart(raw, true) ?? timeFromText(ctx.message)
+  // Si la IA emitió reminder_time explícito lo respetamos. Si no, queda null
+  // y el recordatorio se guarda sin hora. NO escaneamos ctx.message porque eso
+  // pescaba horas de OTROS intents (ej: usuario pide evento 10:30 + reminder
+  // sin hora → el reminder terminaba con 10:30 prestado del evento).
+  const reminderTime = extractStart(raw, true)
   const confidence = confidenceOf(raw)
 
   if (confidence < 0.65) issues.add('low_confidence')
@@ -439,7 +452,18 @@ export function shouldRouteToSonnetFirst(message, events = []) {
   const hasMultiConnector = /\b(despu[eé]s|luego|antes)\b|,|\s+y\s+/i.test(text)
   const intentCount = (n.match(/\b(recuerdame|recuerdate|recordarme|acuerdame|acuerdate|avisame|agenda|agendame|tengo|comprar|pagar|estudiar|entrenar)\b/g) ?? []).length
   const timeCount = (n.match(/\b(?:a las|tipo|noche|tarde|\d{1,2}:\d{2})\b/g) ?? []).length
-  return hasMultiConnector && (intentCount >= 2 || timeCount >= 2)
+  if (hasMultiConnector && (intentCount >= 2 || timeCount >= 2)) return true
+
+  // Multi-intent SIN conector explícito: "tengo X a las Y acuérdame Z" o
+  // "agendá A acuérdame B" — Haiku tiende a perder el sujeto o robarle la
+  // hora al reminder. Si vemos un verbo de evento (tengo/agenda/agéndame) +
+  // un verbo de reminder (recu/acu/avísame) en la misma frase, vamos a Sonnet
+  // directo. Cubre el caso del usuario en mayo 2026 (prueba de artes + aviso al profe).
+  const hasEventVerb = /\b(tengo|agenda|agendame|agéndame)\b/i.test(n)
+  const hasReminderVerb = /\b(recuerdame|recuerdate|recordarme|acuerdame|acuerdate|avisame)\b/i.test(n)
+  if (hasEventVerb && hasReminderVerb) return true
+
+  return false
 }
 
 function splitSegments(message) {
