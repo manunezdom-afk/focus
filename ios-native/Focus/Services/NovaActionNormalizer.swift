@@ -345,6 +345,14 @@ enum NovaActionNormalizer {
             #"\s+para\s+(estar(\s+listo)?|llegar)(\s+(tipo|a\s+la?s?|como\s+a\s+la?s?|sobre\s+la?s?)\s+\d{1,2}(:\d{2})?)?(\s+(ac[aá]|aqu[ií]|all[aá]))?\b"#,
             // Sin temporal: "para estar [listo] acá/aquí/allá" o solo "para llegar"
             #"\s+para\s+(estar(\s+listo)?|llegar)(\s+(ac[aá]|aqu[ií]|all[aá]))?\b"#,
+            // "para [verbo reflexivo]me" trailing — propósito personal del usuario
+            // (no parte del título del evento). Caso real (BUG-USER 2026-05-18):
+            // "más tarde viene la agustina tipo 6 acuérdame 20 min antes para
+            // prepararme" → tras strip de leading "más tarde" y "20 min antes",
+            // quedaba "Viene la agustina para prepararme" con "para prepararme"
+            // colgando. La whitelist refleja reflexiveVerbMap (descanso,
+            // higiene, foco, cuerpo) más "salir/ir" para casos puntuales.
+            #"\s+para\s+(prepararme|concentrarme|relajarme|calmarme|ducharme|bañarme|banarme|lavarme|peinarme|vestirme|afeitarme|cambiarme|dormirme|despertarme|levantarme|acostarme|moverme|ejercitarme|estirarme|irme|salirme|volverme|alistarme|arreglarme|organizarme|ordenarme)\b"#,
         ]
         for pattern in trailingContextPatterns {
             result = result.replacingOccurrences(

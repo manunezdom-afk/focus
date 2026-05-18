@@ -323,6 +323,29 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
+        // BUG-USER 2026-05-18: "más tarde viene la agustina tipo 6 acuérdame
+        // 20 min antes para prepararme" quedaba como título literal completo
+        // en el reminder card. cleanTitle debe strippear leading "más tarde",
+        // "20 min antes" Y trailing "para prepararme" (propósito personal).
+        check(
+            label: "BUG-2026-05-18: 'más tarde viene la agustina 20 min antes para prepararme' → 'Viene la agustina'",
+            actual: NovaActionNormalizer.cleanTitle("más tarde viene la agustina 20 min antes para prepararme"),
+            expected: "Viene la agustina",
+            failures: &failures
+        )
+        check(
+            label: "trailing 'para prepararme' se strippea",
+            actual: NovaActionNormalizer.cleanTitle("salir a comprar para prepararme"),
+            expected: "Salir a comprar",
+            failures: &failures
+        )
+        check(
+            label: "trailing 'para alistarme' se strippea",
+            actual: NovaActionNormalizer.cleanTitle("buscar la mochila para alistarme"),
+            expected: "Buscar la mochila",
+            failures: &failures
+        )
+
         // ───── extractReminderOffset ───────────────────────────────────
 
         check(
