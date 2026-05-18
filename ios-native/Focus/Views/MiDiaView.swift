@@ -1711,13 +1711,44 @@ struct MiDiaView: View {
                 action: .openTasksList
             )
 
-        case .createEvent(let title, let when, let explicitEnd, let location, let section, let wantsReminder):
+        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder):
+            // BUG-USER 2026-05-18: este path guardaba el título RAW del intent
+            // parser sin pasarlo por cleanTitle, mientras que
+            // FocusDataStore.applyLocalNovaIntent SÍ lo limpia. Resultado: el
+            // mismo input creaba bloques con título tipo "Más tarde viene la
+            // agustina 20 min antes" en vez de "Viene la agustina". Unificamos
+            // el pipeline llamando cleanTitle acá también.
+            let title = NovaActionNormalizer.cleanTitle(rawTitle)
+            guard !title.isEmpty else {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "No entendí qué quieres agendar.",
+                    details: "Prueba con un título claro.",
+                    isError: true
+                )
+            }
             guard let date = when else {
                 return InlineNovaResponse(
                     userText: userText,
                     summary: "Necesito saber el día y la hora.",
                     details: "Prueba: «agenda \(title) mañana a las 12».",
                     isError: true
+                )
+            }
+            // Anti-duplicado: si el mismo título ya existe a esa hora, no
+            // duplicar. Antes el usuario podía dictar lo mismo dos veces
+            // (autocomplete, voz repetida) y terminaba con 2-3 bloques iguales.
+            if NovaActionNormalizer.isLikelyDuplicate(
+                title: title,
+                startTime: date,
+                existingEvents: store.events
+            ) {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "Ya tenías «\(title)» a esa hora.",
+                    details: "No lo duplico.",
+                    action: .openCalendar,
+                    tone: .clarify
                 )
             }
             let cal = Calendar.current
