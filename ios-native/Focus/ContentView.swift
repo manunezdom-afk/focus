@@ -45,17 +45,18 @@ struct ContentView: View {
     }
 
     var body: some View {
-        // 2026-05-13: transición suave entre pantallas root.
-        // Antes el switch hacía swap atómico instantáneo — al pasar de
-        // login → main se sentía "brusco" (el usuario lo reportó: "no es
-        // como en otras apps que es más tranquilo y visualmente agradable,
-        // acá salta de una pantalla a otra"). Ahora cada pantalla tiene
-        // su `.transition()` y el outer ZStack anima `value: route` —
-        // una sola animación sobre un único valor evita el bug histórico
-        // de capas duplicadas (que ocurría con 3 `.animation(value:)`
-        // separados disparando crossfades simultáneos). El crossfade es
-        // opacity 0.45s + scale sutil 0.98→1.0 al entrar en MainTabView,
-        // que da la sensación de "asentar" en la app sin chocar.
+        // Transición suave entre pantallas root. Un único `route` computado
+        // + un solo `.animation(value:)` evita el bug histórico de crossfades
+        // simultáneos (capas duplicadas en pantalla).
+        //
+        // Pre-warming: MainTabView se mete en el ZStack a opacity/scale 0 en
+        // cuanto auth resuelve (aunque el boot todavía esté visible). Así su
+        // primer render ocurre silenciosamente en el fondo y no compite con la
+        // animación de entrada — elimina el "traba" que se sentía al abrir la app.
+        //
+        // Curve easeOut (no easeInOut): arranca a velocidad plena y desacelera,
+        // lo opuesto al easeInOut que empieza casi estático y se percibe como
+        // freeze los primeros frames.
         ZStack {
             if route == .boot {
                 BootView()
@@ -70,22 +71,20 @@ struct ContentView: View {
                 LoginView()
                     .transition(.opacity)
             }
-            if route == .main {
+            // Pre-warm: entra al árbol (invisible) en cuanto auth resuelve,
+            // antes de que el boot termine. Cuando route cambia a .main, el
+            // primer frame ya está cacheado → animación sin traba.
+            if route == .main || (route == .boot && auth.isAuthenticatedOrDemo) {
                 MainTabView()
-                    .transition(
-                        .asymmetric(
-                            // Al entrar: opacity + escala muy sutil hacia 1.0.
-                            // Da feeling de "se asienta" sin que parezca rebote.
-                            insertion: .opacity.combined(with: .scale(scale: 0.985)),
-                            // Al salir (logout): solo opacity, sin escala —
-                            // no queremos animar "out" agresivamente cuando
-                            // el usuario cierra sesión, debe ser limpio.
-                            removal: .opacity
-                        )
-                    )
+                    .opacity(route == .main ? 1 : 0)
+                    .scaleEffect(route == .main ? 1.0 : 0.985)
+                    .allowsHitTesting(route == .main)
+                    // Solo aplica en el caso raro donde auth resuelve DESPUÉS
+                    // del boot (sin pre-warm): la vista se inserta fresh.
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
             }
         }
-        .animation(.easeInOut(duration: 0.45), value: route)
+        .animation(.easeOut(duration: 0.35), value: route)
     }
 
     /// Termina el boot rápidamente — 0.6s. Antes era 1.8s, lo que se
