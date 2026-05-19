@@ -1102,6 +1102,9 @@ struct MiDiaView: View {
             // Operan sobre eventos locales por fuzzy match — el backend no
             // tiene visibilidad de IDs locales. Siempre resolver local.
             return true
+        case .proposeActionPlan, .confirmActionPlan:
+            // Plan extraction + confirmación: local.
+            return true
         case .createEvent, .createTask:
             // Solo si el local resolvió un follow-up con pending activo —
             // significa que estaba completando una pregunta previa.
@@ -2183,6 +2186,57 @@ struct MiDiaView: View {
                 summary: "Los ejemplos desaparecen automáticamente.",
                 details: "Solo aparecen mientras no tengas datos tuyos. Apenas crees tu primer evento o tarea, se reemplazan.",
                 action: nil
+            )
+
+        case .proposeActionPlan(let actions):
+            // Modo PROPUESTA — no creamos nada. Guardamos en novaContext
+            // y mostramos el plan numerado. El usuario confirma con
+            // "sí, agrégalas" en el siguiente turno.
+            store.novaContext.pendingActionPlan = actions
+            store.novaContext.updatedAt = Date()
+            let bullets = actions.enumerated().map { idx, action in
+                "\(idx + 1). \(action.title)"
+            }.joined(separator: "\n")
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Entendí \(actions.count) acciones.",
+                details: "\(bullets)\n\nDi «sí, agrégalas» y las creo como tareas.",
+                action: nil,
+                tone: .clarify
+            )
+
+        case .confirmActionPlan:
+            guard let plan = store.novaContext.pendingActionPlan, !plan.isEmpty else {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "No tengo propuesta pendiente.",
+                    details: "Pégame la lista y la organizo.",
+                    action: nil,
+                    tone: .clarify
+                )
+            }
+            for action in plan {
+                let subtasks = action.subtasks
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .map { FocusSubtask(title: $0) }
+                let task = FocusTask(
+                    title: action.title,
+                    notes: action.notes,
+                    priority: action.priority,
+                    category: action.category,
+                    subtasks: subtasks
+                )
+                store.addTask(task)
+            }
+            let count = plan.count
+            store.novaContext.pendingActionPlan = nil
+            store.novaContext.updatedAt = Date()
+            return InlineNovaResponse(
+                userText: userText,
+                summary: count == 1 ? "Creé 1 tarea." : "Creé \(count) tareas.",
+                details: "Las dejé en tu lista de hoy con prioridad alta. Dime «qué me queda pendiente» para revisarlas o si quieres mover alguna.",
+                action: .openTasksList
             )
 
         case .smallTalk(let reply):

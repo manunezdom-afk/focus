@@ -149,6 +149,16 @@ enum NovaIntent: Hashable {
     /// `applyLocalNovaIntent` resuelve el evento con `findEventByApproxTitle`
     /// y actualiza `reminderOffsets` reemplazando cualquier alerta previa.
     case attachReminderToEvent(activity: String, offsetMinutes: Int, note: String?)
+    /// Propuesta de plan de acción desde texto largo. El usuario pegó una
+    /// lista de varias responsabilidades (ej. "Acciones tuyas: 1. Hablar
+    /// con... 2. Revisar... 3. Enviar..."). Nova NO ejecuta — guarda la
+    /// propuesta en `pendingActionPlan` y devuelve un resumen humano. El
+    /// siguiente turno con "sí, agrégalo" / "dale" dispara
+    /// `.confirmActionPlan` que crea las tareas reales.
+    case proposeActionPlan(actions: [ProposedTaskAction])
+    /// Usuario aceptó la propuesta del turno anterior (almacenada en
+    /// `pendingActionPlan`). Crea N tareas con notas + subtasks + prioridad.
+    case confirmActionPlan
     /// Organizar el día → genera sugerencias en la Bandeja.
     case organizeDay
     /// Revisar tareas pendientes → resumen inline.
@@ -207,6 +217,21 @@ struct DiscussedEvent: Equatable, Hashable {
     }
 }
 
+/// Propuesta de tarea generada al extraer un plan de acción desde texto
+/// largo. NO se aplica directamente — se muestra al usuario como
+/// resumen y se aplica solo si confirma con "sí, agrégalo".
+///
+/// Diseño: el título es el visible en la lista de tareas y debe ser
+/// DISCRETO (sin exponer detalles médicos sensibles). Las notas guardan
+/// el detalle original. Las subtasks expanden pasos concretos.
+struct ProposedTaskAction: Equatable, Hashable {
+    var title: String
+    var notes: String?
+    var priority: TaskPriority
+    var category: TaskCategory
+    var subtasks: [String]
+}
+
 /// Memoria local de la última interacción con Nova. Permite resolver
 /// referencias tipo "agéndalo como tarea recurrente" — "lo" remite al título
 /// más reciente. NO se persiste en disco: vive solo en RAM durante la sesión.
@@ -233,6 +258,13 @@ struct NovaContext: Equatable {
     /// MENCIONA un evento (por título fuzzy match). Auto-expira por
     /// item después de 30 min sin actividad.
     var discussedEvents: [DiscussedEvent] = []
+    /// Plan de acción propuesto pero NO confirmado. Lo guardamos cuando
+    /// Nova detecta texto largo con varias acciones y le pregunta al
+    /// usuario si quiere convertirlas en tareas. Una respuesta afirmativa
+    /// corta ("sí, agrégalo", "dale", "agrégalas") en el siguiente turno
+    /// lo ejecuta. Expira por contexto (10 min) o cuando el usuario cambia
+    /// claramente de tema.
+    var pendingActionPlan: [ProposedTaskAction]?
     var updatedAt: Date = Date()
 
     enum Kind: Hashable {
@@ -1222,6 +1254,36 @@ enum NovaResponder {
     static func parse(_ text: String, context: NovaContext = NovaContext()) -> NovaIntent {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
+
+        // ──────────────────────────────────────────────────────────────
+        // -2. Confirmación de plan de acción pendiente. Si el turno
+        //     anterior generó una propuesta y el usuario contesta
+        //     afirmativamente corto ("sí, agrégalo", "dale", "agrégalas",
+        //     "ok", "perfecto"), creamos las tareas. Se chequea ANTES de
+        //     todo lo demás para que respuestas cortas no caigan al
+        //     flujo de createTask con título "sí".
+        // ──────────────────────────────────────────────────────────────
+        if let plan = context.pendingActionPlan, !plan.isEmpty, context.isFresh {
+            if matchesAffirmativeConfirmation(lower) {
+                return .confirmActionPlan
+            }
+            if matchesAny(lower, ["no", "cancela", "déjalo", "dejalo", "olvídalo", "olvidalo"]),
+               lower.count <= 30 {
+                // Cancela la propuesta; devolvemos smalltalk neutro.
+                return .smallTalk(reply: "Listo, no la agendo. Cualquier cosa estoy aquí.")
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // -1.5. Detector de PLAN DE ACCIÓN: texto largo con múltiples
+        //       acciones independientes (3+ líneas con verbos imperativos
+        //       o frases separadas claramente). Nova NO ejecuta — propone.
+        //       Antes este input caía al createEvent / createTask y se
+        //       mezclaba como un único bloque gigante o se ignoraba.
+        // ──────────────────────────────────────────────────────────────
+        if let actions = detectActionPlan(text: trimmed), actions.count >= 3 {
+            return .proposeActionPlan(actions: actions)
+        }
         let baseWantsReminder = matches(lower, [
             "acuérdame", "acuerdame", "acordame",
             "acuérdate", "acuerdate",
@@ -1691,6 +1753,10 @@ enum NovaResponder {
                 ? "\(offsetMinutes) min antes"
                 : (offsetMinutes % 60 == 0 ? "\(offsetMinutes/60) h antes" : "\(offsetMinutes/60) h \(offsetMinutes%60) min antes")
             return "Pongo aviso \(offsetLabel) en «\(activity)»."
+        case .proposeActionPlan(let actions):
+            return "Tengo \(actions.count) acciones para anotar. Confírmame «sí, agrégalas» y las dejo en tu lista."
+        case .confirmActionPlan:
+            return "Anoto las tareas que te propuse."
         case .organizeDay:
             return Self.pick([
                 "Cuéntame qué quieres lograr hoy y armamos el día juntos.",
@@ -1828,6 +1894,211 @@ enum NovaResponder {
         let activity = NovaActionNormalizer.cleanTitle(activityPart)
         guard !activity.isEmpty else { return nil }
         return .rescheduleEventByActivity(activity: activity, hour: h, minute: m)
+    }
+
+    /// Detecta si el turno responde afirmativamente a una propuesta
+    /// pendiente. Conservador: solo respuestas cortas y claras.
+    /// "sí, agrégalas como tareas" / "dale" / "perfecto" / "agrégalo" /
+    /// "ok, agrégalas" → true. "sí pero" / textos largos → false (caller
+    /// debe seguir parseo normal).
+    static func matchesAffirmativeConfirmation(_ lower: String) -> Bool {
+        let trimmed = lower.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count <= 60 else { return false }
+        let triggers: [String] = [
+            "sí", "si,", "si.", "sí.", "sí,",
+            "sí, agré", "si, agre", "sí, agrega", "si, agrega",
+            "sí, dale", "si, dale",
+            "agrégalo", "agregalo", "agrégalas", "agregalas",
+            "agrégala", "agregala", "agrégame", "agregame",
+            "agrégalas como tareas", "agregalas como tareas",
+            "agrégalo como tareas", "agregalo como tareas",
+            "dale", "dale nomás", "dale nomas",
+            "ok,", "ok.", "okey", "okay",
+            "listo,", "listo.", "perfecto", "bueno,",
+            "hazlo", "hacelo", "hagámoslo", "hagamoslo",
+            "confirma", "confirmar"
+        ]
+        if triggers.contains(where: { trimmed.hasPrefix($0) }) { return true }
+        // "sí" solo, o "si" solo.
+        if trimmed == "sí" || trimmed == "si" || trimmed == "sii" || trimmed == "ok" || trimmed == "dale" {
+            return true
+        }
+        return false
+    }
+
+    /// Detecta si `text` contiene una lista de acciones independientes
+    /// (típicamente pegada por el usuario desde un correo/Notion/chat).
+    /// Heurística: 3+ líneas no vacías que arrancan con verbo imperativo
+    /// O 3+ enunciados separados por saltos / "; " / "1." "2.". Devuelve
+    /// las acciones extraídas o nil si no parece plan.
+    ///
+    /// NO toca títulos sensibles aquí — eso lo hace `proposedTaskFromLine`.
+    static func detectActionPlan(text: String) -> [ProposedTaskAction]? {
+        // Primer corte: si tiene <30 caracteres O no contiene ningún
+        // separador → no es plan.
+        guard text.count >= 30 else { return nil }
+        let hasMultipleLines = text.contains("\n")
+        let hasNumberedList = text.range(of: #"(?m)^\s*\d+[\.\)]\s"#, options: .regularExpression) != nil
+        let hasBulletList = text.range(of: #"(?m)^\s*[\u{2022}\-\*]\s"#, options: .regularExpression) != nil
+        guard hasMultipleLines || hasNumberedList || hasBulletList else { return nil }
+
+        // Split por líneas; ignorar líneas vacías o headers ("Acciones tuyas:" / "Lista:").
+        let rawLines = text.components(separatedBy: CharacterSet.newlines)
+        var lines: [String] = []
+        for line in rawLines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedLine.isEmpty { continue }
+            // Ignorar headers tipo "Acciones tuyas:", "Pendientes:", "Lista:".
+            let isHeader = trimmedLine.range(
+                of: #"^(?:acciones|pendientes|lista|tareas|to-?do|hacer|notas)\b.*:?\s*$"#,
+                options: [.regularExpression, .caseInsensitive]
+            ) != nil
+            if isHeader { continue }
+            // Quitar marcadores de bullet/número del inicio.
+            let cleaned = trimmedLine
+                .replacingOccurrences(
+                    of: #"^\s*(?:\d+[\.\)]|[\u{2022}\-\*])\s*"#,
+                    with: "",
+                    options: .regularExpression
+                )
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleaned.count >= 6 {
+                lines.append(cleaned)
+            }
+        }
+        guard lines.count >= 3 else { return nil }
+
+        // Verificar que al menos 3 líneas tengan estructura de acción
+        // (verbo imperativo / infinitivo al inicio o cerca). Si no, no es
+        // un plan — puede ser un párrafo común.
+        let actionVerbs: [String] = [
+            "hablar", "revisar", "enviar", "escribir", "evaluar", "conversar",
+            "preparar", "llamar", "pedir", "mandar", "estudiar", "leer",
+            "comprar", "buscar", "agendar", "anotar", "investigar", "armar",
+            "ordenar", "limpiar", "completar", "terminar", "responder",
+            "decidir", "elegir", "planificar", "planear", "organizar",
+            "contactar", "coordinar", "confirmar", "revisarse", "iniciar"
+        ]
+        let linesWithVerb = lines.filter { line in
+            let lowerLine = line.lowercased()
+            return actionVerbs.contains { verb in
+                lowerLine.hasPrefix(verb) || lowerLine.hasPrefix(verb + "se ")
+                    || lowerLine.contains(" " + verb + " ")
+            }
+        }
+        guard linesWithVerb.count >= max(3, lines.count / 2) else { return nil }
+
+        // Convertir cada línea en ProposedTaskAction.
+        var actions: [ProposedTaskAction] = []
+        for line in lines {
+            if let action = proposedTaskFromLine(line) {
+                actions.append(action)
+            }
+            if actions.count >= 12 { break }  // cap defensivo
+        }
+        return actions.isEmpty ? nil : actions
+    }
+
+    /// Convierte una línea de plan en ProposedTaskAction. Hace:
+    /// - Extrae verbo + objeto principal como título corto.
+    /// - El resto va a notas.
+    /// - Detecta referencias sensibles (psiquiatra, terapia, medicamentos)
+    ///   y usa título genérico ("Pedir certificado médico") con el detalle
+    ///   en notas.
+    /// - Asigna prioridad/categoría heurística.
+    static func proposedTaskFromLine(_ line: String) -> ProposedTaskAction? {
+        let trimmedLine = line.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!? "))
+        guard !trimmedLine.isEmpty else { return nil }
+        let lower = trimmedLine.lowercased()
+
+        // Detección sensitive — "psiquiatra/psicólogo/medicamentos" en un
+        // texto sobre certificado/salud → título genérico discreto.
+        let mentionsTherapist = lower.contains("psiquiatra") || lower.contains("psicologo")
+            || lower.contains("psicólogo") || lower.contains("psicóloga")
+        let mentionsCertificate = lower.contains("certificado") || lower.contains("certificate")
+        let mentionsMedication = lower.contains("medicamento") || lower.contains("medicación")
+            || lower.contains("medicacion") || lower.contains("tratamiento")
+
+        let title: String
+        let notes: String?
+        if mentionsTherapist && (mentionsCertificate || mentionsMedication) {
+            title = "Pedir certificado médico"
+            notes = trimmedLine
+        } else {
+            // Heurística simple: cortar la línea en la primera coma fuerte,
+            // o en " para que" / " con el fin de" / " porque", para que el
+            // título quede breve. Si la línea es corta (≤ 70 chars), usar
+            // toda la línea como título.
+            if trimmedLine.count <= 70 {
+                title = capitalizeFirstSpanish(trimmedLine)
+                notes = nil
+            } else {
+                let cutMarkers = [
+                    ", para ", " para que ", " con el fin de ", " porque ",
+                    ", con copia", ", mencionando", ", incluyendo"
+                ]
+                var cutIndex: String.Index? = nil
+                for marker in cutMarkers {
+                    if let r = trimmedLine.range(of: marker) {
+                        if cutIndex == nil || r.lowerBound < cutIndex! {
+                            cutIndex = r.lowerBound
+                        }
+                    }
+                }
+                if let idx = cutIndex {
+                    title = capitalizeFirstSpanish(String(trimmedLine[..<idx]))
+                    notes = String(trimmedLine[idx...])
+                        .trimmingCharacters(in: CharacterSet(charactersIn: " ,."))
+                } else {
+                    // Cortar en la palabra ≤ 60 chars manteniendo verbo + obj.
+                    let words = trimmedLine.split(separator: " ")
+                    var built = ""
+                    for w in words {
+                        if (built.count + w.count + 1) > 60 { break }
+                        if !built.isEmpty { built += " " }
+                        built += String(w)
+                    }
+                    title = capitalizeFirstSpanish(built)
+                    notes = trimmedLine
+                }
+            }
+        }
+
+        // Prioridad heurística:
+        let priority: TaskPriority
+        if lower.contains("urgente") || lower.contains("importante") || lower.contains("urgentemente")
+            || mentionsCertificate || lower.contains("enviar") || lower.contains("entregar") {
+            priority = .alta
+        } else if lower.contains("evaluar") || lower.contains("conversar") || lower.contains("decidir") {
+            priority = .media
+        } else {
+            priority = .alta  // default alta para acciones de un plan
+        }
+
+        // Categoría heurística. TaskCategory representa urgencia
+        // (hoy/semana/algunDia). Para el plan extraction usamos .hoy
+        // porque:
+        //   1. La beta no tiene una vista dedicada para tareas de "esta
+        //      semana", así que .semana las dejaba invisibles.
+        //   2. Las tareas de un plan suelen ser cosas en las que el user
+        //      quiere trabajar pronto, no archivar.
+        //   3. Si el usuario quiere postergar, el comando "qué me queda
+        //      pendiente" las muestra y puede moverlas.
+        let category: TaskCategory = .hoy
+
+        return ProposedTaskAction(
+            title: title,
+            notes: notes,
+            priority: priority,
+            category: category,
+            subtasks: []
+        )
+    }
+
+    /// Capitaliza primera letra respetando acentos.
+    private static func capitalizeFirstSpanish(_ s: String) -> String {
+        guard let first = s.first else { return s }
+        return first.uppercased() + s.dropFirst()
     }
 
     /// Detecta frases que ATRIBUYEN un reminder a un evento existente sin
@@ -5406,6 +5677,11 @@ final class FocusDataStore: ObservableObject {
             // los IDs locales, así que estos intents SIEMPRE se
             // resuelven local.
             return true
+        case .proposeActionPlan, .confirmActionPlan:
+            // Extracción de plan + confirmación: local, conservador.
+            // El backend podría hacer mejor parseo, pero hasta tenerlo
+            // mejor que el local, el local da una experiencia consistente.
+            return true
         case .createEvent, .createTask:
             return novaContext.pendingIsActive
         default:
@@ -5807,6 +6083,47 @@ final class FocusDataStore: ObservableObject {
 
         case .askAboutDemo:
             return "Los ejemplos solo aparecen mientras no tengas datos tuyos. Apenas creas tu primer evento o tarea, se reemplazan automáticamente."
+
+        case .proposeActionPlan(let actions):
+            // Guardar la propuesta para que el siguiente "sí, agrégalo"
+            // la ejecute. NO crear nada hasta confirmación explícita —
+            // la regla de producto es que textos largos no se ejecutan solos.
+            novaContext.pendingActionPlan = actions
+            novaContext.updatedAt = Date()
+            let bullets = actions.enumerated().map { idx, action in
+                "\(idx + 1). \(action.title)"
+            }.joined(separator: "\n")
+            let count = actions.count
+            return "Entendí \(count) acciones. Te las puedo organizar como tareas:\n\(bullets)\n\n¿Las agrego a tu lista? Responde «sí, agrégalas» y las creo."
+
+        case .confirmActionPlan:
+            guard let plan = novaContext.pendingActionPlan, !plan.isEmpty else {
+                return "No tengo ninguna propuesta pendiente. Pégame la lista y la organizo."
+            }
+            var createdCount = 0
+            for action in plan {
+                var subtasksModels: [FocusSubtask] = []
+                for st in action.subtasks {
+                    let stTrimmed = st.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !stTrimmed.isEmpty {
+                        subtasksModels.append(FocusSubtask(title: stTrimmed))
+                    }
+                }
+                let task = FocusTask(
+                    title: action.title,
+                    notes: action.notes,
+                    priority: action.priority,
+                    category: action.category,
+                    subtasks: subtasksModels
+                )
+                addTask(task)
+                createdCount += 1
+            }
+            novaContext.pendingActionPlan = nil
+            novaContext.updatedAt = Date()
+            return createdCount == 1
+                ? "Listo, creé 1 tarea en tu lista de hoy."
+                : "Listo, creé \(createdCount) tareas en tu lista de hoy. Dime si quieres reordenarlas o mover alguna a la semana."
 
         case .smallTalk(let reply):
             return reply
