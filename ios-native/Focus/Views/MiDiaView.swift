@@ -1954,6 +1954,78 @@ struct MiDiaView: View {
                 isError: true
             )
 
+        case .deleteEventByActivity(let activity):
+            // Borrar evento existente por título aproximado. Antes (pre-fix
+            // 2026-05-19) este input caía al createTask y creaba una tarea
+            // con el mismo nombre — basura. Ahora resolvemos vía
+            // findEventByApproxTitle y borramos si hay match.
+            if let event = NovaResponder.findEventByApproxTitle(activity, in: store.events) {
+                let title = event.title
+                store.deleteEvent(event.id)
+                store.clearNovaContext()
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "Eliminado.",
+                    details: "«\(title)» se borró del calendario.",
+                    action: .dismiss
+                )
+            }
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "No encontré «\(activity)» en tu agenda.",
+                details: "Si lo escribiste distinto, dime el nombre exacto.",
+                action: .dismiss,
+                tone: .clarify
+            )
+
+        case .rescheduleEventByActivity(let activity, let hour, let minute):
+            // Mover evento existente por título aproximado a nueva hora.
+            // Antes el input caía al createEvent y duplicaba — ahora editamos
+            // el evento existente preservando su día.
+            guard let event = NovaResponder.findEventByApproxTitle(activity, in: store.events) else {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "No encontré «\(activity)» en tu agenda.",
+                    details: "Si quieres crearlo nuevo, di «agenda \(activity) a las \(String(format: "%02d:%02d", hour, minute))».",
+                    action: .dismiss,
+                    tone: .clarify
+                )
+            }
+            let cal = Calendar.current
+            guard let newStart = cal.date(
+                bySettingHour: hour, minute: minute, second: 0, of: event.startTime
+            ) else {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "No pude calcular la nueva hora.",
+                    details: "Inténtalo con formato 24h (ej. «a las 17:00»).",
+                    isError: true
+                )
+            }
+            var updated = event
+            updated.startTime = newStart
+            if let oldEnd = event.endTime {
+                let duration = oldEnd.timeIntervalSince(event.startTime)
+                updated.endTime = newStart.addingTimeInterval(duration)
+            }
+            store.updateEvent(updated)
+            store.updateNovaContext(
+                from: userText,
+                title: event.title,
+                date: newStart,
+                location: event.location,
+                section: event.section,
+                kind: .event,
+                eventId: event.id
+            )
+            let timeLabel = DateFormatters.hourMinute.string(from: newStart)
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Listo. Moví «\(event.title)» a las \(timeLabel).",
+                details: nil,
+                action: .openCalendar
+            )
+
         case .organizeDay:
             store.addSuggestion(NovaSuggestion(
                 title: "Plan del día actualizado",

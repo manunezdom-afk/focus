@@ -130,6 +130,14 @@ enum NovaIntent: Hashable {
     case convertLastToTask
     /// Borrar el último ítem creado (evento o tarea).
     case deleteLastItem
+    /// Borrar un evento existente identificado por título aproximado. Ej:
+    /// "borra lo de estudiar comunicación" / "elimina fútbol". El caller
+    /// (`applyLocalNovaIntent`) resuelve el evento usando
+    /// `findEventByApproxTitle`.
+    case deleteEventByActivity(activity: String)
+    /// Cambiar la hora de un evento existente por título aproximado. Ej:
+    /// "mueve fútbol a las 5" / "cambia clase de arte a las 11".
+    case rescheduleEventByActivity(activity: String, hour: Int, minute: Int)
     /// Organizar el día → genera sugerencias en la Bandeja.
     case organizeDay
     /// Revisar tareas pendientes → resumen inline.
@@ -1340,6 +1348,24 @@ enum NovaResponder {
         }
 
         // ──────────────────────────────────────────────────────────────
+        // 2-bis. Reagendar evento existente por título: "mueve fútbol a
+        //        las 5", "cambia clase de arte a las 11". Detección early
+        //        para que NO caiga al createEvent y termine duplicando.
+        // ──────────────────────────────────────────────────────────────
+        if let reschedule = detectRescheduleByActivity(text: trimmed, lower: lower) {
+            return reschedule
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // 2-ter. Borrar evento existente por título: "borra lo de
+        //        estudiar comunicación", "elimina fútbol". Antes esto
+        //        caía al createTask y creaba una tarea con ese título.
+        // ──────────────────────────────────────────────────────────────
+        if let deletion = detectDeleteByActivity(text: trimmed, lower: lower) {
+            return deletion
+        }
+
+        // ──────────────────────────────────────────────────────────────
         // 3. Revisar pendientes.
         // ──────────────────────────────────────────────────────────────
         if matches(lower, [
@@ -1608,6 +1634,10 @@ enum NovaResponder {
             return "Lo paso a tareas."
         case .deleteLastItem:
             return "Listo, lo elimino."
+        case .deleteEventByActivity(let activity):
+            return "Borro «\(activity)» de tu agenda."
+        case .rescheduleEventByActivity(let activity, let hour, let minute):
+            return "Muevo «\(activity)» a las \(String(format: "%02d:%02d", hour, minute))."
         case .organizeDay:
             return Self.pick([
                 "Cuéntame qué quieres lograr hoy y armamos el día juntos.",
@@ -1667,6 +1697,79 @@ enum NovaResponder {
     }
 
     // MARK: - Heurísticas de parsing
+
+    /// Detecta "borra/elimina/quita X" donde X es el nombre aproximado de un
+    /// evento existente. Devuelve nil si el remainder es un pronombre contextual
+    /// (manejado en step 0), o si menciona "demo/ejemplo" (manejado en step 2).
+    ///
+    /// Antes (BUG-USER 2026-05-19): "borra lo de estudiar comunicación" caía al
+    /// flujo de createTask y terminaba creando una tarea con ese título — el
+    /// opuesto de lo pedido. Ahora se devuelve un intent dedicado que el
+    /// `applyLocalNovaIntent` resuelve vía fuzzy-match contra eventos reales.
+    static func detectDeleteByActivity(text: String, lower: String) -> NovaIntent? {
+        // Patrón: comando borra/elimina/quita/saca + (opcional artículo) + sustantivo
+        let pattern = #"^\s*(?:b[oó]rra(?:me|le|lo)?|elimina(?:me|le|lo)?|qu[ií]ta(?:me|le|lo)?|s[aá]ca(?:me|le|lo)?|borrar|eliminar|quitar|sacar)\s+(?:lo\s+de\s+|la\s+|el\s+|los\s+|las\s+)?(.+)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let ns = text as NSString
+        guard let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
+              match.numberOfRanges >= 2 else { return nil }
+        let remainder = ns.substring(with: match.range(at: 1))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let rmLower = remainder.lowercased()
+        // Pronombres puros → step 0 ya los maneja como deleteLastItem.
+        let pronouns: Set<String> = ["lo", "eso", "esto", "ese", "esa", "aquello", "todo", "esos"]
+        if pronouns.contains(rmLower) { return nil }
+        // Demo/ejemplo → step 2 ya los maneja.
+        if rmLower.contains("ejemplo") || rmLower.contains("demo") { return nil }
+        // Limpiar título con el mismo pipeline que usamos para crear.
+        let activity = NovaActionNormalizer.cleanTitle(remainder)
+        guard !activity.isEmpty else { return nil }
+        return .deleteEventByActivity(activity: activity)
+    }
+
+    /// Detecta "mueve/cambia/pasa X a las Y" donde X es título aproximado de un
+    /// evento existente. Sin esta detección, el flujo caía al createEvent y
+    /// duplicaba (BUG-USER 2026-05-19: "mueve fútbol a las 5" → creó "Mueve
+    /// fútbol" 17:00 en vez de mover el existente).
+    static func detectRescheduleByActivity(text: String, lower: String) -> NovaIntent? {
+        let leadingVerbs: [String] = [
+            "muévelo", "muevelo", "muévela", "muevela",
+            "mueve",
+            "cámbialo", "cambialo", "cámbiale", "cambiale",
+            "cambia",
+            "pasa", "p[aá]sala", "pasala", "p[aá]salo", "pasalo",
+            "edita", "ed[ií]tale", "editale",
+            "reagenda", "reag[eé]ndame", "reagendame"
+        ]
+        // Encontrar el verbo de inicio (case-insensitive, word boundary).
+        var matchedVerb: String? = nil
+        for v in leadingVerbs {
+            let vPattern = "^\\s*" + v + "\\b"
+            if lower.range(of: vPattern, options: .regularExpression) != nil {
+                matchedVerb = v
+                break
+            }
+        }
+        guard let verb = matchedVerb else { return nil }
+        // Sustraer la parte después del verbo.
+        let verbRegex = "^\\s*" + verb + "\\s+"
+        guard let verbRange = lower.range(of: verbRegex, options: .regularExpression) else { return nil }
+        let afterVerbLower = String(lower[verbRange.upperBound...])
+        let afterVerbOriginal = String(text[verbRange.upperBound...])
+        // Encontrar el anchor temporal "a las/a la/para las/para la".
+        let timeAnchorRegex = #"\b(?:a\s+la?s?|para\s+la?s?|para\s+el)\s+"#
+        guard let anchorRange = afterVerbLower.range(of: timeAnchorRegex, options: .regularExpression) else { return nil }
+        let activityPart = String(afterVerbOriginal[..<anchorRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !activityPart.isEmpty else { return nil }
+        // Extraer la hora del trailing.
+        let timePart = String(afterVerbLower[anchorRange.lowerBound...])
+        guard let (h, m) = extractHourMinute(from: timePart) else { return nil }
+        // Limpiar el título de la actividad.
+        let activity = NovaActionNormalizer.cleanTitle(activityPart)
+        guard !activity.isEmpty else { return nil }
+        return .rescheduleEventByActivity(activity: activity, hour: h, minute: m)
+    }
 
     private static func matches(_ text: String, _ keywords: [String]) -> Bool {
         keywords.contains { text.contains($0) }
@@ -5303,6 +5406,58 @@ final class FocusDataStore: ObservableObject {
                 return "Eliminada. «\(title)» se borró de pendientes."
             }
             return "No tengo nada reciente para borrar."
+
+        case .deleteEventByActivity(let activity):
+            // Buscar evento por título aproximado. Si no aparece, devolver
+            // mensaje honesto en vez de crear basura.
+            if let event = NovaResponder.findEventByApproxTitle(activity, in: events) {
+                let title = event.title
+                deleteEvent(event.id)
+                clearNovaContext()
+                return "Eliminado. «\(title)» se borró del calendario."
+            }
+            return "No encontré «\(activity)» en tu agenda. Si lo escribiste distinto, dime el nombre exacto."
+
+        case .rescheduleEventByActivity(let activity, let hour, let minute):
+            // Buscar evento existente; si no aparece NO creamos uno nuevo
+            // (era el bug). Devolver mensaje claro al usuario.
+            guard let event = NovaResponder.findEventByApproxTitle(activity, in: events) else {
+                return "No encontré «\(activity)» en tu agenda. Si quieres crearlo nuevo, dime «agenda \(activity) a las \(String(format: "%02d:%02d", hour, minute))»."
+            }
+            // Construir la nueva fecha — mismo día que el evento original.
+            let cal = Calendar.current
+            let originalStart = event.startTime
+            guard let newStart = cal.date(
+                bySettingHour: hour, minute: minute, second: 0, of: originalStart
+            ) else {
+                return "No pude calcular la nueva hora. Inténtalo con formato 24h."
+            }
+            // Si el evento tiene endTime, conservar la duración.
+            let newEnd: Date?
+            if let oldEnd = event.endTime {
+                let duration = oldEnd.timeIntervalSince(originalStart)
+                newEnd = newStart.addingTimeInterval(duration)
+            } else {
+                newEnd = nil
+            }
+            // Aplicar la edición vía updateEvent (preserva id y sync).
+            var updated = event
+            updated.startTime = newStart
+            if let newEnd = newEnd {
+                updated.endTime = newEnd
+            }
+            updateEvent(updated)
+            updateNovaContext(
+                from: userText,
+                title: event.title,
+                date: newStart,
+                location: event.location,
+                section: event.section,
+                kind: .event,
+                eventId: event.id
+            )
+            let timeLabel = DateFormatters.hourMinute.string(from: newStart)
+            return "Listo. Moví «\(event.title)» a las \(timeLabel)."
 
         case .organizeDay:
             // Análisis REAL del día — no inventamos sugerencias genéricas.

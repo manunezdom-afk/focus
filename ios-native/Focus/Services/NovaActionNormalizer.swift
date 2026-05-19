@@ -439,7 +439,7 @@ enum NovaActionNormalizer {
             //     / "Programa X" / "Crea X" / "Añade X". El usuario los usa
             //     como verbo directo para pedir crear evento. Nunca son parte
             //     del título.
-            #"^\s*(ag[eé]ndame|ag[eé]ndamelo|anota|anotame|a[ñn]ade|a[ñn]ademe|ponme|p[oó]ngame|p[oó]nme|programa(me|melo)?|crea(me)?|cr[eé]ame|registra(me)?|guarda(me)?)\s+(la|el|los|las|una|un|que)?\s*"#,
+            #"^\s*(ag[eé]ndame|ag[eé]ndamelo|anota|anotame|a[ñn]ade|a[ñn]ademe|agr[eé]ga(me|le|lo|melo)?|agregar|ponme|p[oó]ngame|p[oó]nme|programa(me|melo)?|crea(me)?|cr[eé]ame|registra(me)?|guarda(me)?|m[eé]te(me|le|lo)?|inclu[ií]ye(me|le)?)\s+(la|el|los|las|una|un|que)?\s*"#,
             // 4d. "salir/ir/me voy + (al|a la|a los|a las) + EVENT_NOUN" — el
             //     verbo de movimiento es contexto, el sustantivo es el evento
             //     real. Ejemplos:
