@@ -88,17 +88,25 @@ enum NovaQuickAction: String, CaseIterable, Identifiable {
 enum RecurrenceHint: Hashable {
     case daily
     case weekly
-    case weeklyOn(label: String)   // "los lunes", "los miércoles"
+    case weeklyOn(label: String)            // "los lunes", "los miércoles"
+    case biweeklyOn(label: String)          // "lunes de por medio" / "cada 2 viernes"
+    case everyNDays(n: Int)                 // "día por medio" → 2, "cada 3 días" → 3
+    case weekdays                           // "de lunes a viernes" / "días hábiles"
+    case multiWeekday(weekdays: [Int], label: String)  // "miércoles y viernes" → [4, 6]
     case monthly
-    case unspecified               // "recurrente" sin frecuencia explícita
+    case unspecified                        // "recurrente" sin frecuencia explícita
 
     var label: String {
         switch self {
-        case .daily:                return "todos los días"
-        case .weekly:               return "cada semana"
-        case .weeklyOn(let label):  return "todos \(label)"
-        case .monthly:              return "cada mes"
-        case .unspecified:          return "recurrente"
+        case .daily:                          return "todos los días"
+        case .weekly:                         return "cada semana"
+        case .weeklyOn(let label):            return "todos \(label)"
+        case .biweeklyOn(let label):          return label
+        case .everyNDays(let n):              return n == 2 ? "día por medio" : "cada \(n) días"
+        case .weekdays:                       return "de lunes a viernes"
+        case .multiWeekday(_, let label):     return label
+        case .monthly:                        return "cada mes"
+        case .unspecified:                    return "recurrente"
         }
     }
 }
@@ -159,6 +167,15 @@ enum NovaIntent: Hashable {
     /// Usuario aceptó la propuesta del turno anterior (almacenada en
     /// `pendingActionPlan`). Crea N tareas con notas + subtasks + prioridad.
     case confirmActionPlan
+    /// Anotar una corrección sobre una tarea existente. Ej: "la planilla
+    /// no era para profesores, era para Juan". El handler busca la tarea
+    /// con `subject` (fuzzy match) y agrega/actualiza la nota con la
+    /// corrección. Sin modificar el título visible (que ya está OK).
+    case annotateTaskCorrection(subject: String, correctionNote: String)
+    /// Anotar una dependencia entre dos cosas: "antes de mandar el correo
+    /// necesito la planilla". El handler busca ambas tareas (fuzzy) y
+    /// agrega una nota explicando el orden. No reordena automáticamente.
+    case annotateDependency(prerequisite: String, dependent: String)
     /// Organizar el día → genera sugerencias en la Bandeja.
     case organizeDay
     /// Revisar tareas pendientes → resumen inline.
@@ -921,8 +938,23 @@ enum NovaResponder {
     /// segmento 2: "mañana tipo 8 salir de mi casa" → Salir de mi casa mañana 08:00
     static func parseAll(_ text: String, context: NovaContext = NovaContext()) -> [NovaIntent] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let segments = splitOnStrongConnectors(trimmed)
+        var segments = splitOnStrongConnectors(trimmed)
+
+        // Detección de reminder compartido: "...y recuérdame N min antes de cada
+        // clase/evento". Si el último segmento es esa directiva, lo extraemos y
+        // appendamos "acuérdame N min antes" a cada segmento de evento. Sin esto,
+        // el reminder se parsearía como una intent independiente o se perdería.
+        var sharedReminderSuffix: String? = nil
+        if let last = segments.last,
+           let suffix = extractGroupReminderSuffix(from: last) {
+            sharedReminderSuffix = suffix
+            segments = Array(segments.dropLast())
+        }
         guard segments.count > 1 else {
+            // Si solo queda 1 segmento + shared reminder, appendamos y parseamos.
+            if let suffix = sharedReminderSuffix, let only = segments.first {
+                return [parse("\(only) \(suffix)", context: context)]
+            }
             return [parse(trimmed, context: context)]
         }
 
@@ -948,6 +980,30 @@ enum NovaResponder {
             return nil
         }()
 
+        // Marcador de recurrencia global ("todos los lunes" / "todos los días"
+        // / "de lunes a viernes"). Si el primer segmento lo tiene y los demás
+        // no, lo herendan. Sin esto, "todos los lunes a las 5 lenguaje, a las
+        // 6 arte" creaba lenguaje recurrente pero arte como evento único.
+        let inheritedRecurrenceMarker: String? = {
+            let candidates = [
+                "todos los lunes", "todos los martes",
+                "todos los miércoles", "todos los miercoles",
+                "todos los jueves", "todos los viernes",
+                "todos los sábados", "todos los sabados",
+                "todos los domingos",
+                "todos los días", "todos los dias",
+                "de lunes a viernes",
+                "día por medio", "dia por medio",
+                "lunes de por medio", "martes de por medio",
+                "miércoles de por medio", "miercoles de por medio",
+                "jueves de por medio", "viernes de por medio"
+            ]
+            for c in candidates where fullLower.contains(c) {
+                return c
+            }
+            return nil
+        }()
+
         var intents: [NovaIntent] = []
         for (i, seg) in segments.enumerated() {
             var workingSeg = seg
@@ -964,15 +1020,54 @@ enum NovaResponder {
                     workingSeg = "\(day) \(workingSeg)"
                 }
             }
+            // Heredar marcador de recurrencia si el segmento no trae el suyo.
+            if i > 0, let rec = inheritedRecurrenceMarker {
+                let segLower = workingSeg.lowercased()
+                let alreadyHasRec = segLower.contains("todos los") || segLower.contains("cada ")
+                    || segLower.contains("de por medio") || segLower.contains("día por medio")
+                    || segLower.contains("dia por medio")
+                if !alreadyHasRec {
+                    workingSeg = "\(rec) \(workingSeg)"
+                }
+            }
             // Reordenamiento estructural: "a las X [verbo]" → "[verbo] a las X".
             // Patrón típico tras splitear por "luego/después": "a las 3 ducharme"
             // queda con la hora al principio y el parser no extrae bien el
             // título. Si invertimos el orden, "ducharme a las 3" matchea los
             // patrones de event/chore triggers normalmente.
             workingSeg = reorderTimeFirstSegment(workingSeg)
+            // Si hay reminder compartido, lo appendamos antes de parsear.
+            if let suffix = sharedReminderSuffix {
+                workingSeg = "\(workingSeg) \(suffix)"
+            }
             intents.append(parse(workingSeg, context: context))
         }
         return intents
+    }
+
+    /// Si el segmento es una directiva de reminder COMPARTIDA (aplica al
+    /// grupo entero), devuelve un suffix que se appendará a cada segmento
+    /// previo. Ejemplos:
+    ///   "y recuérdame 15 min antes de cada clase" → "acuérdame 15 min antes"
+    ///   "y avísame 30 minutos antes" → "avísame 30 minutos antes"
+    /// Si no es una directiva grupal (típico reminder single-event), devuelve nil.
+    private static func extractGroupReminderSuffix(from segment: String) -> String? {
+        let lower = segment.lowercased()
+        // Solo aplica si menciona "cada/los/las" — indica que el reminder es para varios eventos.
+        let isGroupDirective = lower.contains("cada clase") || lower.contains("cada evento")
+            || lower.contains("cada reunión") || lower.contains("cada reunion")
+            || lower.contains("cada uno") || lower.contains("cada una")
+            || lower.contains("cada bloque") || lower.contains("cada sesión") || lower.contains("cada sesion")
+            || lower.contains("cada partido") || lower.contains("cada entrenamiento")
+        guard isGroupDirective else { return nil }
+        // Extraer el N + unidad. Reutilizamos extractReminderOffset que ya
+        // hace todo el trabajo en NovaActionNormalizer.
+        guard let mins = NovaActionNormalizer.extractReminderOffset(from: segment) else { return nil }
+        // Reconstruir un suffix simple y canónico para los segmentos previos.
+        if mins % 60 == 0 && mins >= 60 {
+            return "acuérdame \(mins / 60) horas antes"
+        }
+        return "acuérdame \(mins) min antes"
     }
 
     /// Si el segmento comienza con "a la(s) HH(:MM)" seguido de un verbo
@@ -1267,6 +1362,23 @@ enum NovaResponder {
             if matchesAffirmativeConfirmation(lower) {
                 return .confirmActionPlan
             }
+            // Distribución temporal del plan ("organízamelo para hoy y mañana",
+            // "para hoy", "para mañana"). Es una confirmación + directiva de
+            // distribución; el handler de `.confirmActionPlan` mira userText
+            // para decidir cómo repartir.
+            let distributionTriggers = [
+                "organízamelo", "organizamelo", "organízalo", "organizalo",
+                "ordéname", "ordename", "repártelo", "repartelo", "reparte",
+                "agrégalas para", "agregalas para",
+                "para hoy y mañana", "para hoy y manana",
+                "para mañana", "para manana",
+                "para hoy",
+                "ponlas para", "déjalas para", "dejalas para",
+                "distribúyelas", "distribuyelas"
+            ]
+            if matchesAny(lower, distributionTriggers) {
+                return .confirmActionPlan
+            }
             if matchesAny(lower, ["no", "cancela", "déjalo", "dejalo", "olvídalo", "olvidalo"]),
                lower.count <= 30 {
                 // Cancela la propuesta; devolvemos smalltalk neutro.
@@ -1327,6 +1439,25 @@ enum NovaResponder {
                pending: pending
            ) {
             return resolved
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // -0.5. Corrección semántica sobre TAREA: "la planilla no era
+        //       para profesores, era para Juan". Detección PREVIA a la
+        //       sección 0 (correctLastEvent) porque ahí "no era ..., era
+        //       ..." caía como deleteLastItem por isCorrectionStart.
+        // ──────────────────────────────────────────────────────────────
+        if let taskCorrection = detectTaskCorrection(text: trimmed, lower: lower) {
+            return taskCorrection
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // -0.4. Dependencia entre tareas: "antes de mandar el correo
+        //       necesito la planilla". También antes de sección 0 porque
+        //       "antes de" puede aparentar corrección.
+        // ──────────────────────────────────────────────────────────────
+        if let dependency = detectDependency(text: trimmed, lower: lower) {
+            return dependency
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -1443,6 +1574,10 @@ enum NovaResponder {
         if let attach = detectAttachReminderToEvent(text: trimmed, lower: lower) {
             return attach
         }
+
+        // 2-quintus / 2-sextus se MOVIERON a sección -0.5 / -0.4 para
+        // ganarle a sección 0 (correctLastEvent), que con "no era / era"
+        // disparaba un deleteLastItem incorrecto.
 
         // ──────────────────────────────────────────────────────────────
         // 2-ter. Borrar evento existente por título: "borra lo de
@@ -1635,13 +1770,15 @@ enum NovaResponder {
             if hasExplicitTime, let date = when {
                 let location = extractLocation(from: trimmed)
                 let explicitEnd = extractExplicitEndTime(from: lower, startTime: date)
+                let recurrence = detectRecurrence(lower)
                 return .createEvent(
                     title: fullTitle,
                     when: date,
                     endTime: explicitEnd,
                     location: location,
                     section: .personal,
-                    wantsReminder: wantsReminder
+                    wantsReminder: wantsReminder,
+                    recurrence: recurrence
                 )
             }
             let recurrence = detectRecurrence(lower)
@@ -1671,6 +1808,7 @@ enum NovaResponder {
             let title = cleanupTitle(titleRaw)
             let location = extractLocation(from: trimmed)
             let section = detectSection(in: lower)
+            let recurrence = detectRecurrence(lower)
             if title.isEmpty {
                 if context.pendingIsActive, let pending = context.pendingClarification,
                    let proposedTitle = pending.proposedTitle, !proposedTitle.isEmpty {
@@ -1681,7 +1819,8 @@ enum NovaResponder {
                         endTime: explicitEnd,
                         location: location ?? pending.proposedLocation ?? context.lastLocation,
                         section: section ?? pending.proposedSection ?? context.lastSection,
-                        wantsReminder: wantsReminder || pending.wantsReminder
+                        wantsReminder: wantsReminder || pending.wantsReminder,
+                        recurrence: recurrence
                     )
                 }
                 return .clarify(reason: .eventNeedsTitle)
@@ -1693,7 +1832,8 @@ enum NovaResponder {
                 endTime: explicitEnd,
                 location: location,
                 section: section,
-                wantsReminder: wantsReminder
+                wantsReminder: wantsReminder,
+                recurrence: recurrence
             )
         }
 
@@ -1713,6 +1853,57 @@ enum NovaResponder {
         // 10. Sin pistas → clarify. Chat emocional ya se chequeó en
         //     sección 4.5 — no lo repetimos acá.
         return .clarify(reason: .unclear)
+    }
+
+    /// Si el texto incluye un selector de tema ("de la universidad",
+    /// "del trabajo", "de la casa", etc.), devuelve la lista de keywords
+    /// fuzzy + label humana. Usado por reviewPending para filtrar tareas.
+    /// Conservador: solo 3 temas comunes con vocabulario rico — universidad,
+    /// trabajo, personal/familia. Si no matchea ninguno, devuelve nil.
+    static func topicKeywords(in lower: String) -> (label: String, keywords: [String])? {
+        let universityTriggers = [
+            "de la universidad", "de la u", "de la facultad", "de la facu",
+            "del colegio", "de la escuela", "de los ramos", "del ramo",
+            "de mis clases", "de las clases", "del curso", "de los cursos",
+            "del semestre", "de mis profesores", "de los profesores"
+        ]
+        let workTriggers = [
+            "del trabajo", "de la pega", "de la oficina", "del laburo",
+            "de mi equipo", "del proyecto"
+        ]
+        let personalTriggers = [
+            "de la casa", "del hogar", "de la familia", "de mis hijos",
+            "personales", "de lo personal", "para mí", "para mi"
+        ]
+        if universityTriggers.contains(where: { lower.contains($0) }) {
+            return ("universidad", [
+                "universidad", "facultad", "facu", "ramo", "ramos",
+                "clase", "clases", "asignatura", "profesor", "profesores",
+                "canvas", "asistencia", "notas", "nota", "planilla",
+                "certificado", "examen", "parcial", "entrega", "tp",
+                "trabajo grupal", "trabajos grupales", "estudiar",
+                "comunicación", "lenguaje", "arte", "matemáticas",
+                "cálculo", "calculo", "química", "quimica", "física",
+                "fisica", "biología", "biologia", "juan"  // del caso real
+            ])
+        }
+        if workTriggers.contains(where: { lower.contains($0) }) {
+            return ("trabajo", [
+                "trabajo", "oficina", "pega", "laburo", "jefe", "jefa",
+                "equipo", "proyecto", "reunión", "reunion", "meeting",
+                "cliente", "deadline", "entrega", "stand-up", "standup",
+                "review", "presentación", "presentacion"
+            ])
+        }
+        if personalTriggers.contains(where: { lower.contains($0) }) {
+            return ("lo personal", [
+                "casa", "familia", "hijos", "pareja", "amigo", "amiga",
+                "hermano", "hermana", "padre", "madre", "papá", "papa",
+                "mamá", "mama", "personal", "salud", "doctor", "médico",
+                "medico", "cita", "compra", "compras", "regalo"
+            ])
+        }
+        return nil
     }
 
     /// Detecta estado emocional o pedido de ayuda general en lenguaje
@@ -1827,6 +2018,10 @@ enum NovaResponder {
             return "Tengo \(actions.count) acciones para anotar. Confírmame «sí, agrégalas» y las dejo en tu lista."
         case .confirmActionPlan:
             return "Anoto las tareas que te propuse."
+        case .annotateTaskCorrection(let subject, _):
+            return "Anoto la corrección sobre «\(subject)»."
+        case .annotateDependency(let prerequisite, let dependent):
+            return "Anoto que primero hay que «\(prerequisite)» antes de «\(dependent)»."
         case .organizeDay:
             return Self.pick([
                 "Cuéntame qué quieres lograr hoy y armamos el día juntos.",
@@ -2232,6 +2427,68 @@ enum NovaResponder {
         return .attachReminderToEvent(activity: activity, offsetMinutes: offset, note: note)
     }
 
+    /// Detecta "la X no era [old], era [new]" / "el X no era para [old],
+    /// era para [new]" / "X no era con [old], era con [new]". Captura el
+    /// sujeto X (lo que el user quiere corregir) y la corrección.
+    /// Conservador: requiere "no era" + "era" en la misma oración.
+    static func detectTaskCorrection(text: String, lower: String) -> NovaIntent? {
+        // Patrón flexible. Captura el sujeto (entre "la/el" y "no era"),
+        // y la nueva info (después de "era ").
+        let patterns: [String] = [
+            #"^\s*(?:la|el|los|las)\s+(.+?)\s+no\s+era\s+(?:para|con|de)?\s*(.+?),\s*era\s+(?:para|con|de)?\s*(.+?)\s*$"#,
+            #"^\s*(.+?)\s+no\s+era\s+(?:para|con|de)?\s*(.+?),\s*era\s+(?:para|con|de)?\s*(.+?)\s*$"#
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let ns = text as NSString
+            guard let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
+                  m.numberOfRanges >= 4 else { continue }
+            let subject = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let oldValue = ns.substring(with: m.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let newValue = ns.substring(with: m.range(at: 3)).trimmingCharacters(in: CharacterSet(charactersIn: " .,;:!?"))
+            if subject.isEmpty || oldValue.isEmpty || newValue.isEmpty { continue }
+            // Filtrar falsos positivos: sujetos muy genéricos / pronombres.
+            let pronouns: Set<String> = ["eso", "esto", "ese", "esa", "aquello"]
+            if pronouns.contains(subject.lowercased()) { continue }
+            let correctionNote = "Era para \(newValue), no para \(oldValue)."
+            return .annotateTaskCorrection(subject: subject, correctionNote: correctionNote)
+        }
+        return nil
+    }
+
+    /// Detecta "antes de [acción] necesito/tengo que [prerrequisito]" o
+    /// "primero [prerrequisito], después [acción]". Captura los 2 títulos
+    /// para anotar una dependencia informativa.
+    static func detectDependency(text: String, lower: String) -> NovaIntent? {
+        // Patrón A: "antes de X (necesito|tengo que|debo) Y".
+        let patternA = #"^\s*antes\s+de\s+(.+?),?\s+(?:necesito|tengo\s+que|debo|hay\s+que|necesitamos)\s+(.+?)\s*$"#
+        if let regex = try? NSRegularExpression(pattern: patternA, options: [.caseInsensitive]) {
+            let ns = text as NSString
+            if let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
+               m.numberOfRanges >= 3 {
+                let dependent = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                let prereq = ns.substring(with: m.range(at: 2)).trimmingCharacters(in: CharacterSet(charactersIn: " .,;:!?"))
+                if !dependent.isEmpty && !prereq.isEmpty {
+                    return .annotateDependency(prerequisite: prereq, dependent: dependent)
+                }
+            }
+        }
+        // Patrón B: "primero X, después Y" / "primero X antes de Y".
+        let patternB = #"^\s*primero\s+(.+?),?\s+(?:despu[eé]s|luego|antes\s+de)\s+(.+?)\s*$"#
+        if let regex = try? NSRegularExpression(pattern: patternB, options: [.caseInsensitive]) {
+            let ns = text as NSString
+            if let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
+               m.numberOfRanges >= 3 {
+                let prereq = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                let dependent = ns.substring(with: m.range(at: 2)).trimmingCharacters(in: CharacterSet(charactersIn: " .,;:!?"))
+                if !dependent.isEmpty && !prereq.isEmpty {
+                    return .annotateDependency(prerequisite: prereq, dependent: dependent)
+                }
+            }
+        }
+        return nil
+    }
+
     /// Helper genérico: corre `pattern` contra `text` (case-insensitive) y
     /// devuelve el capture group N como String trimmed. Usado por los
     /// detectores que comparten lógica similar.
@@ -2353,12 +2610,67 @@ enum NovaResponder {
     // MARK: - Recurrence
 
     private static func detectRecurrence(_ lower: String) -> RecurrenceHint? {
+        // 1) Day-by-day: "día por medio" / "cada 2 días" / "cada N días".
+        if matches(lower, ["día por medio", "dia por medio", "cada dos días", "cada dos dias", "cada 2 días", "cada 2 dias"]) {
+            return .everyNDays(n: 2)
+        }
+        if let n = extractEveryNDays(lower), n >= 2 && n <= 30 {
+            return .everyNDays(n: n)
+        }
+
+        // 2) Weekdays: "de lunes a viernes" / "días hábiles" / "entre semana".
+        if matches(lower, [
+            "de lunes a viernes", "lunes a viernes",
+            "días de semana", "dias de semana",
+            "entre semana", "todos los días hábiles", "todos los dias habiles",
+            "días hábiles", "dias habiles"
+        ]) {
+            return .weekdays
+        }
+
+        // 3) Biweekly por día: "lunes de por medio" / "cada dos miércoles" / "cada 2 viernes".
+        let weekdayLabels: [(String, String)] = [
+            ("lunes", "lunes"),
+            ("martes", "martes"),
+            ("miércoles", "miércoles"), ("miercoles", "miércoles"),
+            ("jueves", "jueves"),
+            ("viernes", "viernes"),
+            ("sábados", "sábados"), ("sabados", "sábados"),
+            ("sábado", "sábados"), ("sabado", "sábados"),
+            ("domingos", "domingos"), ("domingo", "domingos")
+        ]
+        for (token, normalized) in weekdayLabels {
+            // "lunes de por medio" / "los lunes de por medio".
+            if lower.contains("\(token) de por medio") || lower.contains("\(token)s de por medio") {
+                return .biweeklyOn(label: "los \(normalized) de por medio")
+            }
+            // "cada dos lunes" / "cada 2 lunes".
+            if lower.contains("cada dos \(token)") || lower.contains("cada 2 \(token)") {
+                return .biweeklyOn(label: "cada dos \(normalized)")
+            }
+        }
+        // Bi-weekly genérica ("cada dos semanas" / "cada 2 semanas") sin día.
+        if matches(lower, ["cada dos semanas", "cada 2 semanas", "cada quince días", "cada quince dias", "cada 15 días", "cada 15 dias"]) {
+            return .biweeklyOn(label: "cada dos semanas")
+        }
+
+        // 4) Multi-weekday: "lunes y miércoles" / "miércoles y viernes" /
+        //    "lunes, miércoles y viernes" / "todos los miércoles y viernes".
+        if let multi = detectMultiWeekday(lower) {
+            return multi
+        }
+
+        // 5) Plain daily.
         if matches(lower, ["todos los días", "todos los dias", "diariamente", "cada día", "cada dia"]) {
             return .daily
         }
+
+        // 6) Plain weekly.
         if matches(lower, ["cada semana", "semanal", "todas las semanas"]) {
             return .weekly
         }
+
+        // 7) Weekly on a single weekday: "todos los lunes" / "los lunes" + verbo.
         let weekdayMap: [(String, String)] = [
             ("todos los lunes", "los lunes"),
             ("todos los martes", "los martes"),
@@ -2380,6 +2692,69 @@ enum NovaResponder {
             return .unspecified
         }
         return nil
+    }
+
+    /// "cada N días" donde N es 2-30. Devuelve N o nil si no matchea.
+    private static func extractEveryNDays(_ lower: String) -> Int? {
+        let pattern = #"\bcada\s+(\d{1,2})\s+d[ií]as\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let ns = lower as NSString
+        guard let m = regex.firstMatch(in: lower, range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges >= 2 else { return nil }
+        return Int(ns.substring(with: m.range(at: 1)))
+    }
+
+    /// Detecta múltiples días de la semana mencionados juntos:
+    /// "miércoles y viernes", "lunes, miércoles y viernes",
+    /// "todos los martes y jueves". Devuelve `.multiWeekday` con los
+    /// `Calendar.component(.weekday)` (1=domingo, 2=lunes...) o nil.
+    private static func detectMultiWeekday(_ lower: String) -> RecurrenceHint? {
+        // Map de tokens a weekday-num + label normalizada.
+        let weekdayTokens: [(token: String, num: Int, label: String)] = [
+            ("lunes", 2, "lunes"),
+            ("martes", 3, "martes"),
+            ("miércoles", 4, "miércoles"), ("miercoles", 4, "miércoles"),
+            ("jueves", 5, "jueves"),
+            ("viernes", 6, "viernes"),
+            ("sábados", 7, "sábado"), ("sabados", 7, "sábado"),
+            ("sábado", 7, "sábado"), ("sabado", 7, "sábado"),
+            ("domingos", 1, "domingo"), ("domingo", 1, "domingo")
+        ]
+        // Para evitar falsos positivos: solo si la frase contiene "y "
+        // entre días, o lista con comas + "y".
+        let hasConjunction = lower.contains(" y ")
+        let hasComma = lower.contains(",")
+        guard hasConjunction || hasComma else { return nil }
+
+        var found: [(Int, String, Range<String.Index>)] = []
+        for (token, num, label) in weekdayTokens {
+            // Buscar el token rodeado por bordería de palabra. Usamos un
+            // regex simple para evitar matches dentro de otras palabras.
+            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: token) + "\\b"
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let ns = lower as NSString
+            if let m = regex.firstMatch(in: lower, range: NSRange(location: 0, length: ns.length)) {
+                if let r = Range(m.range, in: lower) {
+                    // Evitar duplicados: si ya tenemos este weekday num, omitir.
+                    if !found.contains(where: { $0.0 == num }) {
+                        found.append((num, label, r))
+                    }
+                }
+            }
+        }
+        guard found.count >= 2 else { return nil }
+        // Ordenar por posición en el texto.
+        found.sort { $0.2.lowerBound < $1.2.lowerBound }
+        let weekdays = found.map { $0.0 }
+        let labels = found.map { $0.1 }
+        let labelText: String
+        if labels.count == 2 {
+            labelText = "los \(labels[0]) y \(labels[1])"
+        } else {
+            let head = labels.dropLast().joined(separator: ", ")
+            labelText = "los \(head) y \(labels.last!)"
+        }
+        return .multiWeekday(weekdays: weekdays, label: labelText)
     }
 
     // MARK: - Sección por palabra-clave
@@ -2864,10 +3239,34 @@ enum NovaResponder {
 
     /// Capitaliza solo la primera letra y normaliza espacios.
     private static func cleanupTitle(_ raw: String) -> String {
-        let collapsed = raw
+        var collapsed = raw
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+        // Strip "tengo (que)" como prefijo residual. Aparece tras strippear
+        // marcadores temporales: "tengo entrenamiento" → "Entrenamiento".
+        // "tengo que avanzar" ya lo captura el flujo de createTask en
+        // sección 5 — aquí solo cubrimos restos.
+        if let regex = try? NSRegularExpression(pattern: #"^\s*tengo(?:\s+que)?\s+"#, options: [.caseInsensitive]) {
+            let ns = collapsed as NSString
+            collapsed = regex.stringByReplacingMatches(
+                in: collapsed,
+                range: NSRange(location: 0, length: ns.length),
+                withTemplate: ""
+            )
+        }
+        // Strip conjunciones colgantes al inicio ("y viernes ..." después de
+        // strippear "todos los miércoles" deja "y viernes ..."): mejor consumir
+        // hasta la siguiente palabra de contenido.
+        if let regex = try? NSRegularExpression(pattern: #"^\s*(?:y|o)\s+(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?)\s*"#, options: [.caseInsensitive]) {
+            let ns = collapsed as NSString
+            collapsed = regex.stringByReplacingMatches(
+                in: collapsed,
+                range: NSRange(location: 0, length: ns.length),
+                withTemplate: ""
+            )
+        }
+        collapsed = collapsed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let first = collapsed.first else { return collapsed }
         return first.uppercased() + collapsed.dropFirst()
     }
@@ -3672,7 +4071,7 @@ enum NovaResponder {
         //    Mantener la lista corta y solo cubre verbos cuyo significado
         //    temporal en español rioplatense/chileno es claramente vespertino.
         //    Bug fix beta: "recuérdame dormir a las 11" caía como 11:00 AM.
-        let pmContextPattern = #"\b(dormir|durmiendo|duermo|duerme|acostar(me|te|se|nos)?|gym|gimnasio|entrenar|entrenando|entrenamiento|f[uú]tbol|futbol|partido)\b"#
+        let pmContextPattern = #"\b(dormir|durmiendo|duermo|duerme|acostar(me|te|se|nos)?|gym|gimnasio|entrenar|entrenando|entrenamiento|f[uú]tbol|futbol|partido|correr|trotar|running|salir\s+a\s+correr|salir\s+a\s+trotar)\b"#
         if lower.range(of: pmContextPattern, options: .regularExpression) != nil {
             return .forcePM
         }
@@ -4589,26 +4988,43 @@ final class FocusDataStore: ObservableObject {
         }
     }
 
-    /// Expande una recurrencia local a una lista de fechas. Conservador
-    /// para beta — N fijo por tipo, sin opciones avanzadas.
-    /// - daily: 14 ocurrencias (2 semanas).
-    /// - weekly / weeklyOn / unspecified: 8 ocurrencias (~2 meses).
-    /// - monthly: 3 ocurrencias.
-    /// Devuelve siempre al menos `[start]` para que la lógica de creación
-    /// no tenga ramas especiales.
+    /// Expande una recurrencia local a una lista de fechas concretas.
+    /// Conservador para beta — N fijo por tipo, sin RRULE real:
+    ///   - daily / everyNDays: 14 ocurrencias (~2 semanas)
+    ///   - weekly / weeklyOn / biweeklyOn / unspecified: 8 ocurrencias
+    ///   - weekdays / multiWeekday: 4 semanas de cobertura (~20 fechas)
+    ///   - monthly: 3 ocurrencias
+    /// Cada `FocusEvent` resultante es independiente — el usuario puede
+    /// editar/borrar uno sin que afecte al resto. Trade-off consciente:
+    /// editar la "serie" entera requiere editar uno por uno.
     func expandLocalRecurrenceDates(start: Date, recurrence: RecurrenceHint) -> [Date] {
         let cal = Calendar.current
-        let count: Int
-        let component: Calendar.Component
-        let increment: Int
         switch recurrence {
         case .daily:
-            count = 14; component = .day; increment = 1
+            return makeFixedSeries(start: start, component: .day, increment: 1, count: 14)
         case .weekly, .weeklyOn, .unspecified:
-            count = 8; component = .weekOfYear; increment = 1
+            return makeFixedSeries(start: start, component: .weekOfYear, increment: 1, count: 8)
+        case .biweeklyOn:
+            return makeFixedSeries(start: start, component: .weekOfYear, increment: 2, count: 8)
+        case .everyNDays(let n):
+            let safeN = max(1, min(n, 30))
+            return makeFixedSeries(start: start, component: .day, increment: safeN, count: 14)
+        case .weekdays:
+            return expandWeekdayPattern(start: start, weekdays: [2, 3, 4, 5, 6], spanDays: 28)
+        case .multiWeekday(let weekdays, _):
+            // Si la lista trae 2-3 días, expandimos 4 semanas; con más, 3 semanas.
+            let span = weekdays.count >= 4 ? 21 : 28
+            return expandWeekdayPattern(start: start, weekdays: weekdays, spanDays: span)
         case .monthly:
-            count = 3; component = .month; increment = 1
+            return makeFixedSeries(start: start, component: .month, increment: 1, count: 3)
         }
+        // Silencia warning de exhaustividad si Swift detecta unreachable
+        // (no se da hoy porque todos los casos retornan).
+    }
+
+    /// Serie aritmética simple: start, start+inc, start+2*inc, ...
+    private func makeFixedSeries(start: Date, component: Calendar.Component, increment: Int, count: Int) -> [Date] {
+        let cal = Calendar.current
         var dates: [Date] = [start]
         var cursor = start
         for _ in 1..<count {
@@ -4617,6 +5033,29 @@ final class FocusDataStore: ObservableObject {
             cursor = next
         }
         return dates
+    }
+
+    /// Expande un patrón "días específicos de la semana" sobre N días
+    /// calendar. La hora se preserva del `start`. Incluye `start` si
+    /// su weekday está en la lista.
+    /// Mapeo Calendar.weekday: 1=domingo, 2=lunes, 3=martes, ..., 7=sábado.
+    private func expandWeekdayPattern(start: Date, weekdays: [Int], spanDays: Int) -> [Date] {
+        let cal = Calendar.current
+        let hour = cal.component(.hour, from: start)
+        let minute = cal.component(.minute, from: start)
+        let startDay = cal.startOfDay(for: start)
+        var result: [Date] = []
+        for offset in 0..<spanDays {
+            guard let day = cal.date(byAdding: .day, value: offset, to: startDay) else { continue }
+            let wd = cal.component(.weekday, from: day)
+            guard weekdays.contains(wd) else { continue }
+            guard let dt = cal.date(bySettingHour: hour, minute: minute, second: 0, of: day) else { continue }
+            // Si el primer match cae antes que `start` (mismo día pero hora ya
+            // pasada), saltamos para no agendar en el pasado.
+            if dt < start && offset == 0 { continue }
+            result.append(dt)
+        }
+        return result.isEmpty ? [start] : result
     }
 
     /// Llamado por `FocusApp` al arrancar — asegura que recordatorios
@@ -5752,6 +6191,10 @@ final class FocusDataStore: ObservableObject {
             // El backend podría hacer mejor parseo, pero hasta tenerlo
             // mejor que el local, el local da una experiencia consistente.
             return true
+        case .annotateTaskCorrection, .annotateDependency:
+            // Operaciones sobre tareas existentes (resueltas con fuzzy
+            // match local). El backend no tiene visibilidad de IDs locales.
+            return true
         case .createEvent, .createTask:
             return novaContext.pendingIsActive
         default:
@@ -6108,15 +6551,42 @@ final class FocusDataStore: ObservableObject {
             return summarizeAndSuggest(forDayOrganization: userText)
 
         case .reviewPending:
-            let pending = pendingTodayTasks
+            let allPending = pendingTodayTasks
+            // Filtro por tema si el usuario lo indicó ("...de la universidad",
+            // "...del trabajo", "...de la casa"). Usamos keywords fuzzy contra
+            // el title + notes de cada tarea.
+            let topicKeywords = NovaResponder.topicKeywords(in: userText.lowercased())
+            let pending: [FocusTask]
+            let topicLabel: String?
+            if let kw = topicKeywords {
+                topicLabel = kw.label
+                pending = allPending.filter { task in
+                    let haystack = (task.title + " " + (task.notes ?? "")).lowercased()
+                    return kw.keywords.contains { haystack.contains($0) }
+                }
+            } else {
+                topicLabel = nil
+                pending = allPending
+            }
             if pending.isEmpty {
+                if let label = topicLabel {
+                    return "No veo pendientes de \(label) en tu lista de hoy. ¿Quieres que revise toda tu lista?"
+                }
                 return "No tienes pendientes para hoy. Disfrútalo."
             }
-            let preview = pending.prefix(3).map { "• \($0.title)" }.joined(separator: "\n")
+            let preview = pending.prefix(5).map { "• \($0.title)" }.joined(separator: "\n")
             let count = pending.count
-            return count == 1
-                ? "Tienes 1 pendiente hoy:\n\(preview)"
-                : "Tienes \(count) pendientes hoy:\n\(preview)"
+            let header: String
+            if let label = topicLabel {
+                header = count == 1
+                    ? "Tienes 1 pendiente de \(label):"
+                    : "Tienes \(count) pendientes de \(label):"
+            } else {
+                header = count == 1
+                    ? "Tienes 1 pendiente hoy:"
+                    : "Tienes \(count) pendientes hoy:"
+            }
+            return "\(header)\n\(preview)"
 
         case .reviewToday:
             // Eventos visibles para el usuario — incluye demo en modo demo.
@@ -6154,6 +6624,67 @@ final class FocusDataStore: ObservableObject {
         case .askAboutDemo:
             return "Los ejemplos solo aparecen mientras no tengas datos tuyos. Apenas creas tu primer evento o tarea, se reemplazan automáticamente."
 
+        case .annotateTaskCorrection(let subject, let correctionNote):
+            // Fuzzy match contra todas las tareas activas. Si encontramos
+            // 1 sola → update notes. Si encontramos varias → mencionamos
+            // las opciones para que el usuario elija (no editamos a ciegas).
+            let activeTasks = tasks.filter { !$0.done }
+            let subjectLower = subject.lowercased()
+                .trimmingCharacters(in: CharacterSet(charactersIn: " .,;:!?"))
+            let matches = activeTasks.filter { task in
+                let haystack = task.title.lowercased() + " " + (task.notes ?? "").lowercased()
+                // Match si TODO token del subject aparece en haystack.
+                let tokens = subjectLower.split(separator: " ").filter { $0.count >= 3 }
+                guard !tokens.isEmpty else {
+                    return haystack.contains(subjectLower)
+                }
+                return tokens.allSatisfy { haystack.contains($0) }
+            }
+            if matches.isEmpty {
+                return "No encontré una tarea sobre «\(subject)». Si quieres, dime el nombre exacto y lo anoto."
+            }
+            if matches.count > 1 {
+                let titles = matches.prefix(3).map { "• \($0.title)" }.joined(separator: "\n")
+                return "Tengo varias tareas relacionadas con «\(subject)»:\n\(titles)\nDime cuál corregir."
+            }
+            var task = matches[0]
+            let existing = task.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            task.notes = existing.isEmpty
+                ? correctionNote
+                : "\(existing)\n\(correctionNote)"
+            updateTask(task)
+            return "Listo, anoté la corrección en «\(task.title)»: \(correctionNote)"
+
+        case .annotateDependency(let prerequisite, let dependent):
+            // Buscamos las 2 tareas. Anotamos en la dependiente que
+            // "primero hay que X". No reordenamos automáticamente.
+            let activeTasks = tasks.filter { !$0.done }
+            let prereqMatches = activeTasks.filter { task in
+                let h = task.title.lowercased() + " " + (task.notes ?? "").lowercased()
+                return prerequisite.lowercased().split(separator: " ")
+                    .filter { $0.count >= 3 }
+                    .allSatisfy { h.contains($0) }
+            }
+            let dependentMatches = activeTasks.filter { task in
+                let h = task.title.lowercased() + " " + (task.notes ?? "").lowercased()
+                return dependent.lowercased().split(separator: " ")
+                    .filter { $0.count >= 3 }
+                    .allSatisfy { h.contains($0) }
+            }
+            if let dep = dependentMatches.first {
+                var task = dep
+                let prereqNote = "Primero: \(prerequisite)."
+                let existing = task.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                task.notes = existing.isEmpty ? prereqNote : "\(existing)\n\(prereqNote)"
+                updateTask(task)
+                let prereqFound = prereqMatches.first != nil
+                if prereqFound {
+                    return "Anotado. Antes de «\(dep.title)» va «\(prerequisite)»."
+                }
+                return "Anotado en «\(dep.title)»: primero «\(prerequisite)»."
+            }
+            return "No encontré una tarea sobre «\(dependent)». Si la creas, te puedo anotar la dependencia."
+
         case .proposeActionPlan(let actions):
             // Guardar la propuesta para que el siguiente "sí, agrégalo"
             // la ejecute. NO crear nada hasta confirmación explícita —
@@ -6170,30 +6701,75 @@ final class FocusDataStore: ObservableObject {
             guard let plan = novaContext.pendingActionPlan, !plan.isEmpty else {
                 return "No tengo ninguna propuesta pendiente. Pégame la lista y la organizo."
             }
-            var createdCount = 0
-            for action in plan {
-                var subtasksModels: [FocusSubtask] = []
-                for st in action.subtasks {
-                    let stTrimmed = st.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !stTrimmed.isEmpty {
-                        subtasksModels.append(FocusSubtask(title: stTrimmed))
-                    }
+            // Decidir distribución según userText:
+            //   "para hoy y mañana" → primera mitad hoy, segunda mañana
+            //   "para mañana" → todas mañana
+            //   "para hoy" / "sí, agrégalas" / default → todas hoy
+            let lower = userText.lowercased()
+            enum PlanDistribution { case allToday, allTomorrow, splitTodayTomorrow }
+            let distribution: PlanDistribution
+            if lower.contains("para hoy y mañana") || lower.contains("para hoy y manana")
+                || lower.contains("entre hoy y mañana") || lower.contains("entre hoy y manana")
+                || lower.contains("repart") || lower.contains("distribu") {
+                distribution = .splitTodayTomorrow
+            } else if (lower.contains("para mañana") || lower.contains("para manana"))
+                       && !(lower.contains("para hoy")) {
+                distribution = .allTomorrow
+            } else {
+                distribution = .allToday
+            }
+            let cal = Calendar.current
+            let tomorrowDate = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: Date()))
+            let splitAt: Int = {
+                guard distribution == .splitTodayTomorrow else { return plan.count }
+                return Int(ceil(Double(plan.count) / 2.0))
+            }()
+            var todayTitles: [String] = []
+            var tomorrowTitles: [String] = []
+            for (idx, action) in plan.enumerated() {
+                let subtasksModels = action.subtasks
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .map { FocusSubtask(title: $0) }
+                let goesTomorrow: Bool
+                switch distribution {
+                case .allToday:           goesTomorrow = false
+                case .allTomorrow:        goesTomorrow = true
+                case .splitTodayTomorrow: goesTomorrow = idx >= splitAt
                 }
+                let category: TaskCategory = goesTomorrow ? .semana : .hoy
+                let dueDate: Date? = goesTomorrow ? tomorrowDate : nil
                 let task = FocusTask(
                     title: action.title,
                     notes: action.notes,
                     priority: action.priority,
-                    category: action.category,
+                    category: category,
+                    dueDate: dueDate,
                     subtasks: subtasksModels
                 )
                 addTask(task)
-                createdCount += 1
+                if goesTomorrow {
+                    tomorrowTitles.append(action.title)
+                } else {
+                    todayTitles.append(action.title)
+                }
             }
             novaContext.pendingActionPlan = nil
             novaContext.updatedAt = Date()
-            return createdCount == 1
-                ? "Listo, creé 1 tarea en tu lista de hoy."
-                : "Listo, creé \(createdCount) tareas en tu lista de hoy. Dime si quieres reordenarlas o mover alguna a la semana."
+            switch distribution {
+            case .allToday:
+                return plan.count == 1
+                    ? "Listo, creé 1 tarea en tu lista de hoy."
+                    : "Listo, creé \(plan.count) tareas en tu lista de hoy. Dime si quieres mover alguna a otra fecha."
+            case .allTomorrow:
+                return plan.count == 1
+                    ? "Listo, dejé 1 tarea para mañana."
+                    : "Listo, dejé \(plan.count) tareas para mañana."
+            case .splitTodayTomorrow:
+                let hoyList = todayTitles.map { "• \($0)" }.joined(separator: "\n")
+                let mañList = tomorrowTitles.map { "• \($0)" }.joined(separator: "\n")
+                return "Las repartí entre hoy y mañana:\nHoy:\n\(hoyList)\n\nMañana:\n\(mañList)"
+            }
 
         case .smallTalk(let reply):
             return reply

@@ -148,10 +148,41 @@ enum NovaActionNormalizer {
 
         // 3. Strip marcadores temporales sueltos.
         let temporalPatterns: [String] = [
-            // "Para [temporal]" leading — debe ir PRIMERO para que
-            // strippee la unidad "Para mañana" / "Para el martes" antes que
-            // los patrones generales se coman solo "mañana"/"martes" y dejen
-            // un "Para  " huérfano al inicio.
+            // 3a. Marcadores de RECURRENCIA — deben strippearse antes que
+            // los days/times sueltos porque incluyen mismas palabras.
+            // Sin esto, "todos los lunes a las 5 tengo clases" dejaba
+            // "Todos los lunes clases" como título. El parser ya extrae
+            // la recurrencia por separado (detectRecurrence), así que en
+            // el TÍTULO esta info es ruido.
+            #"\btodos los d[ií]as\b"#,
+            #"\bdiariamente\b"#,
+            #"\bcada d[ií]a\b"#,
+            // Multi-weekday: "todos los lunes y miércoles" / "lunes, miércoles y viernes".
+            // Estos patrones consumen la lista completa, no solo el primer día.
+            #"\btodos los (?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?)(?:,\s+(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?))*\s+y\s+(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?)\b"#,
+            #"\b(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?)(?:,\s+(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?))*\s+y\s+(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?)\b"#,
+            // Single-weekday recurrentes (después de multi para no comer la parte).
+            #"\btodos los lunes\b"#, #"\btodos los martes\b"#,
+            #"\btodos los mi[eé]rcoles\b"#, #"\btodos los jueves\b"#,
+            #"\btodos los viernes\b"#, #"\btodos los s[aá]bados\b"#,
+            #"\btodos los domingos\b"#,
+            #"\blos lunes de por medio\b"#, #"\blos martes de por medio\b"#,
+            #"\blos mi[eé]rcoles de por medio\b"#, #"\blos jueves de por medio\b"#,
+            #"\blos viernes de por medio\b"#, #"\blos s[aá]bados de por medio\b"#,
+            #"\blos domingos de por medio\b"#,
+            #"\b(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?)\s+de\s+por\s+medio\b"#,
+            #"\bcada\s+dos\s+(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|semanas|d[ií]as)\b"#,
+            #"\bcada\s+2\s+(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|semanas|d[ií]as)\b"#,
+            #"\bcada\s+\d{1,2}\s+d[ií]as\b"#,
+            #"\bcada\s+semana\b"#, #"\btodas\s+las\s+semanas\b"#,
+            #"\bcada\s+mes\b"#, #"\bmensualmente\b"#, #"\bmensual\b"#,
+            #"\bcada\s+15\s+d[ií]as\b"#, #"\bcada\s+quince\s+d[ií]as\b"#,
+            #"\bd[ií]a\s+por\s+medio\b"#,
+            #"\bde\s+lunes\s+a\s+viernes\b"#, #"\blunes\s+a\s+viernes\b"#,
+            #"\bd[ií]as\s+h[aá]biles\b"#, #"\bentre\s+semana\b"#,
+            #"\bd[ií]as\s+de\s+semana\b"#,
+            // 3b. Marcador de "Para [temporal]" leading — debe ir antes
+            // que strip de days sueltos.
             #"^\s*para\s+(mañana|manana|hoy|esta\s+(tarde|noche|mañana|manana)|en\s+la\s+(tarde|noche|mañana|manana)|el\s+(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)|pasado\s+mañana|pasado\s+manana|al\s+mediod[ií]a)\b"#,
             // Horas en dígitos.
             #"\ba la?s? \d{1,2}(:\d{2})?\s*(am|pm|hrs?|de la (mañana|manana|tarde|noche))?\b"#,

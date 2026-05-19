@@ -1105,6 +1105,9 @@ struct MiDiaView: View {
         case .proposeActionPlan, .confirmActionPlan:
             // Plan extraction + confirmación: local.
             return true
+        case .annotateTaskCorrection, .annotateDependency:
+            // Corrección/dependencia sobre tareas locales por fuzzy match.
+            return true
         case .createEvent, .createTask:
             // Solo si el local resolvió un follow-up con pending activo —
             // significa que estaba completando una pregunta previa.
@@ -2124,21 +2127,44 @@ struct MiDiaView: View {
             )
 
         case .reviewPending:
-            let pending = store.pendingTodayTasks
-            if pending.isEmpty {
-                return InlineNovaResponse(
-                    userText: userText,
-                    summary: "No tienes pendientes de hoy. Disfrútalo."
-                )
+            // Filtro fuzzy por tema si el usuario lo pidió ("de la
+            // universidad", "del trabajo", "de la casa"). Sin filtro,
+            // devolvemos todas las tareas pendientes de hoy.
+            let allPending = store.pendingTodayTasks
+            let topicMatch = NovaResponder.topicKeywords(in: userText.lowercased())
+            let pending: [FocusTask]
+            let topicLabel: String?
+            if let kw = topicMatch {
+                topicLabel = kw.label
+                pending = allPending.filter { task in
+                    let haystack = (task.title + " " + (task.notes ?? "")).lowercased()
+                    return kw.keywords.contains { haystack.contains($0) }
+                }
+            } else {
+                topicLabel = nil
+                pending = allPending
             }
-            let preview = pending.prefix(3).map { "• \($0.title)" }.joined(separator: "\n")
+            if pending.isEmpty {
+                let msg = topicLabel.map { "No veo pendientes de \($0) en tu lista de hoy." }
+                    ?? "No tienes pendientes de hoy. Disfrútalo."
+                return InlineNovaResponse(userText: userText, summary: msg)
+            }
+            let preview = pending.prefix(5).map { "• \($0.title)" }.joined(separator: "\n")
+            let summary: String
+            if let label = topicLabel {
+                summary = pending.count == 1
+                    ? "Tienes 1 pendiente de \(label)."
+                    : "Tienes \(pending.count) pendientes de \(label)."
+            } else {
+                summary = pending.count == 1
+                    ? "Tienes 1 pendiente hoy."
+                    : "Tienes \(pending.count) pendientes hoy."
+            }
             return InlineNovaResponse(
                 userText: userText,
-                summary: pending.count == 1
-                    ? "Tienes 1 pendiente hoy."
-                    : "Tienes \(pending.count) pendientes hoy.",
+                summary: summary,
                 details: preview,
-                action: pending.count > 3 ? .openTasksList : nil
+                action: pending.count > 5 ? .openTasksList : nil
             )
 
         case .reviewToday:
@@ -2205,7 +2231,22 @@ struct MiDiaView: View {
                 tone: .clarify
             )
 
+        case .annotateTaskCorrection, .annotateDependency:
+            // Delegamos al store; ahí está la lógica de fuzzy match y
+            // anotación. Una sola fuente de verdad.
+            let reply = store.applyLocalNovaIntent(intent, userText: userText)
+                ?? "Anoté la nota."
+            return InlineNovaResponse(
+                userText: userText,
+                summary: reply,
+                details: nil,
+                action: nil
+            )
+
         case .confirmActionPlan:
+            // Delegamos al store para una sola fuente de verdad. El store
+            // ya maneja distribución temporal según userText ("para hoy",
+            // "para mañana", "para hoy y mañana") y devuelve el texto humano.
             guard let plan = store.novaContext.pendingActionPlan, !plan.isEmpty else {
                 return InlineNovaResponse(
                     userText: userText,
@@ -2215,27 +2256,12 @@ struct MiDiaView: View {
                     tone: .clarify
                 )
             }
-            for action in plan {
-                let subtasks = action.subtasks
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                    .map { FocusSubtask(title: $0) }
-                let task = FocusTask(
-                    title: action.title,
-                    notes: action.notes,
-                    priority: action.priority,
-                    category: action.category,
-                    subtasks: subtasks
-                )
-                store.addTask(task)
-            }
-            let count = plan.count
-            store.novaContext.pendingActionPlan = nil
-            store.novaContext.updatedAt = Date()
+            let reply = store.applyLocalNovaIntent(intent, userText: userText)
+                ?? "Listo, anoté las tareas."
             return InlineNovaResponse(
                 userText: userText,
-                summary: count == 1 ? "Creé 1 tarea." : "Creé \(count) tareas.",
-                details: "Las dejé en tu lista de hoy con prioridad alta. Dime «qué me queda pendiente» para revisarlas o si quieres mover alguna.",
+                summary: reply,
+                details: nil,
                 action: nil
             )
 
