@@ -655,9 +655,9 @@ struct MiDiaView: View {
             }
             return InlineNovaResponse(
                 userText: trimmed,
-                summary: error.errorDescription ?? "No pude procesar tu mensaje.",
-                details: nil,
-                isError: true
+                summary: error.errorDescription ?? "Algo no salió bien al procesar eso.",
+                details: "Intenta decírmelo de otra forma o más corto. Si quieres, sepáralo en pasos y te ayudo uno por uno.",
+                tone: .clarify
             )
         } catch {
             // Caer al parser local sin nota — el usuario no necesita saber
@@ -846,8 +846,8 @@ struct MiDiaView: View {
         ]
         return InlineNovaResponse(
             userText: userText,
-            summary: "No encontré «\(displayActivity)» en tu día.",
-            details: "¿Quieres crear ese bloque o agregarlo como tarea? El aviso de \(humanReminderLabel(offset)) antes te lo seteo cuando exista.",
+            summary: "No tengo «\(displayActivity)» en tu día como para ponerle aviso.",
+            details: "¿Lo creamos como evento o como tarea? En cuanto exista, le pongo el aviso \(humanReminderLabel(offset)) antes.",
             action: .dismiss,
             isError: false,
             tone: .clarify,
@@ -969,8 +969,9 @@ struct MiDiaView: View {
         ) else {
             return InlineNovaResponse(
                 userText: userText,
-                summary: "No pude armar la hora del evento.",
-                details: nil, isError: true
+                summary: "Necesito la hora en otro formato para agendarlo.",
+                details: "Dímela en 24h, por ejemplo «a las 17:00» o «a las 5 PM», y lo creo de inmediato.",
+                tone: .clarify
             )
         }
         if start <= now {
@@ -1735,9 +1736,9 @@ struct MiDiaView: View {
             guard !title.isEmpty else {
                 return InlineNovaResponse(
                     userText: userText,
-                    summary: "No entendí qué quieres agendar.",
-                    details: "Prueba con un título claro.",
-                    isError: true
+                    summary: "Me falta el nombre del evento para agendarlo.",
+                    details: "Cuéntame qué quieres anotar y cuándo. Ej: «agenda reunión con Juan mañana a las 12».",
+                    tone: .clarify
                 )
             }
             guard let date = when else {
@@ -1879,10 +1880,10 @@ struct MiDiaView: View {
                   var event = store.events.first(where: { $0.id == eventId }) else {
                 return InlineNovaResponse(
                     userText: userText,
-                    summary: "No tengo nada reciente para mover.",
-                    details: "Si quieres crear un nuevo evento, dime título, día y hora.",
+                    summary: "Para corregir necesito un evento reciente.",
+                    details: "Dime el nombre del evento que quieres cambiar — por ejemplo «mueve fútbol a las 6» y lo edito directo.",
                     action: .dismiss,
-                    isError: true
+                    tone: .clarify
                 )
             }
             let cal = Calendar.current
@@ -1977,10 +1978,10 @@ struct MiDiaView: View {
             }
             return InlineNovaResponse(
                 userText: userText,
-                summary: "No tengo nada reciente para borrar.",
-                details: "Si quieres borrar algo más viejo, arrastra a la izquierda en Mi Día o Calendario.",
+                summary: "Para borrar el último ítem necesito uno reciente.",
+                details: "Dime «borra X» y lo encuentro por su nombre. También puedes arrastrar a la izquierda en Mi Día o Calendario.",
                 action: .dismiss,
-                isError: true
+                tone: .clarify
             )
 
         case .deleteEventByActivity(let activity):
@@ -2001,9 +2002,9 @@ struct MiDiaView: View {
             }
             return InlineNovaResponse(
                 userText: userText,
-                summary: "No encontré «\(activity)» en tu agenda.",
-                details: "Si lo escribiste distinto, dime el nombre exacto.",
-                action: .dismiss,
+                summary: "Busqué «\(activity)» y no lo veo en tu agenda.",
+                details: "¿Lo tienes con otro nombre? Si me dices el título exacto lo borro. También puedes revisar el Calendario.",
+                action: .openCalendar,
                 tone: .clarify
             )
 
@@ -2012,10 +2013,11 @@ struct MiDiaView: View {
             // Antes el input caía al createEvent y duplicaba — ahora editamos
             // el evento existente preservando su día.
             guard let event = NovaResponder.findEventByApproxTitle(activity, in: store.events) else {
+                let timeStr = String(format: "%02d:%02d", hour, minute)
                 return InlineNovaResponse(
                     userText: userText,
-                    summary: "No encontré «\(activity)» en tu agenda.",
-                    details: "Si quieres crearlo nuevo, di «agenda \(activity) a las \(String(format: "%02d:%02d", hour, minute))».",
+                    summary: "No tengo «\(activity)» en tu agenda como para moverlo.",
+                    details: "¿Quieres que lo cree nuevo a las \(timeStr)? Dime «agenda \(activity) hoy a las \(timeStr)».",
                     action: .dismiss,
                     tone: .clarify
                 )
@@ -2026,9 +2028,9 @@ struct MiDiaView: View {
             ) else {
                 return InlineNovaResponse(
                     userText: userText,
-                    summary: "No pude calcular la nueva hora.",
-                    details: "Inténtalo con formato 24h (ej. «a las 17:00»).",
-                    isError: true
+                    summary: "Necesito la hora en otro formato.",
+                    details: "Dímela en 24h, por ejemplo «a las 17:00», y muevo «\(event.title)» de una.",
+                    tone: .clarify
                 )
             }
             var updated = event
@@ -2059,10 +2061,11 @@ struct MiDiaView: View {
             // Atribuir reminder a evento existente. Si no encuentra el evento,
             // NO crea uno nuevo (evita duplicado).
             guard let event = NovaResponder.findEventByApproxTitle(activity, in: store.events) else {
+                let offsetLabel = offsetMinutes < 60 ? "\(offsetMinutes) min antes" : "\(offsetMinutes/60) h antes"
                 return InlineNovaResponse(
                     userText: userText,
-                    summary: "No encontré «\(activity)» en tu agenda.",
-                    details: "Si quieres crearlo nuevo, di «agenda \(activity) a las HH:MM».",
+                    summary: "Para ponerle aviso a «\(activity)» primero necesito ese evento en tu agenda.",
+                    details: "Si me das día y hora lo creo y le pongo el aviso \(offsetLabel) de una. Ej: «agenda \(activity) mañana a las 18».",
                     action: .dismiss,
                     tone: .clarify
                 )
@@ -2250,8 +2253,8 @@ struct MiDiaView: View {
             guard let plan = store.novaContext.pendingActionPlan, !plan.isEmpty else {
                 return InlineNovaResponse(
                     userText: userText,
-                    summary: "No tengo propuesta pendiente.",
-                    details: "Pégame la lista y la organizo.",
+                    summary: "No tengo una lista esperando confirmación.",
+                    details: "Pégame tus acciones (una por línea) y te las organizo como tareas listas para confirmar.",
                     action: nil,
                     tone: .clarify
                 )
@@ -2388,11 +2391,11 @@ struct MiDiaView: View {
         case .taskNeedsTitle:           return "¿Qué tarea quieres que anote?"
         case .eventNeedsTitle:          return "¿Qué evento quieres agendar?"
         case .eventNeedsTime(let title, _):
-            return "Tengo «\(title)». ¿A qué hora?"
+            return "Tengo «\(title)». ¿A qué hora lo dejo?"
         case .eventNeedsDateTime(let title):
-            return "Tengo «\(title)». ¿Cuándo?"
-        case .noContext:                return "No estoy seguro a qué te refieres."
-        case .unclear:                  return "No estoy seguro de qué hacer."
+            return "Tengo «\(title)». ¿Para qué día y a qué hora?"
+        case .noContext:                return "Cuéntame un poco más para ayudarte bien."
+        case .unclear:                  return "Cuéntame con más detalle qué quieres hacer."
         }
     }
 

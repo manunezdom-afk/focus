@@ -1382,7 +1382,7 @@ enum NovaResponder {
             if matchesAny(lower, ["no", "cancela", "déjalo", "dejalo", "olvídalo", "olvidalo"]),
                lower.count <= 30 {
                 // Cancela la propuesta; devolvemos smalltalk neutro.
-                return .smallTalk(reply: "Listo, no la agendo. Cualquier cosa estoy aquí.")
+                return .smallTalk(reply: "Listo, lo dejo así. Si más tarde quieres retomar la lista, pégamela de nuevo y la organizamos.")
             }
         }
 
@@ -2045,21 +2045,21 @@ enum NovaResponder {
         case .smallTalk(let reply):
             return reply
         case .clarify(.taskNeedsTitle):
-            return "Dime qué tarea quieres que anote. Ej: «crea tarea estudiar cálculo»."
+            return "Cuéntame qué tarea quieres anotar. Por ejemplo: «crea tarea estudiar cálculo»."
         case .clarify(.eventNeedsTitle):
-            return "¿Qué evento quieres que agende? Ej: «agenda reunión con Juan mañana a las 12»."
+            return "¿Qué quieres agendar? Dime el nombre del evento y, si lo tienes, día y hora. Ej: «agenda reunión con Juan mañana a las 12»."
         case .clarify(.eventNeedsTime(let title, let date)):
             let day = DateFormatters.weekdayDay.string(from: date).lowercased()
-            return "Tengo «\(title)» para el \(day). ¿A qué hora?"
+            return "Tengo «\(title)» para el \(day). ¿A qué hora lo dejo? Si es por la tarde, dime «a las 5 PM» o «a las 17:00»."
         case .clarify(.eventNeedsDateTime(let title)):
-            return "Tengo «\(title)». ¿Para qué día y a qué hora lo agendo?"
+            return "Tengo «\(title)» listo para agendar. Dime el día y la hora — por ejemplo «mañana a las 17» o «el lunes a las 9 AM»."
         case .clarify(.noContext):
-            return "No estoy seguro a qué te refieres. Dime qué quieres agendar o crear."
+            return "Cuéntame un poco más — ¿quieres que agende algo nuevo, edite un bloque que ya tienes, o que te ayude a ordenar el día?"
         case .clarify(.unclear):
             return Self.pick([
-                "No estoy seguro de qué hacer. ¿Quieres que cree una tarea, un evento o una sugerencia?",
-                "Eso no me queda claro. Prueba con «crea tarea X», «agenda Y mañana a las 12» o «organiza mi día».",
-                "Dime un poco más. Puedo crear tareas, agendar eventos u ordenar tu día."
+                "Cuéntame con más detalle qué quieres. Puedo crearte una tarea, agendar un evento, o ayudarte a ordenar el día — dime cuál encaja.",
+                "Dime un poco más y lo armo. Por ejemplo: «crea tarea estudiar cálculo», «agenda fútbol mañana a las 5» u «organiza mi día».",
+                "Me falta contexto para hacerlo bien. ¿Quieres que lo deje como tarea, como evento con hora, o que te ayude a ordenar el día?"
             ])
         }
     }
@@ -6392,7 +6392,7 @@ final class FocusDataStore: ObservableObject {
         case .correctLastEvent(let modifier):
             guard let eventId = novaContext.lastEventId,
                   var event = events.first(where: { $0.id == eventId }) else {
-                return "No tengo nada reciente para mover. Crea un evento nuevo cuando quieras."
+                return "Para corregir necesito un evento reciente como referencia. Dime el nombre del evento que quieres cambiar (ej. «mueve fútbol a las 6») y lo edito directo."
             }
             let cal = Calendar.current
             switch modifier {
@@ -6454,7 +6454,7 @@ final class FocusDataStore: ObservableObject {
                 clearNovaContext()
                 return "Eliminada. «\(title)» se borró de pendientes."
             }
-            return "No tengo nada reciente para borrar."
+            return "Para borrar el último ítem necesito un evento o tarea reciente como referencia. Si quieres borrar algo específico, dime «borra X» y lo encuentro por su nombre."
 
         case .deleteEventByActivity(let activity):
             // Buscar evento por título aproximado. Si no aparece, devolver
@@ -6465,14 +6465,15 @@ final class FocusDataStore: ObservableObject {
                 clearNovaContext()
                 return "Eliminado. «\(title)» se borró del calendario."
             }
-            return "No encontré «\(activity)» en tu agenda. Si lo escribiste distinto, dime el nombre exacto."
+            return "Busqué «\(activity)» y no lo veo en tu agenda. ¿Lo tienes con otro nombre? Si me dices el título exacto lo borro. También puedes revisar el Calendario para ver tus bloques."
 
         case .attachReminderToEvent(let activity, let offsetMinutes, let note):
             // Atribuir el aviso al evento existente. Si no encuentra match,
             // mensaje claro — NO crear evento nuevo (era el bug que
             // generaba duplicados).
             guard let event = NovaResponder.findEventByApproxTitle(activity, in: events) else {
-                return "No encontré «\(activity)» en tu agenda. Si quieres agendarlo nuevo, dime «agenda \(activity) a las HH:MM»."
+                let offsetLabel = offsetMinutes < 60 ? "\(offsetMinutes) min antes" : "\(offsetMinutes/60) h antes"
+                return "Para ponerle aviso a «\(activity)» primero necesito ese evento en tu agenda. Si me das día y hora lo creo y le pongo el aviso \(offsetLabel) de una. Ej: «agenda \(activity) mañana a las 18 con aviso \(offsetLabel)»."
             }
             // Reemplazar offsets — no acumular. Si el user dice "30 min antes",
             // queremos UNA notif a -30 min, no las viejas + la nueva.
@@ -6507,7 +6508,8 @@ final class FocusDataStore: ObservableObject {
             // Buscar evento existente; si no aparece NO creamos uno nuevo
             // (era el bug). Devolver mensaje claro al usuario.
             guard let event = NovaResponder.findEventByApproxTitle(activity, in: events) else {
-                return "No encontré «\(activity)» en tu agenda. Si quieres crearlo nuevo, dime «agenda \(activity) a las \(String(format: "%02d:%02d", hour, minute))»."
+                let timeStr = String(format: "%02d:%02d", hour, minute)
+                return "No tengo «\(activity)» en tu agenda como para moverlo. ¿Quieres que lo cree nuevo a las \(timeStr)? Dime «agenda \(activity) hoy a las \(timeStr)» y lo dejo listo."
             }
             // Construir la nueva fecha — mismo día que el evento original.
             let cal = Calendar.current
@@ -6515,7 +6517,7 @@ final class FocusDataStore: ObservableObject {
             guard let newStart = cal.date(
                 bySettingHour: hour, minute: minute, second: 0, of: originalStart
             ) else {
-                return "No pude calcular la nueva hora. Inténtalo con formato 24h."
+                return "Hubo un detalle con la hora. ¿Puedes decírmela en formato 24h, por ejemplo «a las 17:00»? Así muevo «\(event.title)» sin problema."
             }
             // Si el evento tiene endTime, conservar la duración.
             let newEnd: Date?
@@ -6570,9 +6572,9 @@ final class FocusDataStore: ObservableObject {
             }
             if pending.isEmpty {
                 if let label = topicLabel {
-                    return "No veo pendientes de \(label) en tu lista de hoy. ¿Quieres que revise toda tu lista?"
+                    return "No tienes pendientes de \(label) en tu lista de hoy. ¿Quieres que te muestre todas las tareas pendientes, o agrego algo nuevo?"
                 }
-                return "No tienes pendientes para hoy. Disfrútalo."
+                return "Tu lista de pendientes de hoy está limpia. Buen momento para enfocarte en algo importante — dime si quieres que organicemos lo que viene."
             }
             let preview = pending.prefix(5).map { "• \($0.title)" }.joined(separator: "\n")
             let count = pending.count
@@ -6605,7 +6607,7 @@ final class FocusDataStore: ObservableObject {
             }
             let pending = pendingTodayTasks
             if evts.isEmpty && pending.isEmpty {
-                return "No tienes nada agendado para hoy."
+                return "Tu día está despejado. Si quieres armar un plan, dime qué tienes en mente y lo agendamos. También puedo crearte una tarea rápida si hay algo pendiente."
             }
             let fmt = DateFormatter()
             fmt.dateFormat = "HH:mm"
@@ -6641,11 +6643,11 @@ final class FocusDataStore: ObservableObject {
                 return tokens.allSatisfy { haystack.contains($0) }
             }
             if matches.isEmpty {
-                return "No encontré una tarea sobre «\(subject)». Si quieres, dime el nombre exacto y lo anoto."
+                return "Busqué una tarea sobre «\(subject)» y no la veo en tu lista. ¿Quieres que la cree con esa corrección anotada? Dime «crea tarea \(subject)» y la dejo lista."
             }
             if matches.count > 1 {
                 let titles = matches.prefix(3).map { "• \($0.title)" }.joined(separator: "\n")
-                return "Tengo varias tareas relacionadas con «\(subject)»:\n\(titles)\nDime cuál corregir."
+                return "Tengo varias tareas relacionadas con «\(subject)»:\n\(titles)\n¿En cuál anoto la corrección? Dime el título tal como aparece."
             }
             var task = matches[0]
             let existing = task.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -6683,7 +6685,7 @@ final class FocusDataStore: ObservableObject {
                 }
                 return "Anotado en «\(dep.title)»: primero «\(prerequisite)»."
             }
-            return "No encontré una tarea sobre «\(dependent)». Si la creas, te puedo anotar la dependencia."
+            return "Para anotar la dependencia necesito tener «\(dependent)» como tarea. Si quieres, dime «crea tarea \(dependent)» y de inmediato le agrego que primero va «\(prerequisite)»."
 
         case .proposeActionPlan(let actions):
             // Guardar la propuesta para que el siguiente "sí, agrégalo"
@@ -6699,7 +6701,7 @@ final class FocusDataStore: ObservableObject {
 
         case .confirmActionPlan:
             guard let plan = novaContext.pendingActionPlan, !plan.isEmpty else {
-                return "No tengo ninguna propuesta pendiente. Pégame la lista y la organizo."
+                return "No tengo una lista propuesta esperando confirmación. Pégame tus acciones (una por línea) y te las organizo como tareas listas para confirmar."
             }
             // Decidir distribución según userText:
             //   "para hoy y mañana" → primera mitad hoy, segunda mañana
