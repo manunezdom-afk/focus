@@ -1,6 +1,14 @@
 import Foundation
 import UserNotifications
 
+extension Notification.Name {
+    /// Disparado cuando el usuario toca una notificación local de Focus
+    /// (recordatorio puntual o aviso de evento). `userInfo["eventId"]`
+    /// contiene el UUID del evento como String. La UI escucha esto para
+    /// saltar a la tab Mi Día.
+    static let focusReminderTapped = Notification.Name("focus.reminder.tapped")
+}
+
 /// Servicio de notificaciones LOCALES (UserNotifications framework).
 ///
 /// Programa avisos puntuales en el iPhone para `FocusEvent` que sean
@@ -303,15 +311,36 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
     }
 
     /// Llamado por iOS cuando el usuario interactúa con la notificación
-    /// (tap, swipe). En V1 no hacemos deep routing — la app abre en su
-    /// último estado. El `eventId` queda disponible en `userInfo` para una
-    /// futura implementación de "navegar al item específico".
+    /// (tap o swipe-to-open). Posteamos un `Notification.Name` interno
+    /// para que `MainTabView` salte a Mi Día — ahí están los eventos del
+    /// día y es la pantalla natural para confirmar que vio el aviso.
+    ///
+    /// Privacy: solo pasamos el `eventId` por userInfo, sin contenido
+    /// del recordatorio. El listener decide qué hacer.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        // No-op V1. iOS ya abre la app por default.
+        // Solo respondemos al action default (tap del banner). Dismiss
+        // y otras acciones del system no deberían navegar.
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else {
+            completionHandler()
+            return
+        }
+        let eventIdString = response.notification.request.content.userInfo["eventId"] as? String
+        var payload: [AnyHashable: Any] = [:]
+        if let eventIdString {
+            payload["eventId"] = eventIdString
+        }
+        // Async hop al main para que el listener (UI) lo reciba en main thread.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .focusReminderTapped,
+                object: nil,
+                userInfo: payload
+            )
+        }
         completionHandler()
     }
 }

@@ -121,6 +121,15 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
         }
+        // Cuando el usuario toca una notificación local de recordatorio,
+        // saltamos a Mi Día — ahí ve el bloque del evento en el timeline.
+        // El listener se monta al app launch (porque MainTabView vive
+        // mientras dura la sesión) y queda activo en todo momento.
+        .onReceive(NotificationCenter.default.publisher(for: .focusReminderTapped)) { _ in
+            withAnimation(.easeInOut(duration: 0.28)) {
+                nav.selectedTab = .miDia
+            }
+        }
         .overlay(alignment: .top) {
             if let current = toast.current {
                 ToastBanner(toast: current)

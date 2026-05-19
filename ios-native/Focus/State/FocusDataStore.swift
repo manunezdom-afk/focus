@@ -138,6 +138,13 @@ enum NovaIntent: Hashable {
     /// Cambiar la hora de un evento existente por título aproximado. Ej:
     /// "mueve fútbol a las 5" / "cambia clase de arte a las 11".
     case rescheduleEventByActivity(activity: String, hour: Int, minute: Int)
+    /// Agregar / cambiar la alerta de un evento existente sin crear uno nuevo.
+    /// Ej: "ponle recordatorio media hora antes al fútbol" /
+    /// "el recordatorio del fútbol es 30 min antes" /
+    /// "agrégale aviso 1 hora antes a la reunión".
+    /// `applyLocalNovaIntent` resuelve el evento con `findEventByApproxTitle`
+    /// y actualiza `reminderOffsets` reemplazando cualquier alerta previa.
+    case attachReminderToEvent(activity: String, offsetMinutes: Int, note: String?)
     /// Organizar el día → genera sugerencias en la Bandeja.
     case organizeDay
     /// Revisar tareas pendientes → resumen inline.
@@ -1360,6 +1367,18 @@ enum NovaResponder {
         }
 
         // ──────────────────────────────────────────────────────────────
+        // 2-quater. Atribuir reminder a evento existente: "ponle
+        //           recordatorio media hora antes al fútbol", "el
+        //           recordatorio del fútbol es media hora antes".
+        //           Sin esto, "ponle recordatorio ... al fútbol" caía a
+        //           createEvent y duplicaba ("Ponle recordatorio").
+        //           Detección antes que el flujo de createEvent.
+        // ──────────────────────────────────────────────────────────────
+        if let attach = detectAttachReminderToEvent(text: trimmed, lower: lower) {
+            return attach
+        }
+
+        // ──────────────────────────────────────────────────────────────
         // 2-ter. Borrar evento existente por título: "borra lo de
         //        estudiar comunicación", "elimina fútbol". Antes esto
         //        caía al createTask y creaba una tarea con ese título.
@@ -1617,21 +1636,28 @@ enum NovaResponder {
         case .createTask(let title, let dueDate, let recurrence, let wantsReminder):
             let recBit = recurrence.map { " (\($0.label) — la recurrencia queda preparada para más adelante)" } ?? ""
             let dueBit = dueDate.map { " para el \(DateFormatters.weekdayDay.string(from: $0).lowercased())" } ?? ""
-            let remBit = wantsReminder ? " Las notificaciones automáticas todavía están en preparación." : ""
+            // Si el usuario dijo "acuérdame" + tarea, le explicamos por qué no habrá
+            // notif: las tareas no envían aviso. Mensaje honesto, no promesa futura.
+            let remBit = wantsReminder ? " Como tarea no envía aviso al iPhone — si quieres que te avise, mejor agéndalo como evento con hora." : ""
             return Self.pick([
                 "Anoto «\(title)»\(dueBit) como tarea\(recBit).\(remBit)",
                 "Listo, agrego «\(title)»\(dueBit) a tus pendientes\(recBit).\(remBit)",
                 "La meto como tarea\(dueBit)\(recBit). Si quieres cambiar la prioridad, dime.\(remBit)"
             ])
-        case .createEvent(let title, let when, _, let location, let section, let wantsReminder):
+        case .createEvent(let title, let when, _, let location, let section, _):
             let timeBit = when.map { "el \(DateFormatters.weekdayDay.string(from: $0).lowercased()) a las \(DateFormatters.hourMinute.string(from: $0))" } ?? "cuando me digas"
             let placeBit = location.map { " en \($0)" } ?? ""
             let sectionBit = section.map { " (\($0.displayName.lowercased()))" } ?? ""
-            let remBit = wantsReminder ? " Las notificaciones inteligentes están en preparación." : ""
+            // Antes el copy decía "Las notificaciones inteligentes están en
+            // preparación" — mentira: el evento creado con "acuérdame" SÍ
+            // programa notificación local. Mejor decir nada extra acá: el
+            // path local que crea el evento (`applyLocalNovaIntent`) confirma
+            // explícitamente "con aviso N min antes" cuando hay offset, y la
+            // notif igualmente dispara al startTime si no.
             return Self.pick([
-                "Agendo «\(title)»\(placeBit) \(timeBit)\(sectionBit).\(remBit)",
-                "Listo, evento «\(title)» \(timeBit)\(placeBit)\(sectionBit).\(remBit)",
-                "Va «\(title)» \(timeBit)\(placeBit)\(sectionBit). Si quieres cambiar algo, dime.\(remBit)"
+                "Agendo «\(title)»\(placeBit) \(timeBit)\(sectionBit).",
+                "Listo, evento «\(title)» \(timeBit)\(placeBit)\(sectionBit).",
+                "Va «\(title)» \(timeBit)\(placeBit)\(sectionBit). Si quieres cambiar algo, dime."
             ])
         case .correctLastEvent(let modifier):
             switch modifier {
@@ -1654,6 +1680,11 @@ enum NovaResponder {
             return "Borro «\(activity)» de tu agenda."
         case .rescheduleEventByActivity(let activity, let hour, let minute):
             return "Muevo «\(activity)» a las \(String(format: "%02d:%02d", hour, minute))."
+        case .attachReminderToEvent(let activity, let offsetMinutes, _):
+            let offsetLabel = offsetMinutes < 60
+                ? "\(offsetMinutes) min antes"
+                : (offsetMinutes % 60 == 0 ? "\(offsetMinutes/60) h antes" : "\(offsetMinutes/60) h \(offsetMinutes%60) min antes")
+            return "Pongo aviso \(offsetLabel) en «\(activity)»."
         case .organizeDay:
             return Self.pick([
                 "Cuéntame qué quieres lograr hoy y armamos el día juntos.",
@@ -1791,6 +1822,81 @@ enum NovaResponder {
         let activity = NovaActionNormalizer.cleanTitle(activityPart)
         guard !activity.isEmpty else { return nil }
         return .rescheduleEventByActivity(activity: activity, hour: h, minute: m)
+    }
+
+    /// Detecta frases que ATRIBUYEN un reminder a un evento existente sin
+    /// crear uno nuevo. Ej:
+    ///   - "ponle recordatorio media hora antes al fútbol"
+    ///   - "agrégale aviso 30 min antes a la reunión"
+    ///   - "el recordatorio del fútbol es media hora antes"
+    ///   - "cambia el aviso de la reunión a 1 hora antes"
+    ///
+    /// Para que matchee, el texto debe:
+    /// 1. Tener un verbo de attach (ponle/pon/agrégale/agrega/cambia + recordatorio/aviso/alerta)
+    ///    O ser de la forma "el (recordatorio|aviso) (de|del) Y es X antes".
+    /// 2. Tener un offset extraíble ("X min antes", "media hora antes").
+    /// 3. Tener un activity name después del marcador "al/del/a la/de la".
+    ///
+    /// Si cualquier paso falla → nil → caller cae al createEvent normal.
+    /// El caller resuelve el evento con `findEventByApproxTitle`; si no
+    /// encuentra match, devuelve mensaje claro al usuario en vez de crear
+    /// un duplicado.
+    static func detectAttachReminderToEvent(text: String, lower: String) -> NovaIntent? {
+        // Paso 1: identificar verbo de attach + activity.
+        // Probamos 3 formas en orden de especificidad.
+        let activityRaw: String?
+        // Forma A: "el (recordatorio|aviso|alerta) (de|del) <activity> es ..."
+        // Captura group 1 = activity hasta " es ".
+        let formA = #"el\s+(?:recordatorio|aviso|alerta)\s+(?:de\s+la|de\s+los|de\s+las|de|del)\s+(.+?)\s+es\s+"#
+        if let m = firstCaptureGroup(in: lower, pattern: formA, captureGroupIndex: 1) {
+            activityRaw = m
+        } else {
+            // Forma B: "(ponle|pon|agrégale|agregale|agrega|métele|metele|cambia|cámbiale|cambiale)
+            //           (el|un)?\s*(recordatorio|aviso|alerta|alarma) ... (al|del|a la|a los|a las|de la|de) <activity>"
+            // Captura el activity como TODO lo que viene después de "al/del/a la/de la/de".
+            let formB = #"(?:ponle|pon|agr[eé]gale|agregale|agrega|m[eé]tele|metele|p[oó]ngale|pongale|cambia|c[aá]mbiale|cambiale)\s+(?:el\s+|un\s+|una\s+)?(?:recordatorio|aviso|alerta|alarma)\b.*?\b(?:al|del|de\s+la|de\s+los|de\s+las|a\s+la|a\s+los|a\s+las|de)\s+(.+?)\s*$"#
+            if let m = firstCaptureGroup(in: lower, pattern: formB, captureGroupIndex: 1) {
+                activityRaw = m
+            } else {
+                activityRaw = nil
+            }
+        }
+        guard let rawActivity = activityRaw, !rawActivity.isEmpty else { return nil }
+
+        // Paso 2: offset numérico.
+        guard let offset = NovaActionNormalizer.extractReminderOffset(from: text) else { return nil }
+
+        // Paso 3: limpiar activity. cleanTitle también remueve "X min antes" si
+        // el regex de form-B capturó algo como "fútbol 30 min antes" (raro pero
+        // posible cuando el orden de la frase invierte).
+        let activity = NovaActionNormalizer.cleanTitle(rawActivity)
+        guard !activity.isEmpty else { return nil }
+
+        // Paso 4: nota custom (opcional). Solo si el patrón "antes de <X>"
+        // está presente — ej. "ponle aviso 30 min antes de salir al fútbol"
+        // → note="Salir". Hoy no es común para attach, pero lo soportamos.
+        let note: String?
+        if let detail = NovaActionNormalizer.extractReminderOffsetAndNote(from: text),
+           detail.offsetMinutes == offset {
+            note = detail.note
+        } else {
+            note = nil
+        }
+        return .attachReminderToEvent(activity: activity, offsetMinutes: offset, note: note)
+    }
+
+    /// Helper genérico: corre `pattern` contra `text` (case-insensitive) y
+    /// devuelve el capture group N como String trimmed. Usado por los
+    /// detectores que comparten lógica similar.
+    private static func firstCaptureGroup(in text: String, pattern: String, captureGroupIndex: Int) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let ns = text as NSString
+        guard let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
+              match.numberOfRanges > captureGroupIndex,
+              match.range(at: captureGroupIndex).location != NSNotFound else { return nil }
+        let captured = ns.substring(with: match.range(at: captureGroupIndex))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return captured.isEmpty ? nil : captured
     }
 
     private static func matches(_ text: String, _ keywords: [String]) -> Bool {
@@ -4067,12 +4173,24 @@ final class FocusDataStore: ObservableObject {
     }
 
     /// Re-sincroniza notificaciones para TODOS los eventos vigentes. Se
-    /// llama al final de `mergeRemoteEvents` para asegurar que cualquier
-    /// evento traído de Supabase con `isReminder=true` tenga notificación
-    /// local programada (los identifiers son estables por id, así que no
-    /// duplica).
+    /// llama al final de `mergeRemoteEvents` y al boot. Programa para:
+    ///  - recordatorios puntuales (`isReminder == true`), Y
+    ///  - eventos regulares con `reminderOffsets` (ej. fútbol 15:00 con
+    ///    aviso 30 min antes — el evento en sí no es reminder pero
+    ///    el offset sí lo es).
+    ///
+    /// Bug fix beta: antes este método filtraba solo `isReminder == true`,
+    /// lo que dejaba sin re-schedular avisos de eventos regulares al
+    /// reabrir la app después de cerrarla.
+    ///
+    /// Los identifiers son estables por id, así que es seguro re-llamar
+    /// (no duplica).
     private func resyncAllLocalNotifications() {
-        for event in events where event.isReminder == true && event.startTime > Date() {
+        let now = Date()
+        for event in events where event.startTime > now {
+            let isReminderEvent = event.isReminder == true
+            let hasOffsets = !(event.reminderOffsets?.isEmpty ?? true)
+            guard isReminderEvent || hasOffsets else { continue }
             syncLocalNotification(for: event)
         }
     }
@@ -5199,6 +5317,12 @@ final class FocusDataStore: ObservableObject {
             return true
         case .smallTalk:
             return true
+        case .deleteEventByActivity, .rescheduleEventByActivity, .attachReminderToEvent:
+            // Operaciones sobre eventos existentes (resueltas por
+            // fuzzy match local). El backend no tiene visibilidad de
+            // los IDs locales, así que estos intents SIEMPRE se
+            // resuelven local.
+            return true
         case .createEvent, .createTask:
             return novaContext.pendingIsActive
         default:
@@ -5439,6 +5563,42 @@ final class FocusDataStore: ObservableObject {
                 return "Eliminado. «\(title)» se borró del calendario."
             }
             return "No encontré «\(activity)» en tu agenda. Si lo escribiste distinto, dime el nombre exacto."
+
+        case .attachReminderToEvent(let activity, let offsetMinutes, let note):
+            // Atribuir el aviso al evento existente. Si no encuentra match,
+            // mensaje claro — NO crear evento nuevo (era el bug que
+            // generaba duplicados).
+            guard let event = NovaResponder.findEventByApproxTitle(activity, in: events) else {
+                return "No encontré «\(activity)» en tu agenda. Si quieres agendarlo nuevo, dime «agenda \(activity) a las HH:MM»."
+            }
+            // Reemplazar offsets — no acumular. Si el user dice "30 min antes",
+            // queremos UNA notif a -30 min, no las viejas + la nueva.
+            // `syncLocalNotification` cancela las pendientes anteriores por id
+            // antes de programar la nueva, así que no hay duplicados.
+            var updated = event
+            updated.reminderOffsets = [offsetMinutes]
+            if let note, !note.isEmpty {
+                updated.reminderNotes = [note]
+            } else {
+                updated.reminderNotes = nil
+            }
+            updateEvent(updated)
+            updateNovaContext(
+                from: userText,
+                title: event.title,
+                date: event.startTime,
+                location: event.location,
+                section: event.section,
+                kind: .event,
+                eventId: event.id
+            )
+            let offsetLabel = offsetMinutes < 60
+                ? "\(offsetMinutes) min antes"
+                : (offsetMinutes % 60 == 0 ? "\(offsetMinutes/60) h antes" : "\(offsetMinutes/60) h \(offsetMinutes%60) min antes")
+            if let note, !note.isEmpty {
+                return "Listo. Te aviso \(offsetLabel) de «\(event.title)» para «\(note)»."
+            }
+            return "Listo. Te aviso \(offsetLabel) de «\(event.title)»."
 
         case .rescheduleEventByActivity(let activity, let hour, let minute):
             // Buscar evento existente; si no aparece NO creamos uno nuevo

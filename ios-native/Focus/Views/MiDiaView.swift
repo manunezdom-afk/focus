@@ -1098,6 +1098,10 @@ struct MiDiaView: View {
         case .smallTalk:
             // Confirmaciones/cancelaciones cortas que el local ya resolvió.
             return true
+        case .deleteEventByActivity, .rescheduleEventByActivity, .attachReminderToEvent:
+            // Operan sobre eventos locales por fuzzy match — el backend no
+            // tiene visibilidad de IDs locales. Siempre resolver local.
+            return true
         case .createEvent, .createTask:
             // Solo si el local resolvió un follow-up con pending activo —
             // significa que estaba completando una pregunta previa.
@@ -1681,7 +1685,10 @@ struct MiDiaView: View {
                 kind: .task,
                 taskId: task.id
             )
-            let reminderNote = wantsReminder ? " Las notificaciones automáticas están en preparación." : ""
+            // Las tareas no envían notificación local (sólo eventos). Si el
+            // user pidió aviso ("acuérdame"), le decimos por qué — sin
+            // prometer un push remoto futuro.
+            let reminderNote = wantsReminder ? " Como tarea no envía aviso al iPhone — agéndalo como evento con hora si quieres que te avise." : ""
             let dueLabel: String? = {
                 guard let d = dueDate else { return nil }
                 let cal = Calendar.current
@@ -2024,6 +2031,48 @@ struct MiDiaView: View {
                 summary: "Listo. Moví «\(event.title)» a las \(timeLabel).",
                 details: nil,
                 action: .openCalendar
+            )
+
+        case .attachReminderToEvent(let activity, let offsetMinutes, let note):
+            // Atribuir reminder a evento existente. Si no encuentra el evento,
+            // NO crea uno nuevo (evita duplicado).
+            guard let event = NovaResponder.findEventByApproxTitle(activity, in: store.events) else {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "No encontré «\(activity)» en tu agenda.",
+                    details: "Si quieres crearlo nuevo, di «agenda \(activity) a las HH:MM».",
+                    action: .dismiss,
+                    tone: .clarify
+                )
+            }
+            // Reemplazar offsets, no acumular. La syncLocalNotification cancela
+            // las pendientes anteriores antes de programar la nueva.
+            var updated = event
+            updated.reminderOffsets = [offsetMinutes]
+            if let note, !note.isEmpty {
+                updated.reminderNotes = [note]
+            } else {
+                updated.reminderNotes = nil
+            }
+            store.updateEvent(updated)
+            store.updateNovaContext(
+                from: userText,
+                title: event.title,
+                date: event.startTime,
+                location: event.location,
+                section: event.section,
+                kind: .event,
+                eventId: event.id
+            )
+            let offsetLabel = offsetMinutes < 60
+                ? "\(offsetMinutes) min antes"
+                : (offsetMinutes % 60 == 0 ? "\(offsetMinutes/60) h antes" : "\(offsetMinutes/60) h \(offsetMinutes%60) min antes")
+            let detailsText = note.flatMap { $0.isEmpty ? nil : "Nota del aviso: «\($0)»." }
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Listo. Te aviso \(offsetLabel) de «\(event.title)».",
+                details: detailsText,
+                action: nil
             )
 
         case .organizeDay:
