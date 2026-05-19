@@ -162,6 +162,29 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
+        // BUG REPORTADO POR USUARIO (2026-05-19): "Reunión hoy día a las cuatro
+        // con Pedro" quedaba como "Reunión día con Pedro" porque el patrón
+        // \bhoy\b strippeaba "hoy" dejando "día" suelto. "Hoy día" es expresión
+        // compuesta — debe stripearse como unidad.
+        check(
+            label: "cleanTitle: 'Reunión hoy día a las cuatro con Pedro' → 'Reunión con Pedro'",
+            actual: NovaActionNormalizer.cleanTitle("Reunión hoy día a las cuatro con Pedro"),
+            expected: "Reunión con Pedro",
+            failures: &failures
+        )
+        check(
+            label: "cleanTitle: 'reunión hoy en día a las 3 con el equipo' → 'Reunión con el equipo'",
+            actual: NovaActionNormalizer.cleanTitle("reunión hoy en día a las 3 con el equipo"),
+            expected: "Reunión con el equipo",
+            failures: &failures
+        )
+        check(
+            label: "cleanTitle: 'clase el día de hoy a las 10' → 'Clase'",
+            actual: NovaActionNormalizer.cleanTitle("clase el día de hoy a las 10"),
+            expected: "Clase",
+            failures: &failures
+        )
+
         // Sanity: la frase "X minutos antes" se va del título.
         check(
             label: "cleanTitle: 'salir a buscar a mi hermano a las 10 acuérdame 5 minutos antes' → 'Buscar a mi hermano'",

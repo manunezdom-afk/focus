@@ -180,7 +180,13 @@ enum NovaActionNormalizer {
             #"\ben\s+\d{1,2}(\s+m[aá]s)?\b"#,
             #"\b\d{1,2}\s*hrs?\b"#,
             #"\b\d{1,2}\s*hs\b"#,
-            // Días
+            // Días — orden: compuestos PRIMERO para que no queden residuos.
+            // "hoy día" y "hoy en día" son expresiones coloquiales de "hoy";
+            // si solo strippeamos "hoy", "día" queda suelto en el título.
+            #"\ben el d[ií]a de hoy\b"#,
+            #"\bel d[ií]a de hoy\b"#,
+            #"\bhoy\s+en\s+d[ií]a\b"#,
+            #"\bhoy\s+d[ií]a\b"#,
             #"\bhoy\b"#,
             #"\bmañana\b"#,
             #"\bmanana\b"#,
