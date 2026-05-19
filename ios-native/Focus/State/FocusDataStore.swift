@@ -1474,7 +1474,10 @@ enum NovaResponder {
             "qué tengo pendiente", "que tengo pendiente",
             "qué me queda pendiente", "que me queda pendiente",
             "qué me falta", "que me falta",
-            "qué pendientes tengo", "que pendientes tengo"
+            "qué pendientes tengo", "que pendientes tengo",
+            "qué cosas tengo pendiente", "que cosas tengo pendiente",
+            "qué cosas tengo pendientes", "que cosas tengo pendientes",
+            "qué tengo que hacer", "que tengo que hacer"
         ]) {
             return .reviewPending
         }
@@ -1485,12 +1488,28 @@ enum NovaResponder {
         if matches(lower, [
             "organiza mi día", "organiza mi dia",
             "organiza el día", "organiza el dia",
+            "organízame", "organizame",
             "planifica mi día", "planifica mi dia",
             "ordena mi día", "ordena mi dia",
+            "ordéname el día", "ordename el dia",
+            "ordéname la tarde", "ordename la tarde",
+            "ordéname la mañana", "ordename la manana",
             "arma mi día", "arma mi dia",
+            "ármame el día", "armame el dia",
             "acomoda mi día", "acomoda mi dia"
         ]) {
             return .organizeDay
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // 4.5. Chat emocional / pedido de ayuda. Si el texto expresa
+        //      estado interior (estrés, cansancio, abrumo) o pide ayuda
+        //      genérica, respondemos como chat humano antes de caer al
+        //      flujo de createTask. Sin este chequeo, "me siento cansado
+        //      pero tengo que avanzar" caía como tarea "Avanzar igual".
+        // ──────────────────────────────────────────────────────────────
+        if let emotional = detectEmotionalChat(lower) {
+            return .smallTalk(reply: emotional)
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -1691,8 +1710,59 @@ enum NovaResponder {
             return .smallTalk(reply: randomAcknowledgment())
         }
 
-        // 10. Sin pistas → clarify.
+        // 10. Sin pistas → clarify. Chat emocional ya se chequeó en
+        //     sección 4.5 — no lo repetimos acá.
         return .clarify(reason: .unclear)
+    }
+
+    /// Detecta estado emocional o pedido de ayuda general en lenguaje
+    /// natural. Devuelve un reply empático si matchea, nil si no.
+    /// Mantener conservador: solo palabras claras de estado interior.
+    private static func detectEmotionalChat(_ lower: String) -> String? {
+        let burnoutMarkers = [
+            "colapsado", "colapsada", "agotado", "agotada",
+            "abrumado", "abrumada", "estresado", "estresada",
+            "saturado", "saturada", "quemado", "quemada",
+            "no doy más", "no doy mas", "no puedo más", "no puedo mas",
+            "estoy mal", "estoy peor"
+        ]
+        let tiredMarkers = [
+            "cansado", "cansada", "exhausto", "exhausta",
+            "sin energía", "sin energia", "sin pilas",
+            "muerto de sueño", "muerto de sueno"
+        ]
+        let stuckMarkers = [
+            "no sé qué hacer", "no se que hacer",
+            "no sé por dónde", "no se por donde",
+            "no sé qué priorizar", "no se que priorizar",
+            "ayúdame a", "ayudame a",
+            "qué debería hacer", "que deberia hacer"
+        ]
+        let containsAny: ([String]) -> Bool = { triggers in
+            triggers.contains { lower.contains($0) }
+        }
+        if containsAny(burnoutMarkers) {
+            return Self.pick([
+                "Te escucho. Cuéntame qué tienes encima hoy y vemos qué se puede mover. Si quieres, partimos por 2 prioridades concretas.",
+                "Vamos por partes. Dime las 2-3 cosas más urgentes y empezamos por una sola. Lo demás puede esperar.",
+                "Tranquilo, lo vemos juntos. ¿Qué te pesa más ahora mismo: las clases, una entrega, algo pendiente con alguien?"
+            ])
+        }
+        if containsAny(tiredMarkers) {
+            return Self.pick([
+                "Entiendo. Si vas a avanzar igual, mejor con un bloque corto y realista. Dime una sola cosa para hoy y la dejamos lista.",
+                "Te entiendo. ¿Qué necesitas mover sí o sí hoy? Lo demás lo posponemos sin culpa.",
+                "Si estás cansado, mejor poco y bien. ¿Hay una sola tarea que sí o sí tiene que pasar hoy?"
+            ])
+        }
+        if containsAny(stuckMarkers) {
+            return Self.pick([
+                "Cuéntame qué tienes pendiente y lo ordenamos por urgencia. Puedo proponerte un plan.",
+                "Dime 2 o 3 cosas que tienes encima y empezamos por la más importante.",
+                "Cuéntame lo que tienes y vemos qué hacer primero."
+            ])
+        }
+        return nil
     }
 
     /// String libre para el chat. Reusa `parse` para entender el mensaje y

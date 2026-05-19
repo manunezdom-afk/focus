@@ -2236,7 +2236,7 @@ struct MiDiaView: View {
                 userText: userText,
                 summary: count == 1 ? "Creé 1 tarea." : "Creé \(count) tareas.",
                 details: "Las dejé en tu lista de hoy con prioridad alta. Dime «qué me queda pendiente» para revisarlas o si quieres mover alguna.",
-                action: .openTasksList
+                action: nil
             )
 
         case .smallTalk(let reply):
