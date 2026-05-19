@@ -114,6 +114,10 @@ enum NovaService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // FASE 3 QA — bypass Vercel SSO para Preview. nil en prod.
+        if let bypass = FocusConfig.vercelBypassToken {
+            request.setValue(bypass, forHTTPHeaderField: "x-vercel-protection-bypass")
+        }
 
         let payload = BackendRequestPayload(
             message: trimmed,

@@ -23,6 +23,11 @@ enum FocusConfig {
 
     static let apiOrigin = URL(string: "https://www.usefocus.me")!
 
+    /// Si no es nil, inyecta el header `x-vercel-protection-bypass` en
+    /// CADA request a apiOrigin para saltar la SSO de Vercel Preview.
+    /// SOLO debe estar set durante QA local; nil en builds productivas.
+    static let vercelBypassToken: String? = nil
+
     /// True si la auth real puede funcionar (anon key presente).
     static var isAuthConfigured: Bool {
         !supabaseAnonKey.isEmpty
