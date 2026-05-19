@@ -83,6 +83,10 @@ enum NovaService {
         /// Acciones PROPUESTAS (no ejecutadas). Solo no-vacío cuando
         /// `mode == .proposal`. El cliente muestra UI para aplicar/descartar.
         let proposedActions: [BackendAction]
+        /// ID generado por el backend (o reenviado desde el header
+        /// X-Request-Id del cliente) para correlacionar logs entre Nova,
+        /// el endpoint y la app. Sin PII — UUID o hash corto.
+        let requestId: String?
     }
 
     /// Llama al backend. Lanza `NovaServiceError` para que el caller
@@ -156,6 +160,12 @@ enum NovaService {
                     }
                     return Mode.fallback(actions: decoded.actions, shouldAskUser: shouldAsk)
                 }()
+                #if DEBUG
+                if let rid = decoded.requestId, !rid.isEmpty {
+                    // Trazabilidad e2e — solo DEBUG, sin PII (UUID).
+                    print("[NovaService] reqId=\(rid) actions=\(decoded.actions.count) mode=\(resolvedMode.rawValue)")
+                }
+                #endif
                 return Result(
                     reply: decoded.reply,
                     actions: decoded.actions,
@@ -164,7 +174,8 @@ enum NovaService {
                     confidence: decoded.confidence ?? 1.0,
                     shouldAskUser: shouldAsk,
                     mode: resolvedMode,
-                    proposedActions: decoded.proposedActions
+                    proposedActions: decoded.proposedActions,
+                    requestId: decoded.requestId
                 )
             } catch {
                 throw NovaServiceError.decoding(error)
@@ -353,6 +364,7 @@ private struct BackendResponsePayload: Decodable {
     let confidence: Double?
     let shouldAskUser: Bool?
     let mode: String?
+    let requestId: String?
 
     enum CodingKeys: String, CodingKey {
         case reply
@@ -363,6 +375,7 @@ private struct BackendResponsePayload: Decodable {
         case confidence
         case shouldAskUser
         case mode
+        case requestId
     }
 
     init(from decoder: Decoder) throws {
@@ -373,6 +386,7 @@ private struct BackendResponsePayload: Decodable {
         self.confidence = try c.decodeIfPresent(Double.self, forKey: .confidence)
         self.shouldAskUser = try c.decodeIfPresent(Bool.self, forKey: .shouldAskUser)
         self.mode = try c.decodeIfPresent(String.self, forKey: .mode)
+        self.requestId = try c.decodeIfPresent(String.self, forKey: .requestId)
         // Decodificar actions de forma resiliente: si un item falla por type
         // desconocido o shape inesperado, lo saltamos en vez de tumbar todo.
         if let raw = try? c.decode([RawAction].self, forKey: .actions) {

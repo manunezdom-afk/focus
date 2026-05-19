@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import crypto from 'node:crypto'
 import { rateLimited, clientIp } from './_lib/rateLimit.js'
 import { buildWeatherContext, fetchWeather, describeWeatherCode } from './_lib/weather.js'
 import { buildDateContext } from './_lib/dateContext.js'
@@ -10,6 +11,12 @@ import { getSupabaseAdmin, getUserIdFromAuth } from './_supabaseAdmin.js'
 import { ACTION_TYPES, checkLimit, getUserPlan, recordUsage } from './_lib/usageLimits.js'
 import { trackAIUsageEvent } from './_lib/aiUsageTracking.js'
 import { filterCalendarEditActions, strippedEditMessage } from './_lib/calendarIntent.js'
+import {
+  buildOpenAISystemPrompt,
+  callOpenAINova,
+  extractResponsesText,
+  convertOpenAIToBackendResponse,
+} from './_lib/openaiNova.js'
 
 const MODEL_ID = 'claude-haiku-4-5-20251001'
 // Sonnet 4.6 = fallback "premium" cuando Haiku falla en escenarios críticos
@@ -87,9 +94,39 @@ function detectComplexInput(text) {
     ' también ', ' tambien ',
     ' además ', ' ademas ',
     ' más tarde ', ' mas tarde ',
+    // Evento + recordatorio en la misma frase (caso real beta-12):
+    // "mañana tengo doctor a las 5 y recuérdame llevar los exámenes" →
+    // dos acciones. Sin esta pista, Haiku colapsaba a un solo add_event
+    // con reminderNotes pegados. Cubrimos las 3 familias de triggers
+    // (recuérdame/acuérdame/avísame) con y sin tilde, y los compuestos
+    // "y no se me olvide / no te olvides".
+    ' y recuérdame ', ' y recuerdame ', ' y recordame ',
+    ' y acuérdame ', ' y acuerdame ', ' y acordame ',
+    ' y avísame ', ' y avisame ',
+    ' y que no se me olvide ', ' y que no se olvide ',
+    ' y no te olvides ', ' y no olvides ', ' y no me dejes olvidar ',
+    ' y ponme ', ' y ponle ',
   ]
   for (const h of strongHints) {
     if (lower.includes(h)) return true
+  }
+
+  // 1b) Coexistencia evento + recordatorio SIN conector. Caso real:
+  //     "tengo doctor a las 5 acuérdame llevar exámenes" (sin "y").
+  //     Si la frase tiene a la vez un verbo de evento ("tengo/agenda/
+  //     ponme/agéndame/voy a") Y un trigger de recordatorio, es multi.
+  //     Una frase pura de recordatorio ("recuérdame X") no matchea
+  //     porque no hay verbo de evento.
+  const reminderTriggerRe = /\b(recu[eé]rdame|acu[eé]rdame|acordame|av[ií]same|recordame)\b/
+  const eventVerbRe = /\b(tengo|tenemos|agenda|agendame|agéndame|agendarme|ag[eé]ndame|ponme|ponle|p[oó]neme|crea|cr[eé]ame|cr[ée]ame|reagenda|me\s+toca|tengo\s+que|voy\s+a)\b/
+  if (reminderTriggerRe.test(lower) && eventVerbRe.test(lower)) {
+    // Pero si el ÚNICO contenido es un trigger ("recuérdame llamar a mamá"),
+    // no es multi: es una sola acción reminder. Filtramos: el trigger debe
+    // aparecer separado del verbo de evento por ≥2 palabras (proxy de que
+    // son cláusulas distintas).
+    const tIdx = lower.search(reminderTriggerRe)
+    const eIdx = lower.search(eventVerbRe)
+    if (tIdx >= 0 && eIdx >= 0 && Math.abs(tIdx - eIdx) > 12) return true
   }
 
   // 2) Múltiples marcadores temporales (≥2 hits) — incluye palabras
@@ -219,6 +256,116 @@ export default async function handler(req, res) {
     dateContext, weatherContext, contacts, profile, behavior, memories, events, tasks,
     novaPersonality, discussedEventIds,
   })
+
+  // Request ID — trazabilidad end-to-end. Si el cliente mandó uno (header
+  // X-Request-Id), lo respetamos; si no, generamos uno. Lo devolvemos en
+  // el body para que iOS lo loguee en sus telemetrías. Sin PII.
+  const reqId = (typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].trim())
+    || crypto.randomUUID()
+
+  // Provider switch — beta-13 introduce OpenAI como alternativa. Por
+  // default seguimos en Anthropic (mismo flow, sin cambios). Para activar
+  // OpenAI: setear `NOVA_PROVIDER=openai` Y `OPENAI_API_KEY` en Vercel.
+  // El cliente iOS NO conoce el provider — recibe el mismo shape de
+  // respuesta gracias al adapter en openaiNova.js.
+  const provider = (process.env.NOVA_PROVIDER || 'anthropic').toLowerCase().trim()
+  if (provider === 'openai') {
+    const openaiKey = process.env.OPENAI_API_KEY?.trim()
+    if (!openaiKey) {
+      console.error(`[focus-assistant][${reqId}] NOVA_PROVIDER=openai pero falta OPENAI_API_KEY`)
+      return res.status(503).json({ error: 'no_openai_key', message: 'Provider OpenAI mal configurado.' })
+    }
+    const openaiPrompt = buildOpenAISystemPrompt({
+      tz: dateContext.tz,
+      todayISO: dateContext.todayISO,
+      tomorrow: dateContext.tomorrow,
+      currentTime24: dateContext.currentTime24,
+      weekDates: dateContext.weekDates,
+    })
+    try {
+      const start = Date.now()
+      const data = await callOpenAINova({
+        message,
+        systemPrompt: openaiPrompt,
+        model: process.env.OPENAI_NOVA_MODEL,
+        apiKey: openaiKey,
+        reqId,
+      })
+      const rawText = extractResponsesText(data)
+      let parsed
+      try {
+        parsed = JSON.parse(rawText)
+      } catch (e) {
+        console.error(`[focus-assistant][${reqId}] OpenAI JSON parse failed:`, e.message)
+        return res.status(502).json({
+          error: 'llm_bad_output',
+          requestId: reqId,
+          reply: 'No pude procesar la respuesta. Repite el mensaje, por favor.',
+          actions: [],
+        })
+      }
+      const mapped = convertOpenAIToBackendResponse({
+        openaiPayload: parsed,
+        userMessage: message,
+        reqId,
+      })
+      // Tracking de costo — OpenAI Responses API devuelve usage en `data.usage`.
+      trackAIUsageEvent({
+        admin,
+        userId,
+        action_type: ACTION_TYPES.NOVA_MESSAGE,
+        endpoint: 'focus-assistant',
+        model: data?.model || process.env.OPENAI_NOVA_MODEL || 'openai',
+        usage: {
+          input_tokens: data?.usage?.input_tokens ?? data?.usage?.prompt_tokens ?? 0,
+          output_tokens: data?.usage?.output_tokens ?? data?.usage?.completion_tokens ?? 0,
+          source: 'openai',
+        },
+        success: true,
+        duration_ms: Date.now() - start,
+        metadata: { plan, provider: 'openai', request_id: reqId, dropped: mapped._dropped?.length || 0 },
+      }).catch(() => {})
+
+      // Mismo enforcement de cuota que Anthropic: si actions ≠ vacío,
+      // contamos NOVA_SMART_ACTION; si smartActionsBlocked, las strippeamos.
+      if (smartActionsBlocked && mapped.actions.length > 0) {
+        const allowed = mapped.actions.filter(a => a.type === 'remember')
+        mapped.actions = allowed
+        mapped.smart_actions_blocked = true
+        mapped.smart_actions_message = smartCheck.message
+      }
+      Promise.resolve()
+        .then(() => recordUsage(admin, userId, ACTION_TYPES.NOVA_MESSAGE))
+        .then(() => mapped.actions.length > 0
+          ? recordUsage(admin, userId, ACTION_TYPES.NOVA_SMART_ACTION)
+          : null)
+        .catch(() => {})
+
+      if (mapped._dropped && mapped._dropped.length > 0) {
+        console.warn(`[focus-assistant][${reqId}] OpenAI dropped ${mapped._dropped.length}:`, mapped._dropped.join(' | '))
+      }
+      // No exponer `_dropped` al cliente (es solo para telemetría server-side).
+      delete mapped._dropped
+      return res.status(200).json(mapped)
+    } catch (err) {
+      const status = err?.status || 500
+      console.error(`[focus-assistant][${reqId}] OpenAI call failed (${status}):`, err?.message?.slice(0, 200))
+      if (status === 401 || status === 403) {
+        return res.status(503).json({ error: 'invalid_openai_key', requestId: reqId, message: 'Provider OpenAI no autorizado.' })
+      }
+      if (status === 429) {
+        return res.status(429).json({ error: 'upstream_rate_limit', requestId: reqId, message: 'Demasiadas solicitudes a OpenAI. Espera un momento.' })
+      }
+      // Cualquier otro error: 502, el cliente cae a fallback local con
+      // mensaje humano (igual que con Anthropic caído).
+      return res.status(502).json({
+        error: 'upstream_error',
+        requestId: reqId,
+        reply: 'Tuve un problema con Nova. Vuelve a intentarlo.',
+        actions: [],
+      })
+    }
+  }
 
   // Timeout del SDK 45s para aprovechar maxDuration=60s sin agotarlo. Antes
   // estaba en 25s pero competía con el corte default de Vercel a los 10s,
@@ -370,6 +517,8 @@ export default async function handler(req, res) {
         : null)
       .catch(() => {})
 
+    // Adjuntamos requestId para trazabilidad e2e (iOS lo loguea sin PII).
+    out.requestId = reqId
     return res.status(200).json(out)
   }
 
@@ -637,3 +786,7 @@ function buildTodaySummary({ todayEvents, analysis, hour }) {
   }
   return 'Día programado. Vamos paso a paso.'
 }
+
+// Exportado solo para tests unitarios. El runtime usa la versión local
+// dentro del handler; este export no afecta el bundle de Vercel.
+export { detectComplexInput as __detectComplexInput }

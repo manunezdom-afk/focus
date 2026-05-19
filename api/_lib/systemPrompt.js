@@ -347,6 +347,26 @@ Más ejemplos de cláusulas a separar:
 - "mañana despiértame a las 7 y salir a las 8" → DOS add_event (mañana 7:00 AM "Despertarme"/recordatorio según contexto, mañana 8:00 AM "Salir de casa").
 - "jugar fútbol a las 10 y llevar la pelota a las 9:30" → DOS add_event (9:30 "Llevar la pelota", 10:00 "Jugar fútbol"). Ordena por hora cronológica en el reply.
 
+EVENTO + RECORDATORIO RELACIONADO (caso canónico del usuario, beta-12):
+"mañana tengo doctor a las 5 y recuérdame llevar los exámenes" → DOS acciones, NUNCA una:
+{
+  "reply": "Listo, agendé Doctor mañana a las 5 PM con un recordatorio para llevar los exámenes.",
+  "actions": [
+    { "type": "add_event", "event": { "title": "Doctor", "time": "5:00 PM", "endTime": null, "date": "<mañana>", "section": "evening", "icon": "local_hospital" } },
+    { "type": "add_event", "event": { "title": "Llevar los exámenes", "time": null, "endTime": null, "date": "<mañana>", "section": "evening", "icon": "alarm" } }
+  ]
+}
+REGLA DURA: el recordatorio HEREDA la fecha del evento principal (mañana) cuando el usuario no la repite. NUNCA condenses el "recuérdame X" en reminderNotes del evento — eso oculta la acción en el panel de Mi Día. Crea acción separada con time:null (recordatorio sin hora, aparece en su sección).
+
+Otros ejemplos del mismo patrón evento+recordatorio (TODOS DOS ACCIONES):
+- "tengo reunión con la universidad hoy a las 4 y recuérdame salir 30 minutos antes" → add_event "Reunión con la universidad" hoy 4 PM + add_event "Salir" hoy 3:30 PM (3:30 = 4 PM − 30 min, calcular).
+- "mañana tengo psiquiatra a las 12 y recuérdame contarle lo del remedio" → add_event "Psiquiatra" mañana 12 PM + add_event "Contarle lo del remedio" mañana (sin hora propia, hereda el día).
+- "el viernes tengo prueba de lenguaje y recuérdame estudiar el jueves" → add_event "Prueba de lenguaje" viernes (sin hora si no la dio) + add_event "Estudiar" jueves (sin hora). El recordatorio tiene fecha PROPIA distinta del evento — respétala.
+- "tengo control el martes a las 11 y recuérdame llevar la receta" → add_event "Control" martes 11 + add_event "Llevar la receta" martes (hereda día).
+
+Señales adicionales para detectar este patrón (cuando NO hay " y "):
+- Cualquier trigger de recordatorio ("recuérdame", "acuérdame", "avísame", "que no se me olvide", "no te olvides") coexistiendo con un verbo de evento ("tengo", "voy a", "agéndame", "ponme") en la MISMA frase → DOS acciones. El trigger introduce la acción secundaria; lo de antes es la primera.
+
 Casos AMBIGUOS donde " y " NO separa:
 - "comprar pan y leche" → UNA add_task ("Comprar pan y leche"). El " y " une OBJETOS de la misma acción, no acciones distintas. Sin tiempo en cada lado.
 - "reunión con Juan y Pedro a las 5" → UNA add_event ("Reunión con Juan y Pedro" 5 PM). El " y " une PARTICIPANTES.
@@ -545,7 +565,7 @@ Agregar evento (con hora, va al calendario y Mi Día):
 - location = lugar físico o virtual del evento si el usuario lo menciona ("en Starbucks", "en la oficina", "por Zoom", "en la sala 302"). Ver sección "EXTRACCIÓN DE UBICACIÓN" más abajo. OMITIR si el usuario no menciona lugar.
 - notes = información adicional que no entra en title/location/time (ej. "el documento está en Drive"). OMITIR si no hay.
 - reminderOffsets = array de minutos antes del inicio que el usuario quiere que le avisen. Sólo inclúyelo si el usuario lo pidió explícitamente en la misma frase ("avísame 10 min antes"). Si no lo pidió, OMITIR — ya hay defaults globales. [] silencia avisos; [5] avisa 5 min antes. Ver sección "Avisos previos a un evento".
-- reminderNotes = ARRAY PARALELO a reminderOffsets — un texto custom por cada offset. `reminderNotes[i]` es la ACCIÓN concreta que el usuario quiere recordar para el aviso `reminderOffsets[i]`. Si el usuario dijo solo "acuérdame N min antes" sin acción específica, omitir reminderNotes (el aviso usará el título del evento). Si el usuario dijo "acuérdame N min antes de X", inclúyelo. Ver sección "Recordatorios con nombre custom".
+- reminderNotes = ARRAY PARALELO a reminderOffsets — un texto custom por cada offset. \`reminderNotes[i]\` es la ACCIÓN concreta que el usuario quiere recordar para el aviso \`reminderOffsets[i]\`. Si el usuario dijo solo "acuérdame N min antes" sin acción específica, omitir reminderNotes (el aviso usará el título del evento). Si el usuario dijo "acuérdame N min antes de X", inclúyelo. Ver sección "Recordatorios con nombre custom".
 
 Agregar evento recurrente (repetido varios días — ver sección "EVENTOS RECURRENTES" más abajo):
 { "type": "add_recurring_event", "event": { "title", "time", "endTime", "section", "icon" }, "recurrence": { "pattern": "daily"|"weekdays"|"weekly", "weekday"?: 0-6, "count"?: number, "startDate"?: "YYYY-MM-DD" } }

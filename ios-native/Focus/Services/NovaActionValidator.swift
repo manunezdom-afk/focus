@@ -123,6 +123,49 @@ enum NovaActionValidator {
         guard !trimmed.isEmpty else { return "título vacío" }
         let lower = trimmed.lowercased()
 
+        // Patrón 0 — TÍTULO BASURA (lista negra). Cuando `cleanTitle`
+        // strippea agresivamente o el modelo emite un placeholder, el
+        // título termina siendo un genérico que no aporta significado.
+        // Caso real reportado (beta-12, papá del usuario): bloque con
+        // título "Horas" — residuo de strippear "a las 5" sin consumir
+        // "horas". Rechazamos para que el flujo pida aclaración en vez de
+        // crear ruido en el calendario.
+        //
+        // La lista es CONSERVADORA: solo strings que NUNCA serían un
+        // título legítimo POR SÍ SOLOS (sin más palabras). Si el título
+        // es "Reunión de equipo" no matchea — el strip preservó contenido.
+        // Si es "Reunión", tampoco — el user pudo decir "reunión" suelto
+        // como tema.
+        let bareGarbageTitles: Set<String> = [
+            "hora", "horas",
+            "hoy", "mañana", "manana",
+            "evento", "recordatorio",
+            "a las", "a las 5",
+            "ev", "rec", "tarea sin título",
+            "..."
+        ]
+        // Normalizamos: lower + sin puntuación final (.,!?:;) — "Horas." y
+        // "horas" se tratan igual. Conservamos espacios internos para que
+        // "a las 5" siga matcheando.
+        var normalized = lower
+        while let last = normalized.last,
+              ".,!?:;".contains(last) {
+            normalized.removeLast()
+        }
+        normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        if bareGarbageTitles.contains(normalized) {
+            return "título genérico/placeholder ('\(trimmed)')"
+        }
+        // Patrón 0b — TÍTULO solo dígitos / solo hora ("5", "5:00", "17:00",
+        // "5 horas"). Strip de fecha/hora demasiado agresivo. La hora va en
+        // `time`, el título no puede SER la hora.
+        if normalized.range(of: #"^\d{1,2}(:\d{2})?$"#, options: .regularExpression) != nil {
+            return "título es solo una hora ('\(trimmed)')"
+        }
+        if normalized.range(of: #"^\d{1,2}\s*(horas?|min|minutos?|h|hs)$"#, options: .regularExpression) != nil {
+            return "título es una duración suelta ('\(trimmed)')"
+        }
+
         // Patrón A — verbos encadenados con palabra-puente explícita:
         // "X que (verb)" / "X luego (de) (verb)" / "X después (de) (verb)".
         let chainVerbs = "(llevar|volver|comer|cenar|almorzar|salir|ir|hacer|tomar|traer|estudiar|trabajar|jugar|leer)"

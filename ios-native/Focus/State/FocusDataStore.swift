@@ -468,9 +468,38 @@ enum NovaResponder {
             " después ", " despues ",
             " también ", " tambien ",
             " además ", " ademas ",
-            " más tarde ", " mas tarde "
+            " más tarde ", " mas tarde ",
+            // Evento + recordatorio en la misma frase (beta-12, caso real).
+            // Espejo del backend `detectComplexInput` — sin esto el cliente
+            // no marca como multi y el fallback local arma un solo evento.
+            " y recuérdame ", " y recuerdame ", " y recordame ",
+            " y acuérdame ", " y acuerdame ", " y acordame ",
+            " y avísame ", " y avisame ",
+            " y que no se me olvide ", " y que no se olvide ",
+            " y no te olvides ", " y no olvides ", " y no me dejes olvidar ",
+            " y ponme ", " y ponle "
         ]
         for hint in strongHints where lower.contains(hint) { return true }
+
+        // 1b) Coexistencia evento + recordatorio SIN conector "y". Espejo de
+        //     la regla 1b del backend. Si la frase tiene un verbo de evento
+        //     ("tengo", "voy a", "agéndame", "ponme") Y un trigger de
+        //     recordatorio en posiciones separadas (≥12 chars de distancia
+        //     entre uno y otro), son dos cláusulas distintas. La distancia
+        //     12 es proxy de "no es la misma cláusula": "recuérdame llamar
+        //     a mamá" tiene trigger al inicio y nada de evento → no matchea
+        //     porque eventVerbRe no encuentra "tengo/voy a".
+        let reminderPattern = #"\b(recu[eé]rdame|acu[eé]rdame|acordame|av[ií]same|recordame)\b"#
+        let eventVerbPattern = #"\b(tengo|tenemos|agenda|agendame|ag[eé]ndame|agendarme|ponme|ponle|crea|cr[eé]ame|me\s+toca|tengo\s+que|voy\s+a)\b"#
+        if let rRe = try? NSRegularExpression(pattern: reminderPattern, options: [.caseInsensitive]),
+           let eRe = try? NSRegularExpression(pattern: eventVerbPattern, options: [.caseInsensitive]) {
+            let fullRange = NSRange(location: 0, length: (lower as NSString).length)
+            if let rMatch = rRe.firstMatch(in: lower, options: [], range: fullRange),
+               let eMatch = eRe.firstMatch(in: lower, options: [], range: fullRange) {
+                let distance = abs(rMatch.range.location - eMatch.range.location)
+                if distance > 12 { return true }
+            }
+        }
 
         // 2) Contar marcadores temporales. ≥2 hits → casi seguro multi.
         // Soporta números EN PALABRAS (una/dos/tres) que el hour pattern
