@@ -2662,7 +2662,7 @@ enum NovaActionNormalizerTests {
         let intents = NovaResponder.parseAll(text)
         return intents.compactMap { intent -> ParsedAction? in
             switch intent {
-            case let .createEvent(rawTitle, when, explicitEnd, _, section, wantsReminder):
+            case let .createEvent(rawTitle, when, explicitEnd, _, section, wantsReminder, _):
                 let title = NovaActionNormalizer.cleanTitle(rawTitle)
                 let hour = when.map { Calendar.current.component(.hour, from: $0) }
                 let minute = when.map { Calendar.current.component(.minute, from: $0) }

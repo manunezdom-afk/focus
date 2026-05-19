@@ -1449,7 +1449,7 @@ struct MiDiaView: View {
 
         init?(intent: NovaIntent, userText: String) {
             switch intent {
-            case let .createEvent(rawTitle, when, _, _, _, _):
+            case let .createEvent(rawTitle, when, _, _, _, _, _):
                 let cleaned = NovaActionNormalizer.cleanTitle(rawTitle)
                 guard !cleaned.isEmpty else { return nil }
                 self.kind = .block
@@ -1718,7 +1718,7 @@ struct MiDiaView: View {
                 action: .openTasksList
             )
 
-        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder):
+        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder, let recurrence):
             // BUG-USER 2026-05-18: este path guardaba el título RAW del intent
             // parser sin pasarlo por cleanTitle, mientras que
             // FocusDataStore.applyLocalNovaIntent SÍ lo limpia. Resultado: el
@@ -1810,17 +1810,30 @@ struct MiDiaView: View {
             } else {
                 extractedOffsets = nil
             }
-            let event = FocusEvent(
-                title: title,
-                startTime: date,
-                endTime: end,
-                section: effectiveSection,
-                location: location,
-                isReminder: isReminderFlag,
-                inferredDuration: inferredFlag,
-                reminderOffsets: extractedOffsets
-            )
-            store.addEvent(event)
+            // Si hay recurrencia, expandir las próximas N ocurrencias.
+            let occurrences: [Date]
+            if let recurrence {
+                occurrences = store.expandLocalRecurrenceDates(start: date, recurrence: recurrence)
+            } else {
+                occurrences = [date]
+            }
+            var firstEventId = UUID()
+            for (idx, startDate) in occurrences.enumerated() {
+                let duration = end.timeIntervalSince(date)
+                let occurEnd = startDate.addingTimeInterval(duration)
+                let event = FocusEvent(
+                    title: title,
+                    startTime: startDate,
+                    endTime: occurEnd,
+                    section: effectiveSection,
+                    location: location,
+                    isReminder: isReminderFlag,
+                    inferredDuration: inferredFlag,
+                    reminderOffsets: extractedOffsets
+                )
+                store.addEvent(event)
+                if idx == 0 { firstEventId = event.id }
+            }
             store.updateNovaContext(
                 from: userText,
                 title: title,
@@ -1828,7 +1841,7 @@ struct MiDiaView: View {
                 location: location,
                 section: effectiveSection,
                 kind: .event,
-                eventId: event.id
+                eventId: firstEventId
             )
             let timeLabel = DateFormatters.hourMinute.string(from: date)
             let dayLabel = DateFormatters.capitalizeFirst(
@@ -1843,6 +1856,9 @@ struct MiDiaView: View {
                     ? "\(mins) min antes"
                     : (mins % 60 == 0 ? "\(mins/60) h antes" : "\(mins/60) h \(mins%60) min antes")
                 detail += " · 🔔 \(offsetLabel)"
+            }
+            if let recurrence, occurrences.count > 1 {
+                detail += " · \(recurrence.label), \(occurrences.count) próximas"
             }
             return InlineNovaResponse(
                 userText: userText,
@@ -2123,7 +2139,19 @@ struct MiDiaView: View {
             )
 
         case .reviewToday:
-            let evts = store.todayEvents().sorted { $0.startTime < $1.startTime }
+            // Incluir eventos demo si el usuario está en modo demo y aún
+            // no tiene eventos propios — la UI los muestra como tarjetas,
+            // Nova tiene que ser coherente con eso.
+            let evts: [FocusEvent]
+            if store.hasUserEvents {
+                evts = store.todayEvents().sorted { $0.startTime < $1.startTime }
+            } else if store.isInDemoMode {
+                evts = DemoDataProvider.shared.exampleTodayEvents()
+                    .filter { !store.dismissedDemoEventTitles.contains($0.title) }
+                    .sorted { $0.startTime < $1.startTime }
+            } else {
+                evts = []
+            }
             let pending = store.pendingTodayTasks
             if evts.isEmpty && pending.isEmpty {
                 return InlineNovaResponse(

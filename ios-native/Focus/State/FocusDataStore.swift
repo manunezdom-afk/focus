@@ -115,13 +115,17 @@ enum NovaIntent: Hashable {
     /// `endTime` es no-nil solo cuando el usuario dio hora-fin explícita
     /// ("de 3 a 4", "hasta las 4", "por 1h"). Si es nil, el evento se
     /// muestra como punto en el tiempo.
+    /// `recurrence` no-nil → caller expande N instancias locales (weekly →
+    /// 8 semanas, daily → 14 días, monthly → 3 meses). Hint del parser para
+    /// frases tipo "todos los lunes a las 5 clase de lenguaje".
     case createEvent(
         title: String,
         when: Date?,
         endTime: Date?,
         location: String?,
         section: EventSection?,
-        wantsReminder: Bool
+        wantsReminder: Bool,
+        recurrence: RecurrenceHint? = nil
     )
     /// Corregir el último ítem creado (evento o tarea). Resuelto desde
     /// `NovaContext.lastEventId` / `lastTaskId`.
@@ -1503,6 +1507,7 @@ enum NovaResponder {
             let when = extractDateTime(from: lower)
             let location = extractLocation(from: trimmed)
             let section = detectSection(in: lower)
+            let recurrence = detectRecurrence(lower)
             if title.isEmpty {
                 return .clarify(reason: .eventNeedsTitle)
             }
@@ -1519,7 +1524,8 @@ enum NovaResponder {
                     endTime: explicitEnd,
                     location: location,
                     section: section,
-                    wantsReminder: wantsReminder
+                    wantsReminder: wantsReminder,
+                    recurrence: recurrence
                 )
             }
             return .clarify(reason: .eventNeedsDateTime(title: title))
@@ -1644,7 +1650,7 @@ enum NovaResponder {
                 "Listo, agrego «\(title)»\(dueBit) a tus pendientes\(recBit).\(remBit)",
                 "La meto como tarea\(dueBit)\(recBit). Si quieres cambiar la prioridad, dime.\(remBit)"
             ])
-        case .createEvent(let title, let when, _, let location, let section, _):
+        case .createEvent(let title, let when, _, let location, let section, _, _):
             let timeBit = when.map { "el \(DateFormatters.weekdayDay.string(from: $0).lowercased()) a las \(DateFormatters.hourMinute.string(from: $0))" } ?? "cuando me digas"
             let placeBit = location.map { " en \($0)" } ?? ""
             let sectionBit = section.map { " (\($0.displayName.lowercased()))" } ?? ""
@@ -1903,11 +1909,44 @@ enum NovaResponder {
         keywords.contains { text.contains($0) }
     }
 
-    private static func matchesAny(_ text: String, _ triggers: [String]) -> Bool {
-        triggers.contains { text.contains($0) }
+    /// Busca un trigger respetando word-boundary al inicio. Sin esto,
+    /// `text.contains("ir a ")` matcheaba dentro de "dormir a las" (substring
+    /// "ir a " a partir de la "i" de "mir") y disparaba el flujo de evento
+    /// con título incorrecto. Las pruebas pre-beta (TEST 17) lo evidenciaron:
+    /// "recuérdame dormir a las 11" terminaba como evento "Ir" 11:00.
+    ///
+    /// Reglas:
+    /// - Si el trigger arranca en posición 0 → OK.
+    /// - Si el carácter anterior es letra (a-z incluyendo acentos)
+    ///   → NO matchea (bordería intra-palabra).
+    /// - Si es espacio, puntuación o cualquier otro → OK.
+    ///
+    /// Triggers que TERMINAN con un espacio (ej. "ir a ") ya garantizan
+    /// bordería al final por el espacio explícito.
+    private static func firstWordBoundedRange(of trigger: String, in lower: String) -> Range<String.Index>? {
+        var searchStart = lower.startIndex
+        while let range = lower.range(of: trigger, range: searchStart..<lower.endIndex) {
+            if range.lowerBound == lower.startIndex {
+                return range
+            }
+            let prev = lower[lower.index(before: range.lowerBound)]
+            if !prev.isLetter {
+                return range
+            }
+            // Avanzar el search start un carácter para evitar bucle infinito y
+            // probar el siguiente posible match.
+            searchStart = lower.index(after: range.lowerBound)
+        }
+        return nil
     }
 
-    /// Encuentra el trigger que matchea en `text`. Prioriza:
+    private static func matchesAny(_ text: String, _ triggers: [String]) -> Bool {
+        let lower = text.lowercased()
+        return triggers.contains { firstWordBoundedRange(of: $0, in: lower) != nil }
+    }
+
+    /// Encuentra el trigger que matchea en `text` respetando word-boundary.
+    /// Prioriza:
     /// 1. Posición más temprana en el texto.
     /// 2. Si empatan en posición → trigger MÁS LARGO (más específico).
     /// Eso asegura que "ir a buscar " (12 chars) gane sobre "ir a " (5 chars)
@@ -1916,11 +1955,10 @@ enum NovaResponder {
         let lower = text.lowercased()
         var best: (trigger: String, position: String.Index, length: Int)?
         for trigger in triggers {
-            guard let range = lower.range(of: trigger) else { continue }
+            guard let range = firstWordBoundedRange(of: trigger, in: lower) else { continue }
             let position = range.lowerBound
             let length = trigger.count
             if let current = best {
-                // Posición más temprana; si empata, longitud mayor.
                 if position < current.position {
                     best = (trigger, position, length)
                 } else if position == current.position && length > current.length {
@@ -3283,6 +3321,21 @@ enum NovaResponder {
             return .forcePM
         }
 
+        // 4) Verbos / sustantivos PM por contexto vespertino-nocturno:
+        //    - dormir/acostarse → noche
+        //    - gym/gimnasio/entrenar/entrenamiento → casi siempre tarde
+        //    - fútbol/partido/futbol → casi siempre tarde (los matches AM
+        //      son raros y el usuario los marcaría con "am" explícito)
+        //    - "salida"/"trago"/"copas"/"after"/"bar" → tarde-noche
+        //
+        //    Mantener la lista corta y solo cubre verbos cuyo significado
+        //    temporal en español rioplatense/chileno es claramente vespertino.
+        //    Bug fix beta: "recuérdame dormir a las 11" caía como 11:00 AM.
+        let pmContextPattern = #"\b(dormir|durmiendo|duermo|duerme|acostar(me|te|se|nos)?|gym|gimnasio|entrenar|entrenando|entrenamiento|f[uú]tbol|futbol|partido)\b"#
+        if lower.range(of: pmContextPattern, options: .regularExpression) != nil {
+            return .forcePM
+        }
+
         return .neutral
     }
 
@@ -4193,6 +4246,36 @@ final class FocusDataStore: ObservableObject {
             guard isReminderEvent || hasOffsets else { continue }
             syncLocalNotification(for: event)
         }
+    }
+
+    /// Expande una recurrencia local a una lista de fechas. Conservador
+    /// para beta — N fijo por tipo, sin opciones avanzadas.
+    /// - daily: 14 ocurrencias (2 semanas).
+    /// - weekly / weeklyOn / unspecified: 8 ocurrencias (~2 meses).
+    /// - monthly: 3 ocurrencias.
+    /// Devuelve siempre al menos `[start]` para que la lógica de creación
+    /// no tenga ramas especiales.
+    func expandLocalRecurrenceDates(start: Date, recurrence: RecurrenceHint) -> [Date] {
+        let cal = Calendar.current
+        let count: Int
+        let component: Calendar.Component
+        let increment: Int
+        switch recurrence {
+        case .daily:
+            count = 14; component = .day; increment = 1
+        case .weekly, .weeklyOn, .unspecified:
+            count = 8; component = .weekOfYear; increment = 1
+        case .monthly:
+            count = 3; component = .month; increment = 1
+        }
+        var dates: [Date] = [start]
+        var cursor = start
+        for _ in 1..<count {
+            guard let next = cal.date(byAdding: component, value: increment, to: cursor) else { break }
+            dates.append(next)
+            cursor = next
+        }
+        return dates
     }
 
     /// Llamado por `FocusApp` al arrancar — asegura que recordatorios
@@ -5340,7 +5423,7 @@ final class FocusDataStore: ObservableObject {
     /// Devuelve nil si el intent no debería ejecutarse acá (caller fall-through).
     func applyLocalNovaIntent(_ intent: NovaIntent, userText: String) -> String? {
         switch intent {
-        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder):
+        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder, let recurrence):
             guard let date = when else { return nil }
             // PASO 1: Limpiar título via normalizer (mismo pipeline que
             // backend path → consistencia 100%).
@@ -5419,18 +5502,44 @@ final class FocusDataStore: ObservableObject {
                 extractedNotes = nil
             }
 
-            let event = FocusEvent(
-                title: title,
-                startTime: date,
-                endTime: end,
-                section: effectiveSection,
-                location: location,
-                isReminder: isReminderFlag,
-                inferredDuration: inferredFlag,
-                reminderOffsets: extractedOffsets,
-                reminderNotes: extractedNotes
-            )
-            addEvent(event)
+            // PASO 6: si hay recurrencia, calcular las fechas de las N
+            // ocurrencias futuras y crear un evento por cada una. Estable
+            // para beta: NO usa modelo de recurrencia real (cada evento
+            // es independiente). Pro: ediciones individuales sin lógica
+            // de "este evento o toda la serie". Contra: si el usuario
+            // quiere cancelar la serie completa, hoy hay que borrar uno
+            // por uno. Aceptable para beta v1.
+            let occurrences: [Date]
+            if let recurrence {
+                occurrences = expandLocalRecurrenceDates(start: date, recurrence: recurrence)
+            } else {
+                occurrences = [date]
+            }
+
+            let firstEventId: UUID = {
+                var lastId: UUID = UUID()
+                for (idx, startDate) in occurrences.enumerated() {
+                    // Duración: si endTime original es relativo al inicio,
+                    // mantenemos esa duración para todas las ocurrencias.
+                    let duration = end.timeIntervalSince(date)
+                    let occurEnd = startDate.addingTimeInterval(duration)
+                    let event = FocusEvent(
+                        title: title,
+                        startTime: startDate,
+                        endTime: occurEnd,
+                        section: effectiveSection,
+                        location: location,
+                        isReminder: isReminderFlag,
+                        inferredDuration: inferredFlag,
+                        reminderOffsets: extractedOffsets,
+                        reminderNotes: extractedNotes
+                    )
+                    addEvent(event)
+                    if idx == 0 { lastId = event.id }
+                }
+                return lastId
+            }()
+
             updateNovaContext(
                 from: userText,
                 title: title,
@@ -5438,7 +5547,7 @@ final class FocusDataStore: ObservableObject {
                 location: location,
                 section: effectiveSection,
                 kind: .event,
-                eventId: event.id
+                eventId: firstEventId
             )
             let timeLabel = DateFormatters.hourMinute.string(from: date)
             let dayLabel: String = {
@@ -5446,20 +5555,25 @@ final class FocusDataStore: ObservableObject {
                 if cal.isDateInTomorrow(date) { return "mañana" }
                 return "el \(DateFormatters.weekdayDay.string(from: date).lowercased())"
             }()
+            // Texto base de confirmación.
+            let recurrenceBit: String
+            if let recurrence, occurrences.count > 1 {
+                recurrenceBit = " (\(recurrence.label), \(occurrences.count) próximas)"
+            } else {
+                recurrenceBit = ""
+            }
             // Copy unificado: "bloque" en vez de mezclar "recordatorio" /
             // "evento". El chip 🔔 dentro del bloque comunica el offset.
             if let mins = extractedOffsets?.first {
                 let offsetLabel = mins < 60
                     ? "\(mins) min antes"
                     : (mins % 60 == 0 ? "\(mins/60) h antes" : "\(mins/60) h \(mins%60) min antes")
-                // Si hay nota custom, la mostramos para que el user vea
-                // que entendimos la acción concreta del reminder.
                 if let note = extractedNotes?.first, !note.isEmpty {
-                    return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel) y te aviso \(offsetLabel) para «\(note)»."
+                    return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel)\(recurrenceBit) y te aviso \(offsetLabel) para «\(note)»."
                 }
-                return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel) con aviso \(offsetLabel)."
+                return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel)\(recurrenceBit) con aviso \(offsetLabel)."
             }
-            return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel)."
+            return "Listo. Te dejé «\(title)» \(dayLabel) a las \(timeLabel)\(recurrenceBit)."
 
         case .createTask(let rawTitle, let dueDate, _, let wantsReminder):
             // Mismo pipeline de limpieza para tareas.
@@ -5659,7 +5773,20 @@ final class FocusDataStore: ObservableObject {
                 : "Tienes \(count) pendientes hoy:\n\(preview)"
 
         case .reviewToday:
-            let evts = todayEvents().sorted { $0.startTime < $1.startTime }
+            // Eventos visibles para el usuario — incluye demo en modo demo.
+            // Sin esto, la primera experiencia del usuario nuevo era:
+            // ve 3 eventos en Mi Día (los demos) pero Nova responde
+            // "nada agendado" — contradicción confusa que rompe la beta.
+            let evts: [FocusEvent]
+            if hasUserEvents {
+                evts = todayEvents().sorted { $0.startTime < $1.startTime }
+            } else if isInDemoMode {
+                evts = DemoDataProvider.shared.exampleTodayEvents()
+                    .filter { !dismissedDemoEventTitles.contains($0.title) }
+                    .sorted { $0.startTime < $1.startTime }
+            } else {
+                evts = []
+            }
             let pending = pendingTodayTasks
             if evts.isEmpty && pending.isEmpty {
                 return "No tienes nada agendado para hoy."
