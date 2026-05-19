@@ -412,3 +412,27 @@ test('duration: reminder no calcula endTime (siempre null)', () => {
   })
   assert.equal(out.actions[0].event.endTime, null)
 })
+
+// ─── Reglas nuevas Bug1+Bug2: verificación system prompt ────────────────────
+
+test('system prompt contiene regla "ocho 30" con ejemplo concreto de título limpio', () => {
+  const p = buildOpenAISystemPrompt({
+    tz: 'America/Santiago', todayISO: '2026-05-19', tomorrow: '2026-05-20',
+    currentTime24: '09:00', weekDates: {},
+  })
+  // Regla 3 debe mencionar el patrón explícito "ocho 30" → 08:30
+  assert.ok(p.includes('ocho 30'), 'debe mencionar "ocho 30" como patrón')
+  // Regla 4 debe incluir strip de temporal + ejemplo con "30 del Master"
+  assert.ok(p.includes('30 del Master') || p.includes('ocho 30 del Master'), 'debe mostrar ejemplo con "30 del Master" en el contexto del título')
+  // Regla 3 debe mencionar secuencia PM
+  assert.ok(p.includes('SECUENCIA AM/PM') || p.includes('secuencia'), 'debe tener regla de secuencia PM')
+})
+
+test('system prompt contiene ejemplo de secuencia: 5 gimnasio y 8 estudiar → 17:00 y 20:00', () => {
+  const p = buildOpenAISystemPrompt({
+    tz: 'America/Santiago', todayISO: '2026-05-19', tomorrow: '2026-05-20',
+    currentTime24: '09:00', weekDates: {},
+  })
+  // Debe tener el ejemplo concreto de gimnasio/estudiar con horas PM
+  assert.ok(p.includes('gimnasio') && p.includes('20:00'), 'debe tener ejemplo gimnasio+estudiar con 20:00')
+})

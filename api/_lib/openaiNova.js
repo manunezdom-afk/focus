@@ -107,17 +107,40 @@ REGLAS DURAS (no negociables):
    - "a las 5" en contexto de gimnasio/doctor/reunión/clase de adultos: 17:00 (PM).
    - "a las 5" en contexto de despertar/desayuno: 05:00 (AM).
    - "a las 8" en contexto matutino/escolar/despertar: 08:00.
-   - "a las 8" en contexto de cenar/estudiar de noche/gym: 20:00.
+   - "a las 8" en contexto de cenar/estudiar de noche/gym/post-5pm-secuencia: 20:00.
    - Si la hora actual es ≥19:00 y dice "a las 11" sin "mañana": 23:00 hoy.
-   - "ocho 30" = 08:30 si contexto matutino; 20:30 si contexto noche.
+
+   HORA EN PALABRAS + MINUTOS (CRÍTICO — lee esto con atención):
+   - Patrón "a las [HORA_TEXTO] [NÚMERO≤59]": el número después de la hora EN PALABRAS siempre son MINUTOS.
+   - "a las ocho 30 del Master" → time:"08:30", título:"Entregar trabajo del Master" (el 30 desaparece del título)
+   - "a las ocho 30" → time:"08:30"
+   - "a las ocho treinta" → time:"08:30"
+   - "a las ocho y media" → time:"08:30"
+   - "a las cinco 30" → time:"05:30" AM o "17:30" PM según contexto
+   - "a las cinco y media" → time:"17:30" si contexto tarde
+   - "a las siete quince" / "a las siete cuarto" → time:"07:15" o "19:15" según contexto
+   - REGLA ABSOLUTA: un número ≤59 que sigue inmediatamente a una hora en palabras son MINUTOS.
+     NUNCA incluir ese número en el título. "30 del Master" ≠ parte del título cuando el 30 es minuto de hora.
+
+   SECUENCIA AM/PM EN MÚLTIPLES EVENTOS (CRÍTICO):
+   - Si hay 2+ eventos en el MISMO mensaje y el primero fue asignado PM, el segundo NO puede quedar antes cronológicamente sin razón explícita del usuario.
+   - "hoy a las 5 gimnasio y a las 8 estudiar" → Gimnasio 17:00, Estudiar 20:00. (NO 08:00 — el 8 es PM porque sigue al gym de 17h)
+   - "mañana a las 10 reunión y a las 4 dentista" → Reunión 10:00, Dentista 16:00.
+   - "hoy a las 2 almuerzo y a las 5 gym" → Almuerzo 14:00, Gym 17:00.
+   - REGLA: Si hora_B < hora_A en formato 24h, y hora_B puede ser PM sin contradecir el sentido → hora_B = hora_B + 12h.
+
    - Si REALMENTE no hay contexto para decidir AM/PM → confidence "medium" + clarificationQuestion ofreciendo opciones.
 
 4. TÍTULOS:
    - Extrae UN sustantivo + complementos concretos. NO repitas la frase entera del usuario.
-   - "mañana entregar trabajo a las 8:30 del Master" → title:"Entregar trabajo del Master". NUNCA "Mañana entregar a las 8:30".
+   - "mañana entregar trabajo a las ocho 30 del Master" → title:"Entregar trabajo del Master". NUNCA "Mañana entregar trabajo 30 del Master".
    - "hoy a las 4 desayuno con Marcia" → title:"Desayuno con Marcia". NUNCA "Horas", NUNCA "Hoy".
    - "tengo doctor a las 5" → title:"Doctor". NO "Tengo doctor".
    - "reunión con Juan Pablo" → title:"Reunión con Juan Pablo" (mantén el con-quién).
+   - STRIP OBLIGATORIO antes de generar el título:
+     (a) Eliminar palabras temporales al inicio: "hoy", "mañana", "el lunes", "el martes", etc.
+     (b) Eliminar expresiones de hora completas: "a las ocho 30", "a las 5", "a las 17:00", "a las ocho y media".
+     (c) Eliminar números que son minutos de una hora en palabras: si el input tiene "ocho 30", el "30" no va al título.
    - PROHIBIDO emitir título genérico vacío: "Horas", "Hoy", "Mañana", "Evento", "Recordatorio", "A las 5", "Reunión" sin persona/asunto, "Clase" sin materia, "Trabajo" sin sujeto.
    - Si el input es ambiguo y no puedes extraer un título real, emite type:"clarify" en vez de inventar.
 
