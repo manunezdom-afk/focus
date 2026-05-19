@@ -1091,7 +1091,7 @@ struct MiDiaView: View {
             // Corrige/borra el último ítem usando `lastEventId`/`lastTaskId`
             // del contexto local. Backend no tiene esos ids.
             return true
-        case .organizeDay, .reviewPending, .askAboutDemo:
+        case .organizeDay, .reviewPending, .reviewToday, .askAboutDemo:
             // Comandos meta del cliente — generan suggestions/listados locales,
             // no requieren NLU del backend.
             return true
@@ -2071,6 +2071,33 @@ struct MiDiaView: View {
                     : "Tienes \(pending.count) pendientes hoy.",
                 details: preview,
                 action: pending.count > 3 ? .openTasksList : nil
+            )
+
+        case .reviewToday:
+            let evts = store.todayEvents().sorted { $0.startTime < $1.startTime }
+            let pending = store.pendingTodayTasks
+            if evts.isEmpty && pending.isEmpty {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "No tienes nada agendado para hoy."
+                )
+            }
+            let fmt = DateFormatter()
+            fmt.dateFormat = "HH:mm"
+            fmt.locale = Locale(identifier: "es")
+            var lines: [String] = []
+            for e in evts {
+                lines.append("• \(fmt.string(from: e.startTime)) — \(e.title)")
+            }
+            let header = evts.count == 1 ? "1 evento hoy" : "\(evts.count) eventos hoy"
+            let taskNote = pending.isEmpty ? nil
+                : (pending.count == 1 ? "+ 1 tarea pendiente" : "+ \(pending.count) tareas pendientes")
+            let detailLines = lines + (taskNote.map { [$0] } ?? [])
+            return InlineNovaResponse(
+                userText: userText,
+                summary: header,
+                details: detailLines.joined(separator: "\n"),
+                action: nil
             )
 
         case .askAboutDemo:

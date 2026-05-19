@@ -142,6 +142,9 @@ enum NovaIntent: Hashable {
     case organizeDay
     /// Revisar tareas pendientes → resumen inline.
     case reviewPending
+    /// Vista general del día: eventos del timeline + tareas pendientes.
+    /// Se activa con "¿qué tengo hoy?" / "¿qué sigue?".
+    case reviewToday
     /// Pregunta sobre cómo borrar ejemplos demo.
     case askAboutDemo
     /// Saludo / acuse simple. La respuesta es variada (no siempre la misma).
@@ -1366,14 +1369,27 @@ enum NovaResponder {
         }
 
         // ──────────────────────────────────────────────────────────────
-        // 3. Revisar pendientes.
+        // 3a. Vista general del día (eventos + tareas).
+        // ──────────────────────────────────────────────────────────────
+        if matches(lower, [
+            "qué tengo hoy", "que tengo hoy",
+            "qué hay hoy", "que hay hoy",
+            "qué tengo agendado", "que tengo agendado",
+            "qué sigue", "que sigue", "qué hago ahora", "que hago ahora",
+            "qué más tengo", "que mas tengo"
+        ]) {
+            return .reviewToday
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // 3b. Revisar solo tareas pendientes.
         // ──────────────────────────────────────────────────────────────
         if matches(lower, [
             "revisa pendientes", "revisar pendientes",
             "qué tengo pendiente", "que tengo pendiente",
+            "qué me queda pendiente", "que me queda pendiente",
             "qué me falta", "que me falta",
-            "qué tengo hoy", "que tengo hoy",
-            "qué sigue", "que sigue", "qué hago ahora", "que hago ahora"
+            "qué pendientes tengo", "que pendientes tengo"
         ]) {
             return .reviewPending
         }
@@ -1649,6 +1665,12 @@ enum NovaResponder {
                 "Tus pendientes están en Mi Día → «Pendientes de hoy».",
                 "Mira «Pendientes de hoy» en Mi Día. Si quieres que los reorganice, dime «organiza mi día».",
                 "Lo tienes todo arriba en Mi Día. ¿Los priorizamos por urgencia?"
+            ])
+        case .reviewToday:
+            return Self.pick([
+                "Mira Mi Día para ver tu agenda completa de hoy.",
+                "Tu timeline está arriba en Mi Día. ¿Quieres que te ayude a organizarlo?",
+                "Lo tienes todo en Mi Día. ¿Hay algo que quieras mover o priorizar?"
             ])
         case .askAboutDemo:
             return "Los ejemplos solo aparecen mientras no tengas datos tuyos. Apenas crees tu primer evento o tarea, se reemplazan automáticamente. Si quieres borrar todo, ve a Ajustes → Datos locales."
@@ -5173,7 +5195,7 @@ final class FocusDataStore: ObservableObject {
         switch intent {
         case .correctLastEvent, .deleteLastItem, .convertLastToTask:
             return true
-        case .organizeDay, .reviewPending, .askAboutDemo:
+        case .organizeDay, .reviewPending, .reviewToday, .askAboutDemo:
             return true
         case .smallTalk:
             return true
@@ -5475,6 +5497,26 @@ final class FocusDataStore: ObservableObject {
             return count == 1
                 ? "Tienes 1 pendiente hoy:\n\(preview)"
                 : "Tienes \(count) pendientes hoy:\n\(preview)"
+
+        case .reviewToday:
+            let evts = todayEvents().sorted { $0.startTime < $1.startTime }
+            let pending = pendingTodayTasks
+            if evts.isEmpty && pending.isEmpty {
+                return "No tienes nada agendado para hoy."
+            }
+            let fmt = DateFormatter()
+            fmt.dateFormat = "HH:mm"
+            fmt.locale = Locale(identifier: "es")
+            var lines: [String] = []
+            for e in evts {
+                lines.append("• \(fmt.string(from: e.startTime)) — \(e.title)")
+            }
+            if !pending.isEmpty {
+                let label = pending.count == 1 ? "1 tarea pendiente" : "\(pending.count) tareas pendientes"
+                lines.append("+ \(label)")
+            }
+            let header = evts.count == 1 ? "Tienes 1 evento hoy:" : "Tienes \(evts.count) eventos hoy:"
+            return "\(header)\n\(lines.joined(separator: "\n"))"
 
         case .askAboutDemo:
             return "Los ejemplos solo aparecen mientras no tengas datos tuyos. Apenas creas tu primer evento o tarea, se reemplazan automáticamente."
