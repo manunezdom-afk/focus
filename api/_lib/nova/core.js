@@ -269,11 +269,15 @@ export async function runNova({
     const mentionsManana = /\bma[ñn]ana\b/i.test(message)
     const mentionsAM = /\bAM\b|\bde la ma[ñn]ana\b/i.test(message)
     for (const a of semantic) {
+      // Aplica cuando dateISO es hoy O null O ausente. NO aplica si el
+      // LLM puso explícitamente una fecha futura (mañana, próxima
+      // semana) porque ahí la hora del pasado no es contradicción.
+      const dateIsTodayOrUnknown =
+        !a.dateISO || a.dateISO === dateContext.todayISO
       if (
         (a.type === 'create_event' || a.type === 'create_reminder') &&
         typeof a.time === 'string' &&
-        typeof a.dateISO === 'string' &&
-        a.dateISO === dateContext.todayISO &&
+        dateIsTodayOrUnknown &&
         !mentionsManana &&
         !mentionsAM
       ) {
