@@ -575,7 +575,11 @@ export function collapseSemanticToBackendActions(semanticActions, { reqId, input
 
     const event = {
       title: titleRaw,
-      time: isReminder ? null : time12,
+      // Reminders SÍ llevan time cuando el usuario lo especifica
+      // ("recuérdame llamar a las 7" → 19:00). Antes se forzaba a null
+      // por legacy, perdiendo el bump AM/PM que aplicaba core.js. Si el
+      // LLM no proveyó time, queda null igual.
+      time: time12,
       endTime,
       date,
       section: isReminder ? 'evening' : (CATEGORY_TO_SECTION[cat] || 'evening'),

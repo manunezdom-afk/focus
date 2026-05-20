@@ -277,13 +277,10 @@ test('caso 7: reminder con hora + tarea mañana → 2 actions', () => {
   assert.equal(out.actions.length, 2)
   assert.equal(out.actions[0].event.title, 'Llamar a mi mamá')
   assert.equal(out.actions[0].event.icon, 'alarm')
-  // reminder con hora: lo respetamos pero como reminder (time=null fuerza
-  // que se muestre en sección reminder, no como bloque con duración).
-  // En este caso el modelo dijo 18:00 → time se traduce, pero icon=alarm
-  // (siempre que type sea create_reminder).
-  // El adapter pone time=null para reminders. Esto es intencional: si el
-  // usuario quiere hora del reminder, usa reminderOffsets del evento padre.
-  assert.equal(out.actions[0].event.time, null)
+  // 2026-05-20: reminders ahora preservan time si el LLM lo emitió
+  // (cambio post-QA C2 — antes se forzaba a null y perdía el bump
+  // AM/PM aplicado en core.js).
+  assert.equal(out.actions[0].event.time, '6:00 PM')
   assert.equal(out.actions[1].event.title, 'Comprar cuaderno')
   assert.equal(out.actions[1].event.date, '2026-05-20')
 })
