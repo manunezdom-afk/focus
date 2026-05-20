@@ -168,7 +168,9 @@ export async function runNova({
   // final. Es defensa heurística: cubre los casos canónicos del QA del
   // usuario donde los modelos chico/grande ignoraban la regla 11 del
   // prompt. Si nada matchea, devuelve el input intacto.
-  const normalization = normalizeCorrections(message)
+  const normalization = normalizeCorrections(message, {
+    currentTime24: dateContext.currentTime24,
+  })
   if (normalization.applied.length > 0) {
     logEvent({
       reqId, app,
@@ -258,49 +260,13 @@ export async function runNova({
     }
   }
 
-  // ─── 3-pre. Defensa AM/PM hora pasada ──────────────────────────────────
-  // Si la action es hoy con hora < hora actual y el input no mencionó
-  // "mañana" ni "AM" explícito, asume PM (suma 12). Cubre el bug real
-  // del caso 2: "recuérdame llamar a mi mamá a las 6" a las 11:30 →
-  // el LLM emite 06:00 pasado. La regla 3 del prompt ya cubre esto pero
-  // el modelo a veces lo ignora. Esta defensa lo enmienda.
-  if (Array.isArray(semantic) && dateContext.currentTime24) {
-    const [curH] = dateContext.currentTime24.split(':').map(Number)
-    const mentionsManana = /\bma[ñn]ana\b/i.test(message)
-    const mentionsAM = /\bAM\b|\bde la ma[ñn]ana\b/i.test(message)
-    for (const a of semantic) {
-      // Aplica cuando dateISO es hoy O null O ausente. NO aplica si el
-      // LLM puso explícitamente una fecha futura (mañana, próxima
-      // semana) porque ahí la hora del pasado no es contradicción.
-      const dateIsTodayOrUnknown =
-        !a.dateISO || a.dateISO === dateContext.todayISO
-      if (
-        (a.type === 'create_event' || a.type === 'create_reminder') &&
-        typeof a.time === 'string' &&
-        dateIsTodayOrUnknown &&
-        !mentionsManana &&
-        !mentionsAM
-      ) {
-        const m = a.time.match(/^(\d{1,2}):(\d{2})$/)
-        if (m) {
-          const h = parseInt(m[1], 10)
-          // Si h < 12 (es AM en formato 24h) y h ya pasó: bump a PM.
-          if (h < 12 && h < curH) {
-            const newH = h + 12
-            const newTime = `${newH.toString().padStart(2, '0')}:${m[2]}`
-            logEvent({
-              reqId, app,
-              ampmCorrection: true,
-              before: a.time,
-              after: newTime,
-              title: a.title,
-            })
-            a.time = newTime
-          }
-        }
-      }
-    }
-  }
+  // Nota: el bump AM/PM mecánico post-LLM se removió 2026-05-20. Ahora
+  // el intentNormalizer pre-LLM reescribe "a las N" → "a las (N+12):00"
+  // de forma determinística antes de mandar al modelo, eliminando la
+  // ambigüedad en origen. El sumar 12 sobre una hora equivocada del LLM
+  // (ej. el LLM emite 09:00 → bump producía 21:00 incorrecto) era el bug
+  // del caso 2 fresh QA. La regla pm-heuristic en intentNormalizer.js
+  // captura el patrón correcto y el LLM recibe "a las 19:00" sin duda.
 
   // ─── 3a. Resolver correcciones humanas (defensa en profundidad) ────────
   // Si el input tiene "no, mejor", "espera", "perdón", etc. y el LLM emitió
