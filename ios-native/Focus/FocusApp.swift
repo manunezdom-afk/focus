@@ -76,8 +76,49 @@ struct FocusApp: App {
             .task {
                 dataStore.bootstrapLocalNotifications()
             }
+            // QA harness deep-link — DEBUG only. Permite ejecutar inputs
+            // contra el pipeline real Nova (sendNovaMessage → backend →
+            // store → UI) sin depender de typing en el simulator.
+            // Uso:
+            //   xcrun simctl openurl booted "focusqa://send?text=hola&reqId=q1"
+            // En Release builds, este bloque NO compila → el URL llega
+            // pero el handler no existe → app ignora.
+            .onOpenURL { url in
+                #if DEBUG
+                handleQAURL(url)
+                #endif
+            }
         }
     }
+
+    #if DEBUG
+    /// Parsea `focusqa://send?text=...&reqId=...` y llama al MISMO punto
+    /// de entrada que la UI (`dataStore.sendNovaMessage`). El backend ve
+    /// el reqId via header X-Request-Id (lo arma NovaService internamente
+    /// — no exponemos el reqId del query directamente al server porque
+    /// el endpoint tiene su propia generación, pero loggeamos local para
+    /// correlacionar con los logs Vercel via tiempo + contenido).
+    ///
+    /// Si la sesión es demo, igual procesa — `sendNovaMessage` no
+    /// chequea estado de auth, solo necesita texto válido.
+    private func handleQAURL(_ url: URL) {
+        guard url.scheme == "focusqa" else { return }
+        guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        let text = comps.queryItems?.first(where: { $0.name == "text" })?.value ?? ""
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            print("[QA-harness] URL recibida sin texto: \(url)")
+            return
+        }
+        let reqId = comps.queryItems?.first(where: { $0.name == "reqId" })?.value ?? UUID().uuidString
+        print("[QA-harness] reqId=\(reqId) text=\(trimmed.prefix(80))")
+        // Despachamos al main para alinear con la UI que normalmente
+        // dispara este flow desde un tap del usuario.
+        DispatchQueue.main.async {
+            dataStore.sendNovaMessage(trimmed)
+        }
+    }
+    #endif
 
     /// Identidad que cambia cada vez que el `AuthState` produce credenciales
     /// distintas. Sirve como key del `.task(id:)` para re-evaluar.

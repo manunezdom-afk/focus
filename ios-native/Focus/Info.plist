@@ -25,7 +25,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 
-	<!-- URL Types: GoogleSignIn reversed iOS Client ID. -->
+	<!-- URL Types: GoogleSignIn reversed iOS Client ID, y focusqa para QA harness. -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -36,6 +36,20 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.googleusercontent.apps.587696845191-f1fh55ukaaqtk7odfb8stntmeoqlglglub</string>
+			</array>
+		</dict>
+		<!-- QA harness scheme: solo el handler en Swift responde si build es
+		     DEBUG. En Release builds el handler no compila → el URL llega
+		     pero nada lo procesa. Permite ejecutar inputs de QA contra el
+		     pipeline real Nova sin depender de typing en el simulator. -->
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>FocusQA</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>focusqa</string>
 			</array>
 		</dict>
 	</array>

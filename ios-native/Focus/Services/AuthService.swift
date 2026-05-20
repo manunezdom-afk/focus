@@ -122,6 +122,9 @@ enum AuthService {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let bypass = FocusConfig.vercelBypassToken {
+            req.setValue(bypass, forHTTPHeaderField: "x-vercel-protection-bypass")
+        }
         req.httpBody = try encoder.encode(SendBody(email: clean))
 
         do {
