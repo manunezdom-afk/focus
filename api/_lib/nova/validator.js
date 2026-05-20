@@ -100,6 +100,25 @@ export function validateSemanticActions(actions, { userMessage, todayISO, tomorr
         continue
       }
 
+      // Anti-contaminación por trigger de corrección dentro del título.
+      // Si el usuario dijo "fútbol a las 4, no no mejor a las 5", el modelo
+      // a veces emite título "Futbol , no no mejor" (literal). Detectamos
+      // esto buscando triggers como "no no", "no mejor", "espera", "perdón",
+      // "mejor a las", "mejor el" dentro del título — siempre son basura.
+      const titleNorm = normForCompare(titleRaw)
+      const TITLE_CONTAMINATION = [
+        /\bno\s+no\b/, /\bno\s+mejor\b/, /\bno,?\s*mejor\b/,
+        /\bespera\b/, /\bperd[oó]n\b/, /\bmejor\s+a\s+las\b/,
+        /\bmejor\s+el\b/, /\bmejor\s+hazlo\b/,
+        /\bme\s+equivoqu[eé]\b/, /\bolvida\s+eso\b/,
+        /\beso\s+no\b/, /\bal\s+final\b/, /\ben\s+realidad\b/,
+      ]
+      const dirty = TITLE_CONTAMINATION.find(re => re.test(titleNorm))
+      if (dirty) {
+        errors.push(`correcci[oó]n descartada filtrada en título: "${titleRaw}" (matchea ${dirty})`)
+        continue
+      }
+
       // sourceText debe aparecer en el input
       const src = typeof a.sourceText === 'string' ? a.sourceText.trim() : ''
       if (src.length === 0) {

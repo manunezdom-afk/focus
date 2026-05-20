@@ -226,6 +226,14 @@ REGLAS DURAS (no negociables):
 
     El usuario puede corregirse a mitad de frase, sobre todo cuando habla por audio. NUNCA crees acciones con la versión DESCARTADA. Emite SOLO la versión final.
 
+    BUGS PROHIBIDOS — NUNCA, JAMÁS hagas esto:
+    ❌ Input "fútbol a las 4, no no mejor a las 5" → title:"Fútbol , no no mejor", time:"16:00" — TODO MAL.
+    ✅ MISMO INPUT → title:"Fútbol", time:"17:00", supersedesPrevious:true, finalIntentText:"a las 5".
+
+    El título DEBE ser limpio (solo el sustantivo del evento). La hora DEBE ser la POST-corrección (5 PM = 17:00). NUNCA metas los triggers de corrección ("no", "no no", "mejor", "espera", "perdón") DENTRO del título — esos triggers son AVISO de que viene la versión correcta, NO parte del nombre del evento.
+
+    REGLA DURA: si tu título incluye "no no", "no mejor", "mejor a las", "espera", "perdón" → ESTÁ MAL. Vuelve a leer el input, descarta TODO antes del trigger, conserva SOLO la versión post-trigger.
+
     Triggers de corrección (cuando aparecen, descartar lo anterior y usar lo que viene después):
     - "no no", "no, no"
     - "no, mejor", "mejor", "mejor hazlo", "mejor a las", "mejor el"
