@@ -489,7 +489,11 @@ struct NovaView: View {
     private var novaLiveChip: some View {
         Button {
             HapticManager.shared.tap()
-            showNovaLive = true
+            // 2026-05-20: el botón grande "Hablar con Nova" ahora abre
+            // el VoiceDictationSheet premium (hold-to-talk + waveform +
+            // tutorial). El NovaLiveView legacy queda compilado pero
+            // inalcanzable desde la UI.
+            showVoiceDictation = true
         } label: {
             HStack(spacing: Theme.Spacing.sm) {
                 Image(systemName: "mic.fill")

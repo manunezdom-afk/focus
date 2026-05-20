@@ -10,6 +10,9 @@ struct MiDiaView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var focusBarText: String = ""
     @State private var showAllEvents: Bool = false
+    /// Voice sheet premium (hold-to-talk + waveform + tutorial). Reemplaza
+    /// el dictado inline desde 2026-05-20.
+    @State private var showVoiceSheet: Bool = false
     /// Servicio de dictado inline en el FocusBar. NO es Nova Live.
     /// El transcript se va metiendo en `focusBarText` mientras el usuario
     /// habla; al detener, queda listo en la barra para que revise y mande.
@@ -302,6 +305,16 @@ struct MiDiaView: View {
             .presentationDetents([.medium])
             .presentationBackground(Theme.Colors.background)
         }
+        // Voice sheet premium — hold-to-talk + waveform + tutorial. El
+        // transcript final llega vía `onTranscript` y se procesa por el
+        // mismo flow que typing (processNovaInline → backend Nova).
+        .sheet(isPresented: $showVoiceSheet) {
+            VoiceDictationSheet { transcript in
+                processNovaInline(text: transcript)
+            }
+            .presentationDetents([.medium, .large])
+            .presentationBackground(Theme.Colors.background)
+        }
     }
 
     // MARK: - Header
@@ -424,16 +437,14 @@ struct MiDiaView: View {
             },
             onMic: {
                 HapticManager.shared.tap()
-                // Coach mark del mic la primera vez. Lo disparamos ANTES
-                // de empezar el dictado para que el usuario entienda el
-                // flujo (escucha → revisa → envía) antes de empezar.
-                if coachMarks.shouldShow(.mic) {
-                    coachMarks.presentIfNeeded(.mic)
-                    return
-                }
-                // Mic del FocusBar = DICTADO INLINE. NO abre Nova Live,
-                // NO abre sheet, NO cambia de pantalla.
-                Task { await toggleInlineDictation() }
+                // 2026-05-20: el mic del Mi Día ahora abre el sheet
+                // premium (`VoiceDictationSheet`) con hold-to-talk +
+                // waveform + tutorial. El dictado inline anterior
+                // queda como código muerto en `toggleInlineDictation`
+                // por si alguien quiere reactivarlo. El sheet llama
+                // `processNovaInline(text:)` con el transcript final
+                // — mismo flow que typing.
+                showVoiceSheet = true
             },
             isDictating: isDictating,
             audioLevel: CGFloat(dictationService.audioLevel)
