@@ -17,10 +17,13 @@ import { tryLocalParse } from '../api/_lib/nova/localParser.js'
 import {
   validateSemanticActions,
   shouldRetryWithStrong,
+  resolveCorrectionConflicts,
+  inputHasCorrection,
 } from '../api/_lib/nova/validator.js'
 import {
   expandToSemanticActions,
   collapseSemanticToBackendActions,
+  buildOpenAISystemPrompt as buildFocusPrompt,
 } from '../api/_lib/nova/adapters/focus.js'
 import { runNova } from '../api/_lib/nova/core.js'
 import { notImplemented as kairosNotImplemented } from '../api/_lib/nova/adapters/kairos.js'
@@ -482,4 +485,294 @@ test('KairosNovaAdapter: notImplemented tira 501', () => {
 
 test('SparkNovaAdapter: notImplemented tira 501', () => {
   assert.throws(() => sparkNotImplemented(), err => err.status === 501 && err.code === 'spark_adapter_not_implemented')
+})
+
+// ─── Correcciones humanas (intent normalization) ───────────────────────────
+
+test('inputHasCorrection: detecta triggers comunes', () => {
+  assert.equal(inputHasCorrection('mañana fútbol a las 4, no no mejor a las 5'), true)
+  assert.equal(inputHasCorrection('espera mejor a las 7'), true)
+  assert.equal(inputHasCorrection('hoy a las 4, no perdón, mañana'), true)
+  assert.equal(inputHasCorrection('me equivoqué, es mañana'), true)
+  assert.equal(inputHasCorrection('cámbialo a las 6'), true)
+  assert.equal(inputHasCorrection('olvida eso, mejor el viernes'), true)
+})
+
+test('inputHasCorrection: no false positives en frases normales', () => {
+  assert.equal(inputHasCorrection('mañana doctor a las 5'), false)
+  assert.equal(inputHasCorrection('recuérdame llamar a mi mamá a las 6'), false)
+  assert.equal(inputHasCorrection('tengo fútbol y luego estudiar'), false)
+})
+
+test('resolveCorrectionConflicts: input SIN trigger → actions intactas', () => {
+  const actions = [
+    { type: 'create_event', id: 'a1', title: 'Fútbol', time: '4:00 PM', dateISO: '2026-05-20' },
+    { type: 'create_event', id: 'a2', title: 'Fútbol', time: '5:00 PM', dateISO: '2026-05-20' },
+  ]
+  const r = resolveCorrectionConflicts(actions, { userMessage: 'fútbol a las 4 y estudiar a las 5' })
+  assert.equal(r.conflicts, 0)
+  assert.equal(r.resolved.length, 2)
+})
+
+test('resolveCorrectionConflicts: con "no no mejor" y duplicado → mantiene el último', () => {
+  const actions = [
+    { type: 'create_event', id: 'a1', title: 'Fútbol', time: '4:00 PM', dateISO: '2026-05-20' },
+    { type: 'create_event', id: 'a2', title: 'Fútbol', time: '5:00 PM', dateISO: '2026-05-20' },
+  ]
+  const r = resolveCorrectionConflicts(actions, { userMessage: 'mañana fútbol a las 4, no no mejor a las 5' })
+  assert.equal(r.conflicts, 1)
+  assert.equal(r.resolved.length, 1)
+  assert.equal(r.resolved[0].id, 'a2')
+  assert.equal(r.resolved[0].time, '5:00 PM')
+})
+
+test('resolveCorrectionConflicts: "perdón mañana" cambia fecha → mantiene la última', () => {
+  const actions = [
+    { type: 'create_event', id: 'a1', title: 'Desayuno con Marcia', time: '4:00 PM', dateISO: '2026-05-19' },
+    { type: 'create_event', id: 'a2', title: 'Desayuno con Marcia', time: '4:00 PM', dateISO: '2026-05-20' },
+  ]
+  const r = resolveCorrectionConflicts(actions, { userMessage: 'hoy a las 4 desayuno con Marcia, no perdón, mañana' })
+  assert.equal(r.conflicts, 1)
+  assert.equal(r.resolved[0].dateISO, '2026-05-20')
+})
+
+test('resolveCorrectionConflicts: linked-reminders huérfanos se descartan', () => {
+  const actions = [
+    { type: 'create_event', id: 'evt-1', title: 'Doctor', time: '5:00 PM', dateISO: '2026-05-20' },
+    { type: 'create_linked_sub_reminder', id: 'ls-1', parentActionId: 'evt-1', text: 'Llevar exámenes', offsetMinutes: 0 },
+    { type: 'create_event', id: 'evt-2', title: 'Doctor', time: '5:30 PM', dateISO: '2026-05-20' },
+    { type: 'create_linked_sub_reminder', id: 'ls-2', parentActionId: 'evt-2', text: 'Llevar la receta', offsetMinutes: 0 },
+  ]
+  const r = resolveCorrectionConflicts(actions, { userMessage: 'doctor a las 5, no mejor 5:30, y llevar receta' })
+  assert.equal(r.conflicts, 1)
+  // sobrevive evt-2 + ls-2
+  assert.equal(r.resolved.length, 2)
+  assert.equal(r.resolved[0].id, 'evt-2')
+  assert.equal(r.resolved[1].id, 'ls-2')
+  // ls-1 fue huérfano
+  assert.ok(r.removed.some(d => d.id === 'ls-1'))
+})
+
+test('resolveCorrectionConflicts: 2 eventos distintos NO se mezclan', () => {
+  const actions = [
+    { type: 'create_event', id: 'a1', title: 'Gimnasio', time: '5:00 PM', dateISO: '2026-05-19' },
+    { type: 'create_event', id: 'a2', title: 'Estudiar', time: '8:00 PM', dateISO: '2026-05-20' },
+  ]
+  const r = resolveCorrectionConflicts(actions, { userMessage: 'hoy 5 gimnasio y 8 estudiar, no, estudiar mañana' })
+  // Stem distintos (gimnasio/estudiar) → no se mezclan
+  assert.equal(r.conflicts, 0)
+  assert.equal(r.resolved.length, 2)
+})
+
+// ─── 10 casos canónicos del usuario — propagation via core + mock LLM ──────
+
+test('caso correcciones 1: fútbol a las 4, no no mejor a las 5 → 1 evento 17:00', async () => {
+  const fetchMock = mockFetch(() => ({
+    ok: true,
+    body: mockOpenAIResponse([
+      {
+        type: 'create_event', title: 'Fútbol', dateText: 'mañana', dateISO: '2026-05-20',
+        time: '17:00', durationMinutes: 60, category: 'personal',
+        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+        confidence: 'high', sourceText: 'fútbol a las 4', linkedReminders: [],
+        supersedesPrevious: true, finalIntentText: 'a las 5',
+      },
+    ], { model: 'gpt-5.5' }),
+  }))
+  try {
+    const result = await runNova({
+      app: 'focus',
+      message: 'mañana tengo fútbol a las 4, no no mejor a las 5',
+      dateContext: FAKE_DATE_CONTEXT,
+      reqId: 'corr1',
+      apiKey: 'fake-key',
+    })
+    assert.equal(result.actions.length, 1)
+    assert.equal(result.actions[0].event.title, 'Fútbol')
+    assert.equal(result.actions[0].event.time, '5:00 PM')
+  } finally {
+    fetchMock.restore()
+  }
+})
+
+test('caso correcciones 2: cheap emite duplicado, validator colapsa al último', async () => {
+  // Simula que cheap olvidó la corrección y emitió 2 eventos.
+  const fetchMock = mockFetch(() => ({
+    ok: true,
+    body: mockOpenAIResponse([
+      {
+        type: 'create_event', title: 'Fútbol', dateText: 'mañana', dateISO: '2026-05-20',
+        time: '16:00', durationMinutes: 60, category: 'personal',
+        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+        confidence: 'high', sourceText: 'fútbol a las 4', linkedReminders: [],
+        supersedesPrevious: false, finalIntentText: null,
+      },
+      {
+        type: 'create_event', title: 'Fútbol', dateText: 'mañana', dateISO: '2026-05-20',
+        time: '17:00', durationMinutes: 60, category: 'personal',
+        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+        confidence: 'high', sourceText: 'mejor a las 5', linkedReminders: [],
+        supersedesPrevious: true, finalIntentText: 'a las 5',
+      },
+    ], { model: 'gpt-5.5' }),
+  }))
+  try {
+    const result = await runNova({
+      app: 'focus',
+      message: 'mañana tengo fútbol a las 4, no no mejor a las 5',
+      dateContext: FAKE_DATE_CONTEXT,
+      reqId: 'corr2',
+      apiKey: 'fake-key',
+    })
+    // El validator detectó "no no" + 2 Fútbol con tiempos distintos → solo queda el último
+    assert.equal(result.actions.length, 1)
+    assert.equal(result.actions[0].event.time, '5:00 PM')
+  } finally {
+    fetchMock.restore()
+  }
+})
+
+test('caso correcciones 3: llamar mamá a las 6, espera mejor a las 7 → 19:00', async () => {
+  const fetchMock = mockFetch(() => ({
+    ok: true,
+    body: mockOpenAIResponse([
+      {
+        type: 'create_reminder', title: 'Llamar a mi mamá', dateText: 'hoy', dateISO: '2026-05-19',
+        time: '19:00', durationMinutes: 0, category: 'otro',
+        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+        confidence: 'high', sourceText: 'llamar a mi mamá a las 7', linkedReminders: [],
+        supersedesPrevious: true, finalIntentText: 'a las 7',
+      },
+    ], { model: 'gpt-5.5' }),
+  }))
+  try {
+    const result = await runNova({
+      app: 'focus',
+      message: 'recuérdame llamar a mi mamá a las 6, espera mejor a las 7',
+      dateContext: FAKE_DATE_CONTEXT,
+      reqId: 'corr3',
+      apiKey: 'fake-key',
+    })
+    assert.equal(result.actions.length, 1)
+    assert.equal(result.actions[0].event.title, 'Llamar a mi mamá')
+  } finally {
+    fetchMock.restore()
+  }
+})
+
+test('caso correcciones 4: desayuno con Marcia hoy, no perdón mañana → solo mañana', async () => {
+  // Simula 2 events distintos por fecha; validator se queda con el último.
+  const fetchMock = mockFetch(() => ({
+    ok: true,
+    body: mockOpenAIResponse([
+      {
+        type: 'create_event', title: 'Desayuno con Marcia', dateText: 'hoy', dateISO: '2026-05-19',
+        time: '16:00', durationMinutes: 60, category: 'reunion',
+        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+        confidence: 'high', sourceText: 'desayuno con Marcia', linkedReminders: [],
+        supersedesPrevious: false, finalIntentText: null,
+      },
+      {
+        type: 'create_event', title: 'Desayuno con Marcia', dateText: 'mañana', dateISO: '2026-05-20',
+        time: '16:00', durationMinutes: 60, category: 'reunion',
+        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+        confidence: 'high', sourceText: 'mañana desayuno con Marcia', linkedReminders: [],
+        supersedesPrevious: true, finalIntentText: 'mañana',
+      },
+    ], { model: 'gpt-5.5' }),
+  }))
+  try {
+    const result = await runNova({
+      app: 'focus',
+      message: 'hoy a las 4 desayuno con Marcia, no perdón, mañana',
+      dateContext: FAKE_DATE_CONTEXT,
+      reqId: 'corr4',
+      apiKey: 'fake-key',
+    })
+    assert.equal(result.actions.length, 1)
+    assert.equal(result.actions[0].event.date, '2026-05-20')
+  } finally {
+    fetchMock.restore()
+  }
+})
+
+test('caso correcciones 5: doctor + recuérdame exámenes, no mejor receta → solo receta', async () => {
+  const fetchMock = mockFetch(() => ({
+    ok: true,
+    body: mockOpenAIResponse([
+      {
+        type: 'create_event', title: 'Doctor', dateText: 'mañana', dateISO: '2026-05-20',
+        time: '17:00', durationMinutes: 60, category: 'salud',
+        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+        confidence: 'high', sourceText: 'doctor a las 5', linkedReminders: [
+          { kind: 'checklist_note', offsetMinutes: null, text: 'Llevar la receta' },
+        ],
+        supersedesPrevious: true, finalIntentText: 'mejor llevar la receta',
+      },
+    ], { model: 'gpt-5.5' }),
+  }))
+  try {
+    const result = await runNova({
+      app: 'focus',
+      message: 'mañana doctor a las 5 y recuérdame llevar exámenes, no, mejor llevar la receta',
+      dateContext: FAKE_DATE_CONTEXT,
+      reqId: 'corr5',
+      apiKey: 'fake-key',
+    })
+    assert.equal(result.actions.length, 1)
+    assert.equal(result.actions[0].event.title, 'Doctor')
+    assert.deepEqual(result.actions[0].event.reminderNotes, ['Llevar la receta'])
+  } finally {
+    fetchMock.restore()
+  }
+})
+
+test('caso correcciones 6: gimnasio hoy + estudiar, no estudiar mañana → 2 events distintos', async () => {
+  const fetchMock = mockFetch(() => ({
+    ok: true,
+    body: mockOpenAIResponse([
+      {
+        type: 'create_event', title: 'Gimnasio', dateText: 'hoy', dateISO: '2026-05-19',
+        time: '17:00', durationMinutes: 60, category: 'personal',
+        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+        confidence: 'high', sourceText: 'gimnasio a las 5', linkedReminders: [],
+        supersedesPrevious: false, finalIntentText: null,
+      },
+      {
+        type: 'create_event', title: 'Estudiar', dateText: 'mañana', dateISO: '2026-05-20',
+        time: '20:00', durationMinutes: 60, category: 'estudio',
+        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+        confidence: 'high', sourceText: 'estudiar mañana', linkedReminders: [],
+        supersedesPrevious: true, finalIntentText: 'estudiar mañana',
+      },
+    ], { model: 'gpt-5.5' }),
+  }))
+  try {
+    const result = await runNova({
+      app: 'focus',
+      message: 'hoy a las 5 gimnasio y a las 8 estudiar, no, estudiar mañana',
+      dateContext: FAKE_DATE_CONTEXT,
+      reqId: 'corr6',
+      apiKey: 'fake-key',
+    })
+    // Gimnasio y Estudiar tienen stems distintos — no se colapsan.
+    assert.equal(result.actions.length, 2)
+    assert.equal(result.actions[0].event.title, 'Gimnasio')
+    assert.equal(result.actions[1].event.title, 'Estudiar')
+    assert.equal(result.actions[1].event.date, '2026-05-20')
+  } finally {
+    fetchMock.restore()
+  }
+})
+
+test('system prompt contiene regla 11 de correcciones humanas con ejemplos', () => {
+  const p = buildFocusPrompt({
+    tz: 'America/Santiago', todayISO: '2026-05-19', tomorrow: '2026-05-20',
+    currentTime24: '09:00', weekDates: {},
+  })
+  assert.ok(p.includes('CORRECCIONES HUMANAS'), 'debe tener sección CORRECCIONES HUMANAS')
+  assert.ok(p.includes('no no'), 'trigger "no no"')
+  assert.ok(p.includes('perdón'), 'trigger perdón')
+  assert.ok(p.includes('supersedesPrevious'), 'debe enseñar el campo supersedesPrevious')
+  assert.ok(p.includes('finalIntentText'), 'debe enseñar el campo finalIntentText')
 })

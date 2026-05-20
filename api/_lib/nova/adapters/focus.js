@@ -35,7 +35,7 @@ export const NOVA_OPENAI_SCHEMA = {
             'type', 'title', 'dateText', 'dateISO', 'time',
             'durationMinutes', 'category', 'reminderOffsetMinutes',
             'linkedToPreviousEvent', 'confidence', 'sourceText',
-            'linkedReminders',
+            'linkedReminders', 'supersedesPrevious', 'finalIntentText',
           ],
           properties: {
             type: { type: 'string', enum: ['create_event', 'create_reminder', 'clarify'] },
@@ -65,6 +65,18 @@ export const NOVA_OPENAI_SCHEMA = {
                 },
               },
             },
+            // CORRECCIONES HUMANAS — marca SI esta acción reemplaza
+            // una versión anterior corregida por el usuario en el mismo
+            // mensaje. Es solo TELEMETRÍA: el adapter NO se basa en
+            // este flag para colapsar (el LLM debe emitir solo la final).
+            // Sirve para confirmar a posteriori que la corrección fue
+            // detectada.
+            supersedesPrevious: { type: 'boolean' },
+            // Fragmento literal del input que representa la intención
+            // FINAL (post-corrección). Cuando no hay corrección, igual
+            // al sourceText. Cuando hay corrección, es el fragmento
+            // posterior al trigger ("a las 5" del "no no mejor a las 5").
+            finalIntentText: { type: ['string', 'null'] },
           },
         },
       },
@@ -183,11 +195,6 @@ REGLAS DURAS (no negociables):
    - "recuérdame pagar la matrícula" → create_reminder con time:null y dateISO heredado.
    - Si "recuérdame X" NO tiene evento padre claro o X no depende del evento, emite create_reminder separado.
 
-   CORRECCIÓN INMEDIATA ("no, mejor X" / "espera, mejor X"):
-   - Si después de mencionar una hora/fecha el usuario dice "no", "no no", "mejor", "espera mejor", emite UNA SOLA acción con los valores corregidos (los últimos). NO emitas la versión vieja.
-   - "mañana fútbol a las 4, no no mejor a las 5" → 1 create_event Fútbol mañana 17:00. NO emitir dos.
-   - "recuérdame llamar a mi mamá a las 6, espera mejor a las 7" → 1 create_reminder Llamar a mi mamá hoy/contexto 19:00.
-
    NO mezcles linkedReminders en create_reminder — el campo solo aplica a create_event. En create_reminder emite linkedReminders:[].
 
    reminderOffsetMinutes (legacy) — emítelo null cuando uses linkedReminders[]. Solo úsalo si NO hay sub-recordatorios y el usuario pidió un único aviso ("avísame 10 min antes" sin cosas que llevar).
@@ -214,6 +221,50 @@ REGLAS DURAS (no negociables):
 10. userConfirmationText:
     - Frase breve para mostrar al usuario después de crear. Si hay 1 acción: "Listo, agendé X mañana a las Y". Si hay 2+: "Listo, agendé: X mañana 10:00, Y mañana 16:00". Si needsClarification: la pregunta en sí.
     - Máximo 1-2 oraciones. Sin emojis, sin markdown.
+
+11. CORRECCIONES HUMANAS — INTENCIÓN FINAL (CRÍTICO):
+
+    El usuario puede corregirse a mitad de frase, sobre todo cuando habla por audio. NUNCA crees acciones con la versión DESCARTADA. Emite SOLO la versión final.
+
+    Triggers de corrección (cuando aparecen, descartar lo anterior y usar lo que viene después):
+    - "no no", "no, no"
+    - "no, mejor", "mejor", "mejor hazlo", "mejor a las", "mejor el"
+    - "espera", "espera mejor", "espera a las"
+    - "perdón", "perdona", "perdón, era", "perdón, fue"
+    - "me equivoqué", "me equivoque"
+    - "al final", "en realidad", "la verdad"
+    - "cámbialo a", "cambialo a", "cambia eso por", "cambia a"
+    - "no, era", "no era", "no era eso"
+    - "déjalo", "dejalo en", "déjalo en"
+    - "olvida eso", "olvídate de eso", "eso no"
+
+    Para cada acción que sufrió corrección:
+    - emite UNA SOLA acción con los valores finales (post-trigger)
+    - marca \`supersedesPrevious: true\`
+    - \`finalIntentText\`: fragmento literal del input que define la intención final (ej: "a las 5", "mañana", "llevar la receta")
+    - \`sourceText\`: igual al de siempre, fragmento literal del input que originó la acción (puede incluir antes y después de la corrección)
+
+    Para acciones sin corrección:
+    - \`supersedesPrevious: false\`
+    - \`finalIntentText\`: igual al sourceText (o el sourceText mismo)
+
+    REGLAS DE QUÉ SE CORRIGE:
+    - "mañana fútbol a las 4, no no mejor a las 5" → corrige HORA. 1 evento "Fútbol" mañana 17:00. supersedesPrevious:true, finalIntentText:"a las 5".
+    - "recuérdame llamar a mi mamá a las 6, espera mejor a las 7" → corrige HORA. 1 reminder "Llamar a mi mamá" 19:00. supersedesPrevious:true, finalIntentText:"a las 7".
+    - "hoy a las 4 desayuno con Marcia, no perdón, mañana" → corrige FECHA. 1 evento "Desayuno con Marcia" MAÑANA 16:00. supersedesPrevious:true, finalIntentText:"mañana".
+    - "mañana doctor a las 5 y recuérdame llevar exámenes, no, mejor llevar la receta" → corrige el OBJETO del sub-recordatorio. 1 evento "Doctor" mañana 17:00 + linkedReminders:[{kind:"checklist_note", text:"Llevar la receta", offsetMinutes:null}]. NO emitir "Llevar los exámenes". supersedesPrevious:true en el sub-recordatorio.
+    - "hoy a las 5 gimnasio y a las 8 estudiar, no, estudiar mañana" → corrige FECHA del SEGUNDO evento. 2 eventos: "Gimnasio" hoy 17:00 + "Estudiar" MAÑANA 20:00. Solo el segundo lleva supersedesPrevious:true.
+    - "tengo reunión con Juan Pablo a las 12, perdón a las 12:30" → corrige HORA. 1 evento "Reunión con Juan Pablo" 12:30.
+
+    DIFERENCIA CLAVE — "también" NO es corrección:
+    - "llevar exámenes y receta" → 2 sub-recordatorios. AMBOS sourceText, supersedesPrevious:false.
+    - "llevar exámenes, no, mejor receta" → 1 sub-recordatorio "Llevar la receta", supersedesPrevious:true.
+    - "fútbol a las 4 y a las 5 estudiar" → 2 eventos distintos (Fútbol 16:00, Estudiar 17:00).
+    - "fútbol a las 4, no mejor a las 5" → 1 evento Fútbol 17:00.
+
+    SI LA CORRECCIÓN ES AMBIGUA:
+    - "a las 5, no, mejor más tarde" → no hay hora final concreta → emite clarify con clarificationQuestion:"¿A qué hora exacta lo dejamos?".
+    - "doctor mañana, no, mejor el viernes" → si la fecha "el viernes" es interpretable del mapa de semana → usar esa. Si no → clarify.
 
 DEVUELVE EXCLUSIVAMENTE el JSON del schema. Sin texto fuera del objeto.`
 }
@@ -326,6 +377,8 @@ export function expandToSemanticActions(rawActions) {
         reminderOffsetMinutes: a.reminderOffsetMinutes,
         sourceText: a.sourceText,
         confidence: a.confidence,
+        supersedesPrevious: a.supersedesPrevious === true,
+        finalIntentText: typeof a.finalIntentText === 'string' ? a.finalIntentText : a.sourceText,
       })
       // Linked reminders separados como entidades semánticas.
       const baseOffsetAction = linkedReminders.find(
@@ -356,6 +409,10 @@ export function expandToSemanticActions(rawActions) {
           notificationBody: null,
           sourceText: a.sourceText,
           confidence: a.confidence,
+          // El sub-recordatorio HEREDA el flag del padre — si el padre
+          // fue corregido, todo el conjunto es la versión final.
+          supersedesPrevious: a.supersedesPrevious === true,
+          finalIntentText: typeof a.finalIntentText === 'string' ? a.finalIntentText : a.sourceText,
         })
       }
       continue
@@ -371,6 +428,8 @@ export function expandToSemanticActions(rawActions) {
         time: a.time,
         sourceText: a.sourceText,
         confidence: a.confidence,
+        supersedesPrevious: a.supersedesPrevious === true,
+        finalIntentText: typeof a.finalIntentText === 'string' ? a.finalIntentText : a.sourceText,
       })
       continue
     }

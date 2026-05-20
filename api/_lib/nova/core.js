@@ -18,7 +18,12 @@
 
 import { decideRoute } from './router.js'
 import { callOpenAI, extractResponsesText, resolveModelName } from './openaiClient.js'
-import { validateSemanticActions, shouldRetryWithStrong } from './validator.js'
+import {
+  validateSemanticActions,
+  shouldRetryWithStrong,
+  resolveCorrectionConflicts,
+  inputHasCorrection,
+} from './validator.js'
 import {
   NOVA_OPENAI_SCHEMA as FOCUS_SCHEMA,
   buildOpenAISystemPrompt as buildFocusPrompt,
@@ -234,7 +239,22 @@ export async function runNova({
     }
   }
 
-  // ─── 3. Validator + posible fallback semántico ──────────────────────────
+  // ─── 3a. Resolver correcciones humanas (defensa en profundidad) ────────
+  // Si el input tiene "no, mejor", "espera", "perdón", etc. y el LLM emitió
+  // duplicados con la misma cosa pero distintas horas/fechas, nos quedamos
+  // con la última (post-corrección). Sucede más comúnmente con cheap; el
+  // prompt actualizado (regla 11) reduce esto pero la defensa queda.
+  const correctionResolution = resolveCorrectionConflicts(semantic, { userMessage: message })
+  if (correctionResolution.conflicts > 0) {
+    semantic = correctionResolution.resolved
+    logEvent({
+      reqId, app, modelUsed,
+      correctionsRemoved: correctionResolution.removed,
+      conflictsResolved: correctionResolution.conflicts,
+    })
+  }
+
+  // ─── 3b. Validator + posible fallback semántico ──────────────────────────
   const validation = validateSemanticActions(semantic, {
     userMessage: message,
     todayISO: dateContext.todayISO,
@@ -265,7 +285,11 @@ export async function runNova({
       modelUsed = result.modelUsed
       fallbackUsed = true
       routingReason = `${routing.reason}+fallback:validator`
-      // Re-validar con strong
+      // Re-resolver correcciones después del retry strong.
+      const reResolution = resolveCorrectionConflicts(semantic, { userMessage: message })
+      if (reResolution.conflicts > 0) {
+        semantic = reResolution.resolved
+      }
       const reValidation = validateSemanticActions(semantic, {
         userMessage: message,
         todayISO: dateContext.todayISO,

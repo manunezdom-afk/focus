@@ -157,12 +157,146 @@ export function validateSemanticActions(actions, { userMessage, todayISO, tomorr
  *  - errores de título basura O contaminación → vale la pena strong
  *  - errores de fecha (hoy/mañana mal interpretado) → vale la pena strong
  *  - errores de sourceText vacío → strong puede aclarar
+ *  - conflictos de corrección (mismo título base, distintas horas) → strong
  *  - solo "type desconocido" o "sin parent" → strong no va a arreglar
  */
 export function shouldRetryWithStrong(errors) {
   if (!Array.isArray(errors) || errors.length === 0) return false
   const retryable = errors.some(e =>
-    /basura|contaminación|genérico|solo hora|hoy \(|mañana \(|sourceText vacío|sin t[íi]tulo/.test(e),
+    /basura|contaminación|genérico|solo hora|hoy \(|mañana \(|sourceText vacío|sin t[íi]tulo|correcci[oó]n descartada/.test(e),
   )
   return retryable
+}
+
+// ─── Correcciones humanas — defensa en profundidad ─────────────────────────
+
+// Triggers que indican que el usuario se corrigió a mitad de mensaje.
+// Si alguno está en el input, exigimos que las actions reflejen la
+// intención FINAL — no duplicados con la versión descartada.
+const CORRECTION_TRIGGERS = [
+  /\bno\s+no\b/i, /\bno,\s*no\b/i,
+  /\bno,?\s*mejor\b/i, /\bmejor\s+a\s+las\b/i, /\bmejor\s+el\b/i, /\bmejor\s+hazlo\b/i,
+  /\bespera\b/i, /\bespera\s+mejor\b/i,
+  /\bperd[oó]n\b/i, /\bperdona\b/i,
+  /\bme\s+equivoqu[eé](?:\s|,|\.|$)/i,
+  /\bal\s+final\b/i, /\ben\s+realidad\b/i, /\bla\s+verdad\b/i,
+  /\bc[aá]mbialo\s+a\b/i, /\bcambia\s+eso\s+por\b/i, /\bcambia\s+a\b/i,
+  /\bno,?\s+era\b/i, /\bno\s+era\s+eso\b/i,
+  /\bd[eé]jalo\b/i,
+  /\bolvida\s+eso\b/i, /\bolv[ií]date\s+de\s+eso\b/i, /\beso\s+no\b/i,
+]
+
+/**
+ * True si el input contiene un trigger de corrección humana.
+ */
+export function inputHasCorrection(userMessage) {
+  if (typeof userMessage !== 'string') return false
+  return CORRECTION_TRIGGERS.some(re => re.test(userMessage))
+}
+
+/**
+ * Stem mínimo del título para detectar duplicados que pueden ser corrección
+ * de la misma cosa ("Fútbol" en 2 events distintos). Lowercase + sin tildes
+ * + primer token significativo.
+ */
+function titleStem(title) {
+  if (typeof title !== 'string') return ''
+  const norm = title
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+  const first = norm.split(/\s+/)[0] || ''
+  return first
+}
+
+/**
+ * Detecta y resuelve conflictos de corrección.
+ *
+ * Si el input tiene un trigger de corrección Y hay 2+ create_event/create_reminder
+ * con el MISMO stem-title y DISTINTA hora o fecha, asumimos que el LLM
+ * no descartó la versión vieja como debió. Nos quedamos con la ÚLTIMA
+ * (la que aparece más tarde en el array, que es la versión post-corrección
+ * según el orden natural del prompt).
+ *
+ * Devuelve:
+ *   {
+ *     resolved: Action[],        // lista limpia (sin duplicados)
+ *     removed: { id, reason }[], // qué se descartó y por qué
+ *     conflicts: number,         // cuántos conflictos resolvió
+ *   }
+ *
+ * Si NO hay correction trigger en el input, devuelve actions sin tocar.
+ */
+export function resolveCorrectionConflicts(actions, { userMessage } = {}) {
+  if (!Array.isArray(actions) || actions.length === 0) {
+    return { resolved: actions || [], removed: [], conflicts: 0 }
+  }
+  if (!inputHasCorrection(userMessage)) {
+    return { resolved: actions, removed: [], conflicts: 0 }
+  }
+
+  // Agrupar por stem-title los create_event y create_reminder.
+  const byStem = new Map() // stem -> array of {index, action}
+  for (let i = 0; i < actions.length; i += 1) {
+    const a = actions[i]
+    if (!a || (a.type !== 'create_event' && a.type !== 'create_reminder')) continue
+    const stem = titleStem(a.title)
+    if (!stem) continue
+    const arr = byStem.get(stem) || []
+    arr.push({ index: i, action: a })
+    byStem.set(stem, arr)
+  }
+
+  const drops = new Set() // indices a remover (del array original)
+  const removed = []
+
+  for (const [stem, group] of byStem) {
+    if (group.length < 2) continue
+    // Hay ≥2 con mismo stem. Si difieren en hora o fecha, descartamos
+    // todas menos la última (orden del array = orden temporal en el
+    // input). Si todas tienen igual hora y fecha, no es corrección —
+    // es un duplicado de Nova que el collapse iOS va a deduplicar de
+    // todas formas; lo dejamos.
+    const distinct = new Set(group.map(g => `${g.action.dateISO || ''}|${g.action.time || ''}`))
+    if (distinct.size < 2) continue
+    const keepIdx = group[group.length - 1].index
+    for (const g of group) {
+      if (g.index !== keepIdx) {
+        drops.add(g.index)
+        removed.push({
+          id: g.action.id,
+          reason: `corrección descartada: "${g.action.title}" ${g.action.time || ''} (stem "${stem}", se quedó la versión final)`,
+        })
+      }
+    }
+  }
+
+  if (drops.size === 0) {
+    return { resolved: actions, removed: [], conflicts: 0 }
+  }
+
+  // Construir resolved: filtrar events/reminders descartados, y ARRASTRAR
+  // los linked-reminders huérfanos (su parent ya no existe → también
+  // descartar para no dejar zombies).
+  const survivingEventIds = new Set()
+  const resolved = []
+  for (let i = 0; i < actions.length; i += 1) {
+    if (drops.has(i)) continue
+    const a = actions[i]
+    if (a.type === 'create_event') survivingEventIds.add(a.id)
+    resolved.push(a)
+  }
+  // Segunda pasada: quitar linked-* huérfanos.
+  const final = resolved.filter(a => {
+    if (a.type !== 'create_linked_reminder' && a.type !== 'create_linked_sub_reminder') return true
+    if (survivingEventIds.has(a.parentActionId)) return true
+    removed.push({
+      id: a.id,
+      reason: `linked-reminder huérfano (parent descartado por corrección)`,
+    })
+    return false
+  })
+
+  return { resolved: final, removed, conflicts: drops.size }
 }

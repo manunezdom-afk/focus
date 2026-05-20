@@ -24,7 +24,7 @@ function fakeOpenAIPayload({ actions = [], needsClarification = false, clarifica
   return { actions, needsClarification, clarificationQuestion, userConfirmationText }
 }
 
-function event({ title, dateText = 'hoy', dateISO = '2026-05-19', time = null, durationMinutes = 60, category = 'otro', reminderOffsetMinutes = null, confidence = 'high', sourceText, linkedReminders = [] }) {
+function event({ title, dateText = 'hoy', dateISO = '2026-05-19', time = null, durationMinutes = 60, category = 'otro', reminderOffsetMinutes = null, confidence = 'high', sourceText, linkedReminders = [], supersedesPrevious = false, finalIntentText = null }) {
   return {
     type: 'create_event',
     title,
@@ -38,10 +38,12 @@ function event({ title, dateText = 'hoy', dateISO = '2026-05-19', time = null, d
     confidence,
     sourceText: sourceText ?? title,
     linkedReminders,
+    supersedesPrevious,
+    finalIntentText,
   }
 }
 
-function reminder({ title, dateText = 'hoy', dateISO = '2026-05-19', time = null, confidence = 'high', sourceText }) {
+function reminder({ title, dateText = 'hoy', dateISO = '2026-05-19', time = null, confidence = 'high', sourceText, supersedesPrevious = false, finalIntentText = null }) {
   return {
     type: 'create_reminder',
     title,
@@ -55,6 +57,8 @@ function reminder({ title, dateText = 'hoy', dateISO = '2026-05-19', time = null
     confidence,
     sourceText: sourceText ?? title,
     linkedReminders: [],
+    supersedesPrevious,
+    finalIntentText,
   }
 }
 
@@ -355,7 +359,7 @@ test('mixed: una acción clara + un clarify → emite la clara, agrega pregunta 
     openaiPayload: fakeOpenAIPayload({
       actions: [
         event({ title: 'Doctor', dateText: 'mañana', dateISO: '2026-05-20', time: '17:00', category: 'salud', sourceText: 'doctor a las 5' }),
-        { type: 'clarify', title: '¿A qué hora es la otra cosa?', dateText: '', dateISO: null, time: null, durationMinutes: 0, category: 'otro', reminderOffsetMinutes: null, linkedToPreviousEvent: false, confidence: 'low', sourceText: 'otra cosa' },
+        { type: 'clarify', title: '¿A qué hora es la otra cosa?', dateText: '', dateISO: null, time: null, durationMinutes: 0, category: 'otro', reminderOffsetMinutes: null, linkedToPreviousEvent: false, confidence: 'low', sourceText: 'otra cosa', linkedReminders: [], supersedesPrevious: false, finalIntentText: null },
       ],
       needsClarification: true,
       clarificationQuestion: '¿A qué hora es la otra cosa?',
