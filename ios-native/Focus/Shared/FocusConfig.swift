@@ -23,7 +23,7 @@ enum FocusConfig {
 
     // QA TEMPORAL — apunta a Preview deploy con linkedReminders[] feature.
     // Antes de TestFlight: revertir a https://www.usefocus.me y bypass nil.
-    static let apiOrigin = URL(string: "https://focus-5j1l3jwfy-manunezdom-9658s-projects.vercel.app")!
+    static let apiOrigin = URL(string: "https://focus-msrcfcm9p-manunezdom-9658s-projects.vercel.app")!
 
     /// Si no es nil, inyecta el header `x-vercel-protection-bypass` en
     /// CADA request a apiOrigin para saltar la SSO de Vercel Preview.
