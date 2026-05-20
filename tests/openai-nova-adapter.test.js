@@ -24,7 +24,7 @@ function fakeOpenAIPayload({ actions = [], needsClarification = false, clarifica
   return { actions, needsClarification, clarificationQuestion, userConfirmationText }
 }
 
-function event({ title, dateText = 'hoy', dateISO = '2026-05-19', time = null, durationMinutes = 60, category = 'otro', reminderOffsetMinutes = null, confidence = 'high', sourceText }) {
+function event({ title, dateText = 'hoy', dateISO = '2026-05-19', time = null, durationMinutes = 60, category = 'otro', reminderOffsetMinutes = null, confidence = 'high', sourceText, linkedReminders = [] }) {
   return {
     type: 'create_event',
     title,
@@ -37,6 +37,7 @@ function event({ title, dateText = 'hoy', dateISO = '2026-05-19', time = null, d
     linkedToPreviousEvent: false,
     confidence,
     sourceText: sourceText ?? title,
+    linkedReminders,
   }
 }
 
@@ -53,6 +54,7 @@ function reminder({ title, dateText = 'hoy', dateISO = '2026-05-19', time = null
     linkedToPreviousEvent: false,
     confidence,
     sourceText: sourceText ?? title,
+    linkedReminders: [],
   }
 }
 
@@ -435,4 +437,217 @@ test('system prompt contiene ejemplo de secuencia: 5 gimnasio y 8 estudiar → 1
   })
   // Debe tener el ejemplo concreto de gimnasio/estudiar con horas PM
   assert.ok(p.includes('gimnasio') && p.includes('20:00'), 'debe tener ejemplo gimnasio+estudiar con 20:00')
+})
+
+// ─── linkedReminders[]: sub-recordatorios vinculados al evento ──────────────
+
+test('linkedReminders: fútbol + salir 20 min + llevar zapatos → 1 evento con 2 sub-notas', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({
+        title: 'Fútbol',
+        dateText: 'hoy',
+        dateISO: '2026-05-19',
+        time: '16:00',
+        category: 'personal',
+        sourceText: 'fútbol hoy a las 4',
+        linkedReminders: [
+          { kind: 'offset_action', offsetMinutes: 20, text: 'Salir 20 min antes' },
+          { kind: 'checklist_note', offsetMinutes: null, text: 'Llevar zapatos de fútbol' },
+        ],
+      })],
+    }),
+    userMessage: 'tengo fútbol hoy a las 4, acuérdame salir 20 minutos antes y llevar zapatos de fútbol',
+    reqId: 'lr1',
+  })
+  assert.equal(out.actions.length, 1, JSON.stringify(out._dropped))
+  assert.equal(out.actions[0].event.title, 'Fútbol')
+  assert.deepEqual(out.actions[0].event.reminderOffsets, [20, 20])
+  assert.deepEqual(out.actions[0].event.reminderNotes, ['Salir 20 min antes', 'Llevar zapatos de fútbol'])
+})
+
+test('linkedReminders: doctor + llevar exámenes (sin offset_action) → 1 evento, sub-nota offset 0', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({
+        title: 'Doctor',
+        dateText: 'mañana',
+        dateISO: '2026-05-20',
+        time: '17:00',
+        category: 'salud',
+        sourceText: 'doctor a las 5',
+        linkedReminders: [
+          { kind: 'checklist_note', offsetMinutes: null, text: 'Llevar los exámenes' },
+        ],
+      })],
+    }),
+    userMessage: 'mañana tengo doctor a las 5 y recuérdame llevar los exámenes',
+    reqId: 'lr2',
+  })
+  assert.equal(out.actions.length, 1)
+  assert.equal(out.actions[0].event.title, 'Doctor')
+  // checklist_note sin offset_action hereda offset 0 (notif al startTime)
+  assert.deepEqual(out.actions[0].event.reminderOffsets, [0])
+  assert.deepEqual(out.actions[0].event.reminderNotes, ['Llevar los exámenes'])
+})
+
+test('linkedReminders: reunión Juan Pablo + salir 30 min antes → 1 evento, 1 sub-nota offset 30', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({
+        title: 'Reunión con Juan Pablo',
+        dateText: 'mañana',
+        dateISO: '2026-05-20',
+        time: '12:00',
+        category: 'reunion',
+        sourceText: 'reunión con Juan Pablo mañana a las 12',
+        linkedReminders: [
+          { kind: 'offset_action', offsetMinutes: 30, text: 'Salir 30 min antes' },
+        ],
+      })],
+    }),
+    userMessage: 'reunión con Juan Pablo mañana a las 12 y recuérdame salir 30 minutos antes',
+    reqId: 'lr3',
+  })
+  assert.equal(out.actions.length, 1)
+  assert.deepEqual(out.actions[0].event.reminderOffsets, [30])
+  assert.deepEqual(out.actions[0].event.reminderNotes, ['Salir 30 min antes'])
+})
+
+test('linkedReminders: clases + cargar computador + llevar botella → 1 evento con 2 notas offset 0', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({
+        title: 'Clases',
+        dateText: 'mañana',
+        dateISO: '2026-05-20',
+        time: '09:00',
+        category: 'universidad',
+        sourceText: 'clases mañana a las 9',
+        linkedReminders: [
+          { kind: 'checklist_note', offsetMinutes: null, text: 'Cargar el computador' },
+          { kind: 'checklist_note', offsetMinutes: null, text: 'Llevar la botella' },
+        ],
+      })],
+    }),
+    userMessage: 'clases mañana a las 9 y recuérdame cargar el computador y llevar la botella',
+    reqId: 'lr4',
+  })
+  assert.equal(out.actions.length, 1)
+  assert.deepEqual(out.actions[0].event.reminderOffsets, [0, 0])
+  assert.deepEqual(out.actions[0].event.reminderNotes, ['Cargar el computador', 'Llevar la botella'])
+})
+
+test('linkedReminders: recordatorio independiente (sin evento) NO usa linkedReminders', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [reminder({
+        title: 'Llamar a mi mamá',
+        dateText: 'hoy',
+        dateISO: '2026-05-19',
+        time: '18:00',
+        sourceText: 'llamar a mi mamá a las 6',
+      })],
+    }),
+    userMessage: 'recuérdame llamar a mi mamá a las 6',
+    reqId: 'lr5',
+  })
+  assert.equal(out.actions.length, 1)
+  assert.equal(out.actions[0].event.title, 'Llamar a mi mamá')
+  assert.equal(out.actions[0].event.reminderOffsets, undefined)
+  assert.equal(out.actions[0].event.reminderNotes, undefined)
+})
+
+test('linkedReminders: multi-evento, sub-recordatorio asociado al evento correcto (zapatos→fútbol)', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [
+        event({
+          title: 'Fútbol',
+          dateText: 'hoy', dateISO: '2026-05-19', time: '17:00', category: 'personal',
+          sourceText: 'fútbol a las 5',
+          linkedReminders: [
+            { kind: 'checklist_note', offsetMinutes: null, text: 'Llevar zapatos' },
+          ],
+        }),
+        event({
+          title: 'Estudiar',
+          dateText: 'hoy', dateISO: '2026-05-19', time: '20:00', category: 'estudio',
+          sourceText: 'estudiar a las 8',
+          linkedReminders: [],
+        }),
+      ],
+    }),
+    userMessage: 'hoy a las 5 fútbol, a las 8 estudiar y acuérdame llevar zapatos',
+    reqId: 'lr6',
+  })
+  assert.equal(out.actions.length, 2)
+  // Fútbol tiene la nota
+  assert.equal(out.actions[0].event.title, 'Fútbol')
+  assert.deepEqual(out.actions[0].event.reminderNotes, ['Llevar zapatos'])
+  // Estudiar NO tiene notas
+  assert.equal(out.actions[1].event.title, 'Estudiar')
+  assert.equal(out.actions[1].event.reminderOffsets, undefined)
+})
+
+test('linkedReminders: text vacío se descarta sin romper', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({
+        title: 'Fútbol',
+        time: '17:00',
+        sourceText: 'fútbol',
+        linkedReminders: [
+          { kind: 'offset_action', offsetMinutes: 20, text: '   ' }, // vacío
+          { kind: 'checklist_note', offsetMinutes: null, text: 'Llevar zapatos' },
+        ],
+      })],
+    }),
+    userMessage: 'fútbol hoy a las 5 y acuérdame llevar zapatos',
+    reqId: 'lr7',
+  })
+  assert.equal(out.actions.length, 1)
+  // Solo entró la nota válida, con offset 0 (no había offset_action válido)
+  assert.deepEqual(out.actions[0].event.reminderOffsets, [0])
+  assert.deepEqual(out.actions[0].event.reminderNotes, ['Llevar zapatos'])
+})
+
+test('linkedReminders: legacy reminderOffsetMinutes sigue funcionando si linkedReminders está vacío', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({
+        title: 'Reunión con Juan Pablo',
+        time: '10:00',
+        reminderOffsetMinutes: 15,
+        sourceText: 'reunión con Juan Pablo',
+        linkedReminders: [],
+      })],
+    }),
+    userMessage: 'reunión con Juan Pablo mañana a las 10, avísame 15 min antes',
+    reqId: 'lr8',
+  })
+  assert.equal(out.actions.length, 1)
+  assert.deepEqual(out.actions[0].event.reminderOffsets, [15])
+  assert.equal(out.actions[0].event.reminderNotes, undefined)
+})
+
+test('system prompt menciona linkedReminders y los triggers de dependencia', () => {
+  const p = buildOpenAISystemPrompt({
+    tz: 'America/Santiago', todayISO: '2026-05-19', tomorrow: '2026-05-20',
+    currentTime24: '09:00', weekDates: {},
+  })
+  assert.ok(p.includes('linkedReminders'), 'debe mencionar linkedReminders en el prompt')
+  assert.ok(p.includes('offset_action') && p.includes('checklist_note'), 'debe mencionar los dos kinds')
+  assert.ok(p.includes('zapatos') || p.includes('matching semántico') || p.includes('matching'), 'debe tener regla de matching semántico')
+})
+
+test('schema incluye linkedReminders en items.properties', () => {
+  const items = NOVA_OPENAI_SCHEMA.schema.properties.actions.items
+  assert.ok(items.required.includes('linkedReminders'))
+  assert.equal(items.properties.linkedReminders.type, 'array')
+  assert.equal(items.properties.linkedReminders.items.properties.kind.type, 'string')
+  assert.deepEqual(
+    items.properties.linkedReminders.items.properties.kind.enum,
+    ['offset_action', 'checklist_note'],
+  )
 })

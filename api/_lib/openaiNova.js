@@ -40,6 +40,7 @@ export const NOVA_OPENAI_SCHEMA = {
             'type', 'title', 'dateText', 'dateISO', 'time',
             'durationMinutes', 'category', 'reminderOffsetMinutes',
             'linkedToPreviousEvent', 'confidence', 'sourceText',
+            'linkedReminders',
           ],
           properties: {
             type: { type: 'string', enum: ['create_event', 'create_reminder', 'clarify'] },
@@ -59,7 +60,10 @@ export const NOVA_OPENAI_SCHEMA = {
               type: 'string',
               enum: ['personal', 'universidad', 'salud', 'reunion', 'estudio', 'otro'],
             },
-            // Si el usuario pidió "avísame N min antes", el offset va acá.
+            // LEGACY: offset único cuando el usuario solo pide "avísame N min
+            // antes" sin cosas que llevar. Cuando hay sub-recordatorios
+            // vinculados (objetos, checklists, salida previa), usá
+            // `linkedReminders[]` en su lugar.
             reminderOffsetMinutes: { type: ['integer', 'null'] },
             // True si esta acción depende temporal o temáticamente de la
             // anterior (ej: el recordatorio hereda fecha del evento).
@@ -69,6 +73,38 @@ export const NOVA_OPENAI_SCHEMA = {
             // defensa contra alucinación: si esto no aparece en el input,
             // descartamos la acción.
             sourceText: { type: 'string' },
+            // Sub-recordatorios VINCULADOS al evento (solo válido en
+            // create_event). Cada item representa una acción concreta
+            // que el usuario quiere recordar relacionada con este evento:
+            //   - "Salir 20 min antes" → kind: offset_action, offsetMinutes: 20
+            //   - "Llevar zapatos de fútbol" → kind: checklist_note, offsetMinutes: null
+            // checklist_note con offsetMinutes:null hereda el offset del
+            // primer offset_action del mismo evento (para que zapatos+salir
+            // queden en la misma notif). Si no hay ningún offset_action,
+            // checklist_note dispara al startTime del evento.
+            // Si el recordatorio NO depende del evento (ej. "llamar a mi
+            // mamá a las 6"), emitir create_reminder separado, NO meterlo acá.
+            linkedReminders: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['kind', 'text', 'offsetMinutes'],
+                properties: {
+                  kind: { type: 'string', enum: ['offset_action', 'checklist_note'] },
+                  // Texto INFINITIVO descriptivo para la card iOS:
+                  // "Salir 20 min antes", "Llevar zapatos de fútbol",
+                  // "Cargar el computador". NO uses imperativo ("Sal",
+                  // "Lleva") — el cliente lo transforma al render de la
+                  // notificación.
+                  text: { type: 'string' },
+                  // Minutos antes del startTime. Solo aplica al offset_action.
+                  // checklist_note debe enviar null (hereda del offset_action
+                  // o cae a 0).
+                  offsetMinutes: { type: ['integer', 'null'], minimum: 0, maximum: 1440 },
+                },
+              },
+            },
           },
         },
       },
@@ -150,11 +186,52 @@ REGLAS DURAS (no negociables):
    - "entregar trabajo" del input NUNCA puede convertirse en "Reunión con Cristina" o cualquier título de evento previo.
    - Si dudas si el título proviene del input o de un evento previo, descarta y emite clarify.
 
-6. RECORDATORIOS:
-   - type:"create_reminder" SOLO cuando el usuario dice trigger explícito ("recuérdame", "acuérdame", "avísame", "que no se me olvide", "no te olvides") O cuando es claramente una nota sin compromiso de calendario.
-   - Si dijo "avísame N minutos antes de X", emite UN solo create_event para X con reminderOffsetMinutes:N. NO emitas un create_reminder separado.
-   - Si dijo "recuérdame X" sin evento padre y sin hora, emite create_reminder con time:null y dateISO heredado del contexto (si la frase tiene "mañana"/"hoy" cerca, úsalo).
-   - Si en la MISMA frase hay un evento ("tengo doctor a las 5") + recordatorio independiente ("y recuérdame llevar exámenes"): 2 actions. El recordatorio HEREDA dateISO del evento si no tiene fecha propia.
+6. RECORDATORIOS — VINCULADOS vs INDEPENDIENTES (CRÍTICO):
+
+   VINCULADOS A UN EVENTO ("acuérdame X" donde X depende del evento mencionado):
+   - Si en la misma frase hay un evento + un recordatorio temáticamente dependiente del evento (cosas que llevar al evento, salir antes del evento, preparar para el evento), NO emitas un create_reminder separado. Emite UN create_event con esos recordatorios dentro de \`linkedReminders[]\`.
+   - Triggers de dependencia: "salir N antes", "avisarme N antes", "llevar X", "echar X", "preparar X", "cargar X", "revisar X antes", "comprar X antes", "mandar X antes", "que no se me quede X", "que no se me olvide X", "no se me pueden quedar X".
+   - Mapeo a \`kind\`:
+     • "salir N min antes", "avisarme N antes" → kind:"offset_action", offsetMinutes:N, text:"Salir N min antes"
+     • "llevar X", "echar X", "cargar X", "preparar X", "comprar X", "revisar X" → kind:"checklist_note", offsetMinutes:null, text:"Llevar X" (infinitivo, sin imperativo)
+   - Ejemplos:
+     "fútbol hoy a las 4, acuérdame salir 20 min antes y llevar zapatos de fútbol"
+     → 1 create_event Fútbol con linkedReminders:[
+         {kind:"offset_action", offsetMinutes:20, text:"Salir 20 min antes"},
+         {kind:"checklist_note", offsetMinutes:null, text:"Llevar zapatos de fútbol"}
+       ]
+     "mañana doctor a las 5 y recuérdame llevar los exámenes"
+     → 1 create_event Doctor con linkedReminders:[
+         {kind:"checklist_note", offsetMinutes:null, text:"Llevar los exámenes"}
+       ]
+     "reunión con Juan Pablo a las 12 y recuérdame salir 30 min antes"
+     → 1 create_event Reunión con Juan Pablo con linkedReminders:[
+         {kind:"offset_action", offsetMinutes:30, text:"Salir 30 min antes"}
+       ]
+     "clases mañana a las 9 y recuérdame cargar el computador y llevar la botella"
+     → 1 create_event Clases con linkedReminders:[
+         {kind:"checklist_note", offsetMinutes:null, text:"Cargar el computador"},
+         {kind:"checklist_note", offsetMinutes:null, text:"Llevar la botella"}
+       ]
+
+   MULTI-EVENTO CON SUB-RECORDATORIO (matching semántico):
+   - Si hay 2+ eventos en el mismo mensaje y un sub-recordatorio sin offset explícito, asocialo al evento semánticamente más cercano:
+     • zapatos / botella / pelota / uniforme / casco → deporte (fútbol, gym, tenis, partido)
+     • computador / laptop / cuaderno / libros / cargador → estudio, clases, trabajo
+     • exámenes / recetas / medicamentos / boletas médicas → salud (doctor, dentista, control)
+     • regalo / tarjeta → cumpleaños, fiesta, aniversario
+   - Ejemplo: "hoy a las 5 fútbol, a las 8 estudiar y acuérdame llevar zapatos"
+     → 2 create_event: Fútbol 17:00 con linkedReminders:[{kind:"checklist_note", text:"Llevar zapatos"}], Estudiar 20:00 sin linkedReminders.
+
+   INDEPENDIENTES (NO van dentro de un evento):
+   - "recuérdame llamar a mi mamá a las 6" → create_reminder con time:"18:00", sin linkedReminders.
+   - "recuérdame comprar pan mañana" → create_reminder con dateISO de mañana, time:null.
+   - "recuérdame pagar la matrícula" → create_reminder con time:null y dateISO heredado.
+   - Si "recuérdame X" NO tiene evento padre claro o X no depende del evento, emite create_reminder separado.
+
+   NO mezcles linkedReminders en create_reminder — el campo solo aplica a create_event. En create_reminder emite linkedReminders:[].
+
+   reminderOffsetMinutes (legacy) — emítelo null cuando uses linkedReminders[]. Solo úsalo si NO hay sub-recordatorios y el usuario pidió un único aviso ("avísame 10 min antes" sin cosas que llevar).
 
 7. CATEGORÍAS:
    - "doctor", "dentista", "psiquiatra", "control", "consulta": salud
@@ -452,7 +529,51 @@ export function convertOpenAIToBackendResponse({
       section: isReminder ? 'evening' : (CATEGORY_TO_SECTION[cat] || 'evening'),
       icon: isReminder ? 'alarm' : (CATEGORY_TO_ICON[cat] || 'event'),
     }
-    if (typeof a.reminderOffsetMinutes === 'number' && a.reminderOffsetMinutes >= 0) {
+
+    // Colapso de linkedReminders[] → arrays paralelos reminderOffsets/reminderNotes.
+    // Reglas:
+    //  - Sólo aplica a create_event (create_reminder no lleva subnotas).
+    //  - offset_action.offsetMinutes define el offset base. checklist_note
+    //    con offsetMinutes:null hereda ese base. Si no hay offset_action,
+    //    los checklist_note caen a 0 (notif al startTime).
+    //  - Los items se mantienen como entradas separadas en los arrays
+    //    paralelos (no se concatenan acá) para que la card iOS pueda
+    //    pintarlos como bullets. El LocalNotificationService agrupa por
+    //    fireDate cuando dispara la notif.
+    const rawLinked = !isReminder && Array.isArray(a.linkedReminders) ? a.linkedReminders : []
+    // Pre-filtramos los items inválidos antes de buscar el baseOffsetAction:
+    // un offset_action con text vacío no debe arrastrar su offset a las
+    // checklist_note (sería heredar de basura). Items con text válido son
+    // los únicos que participan.
+    const linked = rawLinked
+      .map(l => {
+        if (!l || typeof l.text !== 'string') return null
+        const txt = l.text.trim()
+        if (txt.length === 0) return null
+        return { kind: l.kind, offsetMinutes: l.offsetMinutes, text: txt }
+      })
+      .filter(Boolean)
+    if (linked.length > 0) {
+      const baseOffsetAction = linked.find(
+        l => l.kind === 'offset_action' && typeof l.offsetMinutes === 'number' && l.offsetMinutes >= 0,
+      )
+      const fallbackOffset = baseOffsetAction ? baseOffsetAction.offsetMinutes : 0
+      const offsets = []
+      const notes = []
+      for (const l of linked) {
+        let off
+        if (typeof l.offsetMinutes === 'number' && l.offsetMinutes >= 0) {
+          off = l.offsetMinutes
+        } else {
+          off = fallbackOffset
+        }
+        offsets.push(off)
+        notes.push(l.text)
+      }
+      event.reminderOffsets = offsets
+      event.reminderNotes = notes
+    } else if (typeof a.reminderOffsetMinutes === 'number' && a.reminderOffsetMinutes >= 0) {
+      // Legacy: solo offset, sin nota custom. Mantiene comportamiento previo.
       event.reminderOffsets = [a.reminderOffsetMinutes]
     }
 

@@ -122,50 +122,39 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
         // este evento (puede haber múltiples si tiene varios offsets).
         cancelReminder(eventId: event.id)
 
-        // Calculamos las fechas en que dispararán las notificaciones.
-        // - Si hay `reminderOffsets`, programamos uno por cada offset
-        //   (startTime - offset). Filtramos los que ya pasaron.
-        // - Si no hay offsets, programamos una sola al startTime.
-        let fireDates = computeFireDates(for: event)
-        guard !fireDates.isEmpty else { return }
+        // Agrupamos por fireDate: cuando hay sub-recordatorios vinculados
+        // ("salir 20 min antes" + "llevar zapatos" comparten offset=20), ambos
+        // generan la MISMA fireDate y queremos UNA sola notif con body
+        // combinado, no spam de 2 notifs idénticas. Cada grupo lleva su
+        // colección de notas (en infinitivo) que el body convierte a
+        // imperativo.
+        let groups = groupedFireDates(for: event)
+        guard !groups.isEmpty else { return }
 
         let center = UNUserNotificationCenter.current()
         let cleanTitle = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayTitle = cleanTitle.isEmpty ? "Focus" : cleanTitle
+        let eventTitle = cleanTitle.isEmpty ? "Focus" : cleanTitle
+        let displayTitle = notificationTitle(eventTitle: eventTitle, eventStart: event.startTime)
 
-        // Mapeamos cada fireDate a su offset original para poder anclar
-        // la nota custom (reminderNotes[i] está alineado a reminderOffsets[i]).
-        let noteForFire = noteMapForFires(event: event, fireDates: fireDates)
-
-        for (index, fireDate) in fireDates.enumerated() {
+        for (index, group) in groups.enumerated() {
             let content = UNMutableNotificationContent()
-            // Si hay nota custom para esta fire date, ESA es el título de la
-            // notif (la ACCIÓN concreta que el user quiere recordar). El
-            // título del evento pasa al subtitle como contexto. Caso user:
-            // "tengo partido 3 PM acuérdame 20 min antes de echar zapatillas":
-            //   - title = "Echar las zapatillas a la mochila"
-            //   - subtitle = "Partido — En 20 min"
-            //   - body = location si la hay
-            // Si NO hay nota custom → comportamiento legacy:
-            //   - title = título del evento (ej. "Ducharme")
-            //   - subtitle = "En 10 min"
-            //   - body = location
-            // Dictionary[Int: String?] devuelve String?? por nested optional;
-            // doble flatMap → String? con la nota efectiva.
-            let note = noteForFire[index].flatMap { $0 }
-            if let note = note, !note.isEmpty {
-                content.title = note
-                content.subtitle = "\(displayTitle) — \(subtitle(forFireDate: fireDate, eventStart: event.startTime))"
-            } else {
-                content.title = displayTitle
-                content.subtitle = subtitle(forFireDate: fireDate, eventStart: event.startTime)
-            }
-            // Body = ubicación (si la hay) o vacío. NO repetimos el título
-            // porque ya está en `content.title` o `subtitle`.
-            if let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !location.isEmpty {
+            // Regla del usuario (2026-05-20):
+            //   title = "<evento> a las HH:mm"  ← contexto primero
+            //   body  = acciones concretas en imperativo, separadas por ". "
+            // Si no hay notas custom, body = ubicación (legacy) o vacío.
+            content.title = displayTitle
+            let imperatives = group.notes
+                .map { toImperative($0, fireDate: group.fireDate, eventStart: event.startTime) }
+                .filter { !$0.isEmpty }
+            if !imperatives.isEmpty {
+                content.body = imperatives.joined(separator: " ")
+                content.subtitle = ""
+            } else if let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !location.isEmpty {
+                content.subtitle = subtitle(forFireDate: group.fireDate, eventStart: event.startTime)
                 content.body = location
             } else {
+                content.subtitle = subtitle(forFireDate: group.fireDate, eventStart: event.startTime)
                 content.body = ""
             }
             content.sound = .default
@@ -173,13 +162,13 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
 
             let components = Calendar.current.dateComponents(
                 [.year, .month, .day, .hour, .minute],
-                from: fireDate
+                from: group.fireDate
             )
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
 
-            // Identifier por offset para poder cancelar individualmente.
-            // El primer fire usa el id base (compatibilidad con cancelReminder).
-            let identifier = fireDates.count == 1
+            // Identifier por grupo. El primer (único) grupo usa el id base
+            // para mantener cancelReminder() compatible con eventos legacy.
+            let identifier = groups.count == 1
                 ? Self.identifier(for: event.id)
                 : "\(Self.identifier(for: event.id))-\(index)"
 
@@ -197,44 +186,111 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
         }
     }
 
-    /// Calcula las fechas reales en las que se van a disparar las notifs
-    /// del evento. Aplica los offsets pidiendo `startTime - offset minutos`.
-    /// Filtra las que quedaron en el pasado (ej. usuario crea evento para
-    /// dentro de 3 min con offset de 10 min → la notif ya pasó, no la
-    /// programamos pero sí seguimos con el resto).
-    private func computeFireDates(for event: FocusEvent) -> [Date] {
+    /// Una notificación a disparar: fecha y todas las notas (infinitivo) que
+    /// caen en esa misma fecha. Cuando varios `reminderOffsets[i]` resultan
+    /// en el mismo fireDate (caso típico: "salir 20 min antes" + "llevar
+    /// zapatos" con offsets [20, 20]), las notas se acumulan en un solo
+    /// grupo para evitar spam.
+    private struct FireGroup {
+        let fireDate: Date
+        var notes: [String]
+    }
+
+    /// Construye los grupos de notif a partir del evento. Aplica los offsets,
+    /// filtra los pasados, agrupa por fireDate idénticos, ordena cronológico.
+    private func groupedFireDates(for event: FocusEvent) -> [FireGroup] {
         let now = Date()
         let offsets = event.reminderOffsets ?? []
         if offsets.isEmpty {
-            return event.startTime > now ? [event.startTime] : []
+            guard event.startTime > now else { return [] }
+            return [FireGroup(fireDate: event.startTime, notes: [])]
         }
-        return offsets
-            .compactMap { offset in
-                event.startTime.addingTimeInterval(-Double(offset) * 60)
+        var byDate: [Date: FireGroup] = [:]
+        for (idx, off) in offsets.enumerated() {
+            let fireDate = event.startTime.addingTimeInterval(-Double(off) * 60)
+            guard fireDate > now else { continue }
+            let note = event.reminderNote(at: idx)
+            if var existing = byDate[fireDate] {
+                if let n = note { existing.notes.append(n) }
+                byDate[fireDate] = existing
+            } else {
+                byDate[fireDate] = FireGroup(fireDate: fireDate, notes: note.map { [$0] } ?? [])
             }
-            .filter { $0 > now }
-            .sorted()
+        }
+        return byDate.values.sorted { $0.fireDate < $1.fireDate }
     }
 
-    /// Mapea cada índice de la lista de fireDates (ya filtradas + ordenadas)
-    /// al note custom correspondiente. Por la complejidad de filtrar
-    /// (futuras) y reordenar, mapeamos cada fireDate de vuelta al offset
-    /// original y luego al note en `reminderNotes[i]`. Si el evento no
-    /// tiene offsets ni notas, retorna [:] vacío.
-    private func noteMapForFires(event: FocusEvent, fireDates: [Date]) -> [Int: String?] {
-        guard let offsets = event.reminderOffsets, !offsets.isEmpty else { return [:] }
-        var map: [Int: String?] = [:]
-        for (fireIdx, fireDate) in fireDates.enumerated() {
-            let deltaMinutes = Int(round(event.startTime.timeIntervalSince(fireDate) / 60))
-            // Buscar offset original que matchee ese delta. Si hay duplicados
-            // (raro), tomamos el primero.
-            if let offsetIdx = offsets.firstIndex(of: deltaMinutes) {
-                map[fireIdx] = event.reminderNote(at: offsetIdx)
-            } else {
-                map[fireIdx] = nil
+    /// Genera el title oficial de la notif: "{evento} a las HH:mm". El usuario
+    /// quiere ver el evento padre + cuándo ocurre, no la nota suelta.
+    private func notificationTitle(eventTitle: String, eventStart: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "es_CL")
+        fmt.dateFormat = "HH:mm"
+        return "\(eventTitle) a las \(fmt.string(from: eventStart))"
+    }
+
+    /// Convierte un infinitivo descriptivo (lo que sale en la card) al
+    /// imperativo que va en el body de la notif. Patrones cubiertos por el
+    /// QA del usuario:
+    ///   "Salir 20 min antes"         → "Sal ahora."
+    ///   "Llevar zapatos de fútbol"    → "Lleva zapatos de fútbol."
+    ///   "Cargar el computador"        → "Carga el computador."
+    ///   "Echar las zapatillas"        → "Echa las zapatillas."
+    ///   "Preparar la presentación"    → "Prepara la presentación."
+    ///   "Revisar el archivo"          → "Revisa el archivo."
+    ///   "Comprar regalo"              → "Compra regalo."
+    ///   "Mandar el archivo"           → "Manda el archivo."
+    ///   "Llamar a mi mamá"            → "Llama a mi mamá."
+    /// Si el verbo no matchea ningún patrón, devuelve el texto tal cual con
+    /// punto final. Fallback seguro: nunca rompe; el peor caso es una notif
+    /// en infinitivo (legible igual).
+    private func toImperative(_ text: String, fireDate: Date, eventStart: Date) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "" }
+        // "Salir N min antes" → "Sal ahora." (cuando dispara la notif, ya es
+        // el momento de salir, así que "ahora" siempre es correcto).
+        let salirRegex = try? NSRegularExpression(
+            pattern: #"^salir\s+\d+\s*(?:min|minutos?|h|hora|horas?)\s*antes\.?$"#,
+            options: [.caseInsensitive]
+        )
+        let trimRange = NSRange(trimmed.startIndex..., in: trimmed)
+        if let r = salirRegex, r.firstMatch(in: trimmed, range: trimRange) != nil {
+            return "Sal ahora."
+        }
+        // Tabla verbo infinitivo → imperativo 2ª persona singular (tú).
+        let verbMap: [(infinitive: String, imperative: String)] = [
+            ("llevar", "Lleva"),
+            ("traer", "Trae"),
+            ("cargar", "Carga"),
+            ("echar", "Echa"),
+            ("preparar", "Prepara"),
+            ("revisar", "Revisa"),
+            ("comprar", "Compra"),
+            ("mandar", "Manda"),
+            ("enviar", "Envía"),
+            ("llamar", "Llama"),
+            ("avisar", "Avisa"),
+            ("recoger", "Recoge"),
+            ("pasar", "Pasa"),
+            ("salir", "Sal"),
+            ("imprimir", "Imprime"),
+            ("guardar", "Guarda"),
+            ("buscar", "Busca"),
+            ("anotar", "Anota"),
+        ]
+        for (inf, imp) in verbMap {
+            // Match al inicio, palabra completa, case insensitive.
+            let pattern = #"^"# + inf + #"\b"#
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let range = NSRange(trimmed.startIndex..., in: trimmed)
+            if let m = regex.firstMatch(in: trimmed, range: range), let matchRange = Range(m.range, in: trimmed) {
+                let rest = trimmed[matchRange.upperBound...]
+                let body = String(rest)
+                return "\(imp)\(body)".trimmingCharacters(in: .whitespaces) + (trimmed.hasSuffix(".") ? "" : ".")
             }
         }
-        return map
+        // Sin verbo conocido al inicio → devolver tal cual con punto.
+        return trimmed.hasSuffix(".") ? trimmed : "\(trimmed)."
     }
 
     /// Genera el subtitle según la relación entre el fireDate y el startTime

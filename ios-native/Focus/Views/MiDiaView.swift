@@ -2928,14 +2928,25 @@ private struct TimelineEventRow: View {
     /// `reminderOffsets = [40]` mostramos "🔔 40 min antes" dentro del
     /// mismo bloque — antes era una tarjeta separada que duplicaba
     /// visualmente el evento.
+    ///
+    /// Cuando hay sub-recordatorios vinculados (caso "fútbol + salir 20 min
+    /// antes + llevar zapatos"), el chip toma el offset > 0 más temprano
+    /// (la salida previa). Si todos son offset 0 (solo cosas que llevar
+    /// al momento del evento), no mostramos chip — las notas van directas.
     private var primaryReminderOffsetMinutes: Int? {
         guard let offsets = event.reminderOffsets, !offsets.isEmpty else { return nil }
-        return offsets.first
+        // Preferimos el mayor offset > 0 — es el "aviso antes" relevante.
+        // Si solo hay ceros (notas al startTime), nil → sin chip.
+        let nonZero = offsets.filter { $0 > 0 }
+        return nonZero.max()
     }
 
     private var reminderChipLabel: String? {
         guard let m = primaryReminderOffsetMinutes else { return nil }
-        let extraCount = (event.reminderOffsets?.count ?? 0) - 1
+        // Para el "(+N)" contamos offsets DISTINTOS al primary, ignorando
+        // los 0 (que son notas al evento, no avisos previos).
+        let uniqueNonZero = Set(event.reminderOffsets?.filter { $0 > 0 } ?? [])
+        let extraCount = max(0, uniqueNonZero.count - 1)
         let unit: String
         if m < 60 {
             unit = "\(m) min antes"
@@ -2954,11 +2965,15 @@ private struct TimelineEventRow: View {
         return extraCount > 0 ? "\(base) (+\(extraCount))" : base
     }
 
-    /// Texto custom del primer reminder (si existe). Usado para mostrar la
-    /// acción concreta debajo del chip cuando el user dijo algo como
-    /// "acuérdame 20 min antes de echar las zapatillas a la mochila".
-    private var primaryReminderNote: String? {
-        event.reminderNote(at: 0)
+    /// Sub-notas del evento. Cada una corresponde a una acción concreta
+    /// vinculada ("Salir 20 min antes", "Llevar zapatos"). Se rendean
+    /// debajo del título con prefijo "↳" y letra pequeña. Mostramos máximo
+    /// 2 — si hay más, una etiqueta "+N más" cierra la lista.
+    private var subReminderTexts: [String] {
+        guard let notes = event.reminderNotes else { return [] }
+        return notes
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     var body: some View {
@@ -3055,33 +3070,49 @@ private struct TimelineEventRow: View {
 
                     // Chip recordatorio anticipado — "🔔 40 min antes". Aparece
                     // DENTRO del mismo bloque, no como card separada arriba.
-                    // Misma regla para eventos puntuales con offset y eventos
-                    // con duración con offset.
-                    if let chipLabel = reminderChipLabel {
+                    // Aparece solo si hay offset > 0 (avísame N antes). Para
+                    // eventos con solo checklist (offsets = 0), saltamos el
+                    // chip y vamos directo a la lista de sub-notas.
+                    let chipLabel = reminderChipLabel
+                    let subs = subReminderTexts
+                    if chipLabel != nil || !subs.isEmpty {
                         VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "bell.fill")
-                                    .font(.system(size: density == .spacious ? 11 : 10, weight: .semibold))
-                                    .foregroundStyle(Theme.Colors.sectionReminder)
-                                Text(chipLabel)
-                                    .font(density.metaFont)
-                                    .foregroundStyle(Theme.Colors.sectionReminder)
+                            if let chipLabel {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "bell.fill")
+                                        .font(.system(size: density == .spacious ? 11 : 10, weight: .semibold))
+                                        .foregroundStyle(Theme.Colors.sectionReminder)
+                                    Text(chipLabel)
+                                        .font(density.metaFont)
+                                        .foregroundStyle(Theme.Colors.sectionReminder)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(
+                                    Capsule().fill(Theme.Colors.sectionReminder.opacity(0.12))
+                                )
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(
-                                Capsule().fill(Theme.Colors.sectionReminder.opacity(0.12))
-                            )
-                            // Nota custom debajo del chip si el user pidió
-                            // un reminder con acción concreta (ej. "echar
-                            // las zapatillas a la mochila"). Wrap multilinea
-                            // si la nota es larga — el card crece.
-                            if let note = primaryReminderNote {
-                                Text(note)
+                            // Sub-notas: cada una indentada con "↳", letra
+                            // chica, color secundario. Máximo 2 visibles;
+                            // si hay más, una línea "+N más" al final.
+                            // Cada Text wrappea en multilínea si es larga.
+                            ForEach(Array(subs.prefix(2).enumerated()), id: \.offset) { _, note in
+                                HStack(alignment: .top, spacing: 4) {
+                                    Text("↳")
+                                        .font(density.metaFont)
+                                        .foregroundStyle(Theme.Colors.textTertiary)
+                                    Text(note)
+                                        .font(density.metaFont)
+                                        .foregroundStyle(Theme.Colors.textSecondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .padding(.leading, 2)
+                            }
+                            if subs.count > 2 {
+                                Text("+\(subs.count - 2) más")
                                     .font(density.metaFont)
-                                    .foregroundStyle(Theme.Colors.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .padding(.leading, 2)
+                                    .foregroundStyle(Theme.Colors.textTertiary)
+                                    .padding(.leading, 14)
                             }
                         }
                     }
