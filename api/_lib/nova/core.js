@@ -258,6 +258,46 @@ export async function runNova({
     }
   }
 
+  // ─── 3-pre. Defensa AM/PM hora pasada ──────────────────────────────────
+  // Si la action es hoy con hora < hora actual y el input no mencionó
+  // "mañana" ni "AM" explícito, asume PM (suma 12). Cubre el bug real
+  // del caso 2: "recuérdame llamar a mi mamá a las 6" a las 11:30 →
+  // el LLM emite 06:00 pasado. La regla 3 del prompt ya cubre esto pero
+  // el modelo a veces lo ignora. Esta defensa lo enmienda.
+  if (Array.isArray(semantic) && dateContext.currentTime24) {
+    const [curH] = dateContext.currentTime24.split(':').map(Number)
+    const mentionsManana = /\bma[ñn]ana\b/i.test(message)
+    const mentionsAM = /\bAM\b|\bde la ma[ñn]ana\b/i.test(message)
+    for (const a of semantic) {
+      if (
+        (a.type === 'create_event' || a.type === 'create_reminder') &&
+        typeof a.time === 'string' &&
+        typeof a.dateISO === 'string' &&
+        a.dateISO === dateContext.todayISO &&
+        !mentionsManana &&
+        !mentionsAM
+      ) {
+        const m = a.time.match(/^(\d{1,2}):(\d{2})$/)
+        if (m) {
+          const h = parseInt(m[1], 10)
+          // Si h < 12 (es AM en formato 24h) y h ya pasó: bump a PM.
+          if (h < 12 && h < curH) {
+            const newH = h + 12
+            const newTime = `${newH.toString().padStart(2, '0')}:${m[2]}`
+            logEvent({
+              reqId, app,
+              ampmCorrection: true,
+              before: a.time,
+              after: newTime,
+              title: a.title,
+            })
+            a.time = newTime
+          }
+        }
+      }
+    }
+  }
+
   // ─── 3a. Resolver correcciones humanas (defensa en profundidad) ────────
   // Si el input tiene "no, mejor", "espera", "perdón", etc. y el LLM emitió
   // duplicados con la misma cosa pero distintas horas/fechas, nos quedamos

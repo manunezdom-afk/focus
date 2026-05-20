@@ -112,6 +112,13 @@ REGLAS DURAS (no negociables):
    - "a las 8" en contexto de cenar/estudiar de noche/gym/post-5pm-secuencia: 20:00.
    - Si la hora actual es ≥19:00 y dice "a las 11" sin "mañana": 23:00 hoy.
 
+   REGLA AM/PM POR HORA PASADA (CRÍTICA — bug real beta-15):
+   - Si la hora que el usuario menciona (sin AM/PM explícito ni "mañana") es MENOR que la hora actual del día Y se entiende como evento/recordatorio futuro: asume PM (suma 12 horas).
+   - "recuérdame llamar a mi mamá a las 6" con hora actual 11:30 → 18:00, NUNCA 06:00 (ya pasó).
+   - "recuérdame llamar a mi mamá a las 7" con hora actual 11:30 → 19:00, NUNCA 09:00 (ya pasó).
+   - "tengo gimnasio a las 4" con hora actual 14:00 → 16:00, NUNCA 04:00.
+   - REGLA: el evento/reminder se crea para el FUTURO. Si la hora propuesta ya pasó hoy, súmale 12 (PM) en lugar de dejarlo en el pasado.
+
    HORA EN PALABRAS + MINUTOS (CRÍTICO — lee esto con atención):
    - Patrón "a las [HORA_TEXTO] [NÚMERO≤59]": el número después de la hora EN PALABRAS siempre son MINUTOS.
    - "a las ocho 30 del Master" → time:"08:30", título:"Entregar trabajo del Master" (el 30 desaparece del título)
