@@ -335,11 +335,44 @@ export default async function handler(req, res) {
     })
     const escalateNeeded = !premiumFirst && shouldEscalateToSonnet(d1, preFilter.stripped.length, normalizedPreview)
 
+    // Heurística: solo caemos al parser determinístico cuando hay evidencia
+    // de que el LLM se equivocó (no cuando legítimamente está preguntando un
+    // detalle como "¿a qué hora?"). Casos que SÍ disparan fallback:
+    //  - preguntó "evento o tarea" (forbidden, palabra "tarea" no existe en
+    //    la app).
+    //  - emitió acciones pero el validator las descartó por título inseguro.
+    // Caso que NO dispara fallback:
+    //  - emitió 0 acciones y el reply es una aclaración honesta. Ahí dejamos
+    //    pasar la pregunta del LLM.
+    function shouldFallbackToDeterministic(parsedResp, normalized) {
+      const rawActions = Array.isArray(parsedResp?.actions) ? parsedResp.actions : []
+      const norm = normalized?.issues ?? []
+      if (norm.includes('asked_event_or_task')) return true
+      if (norm.includes('unsafe_title')) return true
+      // LLM emitió acciones pero al normalizarlas quedaron 0 (todas dropadas)
+      // → validator vetó por título inseguro u otro motivo; merece rescate.
+      if (rawActions.length > 0 && normalized.actions.length === 0) return true
+      return false
+    }
+
     if (escalateNeeded) {
       try {
         const dPremium = await escalateToSonnet()
         const rPremium = (dPremium.content?.[0]?.text ?? '').trim()
         const parsedPremium = safeParseAssistantJSON(rPremium)
+        const sonnetNorm = normalizeNovaResponse(parsedPremium, {
+          message,
+          dateContext,
+          events,
+          alreadyEscalated: true,
+        })
+        if (shouldFallbackToDeterministic(parsedPremium, sonnetNorm)) {
+          const deterministic = tryParseDeterministicCalendarRequest(message, { dateContext, events })
+          if (deterministic) {
+            console.warn('[focus-assistant] deterministic fallback after Sonnet asked_event_or_task or unsafe_title')
+            return finalize(deterministic, { escalated: true })
+          }
+        }
         return finalize(parsedPremium, { escalated: true })
       } catch {
         const deterministic = tryParseDeterministicCalendarRequest(message, { dateContext, events })
@@ -349,6 +382,17 @@ export default async function handler(req, res) {
         // strippea las ediciones malas y agrega la nota humana al reply.
         console.warn('[focus-assistant] Sonnet escalation failed, falling back to Haiku response')
         return finalize(parsed, { escalated: false })
+      }
+    }
+
+    // Aún sin escalación a Sonnet, si Haiku/Sonnet (cuando premiumFirst=true)
+    // pidió "evento o tarea" o el validator descartó todas las acciones,
+    // intentamos rescatar con el parser determinístico.
+    if (shouldFallbackToDeterministic(parsed, normalizedPreview)) {
+      const deterministic = tryParseDeterministicCalendarRequest(message, { dateContext, events })
+      if (deterministic) {
+        console.warn('[focus-assistant] deterministic fallback for ask-too-much / unsafe_title response')
+        return finalize(deterministic, { escalated: premiumFirst })
       }
     }
 

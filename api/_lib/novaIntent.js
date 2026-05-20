@@ -15,9 +15,27 @@ const STOPWORDS = new Set([
   'por', 'con', 'mi', 'mis', 'tu', 'tus', 'que', 'tengo', 'reunion', 'reunión',
 ])
 
-const REMINDER_RE = /\b(recu[eé]rdame|recordarme|recordatorio|acu[eé]rdate|acu[eé]rdame|av[ií]same|no se me puede olvidar|que no se me olvide)\b/i
+const REMINDER_RE = /\b(recu[eé]rdame|recordarme|recordatorio|acu[eé]rdate|acu[eé]rdame|av[ií]same|no se me puede olvidar|que no se me olvide|no se me (?:quede|olvide))\b/i
 const LINKED_RE = /\b(agrega(?:r)? abajo|pon(?:er)? debajo|debajo de|abajo de|para (?:la|el|mi|tu)?\s*.+\s+(?:recu[eé]rdame|acu[eé]rdame|agrega|pon)|en ese evento)\b/i
 const TASK_ACTION_TYPES = new Set(['task', 'add_task', 'toggle_task', 'mark_task_done', 'delete_task'])
+
+// "saca X (del bolso)", "lleva X", "echar X", "trae X" — son sub-recordatorios
+// que cuelgan del último evento mencionado en el mismo mensaje. NO son eventos
+// ni recordatorios sueltos. El usuario los escribe en imperativo dirigido a Nova:
+// "Tengo fútbol en 30 min. Saca las zapatillas del bolso." → linked_reminder.
+const SUB_REMINDER_VERB_RE = /\b(saca|sacar|llev[ao]|llevar|trae|traer|echa|echar|no\s+se\s+me\s+(?:quede|olvide)|que\s+no\s+se\s+me\s+(?:olvide|quede))\b/i
+
+// "tengo que ir a + actividad" / "tengo + evento (fútbol/prueba/doctor)" son
+// señales fuertes de EVENTO, no de recordatorio. Sirve para inferir intent
+// cuando el usuario no usa verbos de agenda explícitos.
+const EVENT_NOUN_RE = /\b(f[uú]tbol|tenis|p[aá]del|b[aá]squet|partido|gym|gimnasio|crossfit|pilates|yoga|prueba|examen|test|control|certamen|interrogaci[oó]n|presentaci[oó]n|reuni[oó]n|junta|llamada|clase|c[aá]tedra|sesi[oó]n|consulta|doctor|m[eé]dico|dentista|cita|entrevista|almuerzo|cena|desayuno|caf[eé]|brunch|conferencia|charla|seminario|taller)\b/i
+
+const SPANISH_NUMBER_WORDS = {
+  un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6,
+  siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12, trece: 13, catorce: 14,
+  quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18, diecinueve: 19,
+  veinte: 20, veintiuno: 21, veintidos: 22, veintitres: 23,
+}
 
 function stripDiacritics(value) {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -46,24 +64,38 @@ export function cleanNovaTitle(input) {
   if (!s) return ''
 
   s = s.replace(/^\[[^\]]+\]\s*/g, '')
-  s = s.replace(/^["'“”]+|["'“”]+$/g, '')
+  s = s.replace(/^["'“”«»]+|["'“”«»]+$/g, '')
   s = s.replace(/\b(hoy|mañana|manana|pasado mañana|pasado manana)\b/gi, ' ')
   s = s.replace(/\b(?:el\s+)?(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\b/gi, ' ')
-  s = s.replace(/\b(?:tipo|como a eso de|alrededor de|cerca de)\s+(?:las\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\b/gi, ' ')
-  s = s.replace(/\b(?:a\s+las|las)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\b/gi, ' ')
+  // Tiempos relativos: "en media hora", "en una hora", "en X minutos" — y la
+  // coletilla coloquial "X más" ("en 30 minutos más", "en media hora más").
+  s = s.replace(/\ben\s+(?:un[ao]?\s+)?(?:media|cuarto)\s+(?:de\s+)?hora(?:\s+m[aá]s)?\b/gi, ' ')
+  s = s.replace(/\ben\s+(?:un[ao]?\s+|\d+\s+)?(?:hora|horas|minuto|minutos|min)(?:\s+m[aá]s)?\b/gi, ' ')
+  s = s.replace(/\b(?:tipo|como a eso de|alrededor de|cerca de)\s+(?:las\s+)?(?:\d{1,2}(?::\d{2})?|un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\s*(?:am|pm|a\.m\.|p\.m\.)?\b/gi, ' ')
+  s = s.replace(/\b(?:a\s+las|las)\s+(?:\d{1,2}(?::\d{2})?|un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\s*(?:am|pm|a\.m\.|p\.m\.)?\b/gi, ' ')
   s = s.replace(/\b(?:en|por)\s+la\s+(?:mañana|manana|tarde|noche)\b/gi, ' ')
-  s = s.replace(/\bdespu[eé]s\b|\bluego\b|\bantes\b/gi, ' ')
+  s = s.replace(/\bdespu[eé]s\b|\bluego\b|\bantes\b|\btambi[eé]n\b/gi, ' ')
   s = s.replace(/\s+/g, ' ').trim()
 
   const leadPatterns = [
     /^(?:por favor\s+)?(?:recu[eé]rdame|recordarme|acu[eé]rdate|acu[eé]rdame|av[ií]same)(?:\s+de|\s+que|\s+para)?\s+/i,
-    /^(?:que\s+)?no\s+se\s+me\s+(?:puede\s+)?olvide(?:\s+de|\s+que)?\s+/i,
+    /^(?:que\s+)?no\s+se\s+me\s+(?:puede\s+)?(?:olvide|quede)(?:\s+de|\s+que)?\s+/i,
     /^recordatorio\s*:\s*/i,
     /^(?:ag[eé]ndame|agenda|agregar?|agr[eé]game|pon(?:me)?|crea(?:me)?)(?:\s+un[ao]?|\s+en\s+(?:mi\s+)?calendario|\s+en\s+(?:mi\s+)?agenda)?(?:\s+de|\s+para)?\s+/i,
+    /^(?:tengo\s+que\s+ir\s+a)\s+/i,
     /^(?:tengo\s+que|hay\s+que|debo|necesito)\s+/i,
     /^tengo\s+/i,
+    // "voy a", "voy al", "voy a la", "voy a los/las", "voy a el" — todas las
+    // formas que llevan determinante. "voy a + verb infinitive" también: el
+    // determinante opcional permite que no se exija.
+    /^voy\s+a(?:l|\s+(?:la|los|las|el))?\s+/i,
   ]
   for (const re of leadPatterns) s = s.replace(re, '')
+
+  // "dar una prueba de historia" → "Prueba de historia" (el verbo "dar" sobra).
+  s = s.replace(/^dar\s+(?:una\s+|un\s+)?/i, '')
+  // "jugar fútbol" → "Fútbol" (queremos el sustantivo, no el verbo genérico).
+  s = s.replace(/^(?:jugar|practicar)\s+(?:al\s+|a\s+)?/i, '')
 
   s = s.replace(/\s*,\s*/g, ' ')
   s = s.replace(/\s+/g, ' ').trim()
@@ -118,6 +150,74 @@ export function normalizeTime24(raw, opts = {}) {
   return parseHourMinute(value, preferPM)
 }
 
+// Hora en palabras: "tipo cuatro", "a las cuatro", "como a las ocho". El
+// parser numérico no las pesca porque trabaja con dígitos. Devuelve "HH:MM"
+// 24h o null. Por defecto PREFIERE PM (uso conversacional): "a las cuatro"
+// sin más contexto = 16:00. Para forzar AM, el usuario debe decir
+// "de la mañana" o "am" explícito.
+export function parseSpanishHourWord(text, opts = {}) {
+  const value = String(text ?? '').toLowerCase()
+  if (!value) return null
+  const match = value.match(
+    /\b(?:a\s+las|las|tipo|alrededor\s+de|cerca\s+de|como\s+a\s+(?:eso\s+de\s+)?(?:las\s+)?)\s*(un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\b/i,
+  )
+  if (!match) return null
+  const word = match[1].toLowerCase()
+  const base = SPANISH_NUMBER_WORDS[word]
+  if (base == null) return null
+
+  let hour = base
+  const isMorning = /\b(?:de\s+la\s+mañana|de\s+la\s+manana|\bam\b|a\.m\.)\b/i.test(value)
+  const isAfternoon =
+    /\b(?:tipo|de\s+la\s+tarde|de\s+la\s+noche|pm|p\.m\.)\b/i.test(value) ||
+    opts.preferAM !== true
+
+  if (isMorning) {
+    if (hour === 12) hour = 0
+  } else if (isAfternoon && hour >= 1 && hour <= 11) {
+    hour += 12
+  }
+  if (hour === 24) hour = 12
+  return `${String(hour).padStart(2, '0')}:00`
+}
+
+// Tiempo relativo: "en media hora", "en una hora", "en 30 minutos", "en un
+// cuarto de hora". Suma a `nowHHMM` y devuelve "HH:MM" 24h. Null si no matchea
+// o si la suma se sale del mismo día (caemos al fallback del caller).
+export function parseRelativeTime(text, nowHHMM) {
+  if (!nowHHMM) return null
+  const nowMin = timeToMinutes(nowHHMM)
+  if (nowMin == null) return null
+  const value = String(text ?? '').toLowerCase()
+  if (!/\ben\s+/.test(value)) return null
+
+  let deltaMin = null
+  if (/\ben\s+(?:un[ao]?\s+)?media\s+hora\b/.test(value)) deltaMin = 30
+  else if (/\ben\s+(?:un\s+)?cuarto\s+(?:de\s+)?hora\b/.test(value)) deltaMin = 15
+  else if (/\ben\s+(?:un[ao]?\s+)hora(?:\s+m[aá]s)?\b/.test(value)) deltaMin = 60
+  else {
+    const numMatch = value.match(/\ben\s+(\d{1,3})\s*(hora|horas|minuto|minutos|min)\b/)
+    if (numMatch) {
+      const qty = parseInt(numMatch[1], 10)
+      const unit = numMatch[2]
+      if (Number.isFinite(qty)) {
+        deltaMin = /hora/.test(unit) ? qty * 60 : qty
+      }
+    } else {
+      const wordMatch = value.match(/\ben\s+(un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(hora|horas|minuto|minutos|min)\b/)
+      if (wordMatch) {
+        const qty = SPANISH_NUMBER_WORDS[wordMatch[1]] ?? null
+        const unit = wordMatch[2]
+        if (qty != null) deltaMin = /hora/.test(unit) ? qty * 60 : qty
+      }
+    }
+  }
+  if (deltaMin == null) return null
+  const total = nowMin + deltaMin
+  if (total < 0 || total > 23 * 60 + 59) return null
+  return minutesToTime(total)
+}
+
 function minutesToTime(total) {
   const mins = Math.max(0, Math.min(23 * 60 + 59, total))
   const h = Math.floor(mins / 60)
@@ -145,8 +245,17 @@ function dateFromText(text, dateContext, fallback = null) {
   return fallback
 }
 
-function timeFromText(text) {
+function timeFromText(text, opts = {}) {
   const n = normalizeText(text)
+
+  // Tiempo relativo: "en media hora", "en 30 min", "en una hora" — preferimos
+  // este parse ANTES que números absolutos, porque "en 30 minutos" lleva un 30
+  // que el regex de horas confundiría con "30:00".
+  if (opts.nowHHMM) {
+    const rel = parseRelativeTime(text, opts.nowHHMM)
+    if (rel) return rel
+  }
+
   const typeMatch = n.match(/\btipo\s+(?:las\s+)?(\d{1,2})(?::(\d{2}))?/)
   if (typeMatch) return normalizeTime24(typeMatch[0], { preferPM: true })
 
@@ -155,6 +264,10 @@ function timeFromText(text) {
 
   const bareMeridiem = text.match(/\b\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm|a\.m\.|p\.m\.)\b/)
   if (bareMeridiem) return normalizeTime24(bareMeridiem[0])
+
+  // Hora en palabras: "tipo cuatro", "a las cinco", "como a las ocho".
+  const word = parseSpanishHourWord(text)
+  if (word) return word
 
   if (/\bnoche\b/i.test(text)) return '20:00'
   if (/\btarde\b/i.test(text)) return '16:00'
@@ -191,10 +304,16 @@ function confidenceOf(raw) {
 
 function titleLooksUnsafe(title, message) {
   if (!title || title.length < 2) return true
-  if (title.length > 90) return true
+  if (title.length > 70) return true
   const nt = normalizeText(title)
   const nm = normalizeText(message)
   if (nt && nm && nt === nm) return true
+  // El LLM a veces concatena dos intents en un mismo título ("Sacar las
+  // zapatillas y también tipo cuatro tengo que..."). Si vemos un conector
+  // multi-intent dentro del título, lo marcamos como inseguro — el parser
+  // determinístico (o un re-prompt) debería separarlo en dos acciones.
+  if (/\s+y\s+tambi[eé]n\s+/i.test(title)) return true
+  if (/\btengo\s+que\s+/i.test(title) && title.length > 30) return true
   return /\b(recu[eé]rdame|acu[eé]rdate|mañana|manana|a las|tipo)\b/i.test(title)
 }
 
@@ -240,12 +359,19 @@ function normalizeEventAction(raw, ctx, issues) {
   const confidence = confidenceOf(raw)
 
   if (confidence < 0.65) issues.add('low_confidence')
-  if (titleLooksUnsafe(title, ctx.message)) issues.add('unsafe_title')
+  const unsafe = titleLooksUnsafe(title, ctx.message)
+  if (unsafe) issues.add('unsafe_title')
 
   if (!title || !date) {
     issues.add('incomplete_action')
     return null
   }
+  // Si el título es inseguro (frase del usuario embebida, multi-intent
+  // concatenado, etc), descartamos la acción para forzar escalación o
+  // fallback determinístico. Dejar pasar un evento con título de 80+ chars
+  // es peor que devolver vacío — el UI lo muestra horrible y el usuario
+  // tiene que editarlo a mano.
+  if (unsafe) return null
 
   return {
     type: 'event',
@@ -271,11 +397,15 @@ function normalizeReminderAction(raw, ctx, issues) {
   const confidence = confidenceOf(raw)
 
   if (confidence < 0.65) issues.add('low_confidence')
-  if (titleLooksUnsafe(title, ctx.message)) issues.add('unsafe_title')
+  const unsafe = titleLooksUnsafe(title, ctx.message)
+  if (unsafe) issues.add('unsafe_title')
   if (!title || !date) {
     issues.add('incomplete_action')
     return null
   }
+  // Igual que en normalizeEventAction: si el título quedó inseguro, no lo
+  // devolvemos al cliente. La escalación se encarga del rescate.
+  if (unsafe) return null
 
   return {
     type: 'reminder',
@@ -420,6 +550,30 @@ export function normalizeNovaResponse(parsed, options) {
     issues.add('unsupported_action')
   }
 
+  // Defensa contra "¿lo creamos como evento o como tarea?" — el LLM filtra la
+  // palabra "tarea" aun con prompt que lo prohíbe. Si la reply pregunta entre
+  // evento y tarea, marcamos el issue para escalar (Sonnet con refuerzo) o
+  // caer al parser determinístico. La palabra "tarea" no existe en esta app.
+  const replyText = typeof parsed?.reply === 'string' ? parsed.reply : ''
+  const lowerReply = replyText.toLowerCase()
+  if (/\b(evento|agenda).{0,30}(o\s+(?:como\s+)?tarea|o\s+tarea)\b/i.test(lowerReply) || /\bcomo\s+tarea\b/i.test(lowerReply)) {
+    issues.add('asked_event_or_task')
+  }
+  // Si el LLM devolvió 0 acciones pero el mensaje tiene señales fuertes de
+  // intent (sustantivo de evento, verbo de recordatorio, o sub-recordatorio
+  // ligado a un evento), también escalamos — significa que Nova está
+  // "preguntando demasiado" en vez de actuar. Importante: NO disparamos en
+  // "tengo X" genérico (ej: "tengo hambre"), solo en patrones donde podemos
+  // ofrecer una acción concreta como fallback. El parser determinístico debe
+  // poder construir algo razonable o no escalamos en falso.
+  const messageHasStrongIntent =
+    EVENT_NOUN_RE.test(ctx.message) ||
+    REMINDER_RE.test(ctx.message) ||
+    SUB_REMINDER_VERB_RE.test(ctx.message)
+  if (actions.length === 0 && messageHasStrongIntent && ctx.message.length > 0) {
+    issues.add('no_actions_for_clear_intent')
+  }
+
   const issueList = Array.from(issues)
   const escalationIssues = new Set([
     'low_confidence',
@@ -428,13 +582,15 @@ export function normalizeNovaResponse(parsed, options) {
     'unsupported_action',
     'incomplete_action',
     'unsafe_title',
+    'asked_event_or_task',
+    'no_actions_for_clear_intent',
   ])
   const needsEscalation =
     !options?.alreadyEscalated &&
     issueList.some((issue) => escalationIssues.has(issue))
 
   return {
-    reply: typeof parsed?.reply === 'string' ? parsed.reply : '',
+    reply: replyText,
     actions: dedupeActions(actions),
     issues: issueList,
     needsEscalation,
@@ -463,6 +619,21 @@ export function shouldRouteToSonnetFirst(message, events = []) {
   const hasReminderVerb = /\b(recuerdame|recuerdate|recordarme|acuerdame|acuerdate|avisame)\b/i.test(n)
   if (hasEventVerb && hasReminderVerb) return true
 
+  // Sub-recordatorio embebido: "Tengo fútbol. Saca las zapatillas" o "Voy al
+  // doctor a las 5 y tengo que llevar la receta". Haiku se confunde y mete
+  // todo en un solo título gigante. Sonnet lo separa mejor.
+  if (SUB_REMINDER_VERB_RE.test(text) && (hasEventVerb || EVENT_NOUN_RE.test(text))) return true
+
+  // Multi-oración con punto. Si el usuario escribió dos o más oraciones,
+  // probablemente son intents distintos y queremos que Sonnet los separe.
+  const sentenceCount = (text.match(/[.!?]\s+\S/g) ?? []).length + 1
+  if (sentenceCount >= 2 && (hasEventVerb || EVENT_NOUN_RE.test(text) || SUB_REMINDER_VERB_RE.test(text))) return true
+
+  // "Tengo X (sustantivo de evento)" o "tengo que ir a + actividad" es señal
+  // de evento aunque no haya conector. Si encima hay tiempo, vamos a Sonnet
+  // por seguridad (Haiku se confunde con "tipo cuatro" o "en media hora").
+  if (/\btengo\s+(?:que\s+)?(?:ir\s+a\s+)?\w+/i.test(text) && EVENT_NOUN_RE.test(text) && timeCount >= 1) return true
+
   return false
 }
 
@@ -470,9 +641,23 @@ function splitSegments(message) {
   return compact(message)
     .replace(/\s+y\s+despu[eé]s\s+/gi, ' | después ')
     .replace(/\s*,\s*despu[eé]s\s+/gi, ' | después ')
+    // Punto / signo final como separador de oraciones. "Tengo fútbol en 30 min.
+    // Saca las zapatillas" debe dividirse en dos segmentos. Mantenemos el
+    // punto fuera del segmento para que el cleanNovaTitle no tenga que pelearse.
+    .replace(/\s*[.!?]+\s+/g, ' | ')
+    // "y también" + "y además" = nuevo intent. Frecuente en habla espontánea
+    // para encadenar dos eventos: "tengo fútbol y también prueba a las 4".
+    .replace(/\s+y\s+(?:tambi[eé]n|adem[aá]s)\s+/gi, ' | ')
     .replace(/\s*,\s*/g, ' | ')
     .replace(/\s+y\s+(?=(?:en|por)\s+la\s+noche)/gi, ' | ')
     .replace(/\s+y\s+(?=(?:recu[eé]rdame|acu[eé]rdame|acu[eé]rdate|av[ií]same))/gi, ' | ')
+    // "y tengo / y voy / y tipo X tengo" — el siguiente verbo de evento abre
+    // un nuevo segmento. Sin esto, "fútbol y tipo cuatro tengo prueba" se
+    // tomaba como un solo segmento ambiguo.
+    .replace(/\s+y\s+(?=(?:tengo|voy|tipo\b))/gi, ' | ')
+    // Sub-recordatorio inline: "fútbol en 30 min y saca las zapatillas" —
+    // separamos para tratarlo como reminder propio.
+    .replace(/\s+y\s+(?=(?:saca|sacar|llev[ao]|llevar|trae|traer|echa|echar|no\s+se\s+me\s+(?:quede|olvide)))/gi, ' | ')
     .replace(/\s+y\s+antes\s+/gi, ' | antes ')
     .split('|')
     .map((s) => compact(s))
@@ -480,8 +665,9 @@ function splitSegments(message) {
 }
 
 function isEventLike(segment) {
-  return /\b(tengo|prueba|dentista|doctor|reuni[oó]n|junta|clase|entrenar|entrenamiento|estudiar|historia|cata|juntarme|almuerzo|cena)\b/i.test(segment) &&
-    !REMINDER_RE.test(segment)
+  return /\b(tengo|prueba|dentista|doctor|m[eé]dico|reuni[oó]n|junta|clase|entrenar|entrenamiento|estudiar|historia|cata|juntarme|almuerzo|cena|f[uú]tbol|tenis|partido|gym|gimnasio|examen|control|certamen|interrogaci[oó]n|presentaci[oó]n|consulta|cita|entrevista|charla|conferencia|seminario|taller)\b/i.test(segment) &&
+    !REMINDER_RE.test(segment) &&
+    !SUB_REMINDER_VERB_RE.test(segment)
 }
 
 function isStudyBlock(segment) {
@@ -490,7 +676,7 @@ function isStudyBlock(segment) {
 
 function parseDeterministicSegment(segment, state, options) {
   const date = dateFromText(segment, options.dateContext, state.currentDate ?? options.dateContext.todayISO)
-  const explicitTime = timeFromText(segment)
+  const explicitTime = timeFromText(segment, { nowHHMM: options.dateContext?.currentTime24 })
 
   if (LINKED_RE.test(segment)) {
     const target = findReferencedEvent(segment, options.events)
@@ -520,6 +706,35 @@ function parseDeterministicSegment(segment, state, options) {
       end_time: null,
       confidence: 0.86,
       reason: 'deterministic_reminder',
+    }
+  }
+
+  // Sub-recordatorio imperativo ("saca/lleva/trae/echa X"). En un mensaje
+  // multi-intent, viene típicamente después de un evento al que pertenece
+  // ("Tengo fútbol en 30 min. Saca las zapatillas del bolso."). Lo guardamos
+  // como reminder con la fecha del evento previo si existe, sin hora propia.
+  if (SUB_REMINDER_VERB_RE.test(segment) && !REMINDER_RE.test(segment)) {
+    // Mantenemos el verbo en imperativo del usuario pero limpiamos la frase.
+    // "Saca las zapatillas del bolso" → "Sacar las zapatillas" (verbo en
+    // infinitivo es más natural para un recordatorio).
+    let title = cleanNovaTitle(segment)
+      .replace(/^(?:saca|sacar|saco)\b/i, 'Sacar')
+      .replace(/^(?:lleva|llevar|llevo)\b/i, 'Llevar')
+      .replace(/^(?:trae|traer|traigo)\b/i, 'Traer')
+      .replace(/^(?:echa|echar|echo)\b/i, 'Echar')
+      .replace(/\s+que\s+las?\s+tengo\s+.*$/i, '')
+      .replace(/\s+que\s+lo\s+tengo\s+.*$/i, '')
+      .replace(/\s+del?\s+(bolso|mochila|cajón|cajon|auto|coche|escritorio)\s*$/i, '')
+    title = sentenceCase(compact(title))
+    if (!title) return null
+    return {
+      type: 'reminder',
+      title,
+      date: state.previousEventDate ?? date,
+      reminder_time: explicitTime,
+      end_time: null,
+      confidence: 0.8,
+      reason: 'deterministic_sub_reminder',
     }
   }
 
@@ -573,6 +788,7 @@ export function tryParseDeterministicCalendarRequest(message, options = {}) {
     currentDate: dateFromText(message, dateContext, dateContext.todayISO),
     previousEventTime: null,
     previousEventTitle: null,
+    previousEventDate: null,
   }
   const actions = []
   for (const segment of segments) {
@@ -584,6 +800,7 @@ export function tryParseDeterministicCalendarRequest(message, options = {}) {
     if (action.type === 'event') {
       if (action.start_time) state.previousEventTime = action.start_time
       state.previousEventTitle = action.title
+      state.previousEventDate = action.date
     }
     if (action.date) state.currentDate = action.date
     actions.push(action)

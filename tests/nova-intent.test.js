@@ -253,3 +253,168 @@ test('marca como escalable una respuesta incompleta de Haiku', () => {
   assert.equal(out.needsEscalation, true)
   assert.ok(out.issues.includes('low_confidence'))
 })
+
+// ─── Bug reportado mayo 2026: Nova preguntaba "¿evento o tarea?" cuando el
+// mensaje ya tenía señales claras (fútbol + zapatillas + prueba historia).
+// Los siguientes tests aseguran que el parser determinístico cubre los 5
+// casos QA del usuario y que el validator detecta cuando el LLM se quedó
+// preguntando en vez de actuar.
+
+test('caso fútbol + zapatillas + prueba: separa 3 acciones y no pregunta evento/tarea', () => {
+  const out = tryParseDeterministicCalendarRequest(
+    'Tengo que ir a jugar fútbol en una media hora más. Saca las zapatillas que las tengo guardadas en el bolso y también tipo cuatro tengo que ir a dar una prueba de historia.',
+    { dateContext: DATE_CONTEXT, events: [] },
+  )
+
+  assert.ok(out, 'debe parsear el caso real reportado por el usuario')
+  assert.deepEqual(out.actions.map((a) => a.type), ['event', 'reminder', 'event'])
+  assert.equal(out.actions[0].title, 'Fútbol')
+  // currentTime24 = '14:10' → +30 min = 14:40.
+  assert.equal(out.actions[0].start_time, '14:40')
+  assert.equal(out.actions[1].title, 'Sacar las zapatillas')
+  // El sub-recordatorio queda en la fecha del evento previo.
+  assert.equal(out.actions[1].date, DATE_CONTEXT.todayISO)
+  assert.equal(out.actions[1].reminder_time, null)
+  assert.equal(out.actions[2].title, 'Prueba de historia')
+  assert.equal(out.actions[2].start_time, '16:00')
+})
+
+test('caso fútbol + acuérdame zapatillas (frase corta)', () => {
+  const out = tryParseDeterministicCalendarRequest(
+    'En media hora fútbol y acuérdame llevar las zapatillas',
+    { dateContext: DATE_CONTEXT, events: [] },
+  )
+
+  assert.ok(out)
+  assert.deepEqual(out.actions.map((a) => a.type), ['event', 'reminder'])
+  assert.equal(out.actions[0].title, 'Fútbol')
+  assert.equal(out.actions[0].start_time, '14:40')
+  assert.equal(out.actions[1].title, 'Llevar las zapatillas')
+})
+
+test('caso "tipo cuatro tengo prueba": infiere evento con 16:00 sin preguntar', () => {
+  const out = tryParseDeterministicCalendarRequest(
+    'tipo cuatro tengo prueba de historia',
+    { dateContext: DATE_CONTEXT, events: [] },
+  )
+
+  assert.ok(out)
+  assert.equal(out.actions.length, 1)
+  assert.equal(out.actions[0].type, 'event')
+  assert.equal(out.actions[0].title, 'Prueba de historia')
+  assert.equal(out.actions[0].start_time, '16:00')
+})
+
+test('caso "hoy tengo fútbol y también prueba a las cuatro": dos eventos, "a las cuatro" = 16:00', () => {
+  const out = tryParseDeterministicCalendarRequest(
+    'Hoy tengo fútbol y también prueba de historia a las cuatro',
+    { dateContext: DATE_CONTEXT, events: [] },
+  )
+
+  assert.ok(out)
+  assert.deepEqual(out.actions.map((a) => a.type), ['event', 'event'])
+  assert.equal(out.actions[0].title, 'Fútbol')
+  assert.equal(out.actions[0].start_time, null)
+  assert.equal(out.actions[1].title, 'Prueba de historia')
+  // Preferencia PM por defecto: "a las cuatro" sin AM/PM → 16:00.
+  assert.equal(out.actions[1].start_time, '16:00')
+})
+
+test('caso doctor + llevar receta: separa evento + sub-recordatorio', () => {
+  const out = tryParseDeterministicCalendarRequest(
+    'Voy al doctor a las 5 y tengo que llevar la receta',
+    { dateContext: DATE_CONTEXT, events: [] },
+  )
+
+  assert.ok(out)
+  assert.deepEqual(out.actions.map((a) => a.type), ['event', 'reminder'])
+  assert.equal(out.actions[0].title, 'Doctor')
+  assert.equal(out.actions[0].start_time, '17:00')
+  assert.match(out.actions[1].title, /llevar la receta/i)
+})
+
+test('shouldRouteToSonnetFirst detecta los nuevos patrones (sub-recordatorio + multi-oración)', () => {
+  assert.equal(
+    shouldRouteToSonnetFirst(
+      'Tengo que ir a jugar fútbol en una media hora más. Saca las zapatillas que las tengo guardadas en el bolso y también tipo cuatro tengo que ir a dar una prueba de historia.',
+      [],
+    ),
+    true,
+  )
+  assert.equal(
+    shouldRouteToSonnetFirst('En media hora fútbol y acuérdame llevar las zapatillas', []),
+    true,
+  )
+  assert.equal(
+    shouldRouteToSonnetFirst('Voy al doctor a las 5 y tengo que llevar la receta', []),
+    true,
+  )
+})
+
+test('validator marca asked_event_or_task cuando el LLM pregunta entre evento y tarea', () => {
+  const out = normalize({
+    reply: 'No tengo «Saca las zapatillas» en tu día como para ponerle aviso. ¿Lo creamos como evento o como tarea?',
+    actions: [],
+  }, 'Tengo que ir a jugar fútbol en una media hora más. Saca las zapatillas que las tengo guardadas en el bolso y también tipo cuatro tengo que ir a dar una prueba de historia.', {
+    alreadyEscalated: false,
+  })
+
+  assert.ok(out.issues.includes('asked_event_or_task'))
+  assert.ok(out.issues.includes('no_actions_for_clear_intent'))
+  assert.equal(out.needsEscalation, true)
+})
+
+test('validator NO marca asked_event_or_task cuando el LLM legítimamente pregunta hora', () => {
+  const out = normalize({
+    reply: '¿A qué hora quieres el dentista?',
+    actions: [{
+      type: 'event',
+      title: 'Dentista',
+      date: '2026-05-14',
+      start_time: null,
+      confidence: 0.85,
+    }],
+  }, 'tengo dentista', { alreadyEscalated: true })
+
+  assert.equal(out.issues.includes('asked_event_or_task'), false)
+})
+
+test('rechaza títulos gigantes con multi-intent embebido', () => {
+  const out = normalize({
+    reply: 'Listo.',
+    actions: [{
+      type: 'reminder',
+      title: 'Sacar las zapatillas y también tipo cuatro tengo que ir a dar una prueba de historia',
+      date: '2026-05-14',
+      reminder_time: null,
+      confidence: 0.9,
+    }],
+  }, 'Saca las zapatillas y también tipo cuatro tengo que dar una prueba')
+
+  // El validator rechaza la acción por título inseguro (concatena dos intents
+  // con "y también" — el LLM no separó correctamente).
+  assert.equal(out.actions.length, 0)
+  assert.ok(out.issues.includes('unsafe_title'))
+})
+
+test('parseRelativeTime suma minutos correctamente desde currentTime24', () => {
+  // "en 30 min" desde 14:10 → 14:40
+  const out = tryParseDeterministicCalendarRequest(
+    'en 30 minutos tengo reunión',
+    { dateContext: DATE_CONTEXT, events: [] },
+  )
+  assert.ok(out)
+  assert.equal(out.actions[0].type, 'event')
+  assert.equal(out.actions[0].start_time, '14:40')
+})
+
+test('parseSpanishHourWord convierte palabras a 24h con preferencia PM', () => {
+  // "tipo cinco" sin AM/PM en contexto de tarde → 17:00
+  const out = tryParseDeterministicCalendarRequest(
+    'tipo cinco tengo dentista',
+    { dateContext: DATE_CONTEXT, events: [] },
+  )
+  assert.ok(out)
+  assert.equal(out.actions[0].title, 'Dentista')
+  assert.equal(out.actions[0].start_time, '17:00')
+})
