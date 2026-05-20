@@ -11,12 +11,7 @@ import { getSupabaseAdmin, getUserIdFromAuth } from './_supabaseAdmin.js'
 import { ACTION_TYPES, checkLimit, getUserPlan, recordUsage } from './_lib/usageLimits.js'
 import { trackAIUsageEvent } from './_lib/aiUsageTracking.js'
 import { filterCalendarEditActions, strippedEditMessage } from './_lib/calendarIntent.js'
-import {
-  buildOpenAISystemPrompt,
-  callOpenAINova,
-  extractResponsesText,
-  convertOpenAIToBackendResponse,
-} from './_lib/openaiNova.js'
+import { runNova } from './_lib/nova/core.js'
 
 const MODEL_ID = 'claude-haiku-4-5-20251001'
 // Sonnet 4.6 = fallback "premium" cuando Haiku falla en escenarios críticos
@@ -275,78 +270,66 @@ export default async function handler(req, res) {
       console.error(`[focus-assistant][${reqId}] NOVA_PROVIDER=openai pero falta OPENAI_API_KEY`)
       return res.status(503).json({ error: 'no_openai_key', message: 'Provider OpenAI mal configurado.' })
     }
-    const openaiPrompt = buildOpenAISystemPrompt({
-      tz: dateContext.tz,
-      todayISO: dateContext.todayISO,
-      tomorrow: dateContext.tomorrow,
-      currentTime24: dateContext.currentTime24,
-      weekDates: dateContext.weekDates,
-    })
+    // Routing controlado por env. Default ON — manda local|cheap|strong
+    // según heurística del router. Si false, vuelve al comportamiento
+    // previo (todo a strong).
+    const routingEnabled = (process.env.NOVA_ROUTING_ENABLED || 'true').toLowerCase().trim() !== 'false'
+    const fallbackToStrong = (process.env.OPENAI_NOVA_FALLBACK_TO_STRONG || 'true').toLowerCase().trim() !== 'false'
     try {
       const start = Date.now()
-      const data = await callOpenAINova({
+      const result = await runNova({
+        app: 'focus',
         message,
-        systemPrompt: openaiPrompt,
-        model: process.env.OPENAI_NOVA_MODEL,
+        dateContext,
+        reqId,
         apiKey: openaiKey,
-        reqId,
+        routingEnabled,
+        fallbackToStrong,
       })
-      const rawText = extractResponsesText(data)
-      let parsed
-      try {
-        parsed = JSON.parse(rawText)
-      } catch (e) {
-        console.error(`[focus-assistant][${reqId}] OpenAI JSON parse failed:`, e.message)
-        return res.status(502).json({
-          error: 'llm_bad_output',
-          requestId: reqId,
-          reply: 'No pude procesar la respuesta. Repite el mensaje, por favor.',
-          actions: [],
-        })
-      }
-      const mapped = convertOpenAIToBackendResponse({
-        openaiPayload: parsed,
-        userMessage: message,
-        reqId,
-      })
-      // Tracking de costo — OpenAI Responses API devuelve usage en `data.usage`.
+
+      // Tracking de costo — Nova Core ya loggeó modelo/routing. Acá solo
+      // contamos la acción para el plan del usuario.
       trackAIUsageEvent({
         admin,
         userId,
         action_type: ACTION_TYPES.NOVA_MESSAGE,
         endpoint: 'focus-assistant',
-        model: data?.model || process.env.OPENAI_NOVA_MODEL || 'openai',
-        usage: {
-          input_tokens: data?.usage?.input_tokens ?? data?.usage?.prompt_tokens ?? 0,
-          output_tokens: data?.usage?.output_tokens ?? data?.usage?.completion_tokens ?? 0,
-          source: 'openai',
-        },
+        model: result?._nova?.modelUsed || 'openai',
+        usage: { input_tokens: 0, output_tokens: 0, source: 'openai' },
         success: true,
         duration_ms: Date.now() - start,
-        metadata: { plan, provider: 'openai', request_id: reqId, dropped: mapped._dropped?.length || 0 },
+        metadata: {
+          plan,
+          provider: 'openai',
+          request_id: reqId,
+          routing_reason: result?._nova?.routingReason || '',
+          fallback_used: result?._nova?.fallbackUsed || false,
+          dropped: result._dropped?.length || 0,
+        },
       }).catch(() => {})
 
-      // Mismo enforcement de cuota que Anthropic: si actions ≠ vacío,
-      // contamos NOVA_SMART_ACTION; si smartActionsBlocked, las strippeamos.
-      if (smartActionsBlocked && mapped.actions.length > 0) {
-        const allowed = mapped.actions.filter(a => a.type === 'remember')
-        mapped.actions = allowed
-        mapped.smart_actions_blocked = true
-        mapped.smart_actions_message = smartCheck.message
+      // Mismo enforcement de cuota: si actions ≠ vacío y smartActionsBlocked,
+      // los strippeamos (solo dejamos `remember`).
+      if (smartActionsBlocked && result.actions.length > 0) {
+        const allowed = result.actions.filter(a => a.type === 'remember')
+        result.actions = allowed
+        result.smart_actions_blocked = true
+        result.smart_actions_message = smartCheck.message
       }
       Promise.resolve()
         .then(() => recordUsage(admin, userId, ACTION_TYPES.NOVA_MESSAGE))
-        .then(() => mapped.actions.length > 0
+        .then(() => result.actions.length > 0
           ? recordUsage(admin, userId, ACTION_TYPES.NOVA_SMART_ACTION)
           : null)
         .catch(() => {})
 
-      if (mapped._dropped && mapped._dropped.length > 0) {
-        console.warn(`[focus-assistant][${reqId}] OpenAI dropped ${mapped._dropped.length}:`, mapped._dropped.join(' | '))
+      if (result._dropped && result._dropped.length > 0) {
+        console.warn(`[focus-assistant][${reqId}] Nova dropped ${result._dropped.length}:`, result._dropped.join(' | '))
       }
-      // No exponer `_dropped` al cliente (es solo para telemetría server-side).
-      delete mapped._dropped
-      return res.status(200).json(mapped)
+      // No exponer `_dropped` ni `_nova` al cliente (telemetría server-side).
+      delete result._dropped
+      delete result._nova
+      return res.status(200).json(result)
     } catch (err) {
       const status = err?.status || 500
       console.error(`[focus-assistant][${reqId}] OpenAI call failed (${status}):`, err?.message?.slice(0, 200))
