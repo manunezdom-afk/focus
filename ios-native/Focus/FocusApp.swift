@@ -92,30 +92,77 @@ struct FocusApp: App {
     }
 
     #if DEBUG
-    /// Parsea `focusqa://send?text=...&reqId=...` y llama al MISMO punto
-    /// de entrada que la UI (`dataStore.sendNovaMessage`). El backend ve
-    /// el reqId via header X-Request-Id (lo arma NovaService internamente
-    /// — no exponemos el reqId del query directamente al server porque
-    /// el endpoint tiene su propia generación, pero loggeamos local para
-    /// correlacionar con los logs Vercel via tiempo + contenido).
-    ///
-    /// Si la sesión es demo, igual procesa — `sendNovaMessage` no
-    /// chequea estado de auth, solo necesita texto válido.
+    /// Parsea URLs `focusqa://*`. Acciones soportadas:
+    ///   - `focusqa://send?text=...&reqId=...` — envía texto al pipeline real
+    ///   - `focusqa://dump?reqId=...` — escribe Documents/qa-events.json con
+    ///     events + tasks actuales para verificar QA sin depender de scroll
+    ///     en el simulator.
     private func handleQAURL(_ url: URL) {
         guard url.scheme == "focusqa" else { return }
         guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
-        let text = comps.queryItems?.first(where: { $0.name == "text" })?.value ?? ""
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            print("[QA-harness] URL recibida sin texto: \(url)")
-            return
-        }
+        let action = url.host ?? "send"
         let reqId = comps.queryItems?.first(where: { $0.name == "reqId" })?.value ?? UUID().uuidString
-        print("[QA-harness] reqId=\(reqId) text=\(trimmed.prefix(80))")
-        // Despachamos al main para alinear con la UI que normalmente
-        // dispara este flow desde un tap del usuario.
-        DispatchQueue.main.async {
-            dataStore.sendNovaMessage(trimmed)
+
+        switch action {
+        case "send":
+            let text = comps.queryItems?.first(where: { $0.name == "text" })?.value ?? ""
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                print("[QA-harness] send sin texto: \(url)")
+                return
+            }
+            print("[QA-harness] reqId=\(reqId) send text=\(trimmed.prefix(80))")
+            DispatchQueue.main.async {
+                dataStore.sendNovaMessage(trimmed)
+            }
+        case "dump":
+            print("[QA-harness] reqId=\(reqId) dump events")
+            DispatchQueue.main.async {
+                qaDumpEvents(reqId: reqId)
+            }
+        default:
+            print("[QA-harness] acción desconocida: \(action)")
+        }
+    }
+
+    /// Escribe Documents/qa-events.json con events + tasks actuales del store.
+    /// QA puede leer el archivo desde el host con `find ~/Library/Developer/
+    /// CoreSimulator/.../Documents/qa-events.json`. Sin PII — solo títulos,
+    /// horas, fechas, sub-recordatorios.
+    private func qaDumpEvents(reqId: String) {
+        let fmt = ISO8601DateFormatter()
+        let timeFmt = DateFormatter()
+        timeFmt.locale = Locale(identifier: "es_CL")
+        timeFmt.dateFormat = "yyyy-MM-dd HH:mm"
+
+        let events = dataStore.events.map { ev -> [String: Any] in
+            var dict: [String: Any] = [
+                "id": ev.id.uuidString,
+                "title": ev.title,
+                "startTime": fmt.string(from: ev.startTime),
+                "localTime": timeFmt.string(from: ev.startTime),
+                "isReminder": ev.isReminder == true,
+                "section": ev.section.rawValue,
+            ]
+            if let end = ev.endTime { dict["endTime"] = fmt.string(from: end) }
+            if let offsets = ev.reminderOffsets { dict["reminderOffsets"] = offsets }
+            if let notes = ev.reminderNotes { dict["reminderNotes"] = notes }
+            return dict
+        }
+        let payload: [String: Any] = [
+            "reqId": reqId,
+            "dumpedAt": fmt.string(from: Date()),
+            "eventCount": events.count,
+            "events": events.sorted { ($0["startTime"] as? String ?? "") < ($1["startTime"] as? String ?? "") },
+        ]
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let outURL = docs.appendingPathComponent("qa-events.json")
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: outURL, options: .atomic)
+            print("[QA-harness] dump escrito: \(outURL.path) (\(events.count) events)")
+        } catch {
+            print("[QA-harness] dump error: \(error)")
         }
     }
     #endif
