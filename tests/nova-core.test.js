@@ -595,27 +595,25 @@ test('caso correcciones 1: fútbol a las 4, no no mejor a las 5 → 1 evento 17:
   }
 })
 
-test('caso correcciones 2: cheap emite duplicado, validator colapsa al último', async () => {
-  // Simula que cheap olvidó la corrección y emitió 2 eventos.
-  const fetchMock = mockFetch(() => ({
-    ok: true,
-    body: mockOpenAIResponse([
-      {
-        type: 'create_event', title: 'Fútbol', dateText: 'mañana', dateISO: '2026-05-20',
-        time: '16:00', durationMinutes: 60, category: 'personal',
-        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
-        confidence: 'high', sourceText: 'fútbol a las 4', linkedReminders: [],
-        supersedesPrevious: false, finalIntentText: null,
-      },
-      {
-        type: 'create_event', title: 'Fútbol', dateText: 'mañana', dateISO: '2026-05-20',
-        time: '17:00', durationMinutes: 60, category: 'personal',
-        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
-        confidence: 'high', sourceText: 'mejor a las 5', linkedReminders: [],
-        supersedesPrevious: true, finalIntentText: 'a las 5',
-      },
-    ], { model: 'gpt-5.5' }),
-  }))
+test('caso correcciones 2: el normalizer reescribe el input ANTES de mandarlo al LLM', async () => {
+  let receivedInput = null
+  const fetchMock = mockFetch(([url, init]) => {
+    const body = JSON.parse(init.body)
+    // El segundo mensaje (user) debe ser el input NORMALIZADO sin "no no mejor a las 5".
+    receivedInput = body.input.find(m => m.role === 'user')?.content
+    return {
+      ok: true,
+      body: mockOpenAIResponse([
+        {
+          type: 'create_event', title: 'Fútbol', dateText: 'mañana', dateISO: '2026-05-20',
+          time: '17:00', durationMinutes: 60, category: 'personal',
+          reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+          confidence: 'high', sourceText: 'fútbol a las 5', linkedReminders: [],
+          supersedesPrevious: false, finalIntentText: null,
+        },
+      ], { model: 'gpt-5.5' }),
+    }
+  })
   try {
     const result = await runNova({
       app: 'focus',
@@ -624,7 +622,9 @@ test('caso correcciones 2: cheap emite duplicado, validator colapsa al último',
       reqId: 'corr2',
       apiKey: 'fake-key',
     })
-    // El validator detectó "no no" + 2 Fútbol con tiempos distintos → solo queda el último
+    // El normalizer pre-LLM eliminó "no no mejor a las 5" → "a las 5"
+    assert.ok(receivedInput.includes('a las 5'), `LLM received: ${receivedInput}`)
+    assert.ok(!receivedInput.includes('no no'), `LLM still has "no no": ${receivedInput}`)
     assert.equal(result.actions.length, 1)
     assert.equal(result.actions[0].event.time, '5:00 PM')
   } finally {
@@ -660,27 +660,24 @@ test('caso correcciones 3: llamar mamá a las 6, espera mejor a las 7 → 19:00'
   }
 })
 
-test('caso correcciones 4: desayuno con Marcia hoy, no perdón mañana → solo mañana', async () => {
-  // Simula 2 events distintos por fecha; validator se queda con el último.
-  const fetchMock = mockFetch(() => ({
-    ok: true,
-    body: mockOpenAIResponse([
-      {
-        type: 'create_event', title: 'Desayuno con Marcia', dateText: 'hoy', dateISO: '2026-05-19',
-        time: '16:00', durationMinutes: 60, category: 'reunion',
-        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
-        confidence: 'high', sourceText: 'desayuno con Marcia', linkedReminders: [],
-        supersedesPrevious: false, finalIntentText: null,
-      },
-      {
-        type: 'create_event', title: 'Desayuno con Marcia', dateText: 'mañana', dateISO: '2026-05-20',
-        time: '16:00', durationMinutes: 60, category: 'reunion',
-        reminderOffsetMinutes: null, linkedToPreviousEvent: false,
-        confidence: 'high', sourceText: 'mañana desayuno con Marcia', linkedReminders: [],
-        supersedesPrevious: true, finalIntentText: 'mañana',
-      },
-    ], { model: 'gpt-5.5' }),
-  }))
+test('caso correcciones 4: desayuno con Marcia hoy, no perdón mañana → normalizer reescribe a "mañana"', async () => {
+  let receivedInput = null
+  const fetchMock = mockFetch(([url, init]) => {
+    const body = JSON.parse(init.body)
+    receivedInput = body.input.find(m => m.role === 'user')?.content
+    return {
+      ok: true,
+      body: mockOpenAIResponse([
+        {
+          type: 'create_event', title: 'Desayuno con Marcia', dateText: 'mañana', dateISO: '2026-05-20',
+          time: '16:00', durationMinutes: 60, category: 'reunion',
+          reminderOffsetMinutes: null, linkedToPreviousEvent: false,
+          confidence: 'high', sourceText: 'desayuno con Marcia', linkedReminders: [],
+          supersedesPrevious: false, finalIntentText: null,
+        },
+      ], { model: 'gpt-5.5' }),
+    }
+  })
   try {
     const result = await runNova({
       app: 'focus',
@@ -689,6 +686,9 @@ test('caso correcciones 4: desayuno con Marcia hoy, no perdón mañana → solo 
       reqId: 'corr4',
       apiKey: 'fake-key',
     })
+    // El normalizer reescribió "hoy ... no perdón, mañana" → "mañana ..."
+    assert.ok(receivedInput.includes('mañana'), `LLM received: ${receivedInput}`)
+    assert.ok(!receivedInput.includes('no perdón'), `LLM still has "no perdón": ${receivedInput}`)
     assert.equal(result.actions.length, 1)
     assert.equal(result.actions[0].event.date, '2026-05-20')
   } finally {

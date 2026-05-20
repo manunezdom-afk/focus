@@ -505,6 +505,28 @@ export function collapseSemanticToBackendActions(semanticActions, { reqId, input
       continue
     }
 
+    // Anti-contaminación por corrección — el LLM a veces emite el título
+    // mezclado con el trigger ("Futbol , no no mejor"). Cualquier match
+    // de los siguientes triggers en lowercase descarta la action; el caller
+    // emite clarify pidiendo que el usuario lo diga de nuevo.
+    const titleNormForTriggers = titleRaw
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+    const TITLE_TRIGGERS = [
+      /\bno\s+no\b/, /\bno\s+mejor\b/, /\bno,?\s*mejor\b/,
+      /\bespera\b/, /\bperd[oó]n\b/, /\bmejor\s+a\s+las\b/,
+      /\bmejor\s+el\b/, /\bmejor\s+hazlo\b/,
+      /\bme\s+equivoqu[eé]\b/, /\bolvida\s+eso\b/,
+      /\beso\s+no\b/, /\bal\s+final\b/, /\ben\s+realidad\b/,
+    ]
+    const triggerHit = TITLE_TRIGGERS.find(re => re.test(titleNormForTriggers))
+    if (triggerHit) {
+      droppedReasons.push(`title contaminado por trigger de corrección: "${titleRaw}"`)
+      clarifications.push(`No entendí bien lo que quieres cambiar. ¿Me lo dices de nuevo en una frase corta?`)
+      continue
+    }
+
     // sourceText debe aparecer en el input (defensa anti-contaminación).
     const src = typeof a.sourceText === 'string' ? a.sourceText : ''
     if (src.trim().length > 0) {

@@ -17,6 +17,7 @@
 // lo devuelve al cliente iOS sin modificaciones adicionales.
 
 import { decideRoute } from './router.js'
+import { normalizeCorrections } from './intentNormalizer.js'
 import { callOpenAI, extractResponsesText, resolveModelName } from './openaiClient.js'
 import {
   validateSemanticActions,
@@ -161,9 +162,27 @@ export async function runNova({
   const { schema, buildPrompt, expand, collapse } = adapterFor(app)
   const systemPrompt = buildPrompt(dateContext)
 
+  // ─── 0. Human Intent Normalization (pre-LLM) ────────────────────────────
+  // Si el usuario se corrigió en el mismo mensaje ("a las 4, no no mejor
+  // a las 5"), reescribe el input para que el LLM solo vea la versión
+  // final. Es defensa heurística: cubre los casos canónicos del QA del
+  // usuario donde los modelos chico/grande ignoraban la regla 11 del
+  // prompt. Si nada matchea, devuelve el input intacto.
+  const normalization = normalizeCorrections(message)
+  if (normalization.applied.length > 0) {
+    logEvent({
+      reqId, app,
+      intentNormalized: true,
+      rulesApplied: normalization.applied,
+      before: message,
+      after: normalization.normalized,
+    })
+  }
+  const effectiveMessage = normalization.normalized
+
   // ─── 1. Routing ─────────────────────────────────────────────────────────
   const routing = routingEnabled
-    ? decideRoute({ message })
+    ? decideRoute({ message: effectiveMessage })
     : { route: 'strong', reason: 'routing-disabled', localResult: null }
 
   // ─── 2a. Local parser path ─────────────────────────────────────────────
@@ -210,7 +229,7 @@ export async function runNova({
   try {
     const result = await runOpenAITier({
       tier: firstTier,
-      systemPrompt, schema, message, apiKey, reqId,
+      systemPrompt, schema, message: effectiveMessage, apiKey, reqId,
       expand,
     })
     semantic = result.semantic
@@ -226,7 +245,7 @@ export async function runNova({
       })
       const result = await runOpenAITier({
         tier: 'strong',
-        systemPrompt, schema, message, apiKey, reqId,
+        systemPrompt, schema, message: effectiveMessage, apiKey, reqId,
         expand,
       })
       semantic = result.semantic
@@ -244,7 +263,7 @@ export async function runNova({
   // duplicados con la misma cosa pero distintas horas/fechas, nos quedamos
   // con la última (post-corrección). Sucede más comúnmente con cheap; el
   // prompt actualizado (regla 11) reduce esto pero la defensa queda.
-  const correctionResolution = resolveCorrectionConflicts(semantic, { userMessage: message })
+  const correctionResolution = resolveCorrectionConflicts(semantic, { userMessage: effectiveMessage })
   if (correctionResolution.conflicts > 0) {
     semantic = correctionResolution.resolved
     logEvent({
@@ -256,7 +275,7 @@ export async function runNova({
 
   // ─── 3b. Validator + posible fallback semántico ──────────────────────────
   const validation = validateSemanticActions(semantic, {
-    userMessage: message,
+    userMessage: effectiveMessage,
     todayISO: dateContext.todayISO,
     tomorrowISO: dateContext.tomorrow,
   })
@@ -277,7 +296,7 @@ export async function runNova({
     try {
       const result = await runOpenAITier({
         tier: 'strong',
-        systemPrompt, schema, message, apiKey, reqId,
+        systemPrompt, schema, message: effectiveMessage, apiKey, reqId,
         expand,
       })
       semantic = result.semantic
@@ -286,7 +305,7 @@ export async function runNova({
       fallbackUsed = true
       routingReason = `${routing.reason}+fallback:validator`
       // Re-resolver correcciones después del retry strong.
-      const reResolution = resolveCorrectionConflicts(semantic, { userMessage: message })
+      const reResolution = resolveCorrectionConflicts(semantic, { userMessage: effectiveMessage })
       if (reResolution.conflicts > 0) {
         semantic = reResolution.resolved
       }
@@ -305,7 +324,7 @@ export async function runNova({
   // ─── 4. Collapse a shape iOS ─────────────────────────────────────────────
   const { safeActions, droppedReasons, clarifications } = collapse(semantic, {
     reqId,
-    inputMessage: message,
+    inputMessage: effectiveMessage,
   })
 
   // Confidence numérica promedio.
