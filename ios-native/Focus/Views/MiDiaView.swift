@@ -2946,6 +2946,13 @@ private struct TimelineEventRow: View {
         event.reminderNote(at: 0)
     }
 
+    /// Theme 2.0: para aplicar opacity + scale a eventos terminados.
+    /// "Pasado" = endTime (o startTime si puntual) ya pasó respecto a now.
+    private var eventHasPassed: Bool {
+        let effectiveEnd = event.endTime ?? event.startTime
+        return effectiveEnd < Date()
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
             // Hora a la izquierda
@@ -2993,29 +3000,28 @@ private struct TimelineEventRow: View {
                     .frame(width: density.sidebarWidth)
 
                 VStack(alignment: .leading, spacing: density == .spacious ? 8 : 6) {
-                    // Badges de estado. Solo uno puede estar visible a la vez.
-                    // • PRÓXIMO  — siguiente bloque real que aún no empezó.
-                    // • EN CURSO — bloque actualmente en progreso (isNow).
-                    // • TERMINADO — bloque cuyo end (o start si es puntual)
-                    //   ya pasó. Color muted: es info contextual, no urgente.
+                    // Theme 2.0: badges de estado en captionMono UPPERCASE con
+                    // tracking opinado para density visual. Antes era SF Pro
+                    // 10pt bold + tracking 1.2 — funcional pero indistinguible
+                    // de un caption regular. CaptionMono da peso técnico.
                     let effectiveEnd = event.endTime ?? event.startTime
                     let hasPassed = effectiveEnd < Date()
 
                     if isNext && !event.isNow {
                         Text("PRÓXIMO")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(Theme.Typography.captionMono)
+                            .tracking(Theme.Tracking.captionMono)
                             .foregroundStyle(Theme.Colors.focusAccent)
-                            .tracking(1.2)
                     } else if event.isNow {
                         Text("EN CURSO")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(Theme.Typography.captionMono)
+                            .tracking(Theme.Tracking.captionMono)
                             .foregroundStyle(Theme.Colors.success)
-                            .tracking(1.2)
                     } else if hasPassed {
                         Text("TERMINADO")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(Theme.Typography.captionMono)
+                            .tracking(Theme.Tracking.captionMono)
                             .foregroundStyle(Theme.Colors.textTertiary)
-                            .tracking(1.2)
                     }
                     Text(event.title)
                         .font(density.titleFont)
@@ -3117,19 +3123,39 @@ private struct TimelineEventRow: View {
                 RoundedRectangle(cornerRadius: density == .spacious ? Theme.Radius.lg : Theme.Radius.md, style: .continuous)
             )
             .overlay(
-                // El border va por fuera del clip para que se vea limpio
-                // en las esquinas redondeadas.
+                // Theme 2.0: cuando el evento está EN CURSO, el border se
+                // intensifica al color de la sección — visualmente la card
+                // "respira" con el contexto. Antes era border genérico
+                // hairline gris para todos los estados.
                 RoundedRectangle(cornerRadius: density == .spacious ? Theme.Radius.lg : Theme.Radius.md, style: .continuous)
                     .strokeBorder(
-                        density == .spacious
-                            ? event.section.color.opacity(0.25)
-                            : Theme.Colors.border,
-                        lineWidth: density == .spacious ? 1.2 : Theme.Stroke.hairline
+                        event.isNow
+                            ? event.section.color.opacity(0.55)
+                            : (density == .spacious
+                                ? event.section.color.opacity(0.25)
+                                : Theme.Colors.borderHairline),
+                        lineWidth: event.isNow ? 1.5 : (density == .spacious ? 1.2 : Theme.Stroke.hairline)
                     )
             )
-            .focusCardShadow()
+            // Theme 2.0: shadow contextual — EN CURSO recibe glow del color
+            // de la sección (foco cobalto, reunión indigo, etc) para que el
+            // evento activo se sienta "iluminado" desde dentro.
+            .shadow(
+                color: event.isNow
+                    ? event.section.color.opacity(0.32)
+                    : Theme.Colors.cardShadow,
+                radius: event.isNow ? 14 : 6,
+                x: 0,
+                y: event.isNow ? 6 : 3
+            )
             .padding(.bottom, isLast ? 0 : Theme.Spacing.sm)
         }
+        // Theme 2.0: eventos terminados se desvanecen al 55% de opacidad
+        // y se contraen levemente — el usuario ve "lo que ya pasó" pero el
+        // foco visual está en el presente y futuro.
+        .opacity(eventHasPassed ? 0.55 : 1.0)
+        .scaleEffect(y: eventHasPassed ? 0.96 : 1.0, anchor: .top)
+        .animation(Theme.Motion.easeInOutStandard, value: eventHasPassed)
         // Coach mark del chip 🔔: la primera vez que el usuario ve un
         // evento con reminder offset, le explicamos qué significa el chip.
         // Solo dispara si este row tiene offset y el flag no se vio antes.
