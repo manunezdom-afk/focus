@@ -289,7 +289,7 @@ struct MiDiaView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center) {
                 FocusBrandRow()
                 Spacer()
@@ -298,18 +298,18 @@ struct MiDiaView: View {
                     profileButton
                 }
             }
+            // Theme 2.0: displayHero 34pt SemiBold + tracking -1.36 para
+            // ancla visual fuerte. Antes era title (30pt bold) — más
+            // grande pero con menos personalidad porque carecía de
+            // tracking opinado. El nuevo se siente "display" de verdad.
             Text("Mi Día")
-                .font(Theme.Typography.title)
+                .font(Theme.Typography.displayHero)
+                .tracking(Theme.Tracking.displayHero)
                 .foregroundStyle(Theme.Colors.textPrimary)
-            // 2026-05-13: subtítulo sutil con el ESTADO del día.
-            // La fecha ya vive en `FocusBrandRow` arriba ("Miércoles, 13 de
-            // mayo") — repetirla en el subtítulo duplicaba data. Acá solo
-            // el contador de bloques + pendientes, o "Día libre" cuando no
-            // hay nada. Sirve como ancla rápida sin obligar al usuario a
-            // leer abajo, y deja a los bloques relajarse a tamaño normal
-            // (ahora `balanced` siempre que sean ≤5) sin sentirse vacío.
+            // Subtítulo con tracking body para coherencia con el sistema.
             Text(headerSubtitle)
                 .font(Theme.Typography.subhead)
+                .tracking(Theme.Tracking.body)
                 .foregroundStyle(Theme.Colors.textSecondary)
         }
     }
@@ -339,19 +339,22 @@ struct MiDiaView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.Colors.textSecondary)
                     .frame(width: 42, height: 42)
+                    // Theme 2.0: hairline border + sombra Z-1 más fina.
                     .background(
                         Circle()
                             .fill(Theme.Colors.surface)
                             .overlay(
-                                Circle().strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                                Circle().strokeBorder(Theme.Colors.borderHairline, lineWidth: Theme.Stroke.hairline)
                             )
                     )
                     .focusCardShadow()
                 if store.pendingDisplaySuggestions.count > 0 {
+                    // Dot Nova con glow sutil — el aviso debe sentirse vivo.
                     Circle()
                         .fill(Theme.Colors.novaAccent)
                         .frame(width: 10, height: 10)
                         .overlay(Circle().strokeBorder(Theme.Colors.background, lineWidth: 2))
+                        .shadow(color: Theme.Colors.novaAccent.opacity(0.55), radius: 4, y: 0)
                         .offset(x: 2, y: -2)
                 }
             }
@@ -363,7 +366,7 @@ struct MiDiaView: View {
     private var profileButton: some View {
         Button {
             HapticManager.shared.tap()
-            withAnimation(.easeInOut(duration: 0.28)) {
+            withAnimation(Theme.Spring.settle) {
                 nav.selectedTab = .ajustes
             }
         } label: {
@@ -371,7 +374,7 @@ struct MiDiaView: View {
                 .fill(Theme.Colors.surface)
                 .frame(width: 42, height: 42)
                 .overlay(
-                    Circle().strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                    Circle().strokeBorder(Theme.Colors.borderHairline, lineWidth: Theme.Stroke.hairline)
                 )
                 .overlay(
                     Image(systemName: "person.fill")
