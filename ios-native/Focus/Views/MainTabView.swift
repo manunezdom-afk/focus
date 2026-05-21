@@ -102,6 +102,9 @@ struct MainTabView: View {
     @StateObject private var nav = NavigationCoordinator()
     @StateObject private var toast = ToastManager()
     @State private var isKeyboardVisible = false
+    /// Namespace para `matchedGeometryEffect` del indicator de tab seleccionada.
+    /// La cápsula de fondo "vuela" entre tabs cuando cambia la selección.
+    @Namespace private var tabSelectionNamespace
 
     var body: some View {
         VStack(spacing: 0) {
@@ -184,7 +187,16 @@ struct MainTabView: View {
         )
     }
 
-    // MARK: - Custom tab bar
+    // MARK: - Custom tab bar (Theme 2.0 — píldora flotante Z-2)
+    //
+    // Antes: barra ancha del 100% pegada al safe area inferior con material
+    // ultraThin + tinte blanco. Funcional pero indistinguible del default iOS.
+    //
+    // Ahora: píldora flotante separada del safe area inferior, con material
+    // ultraThin + tinte Nova 4%, hairline border, sombra Z-2 elevated. La
+    // selección viaja entre tabs como una cápsula que "flota" usando
+    // matchedGeometryEffect — la selección se siente física, no como un
+    // simple cambio de color.
 
     private var customTabBar: some View {
         HStack(spacing: 0) {
@@ -192,24 +204,23 @@ struct MainTabView: View {
                 tabButton(tab)
             }
         }
-        .padding(.horizontal, Theme.Spacing.sm)
-        .padding(.top, Theme.Spacing.xs + 2)
-        .padding(.bottom, Theme.Spacing.xs + 2)
+        .frame(height: 64)
+        .padding(.horizontal, 6)
         .background(
             ZStack {
-                Rectangle()
+                Capsule(style: .continuous)
                     .fill(.ultraThinMaterial)
-                Rectangle()
-                    .fill(Color.white.opacity(0.55))
+                Capsule(style: .continuous)
+                    .fill(Theme.Colors.novaAccent.opacity(0.04))
             }
-            .ignoresSafeArea(edges: .bottom)
         )
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Theme.Colors.border)
-                .frame(height: Theme.Stroke.hairline)
-                .opacity(0.6)
-        }
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(Theme.Colors.borderHairline, lineWidth: Theme.Stroke.hairline)
+        )
+        .shadow(color: Theme.Colors.cardShadowStrong, radius: 18, x: 0, y: 10)
+        .padding(.horizontal, Theme.Spacing.xl)
+        .padding(.bottom, 6)
     }
 
     private func tabButton(_ tab: MainTab) -> some View {
@@ -217,18 +228,43 @@ struct MainTabView: View {
         let isNova = tab == .nova
         return Button {
             HapticManager.shared.tick()
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+            withAnimation(Theme.Spring.settle) {
                 nav.selectedTab = tab
             }
         } label: {
-            VStack(spacing: 3) {
-                tabIcon(tab, isSelected: isSelected)
-                    .frame(height: 28)
-                Text(tab.title)
-                    .font(.system(size: 10, weight: isSelected || isNova ? .semibold : .regular))
-                    .foregroundStyle(labelStyle(for: tab, isSelected: isSelected))
+            ZStack {
+                // Cápsula deslizante del estado seleccionado — vuela entre tabs
+                // con matchedGeometryEffect. Tinte sutil tonal según tab.
+                if isSelected {
+                    Capsule(style: .continuous)
+                        .fill(
+                            isNova
+                                ? Theme.Colors.novaAccent.opacity(0.10)
+                                : Theme.Colors.textPrimary.opacity(0.06)
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(
+                                    isNova
+                                        ? Theme.Colors.novaAccent.opacity(0.18)
+                                        : Theme.Colors.borderHairline,
+                                    lineWidth: Theme.Stroke.hairline
+                                )
+                        )
+                        .matchedGeometryEffect(id: "tabSelection", in: tabSelectionNamespace)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 4)
+                }
+
+                VStack(spacing: 2) {
+                    tabIcon(tab, isSelected: isSelected)
+                        .frame(height: 28)
+                    Text(tab.title)
+                        .font(.system(size: 10, weight: isSelected || isNova ? .semibold : .regular))
+                        .foregroundStyle(labelStyle(for: tab, isSelected: isSelected))
+                }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -270,7 +306,8 @@ struct MainTabView: View {
         switch tab {
         case .nova:
             // Nova destacada — gradient SIEMPRE para que llame la atención.
-            // Cuando está seleccionada, agregamos halo violet pulsante sutil.
+            // Cuando está seleccionada, agregamos halo violet pulsante sutil
+            // + micro-pop de escala via spring (Theme 2.0).
             ZStack {
                 if isSelected {
                     Circle()
@@ -280,18 +317,22 @@ struct MainTabView: View {
                 }
                 NovaSparkMark(
                     size: isSelected ? 26 : 22,
-                    fillColor: AnyShapeStyle(Theme.Colors.novaGradient)
+                    fillColor: AnyShapeStyle(Theme.Colors.novaPrismGradient)
                 )
                 .shadow(color: Theme.Colors.novaAccent.opacity(isSelected ? 0.50 : 0), radius: 6, y: 1)
             }
+            .scaleEffect(isSelected ? 1.08 : 1.0)
+            .animation(Theme.Spring.pop, value: isSelected)
         default:
             // Otros tabs: gris cuando inactivo, gris oscuro cuando activo.
-            // SIN color de marca — Nova es la única que tiene azul/violet.
+            // SIN color de marca — Nova es la única con violeta/cobalto.
             Image(systemName: isSelected ? tab.selectedSymbol : tab.symbol)
                 .font(.system(size: isSelected ? 21 : 19, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(
                     isSelected ? Theme.Colors.textPrimary : Theme.Colors.textTertiary
                 )
+                .scaleEffect(isSelected ? 1.08 : 1.0)
+                .animation(Theme.Spring.pop, value: isSelected)
         }
     }
 }
