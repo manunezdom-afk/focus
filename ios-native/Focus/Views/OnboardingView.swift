@@ -88,7 +88,8 @@ struct OnboardingView: View {
 
             VStack(spacing: Theme.Spacing.md) {
                 Text("Focus OS")
-                    .font(.system(size: 32, weight: .bold))
+                    .font(.system(size: 32, weight: .semibold))
+                    .tracking(-1.28)
                     .foregroundStyle(Theme.Colors.textPrimary)
                 Text("Tu día, tus tareas y Nova en un solo lugar.")
                     .font(Theme.Typography.body)
@@ -114,7 +115,8 @@ struct OnboardingView: View {
 
             VStack(spacing: Theme.Spacing.md) {
                 Text("Ordena tu día sin pensarlo tanto")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: 28, weight: .semibold))
+                    .tracking(-1.12)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("Ve tus bloques, pendientes y recordatorios en una vista simple.")
@@ -180,7 +182,8 @@ struct OnboardingView: View {
 
             VStack(spacing: Theme.Spacing.md) {
                 Text("Díselo como hablas")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: 28, weight: .semibold))
+                    .tracking(-1.12)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("Pídele a Nova: «mañana despiértame a las 7 y recuérdame salir a las 8».")
@@ -206,7 +209,8 @@ struct OnboardingView: View {
 
             VStack(spacing: Theme.Spacing.md) {
                 Text("Que nada se te pase")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: 28, weight: .semibold))
+                    .tracking(-1.12)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("Focus guarda eventos, tareas y te avisa en el momento correcto.")

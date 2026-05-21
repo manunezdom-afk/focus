@@ -146,13 +146,18 @@ struct LoginView: View {
             FocusLogoMark(size: 108)
                 .padding(.bottom, Theme.Spacing.md)
 
+            // Theme 2.0: "Focus" hero con tracking opinado (-1.68 ~ -0.04em
+            // × 42pt). El SemiBold sigue siendo el peso correcto para login
+            // (más amable que Bold full). Tracking agresivo da la
+            // identidad Linear-style sin embeber fuente.
             Text("Focus")
                 .font(.system(size: 42, weight: .semibold))
+                .tracking(-1.68)
                 .foregroundStyle(Theme.Colors.textPrimary)
-                .tracking(0.3)
 
             Text("Entra a tu sistema de organización personal.")
                 .font(Theme.Typography.body)
+                .tracking(Theme.Tracking.body)
                 .foregroundStyle(Theme.Colors.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
@@ -201,18 +206,30 @@ struct LoginView: View {
             }
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.vertical, Theme.Spacing.md + 2)
+            // Theme 2.0: email input con borde focusDeepGradient siempre
+            // visible. Glow cobalto cuando focused para feedback claro.
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
                     .fill(Theme.Colors.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
-                            .strokeBorder(
-                                emailFocused ? Theme.Colors.focusAccent.opacity(0.5) : Theme.Colors.border,
-                                lineWidth: emailFocused ? 1.5 : Theme.Stroke.hairline
-                            )
-                    )
-                    .focusCardShadow()
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.xxl, style: .continuous)
+                    .strokeBorder(
+                        emailFocused
+                            ? AnyShapeStyle(Theme.Colors.focusDeepGradient)
+                            : AnyShapeStyle(Theme.Colors.borderHairline),
+                        lineWidth: emailFocused ? 1.5 : Theme.Stroke.hairline
+                    )
+            )
+            .shadow(
+                color: emailFocused
+                    ? Theme.Colors.focusAccent.opacity(0.18)
+                    : Theme.Colors.cardShadow,
+                radius: emailFocused ? 16 : 6,
+                x: 0,
+                y: emailFocused ? 6 : 3
+            )
+            .animation(Theme.Motion.easeInOutStandard, value: emailFocused)
 
             primaryButton(
                 title: "Enviar código",
