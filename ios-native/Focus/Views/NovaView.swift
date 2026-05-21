@@ -21,7 +21,6 @@ struct NovaView: View {
     @State private var showExportCalendar: Bool = false
     @State private var showNovaLive: Bool = false
     @State private var showVoiceDictation: Bool = false
-    @FocusState private var inputFocused: Bool
 
     /// **Feature flag Nova Live**. La V1 actual (Speech framework + STT
     /// + envío a Nova) NO es la experiencia conversacional tipo
@@ -132,7 +131,6 @@ struct NovaView: View {
                 // se carga en el draft para que el usuario lo revise y
                 // confirme con el botón enviar.
                 draft = transcript
-                inputFocused = true
             }
             .presentationDetents([.height(380)])
             .presentationDragIndicator(.visible)
@@ -584,13 +582,6 @@ struct NovaView: View {
             .onChange(of: store.isNovaTyping) { _, typing in
                 if typing { scrollToBottom(proxy: proxy, animated: true) }
             }
-            .onChange(of: inputFocused) { _, focused in
-                if focused {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        scrollToBottom(proxy: proxy, animated: true)
-                    }
-                }
-            }
             .onAppear {
                 scrollToBottom(proxy: proxy, animated: false)
             }
@@ -610,9 +601,16 @@ struct NovaView: View {
         }
     }
 
-    /// Input multilínea para el chat. Vive dentro de `safeAreaInset(edge: .bottom)`
-    /// del scroll, por lo que iOS lo posiciona automáticamente arriba del teclado.
-    /// Crece hasta 4 líneas y después hace scroll interno.
+    /// v7 unificación de micrófonos: el input del chat de Nova ahora usa
+    /// el MISMO componente `FocusBarInput` que la barra de Mi Día. Mismo
+    /// diamante Nova breathing, mismo botón mic (glifo gris idle → fill
+    /// NovaPrism cuando dicta), mismo botón enviar cobalto sólido. Toda
+    /// la app comparte un único componente de entrada de IA.
+    ///
+    /// El mic NO abre dictado inline en este input (a diferencia del de
+    /// Mi Día). Aquí abre el `VoiceDictationSheet` — flujo histórico que
+    /// el usuario espera. `isDictating: false` permanente porque no hay
+    /// transcript inline; el sheet maneja la voz cuando se abre.
     private var inputBar: some View {
         VStack(spacing: 0) {
             Rectangle()
@@ -620,97 +618,21 @@ struct NovaView: View {
                 .frame(height: Theme.Stroke.hairline)
                 .opacity(0.5)
 
-            HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
-                TextField("Escríbele a Nova…", text: $draft, axis: .vertical)
-                    .focused($inputFocused)
-                    .font(Theme.Typography.body)
-                    .foregroundStyle(Theme.Colors.textPrimary)
-                    .tint(Theme.Colors.focusAccent)
-                    .lineLimit(1...4)
-                    .submitLabel(.send)
-                    .onSubmit(submitDraft)
-                    .padding(.vertical, 4)
-                    // Toolbar "Listo" arriba del teclado — sin esto el
-                    // usuario no tiene cómo cerrarlo si decide no enviar.
-                    .toolbar {
-                        ToolbarItemGroup(placement: .keyboard) {
-                            Spacer()
-                            Button("Listo") {
-                                inputFocused = false
-                            }
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.focusAccent)
-                        }
-                    }
-
-                // Mic del input del chat = dictado rápido para escribir
-                // un mensaje. NO abre Nova Live — eso está en el chip
-                // "Hablar con Nova" del empty state. Aquí el texto va al
-                // draft, el usuario revisa y manda con el botón enviar.
-                Button {
+            FocusBarInput(
+                text: $draft,
+                placeholder: "Escríbele a Nova…",
+                onSubmit: submitDraft,
+                onMic: {
                     HapticManager.shared.tap()
                     showVoiceDictation = true
-                } label: {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.focusAccent)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            Circle().fill(Theme.Colors.focusAccentSoft)
-                        )
-                }
-                .buttonStyle(.plain)
-
-                Button(action: submitDraft) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            Circle().fill(
-                                draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                    ? Theme.Colors.focusAccent.opacity(0.35)
-                                    : Theme.Colors.focusAccent
-                            )
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            .padding(.horizontal, Theme.Spacing.md + 2)
-            .padding(.vertical, Theme.Spacing.sm + 1)
-            // Theme 2.0 fix v3: coherente con FocusBar Mi Día. Surface
-            // sólida, borde soft hairline idle, borde NovaPrism + glow
-            // sólo cuando focused. Sin tinte violet interno.
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                    .fill(Theme.Colors.surface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                    .strokeBorder(
-                        inputFocused
-                            ? AnyShapeStyle(Theme.Colors.novaPrismGradient)
-                            : AnyShapeStyle(Theme.Colors.borderSoft),
-                        lineWidth: inputFocused ? 1.5 : 1.0
-                    )
-            )
-            .shadow(
-                color: inputFocused
-                    ? Theme.Colors.novaAccent.opacity(0.28)
-                    : Color(red: 0.06, green: 0.07, blue: 0.10).opacity(0.08),
-                radius: inputFocused ? 18 : 10,
-                x: 0,
-                y: inputFocused ? 7 : 4
+                },
+                isDictating: false,
+                audioLevel: 0
             )
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.top, Theme.Spacing.sm + 2)
             .padding(.bottom, Theme.Spacing.sm)
-            .animation(Theme.Motion.easeInOutStandard, value: inputFocused)
         }
-        // Background SÓLIDO + sombra superior sutil para separar
-        // visualmente del contenido scrollable. Sin `ignoresSafeArea` —
-        // SwiftUI maneja la keyboard avoidance vía `safeAreaInset`.
         .background(
             Theme.Colors.background
                 .shadow(color: .black.opacity(0.06), radius: 4, y: -2)
@@ -848,30 +770,56 @@ private struct NovaTypingIndicator: View {
         // alineados, sin burbuja con border. Mantiene la coherencia con
         // las respuestas reales de Nova en el chat.
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            // Avatar Nova — gradient NovaPrism con leve "respiración" que
+            // sigue el ritmo del thinking.
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Theme.Colors.novaGradient)
+                    .fill(Theme.Colors.novaPrismGradient)
                     .frame(width: 26, height: 26)
+                    .scaleEffect(animating ? 1.06 : 0.96)
+                    .shadow(
+                        color: Theme.Colors.novaAccent.opacity(animating ? 0.55 : 0.20),
+                        radius: animating ? 10 : 4
+                    )
+                    .animation(
+                        .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
+                        value: animating
+                    )
                 NovaSparkMark(size: 11)
             }
             .padding(.top, 2)
 
-            HStack(spacing: 5) {
-                ForEach(0..<3) { i in
-                    Circle()
-                        .fill(Theme.Colors.novaAccent.opacity(0.75))
-                        .frame(width: 7, height: 7)
-                        .scaleEffect(animating ? 1.0 : 0.45)
-                        .opacity(animating ? 1.0 : 0.45)
-                        .animation(
-                            .easeInOut(duration: 0.65)
-                                .repeatForever(autoreverses: true)
-                                .delay(0.18 * Double(i)),
-                            value: animating
-                        )
+            // v7: "Nova está pensando…" en captionMono UPPERCASE + 3 puntos
+            // gradient que respiran con phase staggered. Antes 3 dots planos
+            // sin label — se sentía pobre. Ahora se siente más conversacional.
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Nova está pensando")
+                    .font(Theme.Typography.captionMono)
+                    .tracking(Theme.Tracking.captionMono)
+                    .foregroundStyle(Theme.Colors.novaAccent)
+                    .textCase(.uppercase)
+                HStack(spacing: 6) {
+                    ForEach(0..<3) { i in
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Theme.Colors.focusAccent, Theme.Colors.novaAccent],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(width: 8, height: 8)
+                            .scaleEffect(animating ? 1.0 : 0.50)
+                            .opacity(animating ? 1.0 : 0.40)
+                            .animation(
+                                .easeInOut(duration: 0.70)
+                                    .repeatForever(autoreverses: true)
+                                    .delay(0.18 * Double(i)),
+                                value: animating
+                            )
+                    }
                 }
             }
-            .padding(.top, 8)
 
             Spacer(minLength: Theme.Spacing.md)
         }

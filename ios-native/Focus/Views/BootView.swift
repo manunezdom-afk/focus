@@ -2,15 +2,26 @@ import SwiftUI
 
 /// Splash cinematic. Gradiente radial premium + logo grande con glow + wordmark
 /// debajo + tagline. Primera impresión del producto.
+///
+/// v7 fix microcorte: el BootView termina haciendo un FADE del gradient
+/// deep navy hacia el canvas light de la app (Theme.Colors.background).
+/// Antes el Boot quedaba en deep cobalto hasta el último frame y la
+/// transición al MainTab (canvas light) creaba un flash gris/blanco
+/// muy notorio. Ahora el último 0.2s del Boot revela el canvas light
+/// debajo del gradient deep, así cuando MainTab fade-in, ambos están
+/// sobre el mismo color base → cero salto visual.
 struct BootView: View {
     @State private var opacity: Double = 0.0
     @State private var markScale: CGFloat = 0.88
     @State private var glowOpacity: Double = 0.0
+    /// Cuando true → el gradient deep + logo + wordmark hacen fade-out a 0
+    /// y queda visible el canvas light. Se activa antes del final del
+    /// Boot para morph a la paleta del MainTab.
+    @State private var morphToLight: Bool = false
 
     /// Gradiente radial multi-stop: brillante cobalto en el centro,
     /// navy profundo intermedio, tinte indigo/violeta en los bordes.
-    /// Da sensación de "spotlight" sobre el logo, con un guiño violet
-    /// que conecta con el gradient interno del Nova diamond.
+    /// Da sensación de "spotlight" sobre el logo.
     private var bgRadial: some View {
         RadialGradient(
             gradient: Gradient(stops: [
@@ -27,7 +38,16 @@ struct BootView: View {
 
     var body: some View {
         ZStack {
-            bgRadial.ignoresSafeArea()
+            // v7: capa light DEBAJO del gradient deep. Cuando morphToLight
+            // se activa, el gradient hace fade-out y revela este canvas
+            // — coincide exactamente con `Theme.Colors.background` del
+            // MainTab → la transición Boot → MainTab no salta de color.
+            Theme.Colors.background
+                .ignoresSafeArea()
+
+            bgRadial
+                .ignoresSafeArea()
+                .opacity(morphToLight ? 0 : 1)
 
             VStack(spacing: 0) {
                 Spacer()
@@ -74,18 +94,29 @@ struct BootView: View {
                 Spacer()
                 Spacer()
             }
+            // v7: TODO el contenido (logo + wordmark) fade-out junto con
+            // el gradient cuando morphToLight = true. Solo queda visible
+            // el canvas light, matching el MainTab.
+            .opacity(morphToLight ? 0 : 1)
         }
         .onAppear {
-            // Animaciones acortadas: antes eran 0.8s + 1.2s con delay,
-            // pero el BootView ahora vive 0.6s. Comprimimos a 0.35s para
-            // que el fade-in alcance a completarse y el splash se sienta
-            // intencional, no "frenado".
+            // Fade-in inicial — el splash se asienta.
             withAnimation(.easeOut(duration: 0.35)) {
                 opacity = 1
                 markScale = 1.0
             }
             withAnimation(.easeOut(duration: 0.45).delay(0.05)) {
                 glowOpacity = 1
+            }
+
+            // v7 morph: a los 400ms (de los 600ms totales del Boot) empieza
+            // a fade del gradient deep al canvas light. Cuando ContentView
+            // hace switch a .main a los 600ms, ya estamos sobre canvas
+            // matching → MainTab fade-in sin salto de color.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
+                withAnimation(.easeInOut(duration: 0.20)) {
+                    morphToLight = true
+                }
             }
         }
     }

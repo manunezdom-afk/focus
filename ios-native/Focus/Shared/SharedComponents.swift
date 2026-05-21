@@ -1708,7 +1708,19 @@ struct FocusAmbientCanvas: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
-        .onAppear { startAnimation() }
+        .onAppear {
+            // v7 fix performance: diferimos el inicio de la animación de
+            // halos 450ms. SwiftUI monta las 4 vistas tab eager — si cada
+            // FocusAmbientCanvas arranca su `withAnimation(repeatForever)`
+            // simultáneamente en el primer mount, se compite por el main
+            // thread y se siente jank en la primera interacción. Con el
+            // delay, el primer paint y el primer tap entran limpios; los
+            // halos arrancan a moverse después.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                startAnimation()
+            }
+        }
         .onChange(of: state) { _, _ in startAnimation() }
     }
 
