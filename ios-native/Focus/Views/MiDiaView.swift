@@ -2517,10 +2517,11 @@ struct MiDiaView: View {
                 Image(systemName: "bell.slash.fill")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(Theme.Colors.warning)
+                // Theme 2.0: label en captionMono UPPERCASE + tracking opinado.
                 Text("Vencidos")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(Theme.Typography.captionMono)
+                    .tracking(Theme.Tracking.captionMono)
                     .foregroundStyle(Theme.Colors.warning)
-                    .tracking(0.8)
                     .textCase(.uppercase)
             }
             VStack(spacing: Theme.Spacing.xs) {
@@ -2579,9 +2580,11 @@ struct MiDiaView: View {
         }
         .padding(.horizontal, Theme.Spacing.md)
         .padding(.vertical, Theme.Spacing.sm)
+        // Theme 2.0: borde warning más sutil + warningSoft fill tonal para
+        // que la urgencia se sienta sin ser agresiva.
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                .fill(Theme.Colors.surface)
+                .fill(Theme.Colors.warningSoft.opacity(0.45))
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
                         .strokeBorder(Theme.Colors.warning.opacity(0.30), lineWidth: 1)
@@ -2772,9 +2775,13 @@ struct MiDiaView: View {
                 Image(systemName: "calendar")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.Colors.textTertiary)
+                // Theme 2.0: label "MAÑANA" en captionMono UPPERCASE para
+                // coherencia con badges del timeline (PRÓXIMO/EN CURSO/etc).
                 Text("Mañana")
-                    .font(Theme.Typography.subheadEmphasized)
+                    .font(Theme.Typography.captionMono)
+                    .tracking(Theme.Tracking.captionMono)
                     .foregroundStyle(Theme.Colors.textTertiary)
+                    .textCase(.uppercase)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
@@ -2798,12 +2805,14 @@ struct MiDiaView: View {
         }
         .padding(.vertical, Theme.Spacing.md)
         .padding(.horizontal, Theme.Spacing.md + 2)
+        // Theme 2.0: borderHairline + surfaceTinted más tenue. La preview
+        // de mañana es info secundaria, debe sentirse "atrás" del timeline.
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                 .fill(Theme.Colors.surfaceTinted.opacity(0.55))
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                        .strokeBorder(Theme.Colors.border.opacity(0.45), lineWidth: 0.5)
+                        .strokeBorder(Theme.Colors.borderHairline, lineWidth: Theme.Stroke.hairline)
                 )
         )
         .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous))
