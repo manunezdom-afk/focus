@@ -758,6 +758,19 @@ struct AjustesView: View {
                     subtitle: "\(AppVersion.displayString) · Hecho para organizar tu día con Nova.",
                     trailing: .nothing
                 )
+
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+
+                // Marca diagnóstica temporal — confirma en device que la
+                // build instalada incluye el rediseño Precision Etherealism.
+                // Borrar este row cuando termine la fase QA del rediseño.
+                AjustesRow(
+                    symbol: "sparkles",
+                    tint: Theme.Colors.novaAccent,
+                    title: Theme.QA.markerLabel,
+                    subtitle: "Build con rediseño visual 2.0 (\(Theme.QA.buildLabel)).",
+                    trailing: .nothing
+                )
             }
             .focusCardContainer()
         }

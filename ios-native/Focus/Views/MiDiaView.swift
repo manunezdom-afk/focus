@@ -298,20 +298,43 @@ struct MiDiaView: View {
                     profileButton
                 }
             }
-            // Theme 2.0: displayHero 34pt SemiBold + tracking -1.36 para
-            // ancla visual fuerte. Antes era title (30pt bold) — más
-            // grande pero con menos personalidad porque carecía de
-            // tracking opinado. El nuevo se siente "display" de verdad.
-            Text("Mi Día")
-                .font(Theme.Typography.displayHero)
-                .tracking(Theme.Tracking.displayHero)
-                .foregroundStyle(Theme.Colors.textPrimary)
+            // Title row + QA marker pill (temporal — confirma que la build
+            // instalada incluye el rediseño Precision Etherealism). Borrar
+            // qaMarkerPill cuando termine la fase de QA.
+            HStack(alignment: .lastTextBaseline, spacing: 10) {
+                Text("Mi Día")
+                    .font(Theme.Typography.displayHero)
+                    .tracking(Theme.Tracking.displayHero)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+                qaMarkerPill
+                Spacer(minLength: 0)
+            }
             // Subtítulo con tracking body para coherencia con el sistema.
             Text(headerSubtitle)
                 .font(Theme.Typography.subhead)
                 .tracking(Theme.Tracking.body)
                 .foregroundStyle(Theme.Colors.textSecondary)
         }
+    }
+
+    /// Pill diagnóstico — temporal hasta que termine la fase QA del
+    /// rediseño visual 2.0. Aparece al lado del título "Mi Día" para que
+    /// al abrir la app sea evidente si la build instalada es la nueva.
+    private var qaMarkerPill: some View {
+        Text(Theme.QA.markerLabel)
+            .font(Theme.Typography.captionMono)
+            .tracking(Theme.Tracking.captionMono)
+            .foregroundStyle(Theme.Colors.novaAccent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .fill(Theme.Colors.novaAccent.opacity(0.10))
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Theme.Colors.novaAccent.opacity(0.35), lineWidth: 0.7)
+                    )
+            )
     }
 
     /// Subtítulo del header: solo el estado del día con el conteo de
