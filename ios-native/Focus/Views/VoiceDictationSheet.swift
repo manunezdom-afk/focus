@@ -25,16 +25,15 @@ struct VoiceDictationSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Mini handle visual del sheet (lo da iOS pero un texto ayuda
-            // a comunicar de qué se trata).
-            HStack {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Theme.Colors.focusAccent)
+            // Theme 2.0: header indicator con NovaSparkMark mini (marca Nova,
+            // no mic genérico) + captionMono UPPERCASE. Comunica que la voz
+            // está conectada al asistente Nova, no a un dictado neutral.
+            HStack(spacing: 6) {
+                NovaSparkMark(size: 10, fillColor: AnyShapeStyle(Theme.Colors.novaAccent))
                 Text("Dictado")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.Typography.captionMono)
+                    .tracking(Theme.Tracking.captionMono)
                     .foregroundStyle(Theme.Colors.textSecondary)
-                    .tracking(0.8)
                     .textCase(.uppercase)
             }
             .padding(.top, Theme.Spacing.md + 4)
@@ -77,40 +76,74 @@ struct VoiceDictationSheet: View {
         .onDisappear { service.cancel() }
     }
 
-    // MARK: - Visual
+    // MARK: - Visual (Theme 2.0 — NovaVoiceCore + WaveformRing)
+    //
+    // Antes: halo cobalto + mic.fill icon — inconsistente con la marca Nova
+    // (violet) y plano visualmente. El sheet se sentía como "otro mic",
+    // no como "estás hablando con Nova".
+    //
+    // Ahora:
+    // - NovaVoiceCore: squircle 84×84 con gradient NovaPrism + glow violet.
+    //   El glyph central es el NovaSparkMark blanco (mismo de la app entera).
+    // - WaveformRing: 3 anillos concéntricos hairline 0.5pt color novaAccent
+    //   con opacity 0.10 / 0.25 / 0.50 escalando con el audio level real.
+    // - Sin pulse infinito: la respiración la dicta el audio. Cuando hay
+    //   silencio absoluto, los anillos descansan en escala base.
 
     private var visual: some View {
         let isListening = service.state == .listening
+        let level: CGFloat = isListening
+            ? max(0, min(1, CGFloat(service.audioLevel)))
+            : 0
         return ZStack {
-            // Halo accent — solo visible cuando escucha.
-            Circle()
-                .fill(Theme.Colors.focusAccent.opacity(isListening ? 0.16 : 0.08))
-                .frame(width: 96, height: 96)
-                .scaleEffect(isListening && pulse ? 1.15 : 0.95)
-                .animation(
-                    isListening
-                        ? .easeInOut(duration: 1.0).repeatForever(autoreverses: true)
-                        : .easeOut(duration: 0.3),
-                    value: pulse
-                )
+            // 3 anillos concéntricos — el más interno responde más al audio.
+            ForEach(0..<3, id: \.self) { i in
+                let baseSize: CGFloat = 110 + CGFloat(i) * 26
+                let ringOpacity: Double = [0.50, 0.25, 0.10][i]
+                let scaleBoost: CGFloat = level * 0.18 * CGFloat(3 - i)
+                Circle()
+                    .strokeBorder(
+                        Theme.Colors.novaAccent.opacity(ringOpacity),
+                        lineWidth: 0.5
+                    )
+                    .frame(width: baseSize, height: baseSize)
+                    .scaleEffect(1.0 + scaleBoost)
+                    .opacity(isListening ? 1.0 : 0.35)
+                    .animation(Theme.Spring.interactive, value: level)
+                    .animation(Theme.Motion.easeInOutStandard, value: isListening)
+            }
 
-            // Anillo de borde sutil
-            Circle()
-                .strokeBorder(Theme.Colors.focusAccent.opacity(isListening ? 0.45 : 0.20), lineWidth: 1.5)
-                .frame(width: 78, height: 78)
-
-            // Mic icon central
-            Image(systemName: "mic.fill")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(Theme.Colors.focusAccent)
-                .scaleEffect(isListening && pulse ? 1.05 : 1.0)
-                .animation(
-                    isListening
-                        ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true)
-                        : .default,
-                    value: pulse
+            // NovaVoiceCore — squircle 84×84 con gradient NovaPrism y glow
+            // contextual. Cuando hay audio, "respira" suavemente con scale
+            // proporcional al level.
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Theme.Colors.novaPrismGradient)
+                .frame(width: 84, height: 84)
+                .overlay(
+                    // Inner highlight specular en el top-left para sensación 3D.
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(Color.white.opacity(0.22), lineWidth: 0.7)
                 )
+                .shadow(
+                    color: Theme.Colors.novaAccent.opacity(isListening ? 0.55 : 0.25),
+                    radius: isListening ? 24 : 14,
+                    x: 0,
+                    y: 8
+                )
+                .scaleEffect(1.0 + level * 0.10)
+                .animation(Theme.Spring.interactive, value: level)
+                .animation(Theme.Motion.easeInOutStandard, value: isListening)
+
+            // NovaSparkMark blanco en el centro — marca propia de Nova.
+            NovaSparkMark(size: 36, fillColor: AnyShapeStyle(Color.white))
+                .scaleEffect(1.0 + level * 0.05)
+                .animation(Theme.Spring.interactive, value: level)
         }
+        .frame(height: 180)
+        // Theme 2.0: ofloading al GPU. Renderizar 3 anillos + core + spark
+        // con gradients + shadows en cada frame del audio level es costoso
+        // en CPU. drawingGroup mueve el composite a Metal — 60fps estables.
+        .drawingGroup()
     }
 
     // MARK: - Transcript / state text
@@ -129,10 +162,13 @@ struct VoiceDictationSheet: View {
             }
         case .listening:
             VStack(spacing: Theme.Spacing.xs) {
+                // Theme 2.0: label "ESCUCHANDO…" en captionMono UPPERCASE
+                // con tinte Nova (no focusAccent) — voz pertenece a la marca
+                // Nova en Theme 2.0.
                 Text("Escuchando…")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.focusAccent)
-                    .tracking(0.6)
+                    .font(Theme.Typography.captionMono)
+                    .tracking(Theme.Tracking.captionMono)
+                    .foregroundStyle(Theme.Colors.novaAccent)
                     .textCase(.uppercase)
                 if !service.transcript.isEmpty {
                     transcriptBubble
@@ -166,17 +202,27 @@ struct VoiceDictationSheet: View {
 
     private var transcriptBubble: some View {
         Text(service.transcript)
-            .font(Theme.Typography.body)
+            // Theme 2.0: headline 17pt SemiBold con tracking opinado para
+            // que la transcripción se sienta "display" — el usuario lee
+            // poco texto pero importante (lo que está dictando).
+            .font(Theme.Typography.headline)
+            .tracking(Theme.Tracking.headline)
             .foregroundStyle(Theme.Colors.textPrimary)
             .multilineTextAlignment(.center)
             .lineLimit(4)
             .truncationMode(.head)
             .padding(.horizontal, Theme.Spacing.md)
-            .padding(.vertical, Theme.Spacing.sm)
+            .padding(.vertical, Theme.Spacing.sm + 2)
             .frame(maxWidth: .infinity)
+            // surfaceL2 + borderHairline = card sutil Z-1 sin pelearse con
+            // el NovaVoiceCore visualmente.
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                    .fill(Theme.Colors.surfaceHigh)
+                    .fill(Theme.Colors.surfaceL2)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                            .strokeBorder(Theme.Colors.borderHairline, lineWidth: Theme.Stroke.hairline)
+                    )
             )
     }
 
@@ -238,46 +284,18 @@ struct VoiceDictationSheet: View {
         }
     }
 
+    // Theme 2.0: delegamos a los componentes unificados (FocusPrimaryButton
+    // / FocusSecondaryButton de SharedComponents). Antes este sheet definía
+    // sus propios primaryButton/ghostButton — ahora la misma anatomía vale
+    // para TODA la app. Wrappers cortos para preservar las firmas usadas
+    // en el switch de `actions`.
+
     private func primaryButton(label: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button {
-            HapticManager.shared.tap()
-            action()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .bold))
-                Text(label)
-                    .font(.system(size: 15, weight: .semibold))
-            }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(Capsule().fill(Theme.Colors.focusAccent))
-            .shadow(color: Theme.Colors.focusAccent.opacity(0.35), radius: 14, y: 5)
-        }
-        .buttonStyle(.plain)
+        FocusPrimaryButton(label: label, icon: icon, fullWidth: true, action: action)
     }
 
     private func ghostButton(label: String, action: @escaping () -> Void) -> some View {
-        Button {
-            HapticManager.shared.tick()
-            action()
-        } label: {
-            Text(label)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.Colors.textSecondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(
-                    Capsule()
-                        .fill(Theme.Colors.surfaceHigh)
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                        )
-                )
-        }
-        .buttonStyle(.plain)
+        FocusSecondaryButton(label: label, fullWidth: true, action: action)
     }
 
     private func deliver() {
