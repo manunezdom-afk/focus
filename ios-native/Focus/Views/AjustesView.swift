@@ -327,7 +327,11 @@ struct AjustesView: View {
                 Divider().overlay(Theme.Colors.border).padding(.leading, 60)
 
                 AjustesRow(
-                    symbol: "mic",
+                    // v8: unificación de mics — TODA la app usa "mic.fill"
+                    // (FocusBarInput de Mi Día y Nova Chat, sheet de
+                    // dictado, Nova Live, empty state chip). Esta fila
+                    // usaba "mic" outline, rompiendo la coherencia.
+                    symbol: "mic.fill",
                     tint: Theme.Colors.novaAccent,
                     title: "Voz",
                     subtitle: "Habla con Nova en lugar de escribir.",
