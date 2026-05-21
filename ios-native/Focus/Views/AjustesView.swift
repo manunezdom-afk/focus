@@ -109,12 +109,14 @@ struct AjustesView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Ajustes")
-                .font(Theme.Typography.title)
+                .font(Theme.Typography.displayHero)
+                .tracking(Theme.Tracking.displayHero)
                 .foregroundStyle(Theme.Colors.textPrimary)
             Text("Tu cuenta, tu Nova, tus notificaciones.")
                 .font(Theme.Typography.body)
+                .tracking(Theme.Tracking.body)
                 .foregroundStyle(Theme.Colors.textSecondary)
         }
     }
@@ -786,6 +788,8 @@ struct AjustesView: View {
 }
 
 private extension View {
+    // Theme 2.0: container con borderHairline en lugar de border sólido.
+    // Las sections de Ajustes ahora se ven más "Linear-style".
     func focusCardContainer() -> some View {
         self
             .background(
@@ -793,7 +797,7 @@ private extension View {
                     .fill(Theme.Colors.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                            .strokeBorder(Theme.Colors.borderHairline, lineWidth: Theme.Stroke.hairline)
                     )
                     .focusCardShadow()
             )
@@ -853,9 +857,10 @@ private struct AjustesRow: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Theme.Colors.focusAccent)
         case .badge(let text, let color):
+            // Theme 2.0: badge en captionMono UPPERCASE + tracking opinado.
             Text(text.uppercased())
-                .font(Theme.Typography.caption)
-                .tracking(0.6)
+                .font(Theme.Typography.captionMono)
+                .tracking(Theme.Tracking.captionMono)
                 .foregroundStyle(color)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -864,9 +869,9 @@ private struct AjustesRow: View {
                         .fill(color.opacity(0.10))
                 )
         case .toggle(let binding):
-            Toggle("", isOn: binding)
-                .labelsHidden()
-                .tint(Theme.Colors.focusAccent)
+            // Theme 2.0: FocusToggle reemplaza UISwitch nativo. Track con
+            // gradient FocusDeep cuando activo, en lugar del verde sistema.
+            FocusToggle(isOn: binding)
         case .nothing:
             EmptyView()
         }
