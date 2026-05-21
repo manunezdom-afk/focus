@@ -363,21 +363,6 @@ enum Theme {
         static let medium: CGFloat = 1.5
     }
 
-    // MARK: - QA diagnostic (temporal)
-    //
-    // Marca visible para confirmar en device físico que la build instalada
-    // contiene el rediseño "Precision Etherealism". Aparece como pill en
-    // Mi Día y como row en Ajustes → Acerca. Borrar este enum y sus call
-    // sites cuando termine la fase QA del rediseño.
-
-    enum QA {
-        static let markerLabel: String = "FOCUS VISUAL 2.0"
-        /// Etiqueta del milestone del rediseño. Si el QA en iPhone NO muestra
-        /// este string, la build instalada es vieja — purgar derived data
-        /// (Xcode → Product → Clean Build Folder) y reinstalar.
-        static let buildLabel: String = "qa-2026-05-21-build22"
-    }
-
     // MARK: - Motion (Theme 2.0)
     //
     // Tokens centralizados de animación. Antes cada vista definía durations

@@ -288,37 +288,16 @@ struct MiDiaView: View {
                     profileButton
                 }
             }
-            // Title row + QA marker pill (temporal — confirma que la build
-            // instalada incluye el rediseño Precision Etherealism). Borrar
-            // qaMarkerPill cuando termine la fase de QA.
-            HStack(alignment: .lastTextBaseline, spacing: 10) {
-                Text("Mi Día")
-                    .font(Theme.Typography.displayHero)
-                    .tracking(Theme.Tracking.displayHero)
-                    .foregroundStyle(Theme.Colors.textPrimary)
-                qaMarkerPill
-                Spacer(minLength: 0)
-            }
+            Text("Mi Día")
+                .font(Theme.Typography.displayHero)
+                .tracking(Theme.Tracking.displayHero)
+                .foregroundStyle(Theme.Colors.textPrimary)
             // Subtítulo con tracking body para coherencia con el sistema.
             Text(headerSubtitle)
                 .font(Theme.Typography.subhead)
                 .tracking(Theme.Tracking.body)
                 .foregroundStyle(Theme.Colors.textSecondary)
         }
-    }
-
-    /// Pill diagnóstico — temporal hasta que se apruebe la dirección
-    /// visual y se cierre el rediseño. Versión discreta: solo "v18" en
-    /// SF Mono pequeño, sin background — no compite con el diseño.
-    private var qaMarkerPill: some View {
-        Text(Theme.QA.buildLabel.split(separator: "-").last.map(String.init) ?? "qa")
-            .font(.system(size: 9, weight: .medium, design: .monospaced))
-            .foregroundStyle(Theme.Colors.novaAccent.opacity(0.55))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(
-                Capsule().fill(Theme.Colors.novaAccent.opacity(0.06))
-            )
     }
 
 
