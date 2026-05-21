@@ -375,7 +375,7 @@ enum Theme {
         /// Etiqueta del milestone del rediseño. Si el QA en iPhone NO muestra
         /// este string, la build instalada es vieja — purgar derived data
         /// (Xcode → Product → Clean Build Folder) y reinstalar.
-        static let buildLabel: String = "qa-2026-05-21-build21"
+        static let buildLabel: String = "qa-2026-05-21-build22"
     }
 
     // MARK: - Motion (Theme 2.0)

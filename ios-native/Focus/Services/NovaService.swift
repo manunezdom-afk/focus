@@ -677,18 +677,22 @@ private struct RawAction: Decodable {
 /// "9:00 AM" / "3:30 PM" / "20:00" → hora del día. "YYYY-MM-DD" → fecha.
 enum NovaTimeFormatter {
 
-    /// Fecha + hora del backend → Date local. Si solo viene `time` (sin
-    /// `date`), asume hoy. Si solo viene `date` (sin time), asume 9:00.
-    /// Si ambos null, retorna nil.
+    /// Fecha + hora del backend → Date local.
+    /// - Si solo viene `time` (sin `date`), asume HOY (la fecha por defecto es razonable
+    ///   para el flujo "voy al gym a las 6" sin fecha).
+    /// - Si solo viene `date` (sin `time`), retorna **nil** — esto es CRÍTICO:
+    ///   antes asignaba 9:00 AM por default, lo que generaba el bug
+    ///   "Nova inventa hora cuando user no la dijo". Ahora devolver nil
+    ///   fuerza al call site a tratar el evento como needsClarification
+    ///   y preguntar al usuario.
+    /// - Si ambos null, retorna nil.
     static func resolveDate(dateString: String?, timeString: String?) -> Date? {
         let cal = Calendar.current
         let now = Date()
         let baseDay = parseISODate(dateString) ?? cal.startOfDay(for: now)
         guard let (hour, minute) = parseHourMinute(timeString) else {
-            // Solo fecha, sin hora → 9:00 default
-            if dateString != nil {
-                return cal.date(bySettingHour: 9, minute: 0, second: 0, of: baseDay)
-            }
+            // Antes: asignaba 9:00 AM si había fecha — eso inventaba hora.
+            // Ahora: retornar nil para que el caller pida aclaración.
             return nil
         }
         return cal.date(bySettingHour: hour, minute: minute, second: 0, of: baseDay)
