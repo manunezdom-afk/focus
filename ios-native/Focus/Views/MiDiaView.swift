@@ -88,33 +88,15 @@ struct MiDiaView: View {
         ZStack {
             Theme.Colors.background.ignoresSafeArea()
 
-            // Hero zone: gradient sutil detrás del header — identidad de
-            // Mi Día. Multi-stop: cobalto suave → tinte azul intermedio →
-            // un guiño violeta Nova → fade a background. Antes era un
-            // simple 2-stops cobalto→bg que se veía plano; ahora la
-            // transición de azul agrega profundidad y conecta visualmente
-            // con el gradient interno del FocusLogoMark / Nova diamond.
-            VStack(spacing: 0) {
-                LinearGradient(
-                    gradient: Gradient(stops: [
-                        .init(color: Theme.Colors.focusAccent.opacity(0.14), location: 0.00),
-                        .init(color: Theme.Colors.focusAccent.opacity(0.07), location: 0.45),
-                        .init(color: Theme.Colors.novaAccent.opacity(0.04),  location: 0.78),
-                        .init(color: Theme.Colors.background,                 location: 1.00),
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                // 2026-05-13: altura 300 → 220. El gradient anterior se
-                // extendía detrás del FocusBar y del primer bloque del
-                // timeline, lo que hacía que con 1 evento la pantalla
-                // se sintiera "azul gigante". Ahora termina más arriba,
-                // queda como halo del header + FocusBar y libera el
-                // tono al primer evento para que respire en bg neutro.
-                .frame(height: 220)
-                Spacer()
-            }
-            .ignoresSafeArea()
+            // Hero zone — Theme 2.0 AmbientCalm radial. Reemplaza el linear
+            // 220pt anterior por un radial centrado en el top: el degradé
+            // se desvanece orgánicamente (no en bandas rectas) y crea una
+            // atmósfera más etérea, alineada con la dirección "Precision
+            // Etherealism". El RadialGradient está tokenizado en Theme
+            // (focusAccent 8% → novaAccent 3% → bg 0%, radio 280pt).
+            Theme.Colors.ambientCalmRadial
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
