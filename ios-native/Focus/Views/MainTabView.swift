@@ -265,7 +265,10 @@ struct MainTabView: View {
                     tabIcon(tab, isSelected: isSelected)
                         .frame(height: 28)
                     Text(tab.title)
-                        .font(.system(size: 10, weight: isSelected || isNova ? .semibold : .regular))
+                        // Theme 2.0 fix: weight depende de isSelected, NO
+                        // de isNova. Antes Nova label siempre era semibold
+                        // (parecía activa aunque no lo estuviera).
+                        .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
                         .foregroundStyle(labelStyle(for: tab, isSelected: isSelected))
                 }
             }
@@ -276,43 +279,25 @@ struct MainTabView: View {
         .accessibilityLabel(tab.title)
     }
 
-    /// Color del label de cada tab. Reglas:
-    /// - Nova SIEMPRE tiene tinte de marca (gradient si está seleccionada,
-    ///   acento sólido si no) — Nova es el único item con identidad
-    ///   propia, los demás son sobrios.
-    /// - El resto: gris textTertiary cuando NO seleccionado; textPrimary
-    ///   sólido cuando SÍ — sin color de marca, mantienen jerarquía.
-    /// ShapeStyle para el label de cada tab. Reglas:
-    /// - Nova: gradient cuando activa, accent sólido cuando no — NUNCA gris.
-    /// - Resto: textPrimary cuando activo, textTertiary cuando no.
+    /// Theme 2.0 fix: TODAS las tabs (Nova incluida) cumplen el patrón
+    /// inactivo = textTertiary, activo = textPrimary. La identidad Nova
+    /// vive en el icono (NovaSparkMark con gradient cuando activo), no
+    /// en el label. Antes Nova se veía "activa" siempre porque su label
+    /// era violeta — confundía sobre qué tab estaba realmente seleccionada.
     private func labelStyle(for tab: MainTab, isSelected: Bool) -> AnyShapeStyle {
-        switch tab {
-        case .nova:
-            if isSelected {
-                return AnyShapeStyle(
-                    LinearGradient(
-                        colors: [Theme.Colors.focusAccent, Theme.Colors.novaAccent],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-            } else {
-                return AnyShapeStyle(Theme.Colors.novaAccent)
-            }
-        default:
-            return AnyShapeStyle(
-                isSelected ? Theme.Colors.textPrimary : Theme.Colors.textTertiary
-            )
-        }
+        AnyShapeStyle(
+            isSelected ? Theme.Colors.textPrimary : Theme.Colors.textTertiary
+        )
     }
 
     @ViewBuilder
     private func tabIcon(_ tab: MainTab, isSelected: Bool) -> some View {
         switch tab {
         case .nova:
-            // Nova destacada — gradient SIEMPRE para que llame la atención.
-            // Cuando está seleccionada, agregamos halo violet pulsante sutil
-            // + micro-pop de escala via spring (Theme 2.0).
+            // Theme 2.0 fix: Nova icon cambia visiblemente entre estados.
+            // - Inactivo: NovaSparkMark monocromo textTertiary (igual que
+            //   los otros tabs inactivos) — no se ve "activo" por accidente.
+            // - Activo: gradient NovaPrism + halo violet + glow.
             ZStack {
                 if isSelected {
                     Circle()
@@ -322,7 +307,9 @@ struct MainTabView: View {
                 }
                 NovaSparkMark(
                     size: isSelected ? 26 : 22,
-                    fillColor: AnyShapeStyle(Theme.Colors.novaPrismGradient)
+                    fillColor: isSelected
+                        ? AnyShapeStyle(Theme.Colors.novaPrismGradient)
+                        : AnyShapeStyle(Theme.Colors.textTertiary)
                 )
                 .shadow(color: Theme.Colors.novaAccent.opacity(isSelected ? 0.50 : 0), radius: 6, y: 1)
             }
@@ -330,7 +317,6 @@ struct MainTabView: View {
             .animation(Theme.Spring.pop, value: isSelected)
         default:
             // Otros tabs: gris cuando inactivo, gris oscuro cuando activo.
-            // SIN color de marca — Nova es la única con violeta/cobalto.
             Image(systemName: isSelected ? tab.selectedSymbol : tab.symbol)
                 .font(.system(size: isSelected ? 21 : 19, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(

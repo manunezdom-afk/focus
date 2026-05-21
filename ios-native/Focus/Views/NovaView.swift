@@ -690,30 +690,29 @@ struct NovaView: View {
             }
             .padding(.horizontal, Theme.Spacing.md + 2)
             .padding(.vertical, Theme.Spacing.sm + 1)
-            // Theme 2.0 FASE 2: input chat coherente con FocusBar Mi Día —
-            // tinte Nova 9%, borde gradient 1.2pt visible siempre + shadow
-            // nova glow para que se sienta suspendido y "vivo".
+            // Theme 2.0 fix v3: coherente con FocusBar Mi Día. Surface
+            // sólida, borde soft hairline idle, borde NovaPrism + glow
+            // sólo cuando focused. Sin tinte violet interno.
             .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                    RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                        .fill(Theme.Colors.novaAccent.opacity(0.09))
-                }
+                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                    .fill(Theme.Colors.surface)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                     .strokeBorder(
-                        Theme.Colors.novaPrismGradient,
-                        lineWidth: inputFocused ? 1.8 : 1.2
+                        inputFocused
+                            ? AnyShapeStyle(Theme.Colors.novaPrismGradient)
+                            : AnyShapeStyle(Theme.Colors.borderSoft),
+                        lineWidth: inputFocused ? 1.5 : 1.0
                     )
-                    .opacity(inputFocused ? 1.0 : 0.85)
             )
             .shadow(
-                color: Theme.Colors.novaAccent.opacity(inputFocused ? 0.32 : 0.18),
-                radius: inputFocused ? 22 : 14,
+                color: inputFocused
+                    ? Theme.Colors.novaAccent.opacity(0.28)
+                    : Color(red: 0.06, green: 0.07, blue: 0.10).opacity(0.08),
+                radius: inputFocused ? 18 : 10,
                 x: 0,
-                y: inputFocused ? 8 : 5
+                y: inputFocused ? 7 : 4
             )
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.top, Theme.Spacing.sm + 2)

@@ -37,15 +37,15 @@ enum Theme {
     enum Colors {
         // MARK: Canvas + superficies (sistema 3-tier)
 
-        /// Lienzo base — el fondo general de pantallas. Theme 2.0: gris-azul
-        /// frío MÁS distintivo (#E9EEF7). El #F1F3F7 anterior era cool pero
-        /// se confundía con neutros Apple genéricos en pantalla pequeña;
-        /// este tono empuja el azul para que la identidad "Precision
-        /// Etherealism" se perciba a primera vista, y que las cards
-        /// blancas tengan más despegue.
-        static let background = Color(red: 0.913, green: 0.933, blue: 0.969)  // #E9EEF7
+        /// Lienzo base — el fondo general de pantallas. Theme 2.0 v3: gris
+        /// azul-slate denso (#D8E0EC). El #E9EEF7 anterior se sentía pastel
+        /// y poco premium en pantalla pequeña — esta versión empuja más al
+        /// slate (más saturado, más profundo) para que las cards blancas
+        /// queden visiblemente elevadas y la identidad Linear/Arc se
+        /// perciba a primera vista. Sigue siendo light mode legible.
+        static let background = Color(red: 0.847, green: 0.878, blue: 0.925)  // #D8E0EC
         /// Canvas alias explícito por claridad — mismo valor que background.
-        static let canvasL0 = Color(red: 0.913, green: 0.933, blue: 0.969)    // #E9EEF7
+        static let canvasL0 = Color(red: 0.847, green: 0.878, blue: 0.925)    // #D8E0EC
         /// Superficie de cards interactivas — blanco puro contra el canvas.
         static let surface = Color.white                                       // #FFFFFF
         /// Alias semántico de surface.
@@ -152,13 +152,15 @@ enum Theme {
 
         // MARK: Sombras táctiles (más sutiles en 2.0)
 
-        /// Sombra de card estándar — opacity 0.04 (antes 0.06). Más fina,
-        /// para que la profundidad venga de las capas Z, no del shadow.
-        static let cardShadow = Color(red: 0.06, green: 0.07, blue: 0.10).opacity(0.04)
+        /// Sombra de card estándar — Theme 2.0 v3: subo opacity de 0.04 a
+        /// 0.10 ahora que el canvas es más profundo (#D8E0EC). Necesita
+        /// sombra más visible para que las cards blancas tengan despegue
+        /// real. Antes con canvas casi-blanco 0.04 alcanzaba; ahora no.
+        static let cardShadow = Color(red: 0.06, green: 0.07, blue: 0.10).opacity(0.10)
         /// Sombra fuerte para elementos elevados (Z-2).
-        static let cardShadowStrong = Color(red: 0.06, green: 0.07, blue: 0.10).opacity(0.08)
+        static let cardShadowStrong = Color(red: 0.06, green: 0.07, blue: 0.10).opacity(0.16)
         /// Sombra para modals / sheets (Z-3).
-        static let modalShadow = Color(red: 0.06, green: 0.07, blue: 0.10).opacity(0.18)
+        static let modalShadow = Color(red: 0.06, green: 0.07, blue: 0.10).opacity(0.22)
 
         // MARK: Gradients catálogo (Theme 2.0)
 
@@ -372,7 +374,7 @@ enum Theme {
         /// Etiqueta del milestone del rediseño. Si el QA en iPhone NO muestra
         /// este string, la build instalada es vieja — purgar derived data
         /// (Xcode → Product → Clean Build Folder) y reinstalar.
-        static let buildLabel: String = "redesign-2026-05-21"
+        static let buildLabel: String = "qa-2026-05-21-build17"
     }
 
     // MARK: - Motion (Theme 2.0)

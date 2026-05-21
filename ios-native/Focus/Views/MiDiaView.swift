@@ -102,13 +102,8 @@ struct MiDiaView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     header
                         .padding(.horizontal, Theme.Spacing.xl)
-                        // Padding superior MÁS generoso (xxl=24pt en vez de
-                        // lg=16pt) más `safeAreaPadding(.top, sm)` abajo en el
-                        // ScrollView para garantizar que el título "Mi Día"
-                        // jamás quede bajo el Dynamic Island. El paging
-                        // container horizontal de MainTabView puede no
-                        // propagar safeArea correctamente a los children,
-                        // por eso paddeamos defensivamente.
+                        // Padding superior generoso para garantizar que
+                        // "Mi Día" jamás quede bajo el Dynamic Island.
                         .padding(.top, Theme.Spacing.xxl)
 
                     focusBar
@@ -336,6 +331,7 @@ struct MiDiaView: View {
                     )
             )
     }
+
 
     /// Subtítulo del header: solo el estado del día con el conteo de
     /// bloques (eventos). Después de retirar "Pendientes de hoy" (2026-05-15),

@@ -800,15 +800,37 @@ struct EmptyStateView: View {
 
     var body: some View {
         VStack(spacing: Theme.Spacing.lg) {
-            // Theme 2.0: glifo lineal grande (64pt weight .light) sobre
-            // textTertiary opacity 0.5 — composición más calmada que el
-            // círculo cobalto saturado anterior. La identidad cromática
-            // viene del action button, no del glifo.
-            Image(systemName: symbol)
-                .font(.system(size: 64, weight: .light))
-                .foregroundStyle(Theme.Colors.textTertiary.opacity(0.5))
-                .opacity(glyphAppear ? 1 : 0)
-                .offset(y: glyphAppear ? 0 : 8)
+            // Theme 2.0 v3: glifo con identidad Focus/Nova — halo radial
+            // novaAccent detrás + glifo 44pt regular weight (no light, que
+            // se ve frágil) en color cobalto. Antes el glifo gris lineal
+            // 64pt parecía un placeholder; ahora se siente "AI-native".
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: Theme.Colors.novaAccent.opacity(0.18), location: 0.0),
+                                .init(color: Theme.Colors.focusAccent.opacity(0.08), location: 0.55),
+                                .init(color: Theme.Colors.novaAccent.opacity(0.0),  location: 1.0),
+                            ]),
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: 80
+                        )
+                    )
+                    .frame(width: 140, height: 140)
+                Image(systemName: symbol)
+                    .font(.system(size: 44, weight: .regular))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Theme.Colors.focusAccent, Theme.Colors.novaAccent],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+            .opacity(glyphAppear ? 1 : 0)
+            .scaleEffect(glyphAppear ? 1.0 : 0.92)
 
             VStack(spacing: Theme.Spacing.xs) {
                 Text(title)
@@ -987,9 +1009,13 @@ struct FocusBarInput: View {
 
             TextField(placeholder, text: $text, axis: .vertical)
                 .focused($isFocused)
-                .font(Theme.Typography.body)
+                // Theme 2.0 fix: peso .medium del TextField para que el
+                // placeholder se lea con presencia (default regular se ve
+                // débil sobre el material translúcido). El tinte cursor
+                // pasa a novaAccent — coherente con el borde NovaPrism.
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.Colors.textPrimary)
-                .tint(Theme.Colors.focusAccent)
+                .tint(Theme.Colors.novaAccent)
                 // 1 a 5 líneas visibles; pasado eso TextField hace scroll
                 // interno y conserva el cursor visible.
                 .lineLimit(1...5)
@@ -1017,25 +1043,32 @@ struct FocusBarInput: View {
                     }
                 }
 
+            // Theme 2.0 fix: botones integrados al barra, sin círculos
+            // sueltos con fondo cobalto-soft. El mic en idle es solo el
+            // glifo (color textTertiary). Cuando dicta, recibe fondo
+            // novaAccent + halo. El botón enviar es el único que mantiene
+            // fondo sólido cobalto — es la acción principal.
             if let onMic {
                 Button(action: onMic) {
                     Image(systemName: isDictating ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(isDictating ? .white : Theme.Colors.focusAccent)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(
+                            isDictating
+                                ? Color.white
+                                : Theme.Colors.textTertiary
+                        )
                         .frame(width: 32, height: 32)
                         .background(
                             Circle().fill(
                                 isDictating
-                                    ? Theme.Colors.focusAccent
-                                    : Theme.Colors.focusAccentSoft
+                                    ? AnyShapeStyle(Theme.Colors.novaPrismGradient)
+                                    : AnyShapeStyle(Color.clear)
                             )
                         )
                         .overlay(
-                            // Halo pulsante cuando dicta — feedback visual
-                            // inmediato sin sheet ni popup.
                             Circle()
                                 .strokeBorder(
-                                    Theme.Colors.focusAccent.opacity(isDictating ? 0.45 : 0),
+                                    Theme.Colors.novaAccent.opacity(isDictating ? 0.45 : 0),
                                     lineWidth: 2
                                 )
                                 .scaleEffect(isDictating && dictationPulse ? 1.55 : 1.0)
@@ -1061,8 +1094,9 @@ struct FocusBarInput: View {
                 }
             }
 
-            // Botón enviar siempre visible para no romper el layout al teclear;
-            // se desactiva cuando no hay texto.
+            // Botón enviar — acción principal, mantiene fill sólido cobalto.
+            // Disabled = solo cambia opacity y desactiva tap; sin background
+            // ghost para no agregar otro círculo flotante a la barra.
             Button {
                 if canSubmit { onSubmit() }
             } label: {
@@ -1071,12 +1105,9 @@ struct FocusBarInput: View {
                     .foregroundStyle(.white)
                     .frame(width: 32, height: 32)
                     .background(
-                        Circle().fill(
-                            canSubmit
-                                ? Theme.Colors.focusAccent
-                                : Theme.Colors.focusAccent.opacity(0.30)
-                        )
+                        Circle().fill(Theme.Colors.focusAccent)
                     )
+                    .opacity(canSubmit ? 1.0 : 0.30)
             }
             .buttonStyle(.plain)
             .disabled(!canSubmit)
@@ -1084,32 +1115,34 @@ struct FocusBarInput: View {
         }
         .padding(.horizontal, Theme.Spacing.md + 2)
         .padding(.vertical, Theme.Spacing.sm + 2)
-        // Theme 2.0 FASE 2: FocusBar como elemento flotante Z-2 con
-        // identidad Nova MUY visible. Subimos opacity del tinte (5% → 9%),
-        // del borde NovaPrism (0.45 → 0.85 idle, lineWidth 0.7 → 1.2) y
-        // de la sombra Nova (cardShadow → novaAccent glow). Antes el
-        // gradient borde era sutil cuando idle — ahora se ve siempre.
+        // Theme 2.0 fix v3: el FocusBar quería verse "IA-native" pero el
+        // tinte violet 9% + borde NovaPrism 85% lo hacía sentir saturado
+        // y poco premium. Bajamos a:
+        //  - surface elevated más sólido (no translúcido violet);
+        //  - borde gradient sólo cuando focused (idle = soft hairline);
+        //  - cuando focused, glow nova claro para feedback.
+        // El contraste viene del CONTAINER vs canvas oscuro nuevo, no
+        // de un tinte interno fuerte. Más Linear/Arc, menos pastel.
         .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                    .fill(Theme.Colors.novaAccent.opacity(0.09))
-            }
+            RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                .fill(Theme.Colors.surface)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                 .strokeBorder(
-                    Theme.Colors.novaPrismGradient,
-                    lineWidth: isFocused ? 1.8 : 1.2
+                    isFocused
+                        ? AnyShapeStyle(Theme.Colors.novaPrismGradient)
+                        : AnyShapeStyle(Theme.Colors.borderSoft),
+                    lineWidth: isFocused ? 1.5 : 1.0
                 )
-                .opacity(isFocused ? 1.0 : 0.85)
         )
         .shadow(
-            color: Theme.Colors.novaAccent.opacity(isFocused ? 0.32 : 0.18),
-            radius: isFocused ? 22 : 14,
+            color: isFocused
+                ? Theme.Colors.novaAccent.opacity(0.28)
+                : Color(red: 0.06, green: 0.07, blue: 0.10).opacity(0.08),
+            radius: isFocused ? 18 : 10,
             x: 0,
-            y: isFocused ? 8 : 5
+            y: isFocused ? 7 : 4
         )
         .animation(Theme.Motion.easeInOutStandard, value: isFocused)
     }
