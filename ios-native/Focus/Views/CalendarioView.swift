@@ -58,7 +58,10 @@ struct CalendarioView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.Colors.background.ignoresSafeArea()
+                // Theme 2.0 v4: mismo ambient canvas animado que Mi Día y
+                // Nova. Estado .idle — Calendario no tiene flow de IA
+                // activo. Coherencia visual cruzando tabs.
+                FocusAmbientCanvas(state: .idle)
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xl) {

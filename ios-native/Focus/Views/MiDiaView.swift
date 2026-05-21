@@ -86,17 +86,12 @@ struct MiDiaView: View {
 
     var body: some View {
         ZStack {
-            Theme.Colors.background.ignoresSafeArea()
-
-            // Hero zone — Theme 2.0 AmbientCalm radial. Reemplaza el linear
-            // 220pt anterior por un radial centrado en el top: el degradé
-            // se desvanece orgánicamente (no en bandas rectas) y crea una
-            // atmósfera más etérea, alineada con la dirección "Precision
-            // Etherealism". El RadialGradient está tokenizado en Theme
-            // (focusAccent 8% → novaAccent 3% → bg 0%, radio 280pt).
-            Theme.Colors.ambientCalmRadial
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
+            // Theme 2.0 v4: ambient canvas animado tipo Gemini.
+            // Reemplaza `Theme.Colors.background + AmbientCalmRadial` con
+            // un componente vivo (2 halos cobalto + violet desplazándose
+            // lentamente). El estado es .listening mientras dicta, .idle
+            // el resto del tiempo — la app respira.
+            FocusAmbientCanvas(state: isDictating ? .listening : .idle)
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
@@ -312,23 +307,17 @@ struct MiDiaView: View {
         }
     }
 
-    /// Pill diagnóstico — temporal hasta que termine la fase QA del
-    /// rediseño visual 2.0. Aparece al lado del título "Mi Día" para que
-    /// al abrir la app sea evidente si la build instalada es la nueva.
+    /// Pill diagnóstico — temporal hasta que se apruebe la dirección
+    /// visual y se cierre el rediseño. Versión discreta: solo "v18" en
+    /// SF Mono pequeño, sin background — no compite con el diseño.
     private var qaMarkerPill: some View {
-        Text(Theme.QA.markerLabel)
-            .font(Theme.Typography.captionMono)
-            .tracking(Theme.Tracking.captionMono)
-            .foregroundStyle(Theme.Colors.novaAccent)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+        Text(Theme.QA.buildLabel.split(separator: "-").last.map(String.init) ?? "qa")
+            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .foregroundStyle(Theme.Colors.novaAccent.opacity(0.55))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
             .background(
-                Capsule()
-                    .fill(Theme.Colors.novaAccent.opacity(0.10))
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Theme.Colors.novaAccent.opacity(0.35), lineWidth: 0.7)
-                    )
+                Capsule().fill(Theme.Colors.novaAccent.opacity(0.06))
             )
     }
 

@@ -41,24 +41,13 @@ struct NovaView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.Colors.background.ignoresSafeArea()
-
-                // Theme 2.0 FASE 2: ambient radial nova-tinted MÁS visible
-                // (22% nova + 10% focus vs 12%/5% anterior). Sin blur 30pt
-                // pesado — un radial nativo es más fluido. El halo cubre
-                // hasta el segmented control y se desvanece hacia abajo.
-                RadialGradient(
-                    gradient: Gradient(stops: [
-                        .init(color: Theme.Colors.novaAccent.opacity(0.22), location: 0.0),
-                        .init(color: Theme.Colors.focusAccent.opacity(0.10), location: 0.45),
-                        .init(color: Theme.Colors.background.opacity(0.0),  location: 1.0),
-                    ]),
-                    center: .top,
-                    startRadius: 0,
-                    endRadius: 400
-                )
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
+                // Theme 2.0 v4: ambient canvas animado tipo Gemini, mismo
+                // componente que Mi Día. Estado .thinking cuando Nova está
+                // tecleando una respuesta — los halos se intensifican,
+                // como si la IA "respirara" su procesamiento. .idle el
+                // resto. Reemplaza el RadialGradient estático que era el
+                // top + Theme.Colors.background.
+                FocusAmbientCanvas(state: store.isNovaTyping ? .thinking : .idle)
 
                 VStack(spacing: 0) {
                     branding

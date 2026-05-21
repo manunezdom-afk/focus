@@ -971,6 +971,27 @@ struct FocusBarInput: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            inputRow
+            // Theme 2.0 v4: visualizer reactivo aparece DEBAJO del input
+            // cuando el usuario está dictando. Barras gradient cobalto→
+            // violet con forma de onda — sensación "Gemini escuchando voz"
+            // unificada en todos los micrófonos de la app.
+            if isDictating {
+                FocusAudioVisualizer(
+                    level: Float(audioLevel),
+                    state: audioLevel > 0.08 ? .speaking : .listening,
+                    maxBarHeight: 28
+                )
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 2)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(Theme.Motion.easeInOutStandard, value: isDictating)
+    }
+
+    private var inputRow: some View {
         HStack(alignment: .bottom, spacing: Theme.Spacing.md) {
             // Marca de Nova — anclada a la base junto a los botones. Cuando
             // está dictando, el diamante "cobra vida":
@@ -1585,46 +1606,244 @@ struct PromptChip: View {
     }
 }
 
-// MARK: - AudioLevelBars (decibeles en vivo)
+// MARK: - FocusAmbientCanvas (background animado tipo Gemini)
+//
+// Componente reutilizable que pinta el FONDO de las pantallas principales
+// con sensación de IA viva: 2 halos radiales (cobalto + violet) que se
+// desplazan lentamente en direcciones opuestas. Cuando Nova está activa
+// (listening/thinking) los halos se intensifican y se mueven más rápido.
+//
+// Objetivo: que Focus se sienta como una app IA premium, no plana. Sin
+// blur dinámico, sin TimelineView por frame — solo 2 Circles con
+// RadialGradient + withAnimation repeatForever. Performance estable.
+//
+// Reemplaza el patrón anterior `Theme.Colors.background.ignoresSafeArea()
+// + AmbientCalmRadial` con un solo componente coherente para Mi Día,
+// Nova, Calendario, Tareas.
 
-/// 5 barras verticales animadas que reflejan el nivel de audio en vivo.
-/// Las barras del centro son las "más sensibles" (responden más fuerte al
-/// nivel), las laterales atenúan — patrón "ecualizador" estándar. Animadas
-/// con spring para movimiento orgánico, no robótico.
-///
-/// `level` debe estar normalizado 0...1 (lo que `NovaLiveService.audioLevel`
-/// publica). Sin habla = barras planas. Voz normal = ~50% altura. Voz
-/// fuerte = ~80-100%.
-struct AudioLevelBars: View {
-    /// Nivel de audio actual (0...1). Cambios animados via spring.
-    let level: Float
+enum FocusAmbientState: Equatable {
+    case idle        // Pantalla en reposo — halos calmados, ciclo lento (12s).
+    case listening   // Nova escuchando voz — halos intensificados (5s).
+    case thinking    // Nova procesando — halos respirando (7s).
+    case success     // Acción completada — pulso breve (8s).
+}
 
-    /// Multiplicadores por barra para crear el efecto "ecualizador" —
-    /// el centro responde más, las laterales atenúan. Los valores son
-    /// arbitrarios pero coreografeados para que parezca natural.
-    private let multipliers: [CGFloat] = [0.55, 0.85, 1.0, 0.85, 0.55]
+struct FocusAmbientCanvas: View {
+    var state: FocusAmbientState = .idle
+
+    @State private var phase: Bool = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 2) {
-            ForEach(multipliers.indices, id: \.self) { i in
+        ZStack {
+            // Canvas base — el slate definido en Theme.
+            Theme.Colors.background
+
+            // Halo COBALTO — top-leading, oscila diagonal.
+            haloCircle(
+                color: Theme.Colors.focusAccent,
+                radius: 340
+            )
+            .opacity(focusOpacity)
+            .offset(
+                x: phase ? -140 : -200,
+                y: phase ? -260 : -200
+            )
+
+            // Halo VIOLET (Nova) — bottom-trailing, oscila en dirección opuesta.
+            haloCircle(
+                color: Theme.Colors.novaAccent,
+                radius: 300
+            )
+            .opacity(novaOpacity)
+            .offset(
+                x: phase ? 170 : 110,
+                y: phase ? 300 : 250
+            )
+
+            // Halo extra solo cuando IA está activa — da sensación de
+            // "presencia" violet que cruza el centro de la pantalla.
+            if state == .listening || state == .thinking {
+                haloCircle(
+                    color: Theme.Colors.novaAccent,
+                    radius: 200
+                )
+                .opacity(0.22)
+                .offset(
+                    x: phase ? -40 : 60,
+                    y: phase ? 80 : -40
+                )
+                .transition(.opacity)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .onAppear { startAnimation() }
+        .onChange(of: state) { _, _ in startAnimation() }
+    }
+
+    private func startAnimation() {
+        // Reinicia el ciclo con la duración del estado actual. SwiftUI
+        // interpola desde la posición actual hacia el target — la
+        // transición entre states se siente fluida.
+        withAnimation(.easeInOut(duration: cycleDuration).repeatForever(autoreverses: true)) {
+            phase.toggle()
+        }
+    }
+
+    /// Intensidad del halo COBALTO según estado.
+    private var focusOpacity: Double {
+        switch state {
+        case .idle:      return 0.90
+        case .listening: return 1.20
+        case .thinking:  return 1.10
+        case .success:   return 1.10
+        }
+    }
+
+    /// Intensidad del halo VIOLET (Nova) según estado.
+    private var novaOpacity: Double {
+        switch state {
+        case .idle:      return 0.75
+        case .listening: return 1.35
+        case .thinking:  return 1.25
+        case .success:   return 1.05
+        }
+    }
+
+    /// Duración del ciclo (segundos). Idle es muy lento (calma); listening
+    /// es más rápido (energía visible).
+    private var cycleDuration: Double {
+        switch state {
+        case .idle:      return 12.0
+        case .listening: return 5.0
+        case .thinking:  return 7.0
+        case .success:   return 8.0
+        }
+    }
+
+    /// Un halo radial gaussian-like. RadialGradient nativo de SwiftUI —
+    /// cero blur dinámico (caro). El gradient ya da el efecto difuso.
+    private func haloCircle(color: Color, radius: CGFloat) -> some View {
+        Circle()
+            .fill(
+                RadialGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: color.opacity(0.32), location: 0.0),
+                        .init(color: color.opacity(0.14), location: 0.50),
+                        .init(color: color.opacity(0.0),  location: 1.0),
+                    ]),
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: radius
+                )
+            )
+            .frame(width: radius * 2, height: radius * 2)
+    }
+}
+
+// MARK: - FocusAudioVisualizer (barras reactivas con identidad Focus)
+
+/// Visualizador de audio unificado para TODOS los micrófonos de la app
+/// (FocusBar inline, VoiceDictationSheet). 14 barras finas verticales
+/// con gradient vertical cobalto→violet. Cada barra tiene un phase
+/// offset propio para que el conjunto se vea como "onda viva", no
+/// como ecualizador robótico.
+///
+/// Reemplaza `AudioLevelBars` (5 barras planas violet) anterior. La
+/// nueva versión tiene 3 estados: idle (calm breath), listening
+/// (subtle reactive), speaking (full envelope).
+///
+/// Performance: HStack de 14 Capsules con animación spring + un
+/// timer suave para el breath. Sin TimelineView por frame.
+
+enum FocusAudioVisualizerState: Equatable {
+    case idle        // No escuchando — barras casi planas con leve respiración.
+    case listening   // Escuchando pero sin habla — barras con respiración suave.
+    case speaking    // Detectando voz — barras saltando con audio level.
+    case processing  // Cierre/procesando — respiración más amplia, no reactiva.
+}
+
+struct FocusAudioVisualizer: View {
+    /// Audio level normalizado (0...1) que viene de NovaLiveService.audioLevel.
+    var level: Float = 0
+    var state: FocusAudioVisualizerState = .idle
+    /// Altura máxima de la barra central cuando hay habla (speaking).
+    /// Ajustable según el contexto: FocusBar inline usa 28pt, sheet usa 56pt.
+    var maxBarHeight: CGFloat = 36
+
+    private let barCount: Int = 14
+
+    @State private var breath: Double = 0
+
+    /// Multiplicadores que crean forma de "onda" — barras centrales más
+    /// altas, extremos más bajos. Coreografía estándar para visualizers
+    /// de voz premium.
+    private var multipliers: [CGFloat] {
+        (0..<barCount).map { i in
+            let normalized = abs(CGFloat(i) - CGFloat(barCount - 1) / 2.0) / (CGFloat(barCount - 1) / 2.0)
+            return 1.0 - normalized * 0.55
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 3) {
+            ForEach(0..<barCount, id: \.self) { i in
                 Capsule()
-                    .fill(Theme.Colors.novaAccent)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Theme.Colors.focusAccent,
+                                Theme.Colors.novaAccent
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
                     .frame(width: 2.5, height: barHeight(at: i))
             }
         }
-        // Theme 2.0: usar spring interactive tokenizado.
+        .frame(height: maxBarHeight, alignment: .center)
+        .opacity(stateOpacity)
         .animation(Theme.Spring.interactive, value: level)
+        .animation(Theme.Motion.easeInOutStandard, value: state)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) {
+                breath = 1.0
+            }
+        }
     }
 
-    /// Altura por barra: piso 3pt (siempre visible aunque haya silencio
-    /// total — más profesional que barras invisibles) + porción
-    /// proporcional al level × multiplier. Tope a 14pt para no exceder
-    /// el contenedor de 14pt que usa Mi Día.
+    /// Altura por barra: piso + dinámica del audio + respiración base.
     private func barHeight(at index: Int) -> CGFloat {
-        let floor: CGFloat = 3
-        let ceiling: CGFloat = 14
+        let floor: CGFloat = 4
+        let ceiling: CGFloat = stateCeiling
+
+        // Wave phase shift — cada barra respira con un offset distinto
+        // para que el conjunto se vea orgánico, no sincronizado robótico.
+        let phase = sin(breath * .pi * 2 + Double(index) * 0.38) * 0.5 + 0.5
+        let breathAmplitude: CGFloat = (state == .idle ? 4 : (state == .listening ? 6 : 3))
+        let breathBoost = CGFloat(phase) * breathAmplitude
+
         let dynamic = CGFloat(level) * multipliers[index] * (ceiling - floor)
-        return floor + dynamic
+        return max(floor, floor + dynamic + breathBoost)
+    }
+
+    private var stateCeiling: CGFloat {
+        switch state {
+        case .idle:       return min(10, maxBarHeight * 0.30)
+        case .listening:  return min(16, maxBarHeight * 0.50)
+        case .speaking:   return maxBarHeight
+        case .processing: return min(12, maxBarHeight * 0.40)
+        }
+    }
+
+    private var stateOpacity: Double {
+        switch state {
+        case .idle:       return 0.55
+        case .listening:  return 0.85
+        case .speaking:   return 1.0
+        case .processing: return 0.70
+        }
     }
 }
 

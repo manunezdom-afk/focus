@@ -23,6 +23,20 @@ struct VoiceDictationSheet: View {
     @State private var didAutoStart: Bool = false
     @State private var pulse: Bool = false
 
+    /// Mapea el state del NovaLiveService al state del visualizer
+    /// unificado de la app — para que el ambient canvas + las barras
+    /// gradient sepan qué cara mostrar.
+    private var visualizerState: FocusAudioVisualizerState {
+        switch service.state {
+        case .listening:
+            return service.audioLevel > 0.08 ? .speaking : .listening
+        case .processing:
+            return .processing
+        default:
+            return .idle
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Theme 2.0: header indicator con NovaSparkMark mini (marca Nova,
@@ -41,10 +55,24 @@ struct VoiceDictationSheet: View {
 
             visual
 
+            // Theme 2.0 v4: banda de visualizer reactivo unificado entre el
+            // NovaVoiceCore + WaveformRing y la transcripción. Las barras
+            // gradient cobalto→violet reaccionan al audio level — coherente
+            // con la banda que aparece bajo el FocusBar inline. Toda la
+            // app comparte el mismo lenguaje visual de voz.
+            FocusAudioVisualizer(
+                level: service.audioLevel,
+                state: visualizerState,
+                maxBarHeight: 56
+            )
+            .frame(height: 56)
+            .padding(.horizontal, Theme.Spacing.xxl)
+            .padding(.top, Theme.Spacing.lg)
+
             transcriptText
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, Theme.Spacing.xl)
-                .padding(.top, Theme.Spacing.lg)
+                .padding(.top, Theme.Spacing.md)
 
             Spacer(minLength: Theme.Spacing.lg)
 
@@ -53,7 +81,11 @@ struct VoiceDictationSheet: View {
                 .padding(.bottom, Theme.Spacing.xl)
         }
         .frame(maxWidth: .infinity)
-        .background(Theme.Colors.background)
+        .background(
+            // Theme 2.0 v4: ambient canvas atrás del sheet también — la
+            // sensación "presencia Nova" se mantiene cuando se abre.
+            FocusAmbientCanvas(state: visualizerState == .speaking ? .listening : .idle)
+        )
         .onAppear { pulse = true }
         .task {
             if !didAutoStart {
