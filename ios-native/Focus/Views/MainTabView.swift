@@ -206,21 +206,26 @@ struct MainTabView: View {
         }
         .frame(height: 64)
         .padding(.horizontal, 6)
+        // Theme 2.0 FASE 2: tinte Nova MÁS visible (10% vs 4%) + sombra
+        // elevated más fuerte para que la píldora realmente se sienta
+        // suspendida sobre el canvas. Border Nova en lugar de hairline
+        // gris — la barra cobra identidad violet visible.
         .background(
             ZStack {
                 Capsule(style: .continuous)
                     .fill(.ultraThinMaterial)
                 Capsule(style: .continuous)
-                    .fill(Theme.Colors.novaAccent.opacity(0.04))
+                    .fill(Theme.Colors.novaAccent.opacity(0.10))
             }
         )
         .overlay(
             Capsule(style: .continuous)
-                .strokeBorder(Theme.Colors.borderHairline, lineWidth: Theme.Stroke.hairline)
+                .strokeBorder(Theme.Colors.novaAccent.opacity(0.18), lineWidth: 0.7)
         )
-        .shadow(color: Theme.Colors.cardShadowStrong, radius: 18, x: 0, y: 10)
+        .shadow(color: Theme.Colors.novaAccent.opacity(0.20), radius: 22, x: 0, y: 12)
+        .shadow(color: Theme.Colors.cardShadowStrong, radius: 8, x: 0, y: 4)
         .padding(.horizontal, Theme.Spacing.xl)
-        .padding(.bottom, 6)
+        .padding(.bottom, 8)
     }
 
     private func tabButton(_ tab: MainTab) -> some View {

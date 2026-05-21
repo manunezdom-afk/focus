@@ -43,20 +43,19 @@ struct NovaView: View {
             ZStack {
                 Theme.Colors.background.ignoresSafeArea()
 
-                // Theme 2.0: ambient radial nova-tinted. Sustituye el
-                // LinearGradient + blur 30pt anterior (caro en render por
-                // el blur). El radial nativo es más fluido y se desvanece
-                // orgánicamente desde el top — coherente con el hero de
-                // Mi Día (AmbientCalmRadial) pero con tinte Nova-dominante.
+                // Theme 2.0 FASE 2: ambient radial nova-tinted MÁS visible
+                // (22% nova + 10% focus vs 12%/5% anterior). Sin blur 30pt
+                // pesado — un radial nativo es más fluido. El halo cubre
+                // hasta el segmented control y se desvanece hacia abajo.
                 RadialGradient(
                     gradient: Gradient(stops: [
-                        .init(color: Theme.Colors.novaAccent.opacity(0.12), location: 0.0),
-                        .init(color: Theme.Colors.focusAccent.opacity(0.05), location: 0.45),
+                        .init(color: Theme.Colors.novaAccent.opacity(0.22), location: 0.0),
+                        .init(color: Theme.Colors.focusAccent.opacity(0.10), location: 0.45),
                         .init(color: Theme.Colors.background.opacity(0.0),  location: 1.0),
                     ]),
                     center: .top,
                     startRadius: 0,
-                    endRadius: 320
+                    endRadius: 400
                 )
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
@@ -691,30 +690,30 @@ struct NovaView: View {
             }
             .padding(.horizontal, Theme.Spacing.md + 2)
             .padding(.vertical, Theme.Spacing.sm + 1)
-            // Theme 2.0: input chat coherente con FocusBar de Mi Día.
-            // ultraThinMaterial + tinte Nova 5% + borde NovaPrism siempre
-            // visible (lineWidth y opacity varían con focus).
+            // Theme 2.0 FASE 2: input chat coherente con FocusBar Mi Día —
+            // tinte Nova 9%, borde gradient 1.2pt visible siempre + shadow
+            // nova glow para que se sienta suspendido y "vivo".
             .background(
                 ZStack {
                     RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                         .fill(.ultraThinMaterial)
                     RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                        .fill(Theme.Colors.novaAccent.opacity(0.05))
+                        .fill(Theme.Colors.novaAccent.opacity(0.09))
                 }
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                     .strokeBorder(
                         Theme.Colors.novaPrismGradient,
-                        lineWidth: inputFocused ? 1.5 : 0.7
+                        lineWidth: inputFocused ? 1.8 : 1.2
                     )
-                    .opacity(inputFocused ? 1.0 : 0.45)
+                    .opacity(inputFocused ? 1.0 : 0.85)
             )
             .shadow(
-                color: Theme.Colors.cardShadowStrong,
-                radius: inputFocused ? 16 : 10,
+                color: Theme.Colors.novaAccent.opacity(inputFocused ? 0.32 : 0.18),
+                radius: inputFocused ? 22 : 14,
                 x: 0,
-                y: inputFocused ? 7 : 4
+                y: inputFocused ? 8 : 5
             )
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.top, Theme.Spacing.sm + 2)

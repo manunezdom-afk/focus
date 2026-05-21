@@ -1084,33 +1084,30 @@ struct FocusBarInput: View {
         }
         .padding(.horizontal, Theme.Spacing.md + 2)
         .padding(.vertical, Theme.Spacing.sm + 2)
-        // Theme 2.0: FocusBar como elemento flotante Z-2.
-        // - Fondo .ultraThinMaterial con tinte novaAccent muy sutil (5%)
-        //   para que vibra ligeramente con la marca Nova sin pintarse violet.
-        // - Borde gradient NovaPrism SIEMPRE visible (no condicional). El
-        //   énfasis del focus viene del lineWidth (1.5 vs 0.7) y del
-        //   shadow (más intenso cuando focused), no del color.
-        // - Sombra elevated (Z-2) para que la barra se vea suspendida
-        //   sobre el canvas L0.
+        // Theme 2.0 FASE 2: FocusBar como elemento flotante Z-2 con
+        // identidad Nova MUY visible. Subimos opacity del tinte (5% → 9%),
+        // del borde NovaPrism (0.45 → 0.85 idle, lineWidth 0.7 → 1.2) y
+        // de la sombra Nova (cardShadow → novaAccent glow). Antes el
+        // gradient borde era sutil cuando idle — ahora se ve siempre.
         .background(
             ZStack {
                 RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                     .fill(.ultraThinMaterial)
                 RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                    .fill(Theme.Colors.novaAccent.opacity(0.05))
+                    .fill(Theme.Colors.novaAccent.opacity(0.09))
             }
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                 .strokeBorder(
                     Theme.Colors.novaPrismGradient,
-                    lineWidth: isFocused ? 1.5 : 0.7
+                    lineWidth: isFocused ? 1.8 : 1.2
                 )
-                .opacity(isFocused ? 1.0 : 0.45)
+                .opacity(isFocused ? 1.0 : 0.85)
         )
         .shadow(
-            color: Theme.Colors.cardShadowStrong,
-            radius: isFocused ? 18 : 12,
+            color: Theme.Colors.novaAccent.opacity(isFocused ? 0.32 : 0.18),
+            radius: isFocused ? 22 : 14,
             x: 0,
             y: isFocused ? 8 : 5
         )

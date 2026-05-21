@@ -96,37 +96,42 @@ struct VoiceDictationSheet: View {
             ? max(0, min(1, CGFloat(service.audioLevel)))
             : 0
         return ZStack {
-            // 3 anillos concéntricos — el más interno responde más al audio.
+            // 3 anillos concéntricos — Theme 2.0 FASE 2: opacity MUCHO más
+            // alta (0.85/0.55/0.30 vs 0.50/0.25/0.10 anterior) y lineWidth
+            // 1.0pt (vs 0.5pt) para que se vean siempre, no solo al hablar.
+            // El idle baseline opacity también sube de 35% a 70% — el core
+            // se siente "vivo" desde el momento que abre el sheet.
             ForEach(0..<3, id: \.self) { i in
-                let baseSize: CGFloat = 110 + CGFloat(i) * 26
-                let ringOpacity: Double = [0.50, 0.25, 0.10][i]
-                let scaleBoost: CGFloat = level * 0.18 * CGFloat(3 - i)
+                let baseSize: CGFloat = 110 + CGFloat(i) * 28
+                let ringOpacity: Double = [0.85, 0.55, 0.30][i]
+                let scaleBoost: CGFloat = level * 0.20 * CGFloat(3 - i)
                 Circle()
                     .strokeBorder(
                         Theme.Colors.novaAccent.opacity(ringOpacity),
-                        lineWidth: 0.5
+                        lineWidth: 1.0
                     )
                     .frame(width: baseSize, height: baseSize)
                     .scaleEffect(1.0 + scaleBoost)
-                    .opacity(isListening ? 1.0 : 0.35)
+                    .opacity(isListening ? 1.0 : 0.70)
                     .animation(Theme.Spring.interactive, value: level)
                     .animation(Theme.Motion.easeInOutStandard, value: isListening)
             }
 
-            // NovaVoiceCore — squircle 84×84 con gradient NovaPrism y glow
-            // contextual. Cuando hay audio, "respira" suavemente con scale
-            // proporcional al level.
+            // NovaVoiceCore — squircle 84×84 con gradient NovaPrism. Theme 2.0
+            // FASE 2: glow base mucho más fuerte (45% vs 25% idle, 75% vs
+            // 55% listening) para que el squircle "irradie" desde que se
+            // abre el sheet.
             RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .fill(Theme.Colors.novaPrismGradient)
                 .frame(width: 84, height: 84)
                 .overlay(
-                    // Inner highlight specular en el top-left para sensación 3D.
+                    // Inner highlight specular top-left para sensación 3D.
                     RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .stroke(Color.white.opacity(0.22), lineWidth: 0.7)
+                        .stroke(Color.white.opacity(0.30), lineWidth: 0.9)
                 )
                 .shadow(
-                    color: Theme.Colors.novaAccent.opacity(isListening ? 0.55 : 0.25),
-                    radius: isListening ? 24 : 14,
+                    color: Theme.Colors.novaAccent.opacity(isListening ? 0.75 : 0.45),
+                    radius: isListening ? 30 : 22,
                     x: 0,
                     y: 8
                 )

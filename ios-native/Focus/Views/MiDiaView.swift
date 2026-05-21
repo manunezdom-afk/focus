@@ -2900,10 +2900,13 @@ enum TimelineRowDensity {
     }
 
     var sidebarWidth: CGFloat {
+        // Theme 2.0: banda lateral MÁS ancha para que el color de la
+        // sección (Foco cobalto, Reunión indigo, etc.) se lea como
+        // marcador sólido visible, no como hairline decorativo.
         switch self {
-        case .spacious: return 5
-        case .balanced: return 4
-        case .compact:  return 3
+        case .spacious: return 6
+        case .balanced: return 7
+        case .compact:  return 5
         }
     }
 
@@ -3156,29 +3159,29 @@ private struct TimelineEventRow: View {
             )
             .overlay(
                 // Theme 2.0: cuando el evento está EN CURSO, el border se
-                // intensifica al color de la sección — visualmente la card
-                // "respira" con el contexto. Antes era border genérico
-                // hairline gris para todos los estados.
+                // intensifica al color de la sección (75% opacity, 2pt
+                // lineWidth) — la card "respira" con el contexto activo.
                 RoundedRectangle(cornerRadius: density == .spacious ? Theme.Radius.lg : Theme.Radius.md, style: .continuous)
                     .strokeBorder(
                         event.isNow
-                            ? event.section.color.opacity(0.55)
+                            ? event.section.color.opacity(0.75)
                             : (density == .spacious
                                 ? event.section.color.opacity(0.25)
                                 : Theme.Colors.borderHairline),
-                        lineWidth: event.isNow ? 1.5 : (density == .spacious ? 1.2 : Theme.Stroke.hairline)
+                        lineWidth: event.isNow ? 2.0 : (density == .spacious ? 1.2 : Theme.Stroke.hairline)
                     )
             )
-            // Theme 2.0: shadow contextual — EN CURSO recibe glow del color
-            // de la sección (foco cobalto, reunión indigo, etc) para que el
-            // evento activo se sienta "iluminado" desde dentro.
+            // Theme 2.0: shadow contextual MÁS fuerte cuando EN CURSO.
+            // 55% opacity + radius 22 — el evento activo "irradia" su color
+            // de sección. Antes era 32%/14 — visible pero podía pasar
+            // desapercibido sobre canvas frío.
             .shadow(
                 color: event.isNow
-                    ? event.section.color.opacity(0.32)
+                    ? event.section.color.opacity(0.55)
                     : Theme.Colors.cardShadow,
-                radius: event.isNow ? 14 : 6,
+                radius: event.isNow ? 22 : 6,
                 x: 0,
-                y: event.isNow ? 6 : 3
+                y: event.isNow ? 8 : 3
             )
             .padding(.bottom, isLast ? 0 : Theme.Spacing.sm)
         }

@@ -37,12 +37,15 @@ enum Theme {
     enum Colors {
         // MARK: Canvas + superficies (sistema 3-tier)
 
-        /// Lienzo base — el fondo general de pantallas. Gris frío denso
-        /// que hace que las cards blancas tengan despegue visible.
-        /// 2026-05-21: cambiado de #FAFBFD (casi blanco) a #F1F3F7.
-        static let background = Color(red: 0.945, green: 0.953, blue: 0.969)  // #F1F3F7
+        /// Lienzo base — el fondo general de pantallas. Theme 2.0: gris-azul
+        /// frío MÁS distintivo (#E9EEF7). El #F1F3F7 anterior era cool pero
+        /// se confundía con neutros Apple genéricos en pantalla pequeña;
+        /// este tono empuja el azul para que la identidad "Precision
+        /// Etherealism" se perciba a primera vista, y que las cards
+        /// blancas tengan más despegue.
+        static let background = Color(red: 0.913, green: 0.933, blue: 0.969)  // #E9EEF7
         /// Canvas alias explícito por claridad — mismo valor que background.
-        static let canvasL0 = Color(red: 0.945, green: 0.953, blue: 0.969)    // #F1F3F7
+        static let canvasL0 = Color(red: 0.913, green: 0.933, blue: 0.969)    // #E9EEF7
         /// Superficie de cards interactivas — blanco puro contra el canvas.
         static let surface = Color.white                                       // #FFFFFF
         /// Alias semántico de surface.
@@ -182,17 +185,20 @@ enum Theme {
             endPoint: UnitPoint(x: 0.71, y: 0.71)
         )
 
-        /// AmbientCalm — radial muy sutil para hero zones (Mi Día).
-        /// Cobalto 8% → nova 3% → bg 0%. Centro arriba, radio 280pt.
+        /// AmbientCalm — radial para hero zones (Mi Día, Nova). Theme 2.0:
+        /// SUBE intensidad. Antes era casi imperceptible (8%/3%); ahora
+        /// 18%/8% para que el "halo cobalto desde el top" sea claramente
+        /// visible cuando se abre Mi Día. Radio 280 → 380 para que
+        /// cubra hasta el primer evento del timeline.
         static let ambientCalmRadial = RadialGradient(
             gradient: Gradient(stops: [
-                .init(color: Color(red: 0.145, green: 0.388, blue: 0.922).opacity(0.08), location: 0.0),
-                .init(color: Color(red: 0.357, green: 0.302, blue: 1.000).opacity(0.03), location: 0.50),
-                .init(color: Color(red: 0.945, green: 0.953, blue: 0.969).opacity(0.0),  location: 1.0),
+                .init(color: Color(red: 0.145, green: 0.388, blue: 0.922).opacity(0.18), location: 0.0),
+                .init(color: Color(red: 0.357, green: 0.302, blue: 1.000).opacity(0.08), location: 0.50),
+                .init(color: Color(red: 0.913, green: 0.933, blue: 0.969).opacity(0.0),  location: 1.0),
             ]),
             center: .top,
             startRadius: 0,
-            endRadius: 280
+            endRadius: 380
         )
 
         /// HeroSunset — gradient tenue para premium cards (focusSoft → novaSoft).
