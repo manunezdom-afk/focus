@@ -689,30 +689,35 @@ struct NovaView: View {
             }
             .padding(.horizontal, Theme.Spacing.md + 2)
             .padding(.vertical, Theme.Spacing.sm + 1)
+            // Theme 2.0: input chat coherente con FocusBar de Mi Día.
+            // ultraThinMaterial + tinte Nova 5% + borde NovaPrism siempre
+            // visible (lineWidth y opacity varían con focus).
             .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                        .fill(Theme.Colors.novaAccent.opacity(0.05))
+                }
+            )
+            .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                    .fill(
-                        inputFocused
-                            ? Theme.Colors.surface
-                            : Theme.Colors.surfaceHigh
+                    .strokeBorder(
+                        Theme.Colors.novaPrismGradient,
+                        lineWidth: inputFocused ? 1.5 : 0.7
                     )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                            .strokeBorder(
-                                inputFocused ? Theme.Colors.focusAccent.opacity(0.45) : Theme.Colors.borderEmphasis.opacity(0.55),
-                                lineWidth: inputFocused ? 1.3 : 1.0
-                            )
-                    )
-                    .shadow(
-                        color: Theme.Colors.cardShadow,
-                        radius: inputFocused ? 8 : 4,
-                        y: inputFocused ? 4 : 2
-                    )
+                    .opacity(inputFocused ? 1.0 : 0.45)
+            )
+            .shadow(
+                color: Theme.Colors.cardShadowStrong,
+                radius: inputFocused ? 16 : 10,
+                x: 0,
+                y: inputFocused ? 7 : 4
             )
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.top, Theme.Spacing.sm + 2)
             .padding(.bottom, Theme.Spacing.sm)
-            .animation(.easeInOut(duration: 0.18), value: inputFocused)
+            .animation(Theme.Motion.easeInOutStandard, value: inputFocused)
         }
         // Background SÓLIDO + sombra superior sutil para separar
         // visualmente del contenido scrollable. Sin `ignoresSafeArea` —
@@ -810,13 +815,16 @@ private struct NovaMessageBubble: View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
             novaSparkAvatar
             VStack(alignment: .leading, spacing: 6) {
+                // Theme 2.0: label "NOVA" en captionMono — coherente con
+                // badges del timeline (PRÓXIMO, EN CURSO).
                 Text("Nova")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Theme.Typography.captionMono)
+                    .tracking(Theme.Tracking.captionMono)
                     .foregroundStyle(Theme.Colors.novaAccent)
-                    .tracking(0.6)
                     .textCase(.uppercase)
                 Text(message.content)
                     .font(Theme.Typography.body)
+                    .tracking(Theme.Tracking.body)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .lineSpacing(3)
@@ -826,12 +834,12 @@ private struct NovaMessageBubble: View {
         }
     }
 
-    /// Avatar mini de Nova: cuadrado redondeado con gradient + spark mark.
-    /// Más sutil que el anterior, sin sombra heavy.
+    /// Avatar mini de Nova: cuadrado redondeado con NovaPrism gradient.
+    /// Theme 2.0: cambio de novaGradient legacy → novaPrismGradient.
     private var novaSparkAvatar: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Theme.Colors.novaGradient)
+                .fill(Theme.Colors.novaPrismGradient)
                 .frame(width: 26, height: 26)
             NovaSparkMark(size: 11)
         }
