@@ -216,18 +216,22 @@ struct CalendarioView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Theme 2.0: meta-label en captionMono UPPERCASE (coherente
+                // con badges del timeline y headers de Mi Día).
                 Text(monthYearLabel)
-                    .font(Theme.Typography.subhead)
+                    .font(Theme.Typography.captionMono)
+                    .tracking(Theme.Tracking.captionMono)
                     .foregroundStyle(Theme.Colors.textTertiary)
-                    .tracking(0.4)
+                    .textCase(.uppercase)
                 Text("Calendario")
-                    .font(Theme.Typography.title)
+                    .font(Theme.Typography.displayHero)
+                    .tracking(Theme.Tracking.displayHero)
                     .foregroundStyle(Theme.Colors.textPrimary)
             }
             Spacer()
             addButton
-                .padding(.top, 6)
+                .padding(.top, 8)
         }
     }
 
@@ -240,10 +244,14 @@ struct CalendarioView: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 38, height: 38)
+                // Theme 2.0: focusDeepGradient + sombra cobalto más intensa.
                 .background(
                     Circle()
-                        .fill(Theme.Colors.focusAccent)
-                        .shadow(color: Theme.Colors.focusAccent.opacity(0.30), radius: 10, x: 0, y: 4)
+                        .fill(Theme.Colors.focusDeepGradient)
+                        .shadow(color: Theme.Colors.focusAccent.opacity(0.40), radius: 14, x: 0, y: 5)
+                )
+                .overlay(
+                    Circle().strokeBorder(Color.white.opacity(0.20), lineWidth: 0.5)
                 )
         }
         .buttonStyle(.plain)
@@ -257,12 +265,14 @@ struct CalendarioView: View {
     // MARK: - Day detail
 
     private var dateDetailHeader: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(dayName)
-                .font(Theme.Typography.title2)
+                .font(Theme.Typography.title1)
+                .tracking(Theme.Tracking.title1)
                 .foregroundStyle(Theme.Colors.textPrimary)
             Text(dayMetadataLabel)
                 .font(Theme.Typography.subhead)
+                .tracking(Theme.Tracking.body)
                 .foregroundStyle(Theme.Colors.textSecondary)
         }
     }
@@ -389,13 +399,20 @@ private struct DayPill: View {
     let eventsCount: Int
     let action: () -> Void
 
+    /// Theme 2.0: si el día representa "hoy" pero NO está seleccionado,
+    /// recibe un ring sutil cobalto + dot indicador — el usuario ubica
+    /// el presente sin tener que contar pills.
+    private var isToday: Bool {
+        Calendar.current.isDateInToday(date)
+    }
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
                 Text(weekdayShort)
-                    .font(Theme.Typography.caption)
+                    .font(Theme.Typography.captionMono)
+                    .tracking(Theme.Tracking.captionMono)
                     .foregroundStyle(isSelected ? .white : Theme.Colors.textTertiary)
-                    .tracking(0.6)
                 Text("\(dayNumber)")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(isSelected ? .white : Theme.Colors.textPrimary)
@@ -406,17 +423,37 @@ private struct DayPill: View {
                     .frame(width: 5, height: 5)
             }
             .frame(width: 50, height: 72)
+            // Theme 2.0: selected → focusDeepGradient (no sólido) + sombra
+            // contextual. isToday no-selected → ring focusAccent 0.55 +
+            // glow cobalto sutil. Resto → surface plano + borderHairline.
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                    .fill(isSelected ? AnyShapeStyle(Theme.Colors.focusAccent) : AnyShapeStyle(Theme.Colors.surface))
+                    .fill(
+                        isSelected
+                            ? AnyShapeStyle(Theme.Colors.focusDeepGradient)
+                            : AnyShapeStyle(Theme.Colors.surface)
+                    )
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                             .strokeBorder(
-                                isSelected ? Color.clear : Theme.Colors.border,
-                                lineWidth: Theme.Stroke.hairline
+                                isSelected
+                                    ? Color.clear
+                                    : (isToday
+                                        ? Theme.Colors.focusAccent.opacity(0.55)
+                                        : Theme.Colors.borderHairline),
+                                lineWidth: isToday && !isSelected ? 1.2 : Theme.Stroke.hairline
                             )
                     )
-                    .focusCardShadow()
+                    .shadow(
+                        color: isSelected
+                            ? Theme.Colors.focusAccent.opacity(0.32)
+                            : (isToday
+                                ? Theme.Colors.focusAccent.opacity(0.18)
+                                : Theme.Colors.cardShadow),
+                        radius: isSelected ? 14 : (isToday ? 8 : 6),
+                        x: 0,
+                        y: isSelected ? 6 : 3
+                    )
             )
         }
         .buttonStyle(.plain)
