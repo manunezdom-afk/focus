@@ -365,10 +365,12 @@ struct NovaView: View {
     private var accionesHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("¿Qué quieres hacer?")
-                .font(Theme.Typography.title2)
+                .font(Theme.Typography.title1)
+                .tracking(Theme.Tracking.title1)
                 .foregroundStyle(Theme.Colors.textPrimary)
             Text("Toca una acción y Nova arranca contigo. Las decisiones quedan en Bandeja.")
                 .font(Theme.Typography.subhead)
+                .tracking(Theme.Tracking.body)
                 .foregroundStyle(Theme.Colors.textSecondary)
         }
     }

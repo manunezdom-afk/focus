@@ -116,10 +116,12 @@ struct NovaInboxContent: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Sugerencias inteligentes")
-                .font(Theme.Typography.title2)
+                .font(Theme.Typography.title1)
+                .tracking(Theme.Tracking.title1)
                 .foregroundStyle(Theme.Colors.textPrimary)
             Text("Nova mira tu día y te propone ajustes. Aprueba lo útil, descarta el resto.")
                 .font(Theme.Typography.subhead)
+                .tracking(Theme.Tracking.body)
                 .foregroundStyle(Theme.Colors.textSecondary)
         }
     }

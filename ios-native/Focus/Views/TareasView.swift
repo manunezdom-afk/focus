@@ -93,18 +93,20 @@ struct TareasView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Tareas")
-                    .font(Theme.Typography.title)
+                    .font(Theme.Typography.displayHero)
+                    .tracking(Theme.Tracking.displayHero)
                     .foregroundStyle(Theme.Colors.textPrimary)
                 Text(headerSubtitle)
                     .font(Theme.Typography.body)
+                    .tracking(Theme.Tracking.body)
                     .foregroundStyle(Theme.Colors.textSecondary)
                     .lineLimit(2)
             }
             Spacer()
             addButton
-                .padding(.top, 4)
+                .padding(.top, 6)
         }
     }
 
