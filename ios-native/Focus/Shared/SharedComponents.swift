@@ -791,27 +791,43 @@ struct EmptyStateView: View {
     /// "Crear evento". Default false mantiene el look sólido cobalto.
     var aiStyledAction: Bool = false
 
+    // Theme 2.0: staggered fade-in. Cada elemento entra con 60ms de delay
+    // sobre el anterior para crear secuencia visual ordenada en empty states
+    // (típicamente la primera impresión de una pantalla vacía).
+    @State private var glyphAppear: Bool = false
+    @State private var textAppear: Bool = false
+    @State private var actionAppear: Bool = false
+
     var body: some View {
         VStack(spacing: Theme.Spacing.lg) {
-            ZStack {
-                Circle()
-                    .fill(Theme.Colors.focusAccentSoft)
-                    .frame(width: 80, height: 80)
-                Image(systemName: symbol)
-                    .font(.system(size: 30, weight: .light))
-                    .foregroundStyle(Theme.Colors.focusAccent)
-            }
+            // Theme 2.0: glifo lineal grande (64pt weight .light) sobre
+            // textTertiary opacity 0.5 — composición más calmada que el
+            // círculo cobalto saturado anterior. La identidad cromática
+            // viene del action button, no del glifo.
+            Image(systemName: symbol)
+                .font(.system(size: 64, weight: .light))
+                .foregroundStyle(Theme.Colors.textTertiary.opacity(0.5))
+                .opacity(glyphAppear ? 1 : 0)
+                .offset(y: glyphAppear ? 0 : 8)
 
             VStack(spacing: Theme.Spacing.xs) {
                 Text(title)
-                    .font(Theme.Typography.title2)
+                    // Title1 24pt SemiBold + tracking -0.72 — más display
+                    // que title2 anterior, con weight propio que distingue
+                    // un empty hero de un title2 de card.
+                    .font(Theme.Typography.title1)
+                    .tracking(Theme.Tracking.title1)
                     .foregroundStyle(Theme.Colors.textPrimary)
+                    .multilineTextAlignment(.center)
                 Text(message)
                     .font(Theme.Typography.body)
+                    .tracking(Theme.Tracking.body)
                     .foregroundStyle(Theme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
-            .frame(maxWidth: 300)
+            .frame(maxWidth: 320)
+            .opacity(textAppear ? 1 : 0)
+            .offset(y: textAppear ? 0 : 8)
 
             if let actionLabel, let action {
                 Button(action: {
@@ -867,10 +883,23 @@ struct EmptyStateView: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.top, Theme.Spacing.xs)
+                .opacity(actionAppear ? 1 : 0)
+                .offset(y: actionAppear ? 0 : 8)
             }
         }
         .padding(Theme.Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Theme 2.0: staggered entrance — glifo → texto (60ms) → action (120ms).
+        // Total 240ms para sensación intencional, no súbita.
+        .onAppear {
+            withAnimation(Theme.Spring.entrance) { glyphAppear = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                withAnimation(Theme.Spring.entrance) { textAppear = true }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                withAnimation(Theme.Spring.entrance) { actionAppear = true }
+            }
+        }
     }
 }
 
@@ -1055,25 +1084,37 @@ struct FocusBarInput: View {
         }
         .padding(.horizontal, Theme.Spacing.md + 2)
         .padding(.vertical, Theme.Spacing.sm + 2)
+        // Theme 2.0: FocusBar como elemento flotante Z-2.
+        // - Fondo .ultraThinMaterial con tinte novaAccent muy sutil (5%)
+        //   para que vibra ligeramente con la marca Nova sin pintarse violet.
+        // - Borde gradient NovaPrism SIEMPRE visible (no condicional). El
+        //   énfasis del focus viene del lineWidth (1.5 vs 0.7) y del
+        //   shadow (más intenso cuando focused), no del color.
+        // - Sombra elevated (Z-2) para que la barra se vea suspendida
+        //   sobre el canvas L0.
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
-                .fill(
-                    isFocused
-                        ? Theme.Colors.surface
-                        : Theme.Colors.surfaceHigh
-                )
+            ZStack {
+                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
+                    .fill(Theme.Colors.novaAccent.opacity(0.05))
+            }
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous)
                 .strokeBorder(
-                    isFocused
-                        ? AnyShapeStyle(Theme.Colors.novaGradient)
-                        : AnyShapeStyle(Theme.Colors.borderEmphasis.opacity(0.55)),
-                    lineWidth: isFocused ? 1.5 : 1.0
+                    Theme.Colors.novaPrismGradient,
+                    lineWidth: isFocused ? 1.5 : 0.7
                 )
+                .opacity(isFocused ? 1.0 : 0.45)
         )
-        .focusCardShadow()
-        .animation(.easeInOut(duration: 0.2), value: isFocused)
+        .shadow(
+            color: Theme.Colors.cardShadowStrong,
+            radius: isFocused ? 18 : 12,
+            x: 0,
+            y: isFocused ? 8 : 5
+        )
+        .animation(Theme.Motion.easeInOutStandard, value: isFocused)
     }
 }
 
@@ -1123,9 +1164,11 @@ struct StatePill: View {
                 Image(systemName: symbol)
                     .font(.system(size: 9, weight: .semibold))
             }
+            // Theme 2.0: caption mono + tracking opinado. SF Mono medium
+            // da mejor density visual para badges UPPERCASE que SF Pro.
             Text(label.uppercased())
-                .font(Theme.Typography.caption)
-                .tracking(0.7)
+                .font(Theme.Typography.captionMono)
+                .tracking(Theme.Tracking.captionMono)
         }
         .foregroundStyle(tint)
         .padding(.horizontal, 8)
@@ -1468,6 +1511,8 @@ struct PromptChip: View {
     let text: String
     let action: () -> Void
 
+    @State private var isPressed: Bool = false
+
     var body: some View {
         Button(action: {
             HapticManager.shared.tap()
@@ -1477,6 +1522,7 @@ struct PromptChip: View {
                 NovaSparkMark(size: 11, fillColor: AnyShapeStyle(Theme.Colors.novaAccent))
                 Text(text)
                     .font(Theme.Typography.subheadEmphasized)
+                    .tracking(Theme.Tracking.body)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
@@ -1486,17 +1532,26 @@ struct PromptChip: View {
             }
             .padding(.horizontal, Theme.Spacing.md + 2)
             .padding(.vertical, Theme.Spacing.md - 1)
+            // Theme 2.0: borderHairline + sombra ligera Z-1.
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                     .fill(Theme.Colors.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                            .strokeBorder(Theme.Colors.borderHairline, lineWidth: Theme.Stroke.hairline)
                     )
             )
             .focusCardShadow()
+            // Theme 2.0: tap feedback con scale 0.97 (MotionSnap 120ms).
+            .scaleEffect(isPressed ? 0.97 : 1.0)
+            .animation(Theme.Motion.snapTap, value: isPressed)
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in isPressed = true }
+                .onEnded { _ in isPressed = false }
+        )
     }
 }
 
@@ -1523,11 +1578,12 @@ struct AudioLevelBars: View {
         HStack(alignment: .center, spacing: 2) {
             ForEach(multipliers.indices, id: \.self) { i in
                 Capsule()
-                    .fill(Theme.Colors.focusAccent)
+                    .fill(Theme.Colors.novaAccent)
                     .frame(width: 2.5, height: barHeight(at: i))
             }
         }
-        .animation(.spring(response: 0.18, dampingFraction: 0.65), value: level)
+        // Theme 2.0: usar spring interactive tokenizado.
+        .animation(Theme.Spring.interactive, value: level)
     }
 
     /// Altura por barra: piso 3pt (siempre visible aunque haya silencio
@@ -1541,3 +1597,346 @@ struct AudioLevelBars: View {
         return floor + dynamic
     }
 }
+
+// MARK: - Buttons system (Theme 2.0 — Precision Etherealism)
+//
+// Familia de 4 botones primarios usados en toda la app. Antes cada vista
+// definía sus propios botones a mano (capsule + fill + shadow + text);
+// con Theme 2.0 unificamos en componentes con motion + haptics tokenizados.
+//
+// Reglas comunes:
+// - Altura 48pt fija (área táctil generosa Apple HIG).
+// - Radius 14 (md) — más recto que los chips/cards (lg=18) por contraste.
+// - Texto callout 13pt medium (size de botón estándar Apple).
+// - Scale 0.96 + MotionSnap (120ms) al tap, return spring settle.
+
+/// Botón primario — gradient FocusDeep + texto blanco.
+/// Para CTAs principales: "Empezar", "Enviar código", "Crear evento".
+struct FocusPrimaryButton: View {
+    let label: String
+    var icon: String? = nil
+    var fullWidth: Bool = true
+    var action: () -> Void
+
+    @State private var isPressed: Bool = false
+
+    var body: some View {
+        Button(action: {
+            HapticManager.shared.tap()
+            action()
+        }) {
+            HStack(spacing: 8) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 14, weight: .bold))
+                }
+                Text(label)
+                    .font(Theme.Typography.callout)
+                    .fontWeight(.semibold)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: fullWidth ? .infinity : nil)
+            .frame(height: 48)
+            .padding(.horizontal, fullWidth ? 0 : Theme.Spacing.xl)
+            .background(
+                Capsule()
+                    .fill(Theme.Colors.focusDeepGradient)
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.white.opacity(0.20), lineWidth: 0.5)
+            )
+            .shadow(
+                color: Theme.Colors.focusAccent.opacity(0.32),
+                radius: 14,
+                x: 0,
+                y: 5
+            )
+            .scaleEffect(isPressed ? 0.96 : 1.0)
+            .animation(Theme.Motion.snapTap, value: isPressed)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in isPressed = true }
+                .onEnded { _ in isPressed = false }
+        )
+    }
+}
+
+/// Botón secundario — surface elevated + border hairline + texto secondary.
+/// Para acciones de soporte: "Cancelar", "Volver", "Reintentar".
+struct FocusSecondaryButton: View {
+    let label: String
+    var icon: String? = nil
+    var fullWidth: Bool = true
+    var action: () -> Void
+
+    @State private var isPressed: Bool = false
+
+    var body: some View {
+        Button(action: {
+            HapticManager.shared.tick()
+            action()
+        }) {
+            HStack(spacing: 8) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 14, weight: .medium))
+                }
+                Text(label)
+                    .font(Theme.Typography.callout)
+                    .fontWeight(.medium)
+            }
+            .foregroundStyle(Theme.Colors.textSecondary)
+            .frame(maxWidth: fullWidth ? .infinity : nil)
+            .frame(height: 48)
+            .padding(.horizontal, fullWidth ? 0 : Theme.Spacing.xl)
+            .background(
+                Capsule()
+                    .fill(Theme.Colors.surfaceL2)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Theme.Colors.borderHairline, lineWidth: Theme.Stroke.hairline)
+                    )
+            )
+            .scaleEffect(isPressed ? 0.98 : 1.0)
+            .animation(Theme.Motion.snapTap, value: isPressed)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in isPressed = true }
+                .onEnded { _ in isPressed = false }
+        )
+    }
+}
+
+/// Botón ghost — sin fill ni border. Solo texto colored.
+/// Para acciones discretas inline: "Saltar", "Más tarde", "Ver detalles".
+struct FocusGhostButton: View {
+    let label: String
+    var icon: String? = nil
+    var tint: Color = Theme.Colors.focusAccent
+    var action: () -> Void
+
+    @State private var isPressed: Bool = false
+
+    var body: some View {
+        Button(action: {
+            HapticManager.shared.tick()
+            action()
+        }) {
+            HStack(spacing: 6) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                Text(label)
+                    .font(Theme.Typography.callout)
+                    .fontWeight(.semibold)
+            }
+            .foregroundStyle(tint)
+            .opacity(isPressed ? 0.6 : 1.0)
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.sm)
+            .contentShape(Rectangle())
+            .animation(Theme.Motion.snapTap, value: isPressed)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in isPressed = true }
+                .onEnded { _ in isPressed = false }
+        )
+    }
+}
+
+/// Botón destructivo — fondo dangerSoft + texto danger.
+/// Para acciones irreversibles: "Eliminar evento", "Borrar todo".
+///
+/// Variante hold-to-confirm: cuando `holdToConfirm = true`, el botón debe
+/// mantenerse presionado por 1 segundo. Durante ese tiempo, una barra
+/// horizontal rojo sólido crece como confirmación visual. Soltar antes
+/// cancela el hold y vuelve a vacío.
+struct FocusDestructiveButton: View {
+    let label: String
+    var icon: String? = "trash"
+    var holdToConfirm: Bool = false
+    var fullWidth: Bool = true
+    var action: () -> Void
+
+    @State private var isPressed: Bool = false
+    @State private var holdProgress: CGFloat = 0
+    @State private var holdTask: Task<Void, Never>? = nil
+
+    var body: some View {
+        Button(action: {
+            if !holdToConfirm {
+                HapticManager.shared.warning()
+                action()
+            }
+        }) {
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Theme.Colors.dangerSoft)
+
+                // Barra de progreso del hold (sólo si holdToConfirm).
+                if holdToConfirm {
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(Theme.Colors.danger)
+                            .frame(width: geo.size.width * holdProgress)
+                            .opacity(0.85)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    if let icon {
+                        Image(systemName: icon)
+                            .font(.system(size: 14, weight: .bold))
+                    }
+                    Text(label)
+                        .font(Theme.Typography.callout)
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(holdProgress > 0.6 ? Color.white : Theme.Colors.danger)
+                .frame(maxWidth: fullWidth ? .infinity : nil)
+                .padding(.horizontal, fullWidth ? 0 : Theme.Spacing.xl)
+            }
+            .frame(height: 48)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(Theme.Colors.danger.opacity(0.20), lineWidth: 0.5)
+            )
+            .scaleEffect(isPressed && !holdToConfirm ? 0.96 : 1.0)
+            .animation(Theme.Motion.snapTap, value: isPressed)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !isPressed {
+                        isPressed = true
+                        if holdToConfirm {
+                            startHold()
+                        }
+                    }
+                }
+                .onEnded { _ in
+                    isPressed = false
+                    if holdToConfirm {
+                        cancelHold()
+                    }
+                }
+        )
+    }
+
+    private func startHold() {
+        holdTask?.cancel()
+        holdTask = Task {
+            let steps = 60
+            for i in 1...steps {
+                if Task.isCancelled { return }
+                try? await Task.sleep(nanoseconds: 1_000_000_000 / UInt64(steps))
+                await MainActor.run {
+                    withAnimation(.linear(duration: 0.016)) {
+                        holdProgress = CGFloat(i) / CGFloat(steps)
+                    }
+                }
+            }
+            // Hold completo → ejecutar acción.
+            await MainActor.run {
+                HapticManager.shared.warning()
+                action()
+                holdProgress = 0
+            }
+        }
+    }
+
+    private func cancelHold() {
+        holdTask?.cancel()
+        withAnimation(Theme.Motion.snapTap) {
+            holdProgress = 0
+        }
+    }
+}
+
+// MARK: - FocusBadge — pill numérico/indicador
+
+/// Badge pequeño para notificaciones / contadores. Usa CaptionMono.
+/// Para usar como indicador de status (PRÓXIMO/EN CURSO/etc) preferir StatePill.
+struct FocusBadge: View {
+    let label: String
+    var tint: Color = Theme.Colors.novaAccent
+    var fillStyle: AnyShapeStyle? = nil
+
+    var body: some View {
+        Text(label)
+            .font(Theme.Typography.captionMono)
+            .tracking(Theme.Tracking.captionMono)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .frame(minWidth: 18, minHeight: 18)
+            .background(
+                Capsule()
+                    .fill(fillStyle ?? AnyShapeStyle(tint))
+            )
+    }
+}
+
+// MARK: - FocusToggle — switch custom con FocusDeep gradient
+
+/// Toggle custom que reemplaza UISwitch nativo (verde sistema) por uno
+/// con gradient FocusDeep cuando activo. Más coherente con la marca Focus.
+///
+/// Uso: `FocusToggle(isOn: $value)` — drop-in replacement para `Toggle`
+/// SwiftUI estándar. El label se renderiza separado por convención.
+struct FocusToggle: View {
+    @Binding var isOn: Bool
+    var disabled: Bool = false
+
+    private let width: CGFloat = 51
+    private let height: CGFloat = 31
+    private let nodeSize: CGFloat = 27
+
+    var body: some View {
+        Button {
+            HapticManager.shared.tick()
+            withAnimation(Theme.Spring.settle) {
+                isOn.toggle()
+            }
+        } label: {
+            ZStack(alignment: isOn ? .trailing : .leading) {
+                // Track — gradient FocusDeep cuando activo, gris cuando off.
+                Capsule()
+                    .fill(
+                        isOn
+                            ? AnyShapeStyle(Theme.Colors.focusDeepGradient)
+                            : AnyShapeStyle(Theme.Colors.surfaceL2)
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(
+                                isOn ? Color.clear : Theme.Colors.borderSoft,
+                                lineWidth: Theme.Stroke.hairline
+                            )
+                    )
+                    .frame(width: width, height: height)
+
+                // Node deslizante — blanco con sombra táctil + leve overhang.
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: nodeSize, height: nodeSize)
+                    .shadow(color: .black.opacity(0.18), radius: 2.5, y: 1.5)
+                    .padding(.horizontal, 2)
+            }
+            .opacity(disabled ? 0.45 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+}
+
