@@ -1634,46 +1634,67 @@ struct FocusAmbientCanvas: View {
     @State private var phase: Bool = false
 
     var body: some View {
-        ZStack {
-            // Canvas base — el slate definido en Theme.
-            Theme.Colors.background
+        // v5 fix: GeometryReader + .position() + .clipped() para que el
+        // background NUNCA empuje el layout del contenido encima. La
+        // versión anterior usaba `.offset()` con frames gigantes (640x640)
+        // — al ser child de un ZStack padre, el ZStack heredaba ese
+        // tamaño y desplazaba el contenido a la izquierda.
+        //
+        // Reglas del nuevo container:
+        // - GeometryReader provee dimensiones reales de la pantalla.
+        // - Halos posicionados con .position() absoluta (no .offset()).
+        // - Tamaños de halos relativos a screen width (siempre proporcional).
+        // - El ZStack interno se clava a width/height de la pantalla.
+        // - .clipped() corta cualquier halo que se desborde.
+        // - .ignoresSafeArea() afuera del GeometryReader para llenar bordes.
+        GeometryReader { proxy in
+            let w = proxy.size.width
+            let h = proxy.size.height
+            ZStack {
+                // Canvas base sólido — el slate del Theme.
+                Theme.Colors.background
 
-            // Halo COBALTO — top-leading, oscila diagonal.
-            haloCircle(
-                color: Theme.Colors.focusAccent,
-                radius: 340
-            )
-            .opacity(focusOpacity)
-            .offset(
-                x: phase ? -140 : -200,
-                y: phase ? -260 : -200
-            )
+                // Halo COBALTO — flota arriba-izquierda. Su centro vive en
+                // las afueras del lienzo (x:-5%/+10%, y:-15%/-5%) para que
+                // sólo el borde teñido del radial entre en la pantalla —
+                // así no compite con el contenido.
+                haloCircle(
+                    color: Theme.Colors.focusAccent,
+                    diameter: w * 1.4
+                )
+                .opacity(focusOpacity)
+                .position(
+                    x: phase ? w * 0.10 : -w * 0.05,
+                    y: phase ? -h * 0.20 : -h * 0.05
+                )
 
-            // Halo VIOLET (Nova) — bottom-trailing, oscila en dirección opuesta.
-            haloCircle(
-                color: Theme.Colors.novaAccent,
-                radius: 300
-            )
-            .opacity(novaOpacity)
-            .offset(
-                x: phase ? 170 : 110,
-                y: phase ? 300 : 250
-            )
-
-            // Halo extra solo cuando IA está activa — da sensación de
-            // "presencia" violet que cruza el centro de la pantalla.
-            if state == .listening || state == .thinking {
+                // Halo VIOLET (Nova) — flota abajo-derecha, en dirección
+                // opuesta. Mismo principio: centro fuera del lienzo.
                 haloCircle(
                     color: Theme.Colors.novaAccent,
-                    radius: 200
+                    diameter: w * 1.25
                 )
-                .opacity(0.22)
-                .offset(
-                    x: phase ? -40 : 60,
-                    y: phase ? 80 : -40
+                .opacity(novaOpacity)
+                .position(
+                    x: phase ? w * 1.05 : w * 0.85,
+                    y: phase ? h * 1.20 : h * 1.05
                 )
-                .transition(.opacity)
+
+                // Halo extra solo cuando IA está activa — cruza el centro.
+                if state == .listening || state == .thinking {
+                    haloCircle(
+                        color: Theme.Colors.novaAccent,
+                        diameter: w * 0.85
+                    )
+                    .opacity(0.28)
+                    .position(
+                        x: phase ? w * 0.35 : w * 0.65,
+                        y: phase ? h * 0.60 : h * 0.40
+                    )
+                }
             }
+            .frame(width: w, height: h)
+            .clipped()
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
@@ -1690,28 +1711,30 @@ struct FocusAmbientCanvas: View {
         }
     }
 
-    /// Intensidad del halo COBALTO según estado.
+    /// Intensidad del halo COBALTO según estado. v5: subimos los baseline
+    /// para que la presencia cobalto se vea claramente sobre el canvas
+    /// más profundo — antes 0.90 idle se perdía.
     private var focusOpacity: Double {
         switch state {
-        case .idle:      return 0.90
-        case .listening: return 1.20
-        case .thinking:  return 1.10
-        case .success:   return 1.10
+        case .idle:      return 1.00
+        case .listening: return 1.30
+        case .thinking:  return 1.20
+        case .success:   return 1.20
         }
     }
 
     /// Intensidad del halo VIOLET (Nova) según estado.
     private var novaOpacity: Double {
         switch state {
-        case .idle:      return 0.75
-        case .listening: return 1.35
-        case .thinking:  return 1.25
-        case .success:   return 1.05
+        case .idle:      return 0.85
+        case .listening: return 1.45
+        case .thinking:  return 1.35
+        case .success:   return 1.15
         }
     }
 
-    /// Duración del ciclo (segundos). Idle es muy lento (calma); listening
-    /// es más rápido (energía visible).
+    /// Duración del ciclo (segundos). Idle muy lento (calma); listening
+    /// más rápido (energía visible).
     private var cycleDuration: Double {
         switch state {
         case .idle:      return 12.0
@@ -1722,22 +1745,24 @@ struct FocusAmbientCanvas: View {
     }
 
     /// Un halo radial gaussian-like. RadialGradient nativo de SwiftUI —
-    /// cero blur dinámico (caro). El gradient ya da el efecto difuso.
-    private func haloCircle(color: Color, radius: CGFloat) -> some View {
+    /// cero blur dinámico. El gradient ya da el efecto difuso.
+    /// v5: subimos opacidades de los stops (0.32→0.42 centro, 0.14→0.20
+    /// medio) para que los halos se vean MÁS, no más pastel.
+    private func haloCircle(color: Color, diameter: CGFloat) -> some View {
         Circle()
             .fill(
                 RadialGradient(
                     gradient: Gradient(stops: [
-                        .init(color: color.opacity(0.32), location: 0.0),
-                        .init(color: color.opacity(0.14), location: 0.50),
+                        .init(color: color.opacity(0.42), location: 0.0),
+                        .init(color: color.opacity(0.20), location: 0.50),
                         .init(color: color.opacity(0.0),  location: 1.0),
                     ]),
                     center: .center,
                     startRadius: 0,
-                    endRadius: radius
+                    endRadius: diameter / 2
                 )
             )
-            .frame(width: radius * 2, height: radius * 2)
+            .frame(width: diameter, height: diameter)
     }
 }
 

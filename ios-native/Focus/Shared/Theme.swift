@@ -37,15 +37,14 @@ enum Theme {
     enum Colors {
         // MARK: Canvas + superficies (sistema 3-tier)
 
-        /// Lienzo base — el fondo general de pantallas. Theme 2.0 v3: gris
-        /// azul-slate denso (#D8E0EC). El #E9EEF7 anterior se sentía pastel
-        /// y poco premium en pantalla pequeña — esta versión empuja más al
-        /// slate (más saturado, más profundo) para que las cards blancas
-        /// queden visiblemente elevadas y la identidad Linear/Arc se
-        /// perciba a primera vista. Sigue siendo light mode legible.
-        static let background = Color(red: 0.847, green: 0.878, blue: 0.925)  // #D8E0EC
+        /// Lienzo base — el fondo general de pantallas. Theme 2.0 v5:
+        /// cobalto-slate denso (#C5D2E8). El #D8E0EC anterior se sentía
+        /// "celeste pálido lavado" — este tono empuja más al cobalto
+        /// (más azul, más saturado, premium) sin caer en oscuro. Cards
+        /// blancas tienen despegue máximo + identidad Linear/Arc clara.
+        static let background = Color(red: 0.773, green: 0.823, blue: 0.910)  // #C5D2E8
         /// Canvas alias explícito por claridad — mismo valor que background.
-        static let canvasL0 = Color(red: 0.847, green: 0.878, blue: 0.925)    // #D8E0EC
+        static let canvasL0 = Color(red: 0.773, green: 0.823, blue: 0.910)    // #C5D2E8
         /// Superficie de cards interactivas — blanco puro contra el canvas.
         static let surface = Color.white                                       // #FFFFFF
         /// Alias semántico de surface.
@@ -374,7 +373,7 @@ enum Theme {
         /// Etiqueta del milestone del rediseño. Si el QA en iPhone NO muestra
         /// este string, la build instalada es vieja — purgar derived data
         /// (Xcode → Product → Clean Build Folder) y reinstalar.
-        static let buildLabel: String = "qa-2026-05-21-build18"
+        static let buildLabel: String = "qa-2026-05-21-build19"
     }
 
     // MARK: - Motion (Theme 2.0)
