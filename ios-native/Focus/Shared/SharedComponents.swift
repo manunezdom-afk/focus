@@ -1651,13 +1651,24 @@ struct FocusAmbientCanvas: View {
             let w = proxy.size.width
             let h = proxy.size.height
             ZStack {
-                // Canvas base sólido — el slate del Theme.
+                // Canvas base — el cobalto-slate del Theme.
                 Theme.Colors.background
 
-                // Halo COBALTO — flota arriba-izquierda. Su centro vive en
-                // las afueras del lienzo (x:-5%/+10%, y:-15%/-5%) para que
-                // sólo el borde teñido del radial entre en la pantalla —
-                // así no compite con el contenido.
+                // v6: gradiente lineal vertical canvas→blanco. Da la
+                // sensación "respira hacia blanco" en la mitad inferior:
+                // arriba mantiene la identidad cobalto, abajo abre aire.
+                // Menos saturación general sin perder el tinte azul.
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: Color.white.opacity(0.0), location: 0.0),
+                        .init(color: Color.white.opacity(0.0), location: 0.30),
+                        .init(color: Color.white.opacity(0.55), location: 1.0),
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                // Halo COBALTO — flota arriba-izquierda.
                 haloCircle(
                     color: Theme.Colors.focusAccent,
                     diameter: w * 1.4
@@ -1668,8 +1679,7 @@ struct FocusAmbientCanvas: View {
                     y: phase ? -h * 0.20 : -h * 0.05
                 )
 
-                // Halo VIOLET (Nova) — flota abajo-derecha, en dirección
-                // opuesta. Mismo principio: centro fuera del lienzo.
+                // Halo VIOLET (Nova) — flota abajo-derecha.
                 haloCircle(
                     color: Theme.Colors.novaAccent,
                     diameter: w * 1.25
@@ -1686,7 +1696,7 @@ struct FocusAmbientCanvas: View {
                         color: Theme.Colors.novaAccent,
                         diameter: w * 0.85
                     )
-                    .opacity(0.28)
+                    .opacity(0.22)
                     .position(
                         x: phase ? w * 0.35 : w * 0.65,
                         y: phase ? h * 0.60 : h * 0.40
@@ -1711,25 +1721,25 @@ struct FocusAmbientCanvas: View {
         }
     }
 
-    /// Intensidad del halo COBALTO según estado. v5: subimos los baseline
-    /// para que la presencia cobalto se vea claramente sobre el canvas
-    /// más profundo — antes 0.90 idle se perdía.
+    /// Intensidad del halo COBALTO según estado. v6: bajamos un punto para
+    /// que el canvas respire — antes 1.00 idle saturaba sobre el fondo
+    /// claro. Sigue dando presencia cobalto sin sentirse pesado.
     private var focusOpacity: Double {
         switch state {
-        case .idle:      return 1.00
-        case .listening: return 1.30
-        case .thinking:  return 1.20
-        case .success:   return 1.20
+        case .idle:      return 0.75
+        case .listening: return 1.05
+        case .thinking:  return 0.95
+        case .success:   return 0.95
         }
     }
 
     /// Intensidad del halo VIOLET (Nova) según estado.
     private var novaOpacity: Double {
         switch state {
-        case .idle:      return 0.85
-        case .listening: return 1.45
-        case .thinking:  return 1.35
-        case .success:   return 1.15
+        case .idle:      return 0.62
+        case .listening: return 1.15
+        case .thinking:  return 1.05
+        case .success:   return 0.85
         }
     }
 
@@ -1744,17 +1754,17 @@ struct FocusAmbientCanvas: View {
         }
     }
 
-    /// Un halo radial gaussian-like. RadialGradient nativo de SwiftUI —
-    /// cero blur dinámico. El gradient ya da el efecto difuso.
-    /// v5: subimos opacidades de los stops (0.32→0.42 centro, 0.14→0.20
-    /// medio) para que los halos se vean MÁS, no más pastel.
+    /// Un halo radial gaussian-like. RadialGradient nativo — cero blur
+    /// dinámico. v6: bajamos opacidades de stops (0.42→0.32 centro,
+    /// 0.20→0.12 medio) para que respire más limpio. El fade vertical
+    /// del LinearGradient encima da la sensación "respira hacia blanco".
     private func haloCircle(color: Color, diameter: CGFloat) -> some View {
         Circle()
             .fill(
                 RadialGradient(
                     gradient: Gradient(stops: [
-                        .init(color: color.opacity(0.42), location: 0.0),
-                        .init(color: color.opacity(0.20), location: 0.50),
+                        .init(color: color.opacity(0.32), location: 0.0),
+                        .init(color: color.opacity(0.12), location: 0.50),
                         .init(color: color.opacity(0.0),  location: 1.0),
                     ]),
                     center: .center,
