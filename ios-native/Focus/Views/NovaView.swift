@@ -43,25 +43,23 @@ struct NovaView: View {
             ZStack {
                 Theme.Colors.background.ignoresSafeArea()
 
-                // Ambient gradient violeta SUTIL detrás del top de Nova
-                // tab — crea atmósfera "capa especial" sin pintar paredes
-                // de color. Solo se ve en la zona superior, fade a fondo
-                // normal antes del segmented control.
-                VStack(spacing: 0) {
-                    LinearGradient(
-                        colors: [
-                            Theme.Colors.novaAccent.opacity(0.12),
-                            Theme.Colors.novaAccent.opacity(0.04),
-                            .clear
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 220)
-                    .blur(radius: 30)
-                    Spacer()
-                }
-                .ignoresSafeArea(edges: .top)
+                // Theme 2.0: ambient radial nova-tinted. Sustituye el
+                // LinearGradient + blur 30pt anterior (caro en render por
+                // el blur). El radial nativo es más fluido y se desvanece
+                // orgánicamente desde el top — coherente con el hero de
+                // Mi Día (AmbientCalmRadial) pero con tinte Nova-dominante.
+                RadialGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: Theme.Colors.novaAccent.opacity(0.12), location: 0.0),
+                        .init(color: Theme.Colors.focusAccent.opacity(0.05), location: 0.45),
+                        .init(color: Theme.Colors.background.opacity(0.0),  location: 1.0),
+                    ]),
+                    center: .top,
+                    startRadius: 0,
+                    endRadius: 320
+                )
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
                 VStack(spacing: 0) {
                     branding
@@ -255,11 +253,14 @@ struct NovaView: View {
                     NovaSparkMark(size: 12)
                 }
             }
-            // Título "Nova" con gradient — esto es lo que la diferencia
-            // visualmente de "Mi Día" o "Calendario" que tienen título
-            // negro plano. Treatment premium.
+            // Theme 2.0: "Nova" en displayHero 34pt SemiBold + tracking
+            // displayHero (-1.36) — coherente con "Mi Día" del bloque D.
+            // El gradient horizontal cobalto→violet permanece como
+            // diferenciador visual de Nova respecto al resto de pantallas
+            // (que tienen títulos negros planos).
             Text("Nova")
-                .font(.system(size: 30, weight: .bold))
+                .font(Theme.Typography.displayHero)
+                .tracking(Theme.Tracking.displayHero)
                 .foregroundStyle(
                     LinearGradient(
                         colors: [
@@ -436,16 +437,26 @@ struct NovaView: View {
         // con el botón "Listo" del toolbar o haciendo scroll.
     }
 
-    /// Empty state estilo Gemini: hero centrado con mark grande + saludo
-    /// en tipografía light + subtítulo amable + chips espaciados.
+    /// Theme 2.0: empty hero opinado. Antes "34pt light" se sentía amable
+    /// pero genérico (Apple Intelligence-like). Ahora displayHero 34pt
+    /// SemiBold con tracking -1.36 — peso visual definido sin perder
+    /// elegancia, alineado con Mi Día y Nova title.
     private var emptyChatHero: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: Theme.Spacing.lg) {
                 Spacer(minLength: Theme.Spacing.xxxl + Theme.Spacing.md)
                 ZStack {
+                    // NovaPrism gradient (Theme 2.0) — stops opinados para
+                    // IA, distintos del legacy novaGradient.
                     RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .fill(Theme.Colors.novaGradient)
+                        .fill(Theme.Colors.novaPrismGradient)
                         .frame(width: 96, height: 96)
+                        .overlay(
+                            // Inner highlight specular — sensación 3D
+                            // coherente con NovaVoiceCore de E.
+                            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                                .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
+                        )
                         .shadow(color: Theme.Colors.novaAccent.opacity(0.55), radius: 28, y: 10)
                         .shadow(color: Theme.Colors.focusAccent.opacity(0.25), radius: 16, y: 4)
                     NovaSparkMark(size: 42)
@@ -453,13 +464,14 @@ struct NovaView: View {
                 .padding(.bottom, Theme.Spacing.sm)
 
                 Text("¿Qué quieres ordenar?")
-                    .font(.system(size: 34, weight: .light))
+                    .font(Theme.Typography.displayHero)
+                    .tracking(Theme.Tracking.displayHero)
                     .foregroundStyle(Theme.Colors.textPrimary)
                     .multilineTextAlignment(.center)
-                    .tracking(-0.5)
 
                 Text("Pídele a Nova un evento, una tarea, o que organice tu día.")
-                    .font(.system(size: 15, weight: .regular))
+                    .font(Theme.Typography.body)
+                    .tracking(Theme.Tracking.body)
                     .foregroundStyle(Theme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
                     .lineSpacing(2)
