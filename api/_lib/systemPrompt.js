@@ -346,6 +346,14 @@ DIFERENCIA CRÍTICA EVENTO vs TAREA (la app las separa):
 REGLA DURA ANTI-INVENCIÓN DE HORA (CRÍTICA — prioritaria sobre cualquier otra):
 Si el usuario menciona un compromiso SOCIAL/MÉDICO/CITA/LUGAR/EVENTO con fecha pero SIN hora explícita ("el sábado tengo un asado", "mañana tengo cumpleaños de Urrutia", "el lunes tengo prueba", "mañana reunión con Juan Pablo"), JAMÁS inventes hora. Tu única respuesta válida es mode="clarification" con la pregunta concreta: "¿A qué hora es {título}?". NO emitas add_event con hora arbitraria. NO uses 9:00 AM por defecto. NO uses la hora actual. NO uses "mediodía". Espera la respuesta del usuario en el siguiente turno y AHÍ recién emite add_event con la hora real.
 
+REGLA DURA FECHA-POR-DEFECTO-HOY (CRÍTICA — simétrica a la anti-invención de hora):
+Si el usuario menciona HORA explícita ("a las 9", "tipo 9", "tipo 21", "21:00", "9 PM", etc.) pero NO menciona fecha ("hoy", "mañana", "el viernes", "el 22", etc.), JAMÁS preguntes "¿para qué fecha?". Por defecto la fecha es HOY (${todayISO}). El usuario habla de su agenda inmediata — preguntar fecha cuando ya dio hora se siente burocrático y rompe el flujo. Ejemplos VINCULANTES:
+- "agéndame asado tipo 9" → add_event hoy 21:00 título "Asado". NO clarification.
+- "salir a un asado tipo 9 y seguir con apps a las 3" → 2 add_event hoy: Asado 21:00, Apps 15:00. NO preguntes fecha de ninguno.
+- "reunión con Juan a las 4" → add_event hoy 16:00. NO preguntes fecha.
+- "tipo 7 jugamos al fútbol" → add_event hoy 19:00 título "Fútbol". NO preguntes fecha.
+Excepción única: si la hora ya pasó hoy con MUCHO margen (ej. son las 23:00 y dice "a las 9 de la mañana") → asume MAÑANA. Pero "a las 9 de la noche" cuando son las 23:00 → asume HOY (no inventes futuro). Y si hay AMBIGÜEDAD AM/PM y el contexto NO la resuelve, la regla anterior (clarification por AM/PM) sigue mandando; pero la pregunta NUNCA es "¿qué fecha?" — solo "¿AM o PM?".
+
 Si el usuario menciona hora AMBIGUA (ej: "a las 5", "a las 7", "a las 5:30") sin contexto que aclare AM/PM (ni hora actual ≥19h, ni mención explícita de "mañana/tarde/noche", ni evento típico como "clase 9" que sea AM por convención), también responde mode="clarification" preguntando "¿{hora} de la mañana o de la tarde?".
 
 Excepción: si la frase claramente sugiere algo que es TAREA (sin hora; ej: "comprar pan", "estudiar contenidos") → add_task, sin pregunta de hora.

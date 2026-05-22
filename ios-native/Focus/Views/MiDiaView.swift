@@ -156,7 +156,14 @@ struct MiDiaView: View {
                     // anclado al evento) se ven dentro del card del evento
                     // padre, así que la sección de pendientes no aportaba.
 
+                    // v8 alineación: el padding horizontal de la sección
+                    // de timeline ahora vive acá afuera (mismo patrón que
+                    // focusBar y header de arriba) en lugar de repartido
+                    // en tres `.padding` internos. Garantiza que la
+                    // tarjeta de evento empieza EXACTAMENTE en el mismo
+                    // eje vertical izquierdo que el input de Nova.
                     timelineSection
+                        .padding(.horizontal, Theme.Spacing.xl)
 
                     nextDayPreviewSection
 
@@ -2601,7 +2608,6 @@ struct MiDiaView: View {
                     .sectionLabelStyle()
                 Spacer()
             }
-            .padding(.horizontal, Theme.Spacing.xl)
 
             if displayEvents.isEmpty {
                 // 2026-05-14: el botón ahora navega directo al CHAT de Nova
@@ -2620,7 +2626,6 @@ struct MiDiaView: View {
                     aiStyledAction: true
                 )
                 .frame(minHeight: 260)
-                .padding(.horizontal, Theme.Spacing.xl)
             } else {
                 let shown = showAllEvents
                     ? displayEvents
@@ -2671,7 +2676,6 @@ struct MiDiaView: View {
                         }
                     }
                 }
-                .padding(.horizontal, Theme.Spacing.xl)
 
                 if hiddenCount > 0 {
                     Button {
@@ -2692,7 +2696,6 @@ struct MiDiaView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.plain)
-                    .padding(.horizontal, Theme.Spacing.xl)
                     .padding(.top, Theme.Spacing.xs)
                 }
             }

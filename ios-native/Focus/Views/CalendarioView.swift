@@ -789,7 +789,16 @@ private struct MonthGridView: View {
     /// alinear el primer día del mes con el día de la semana correspondiente
     /// (L=2 en es_ES). Devuelve nil para celdas vacías.
     private var gridDays: [Date?] {
-        let comps = calendar.dateComponents([.year, .month], from: displayedMonth)
+        // Fix off-by-one: ancla EXPLÍCITAMENTE `comps.day = 1`. Sin esto,
+        // `calendar.date(from:)` puede resolver a las 00:00 del día 0 del
+        // mes (=último día del mes anterior) según la configuración del
+        // Calendar — exactamente el síntoma reportado: mayo 2026 caía
+        // como si el día 1 fuera jueves (porque firstOfMonth resolvía a
+        // abril 30=jueves) en lugar de viernes, y la grilla terminaba
+        // shifteada una columna a la izquierda. Setear day=1 a mano lo
+        // hace determinista en cualquier locale/calendar.
+        var comps = calendar.dateComponents([.year, .month], from: displayedMonth)
+        comps.day = 1
         guard let firstOfMonth = calendar.date(from: comps) else { return [] }
         let range = calendar.range(of: .day, in: .month, for: firstOfMonth) ?? 1..<2
         let daysInMonth = range.count

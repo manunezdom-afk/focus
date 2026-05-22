@@ -67,8 +67,25 @@ struct NovaView: View {
                         case .chat:     chatContent
                         }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            // v8 fix teclado iOS: el `safeAreaInset(.bottom)` del inputBar
+            // vive en la RAÍZ del ZStack, no anidado dentro de chatContent.
+            // El patrón anterior (safeAreaInset en un `Group { switch }`
+            // dos niveles abajo) confundía la propagación del keyboard inset
+            // — el inputBar terminaba empujado fuera del viewport y el
+            // usuario veía solo la barra "Listo" del toolbar del teclado.
+            // Acá SwiftUI sabe que esta banda es fija al bottom: cuando
+            // aparece el teclado, sube el inputBar encima de él y comprime
+            // el ScrollView de mensajes detrás. Sólo se renderiza en .chat.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if nav.novaSegment == .chat {
+                    inputBar
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: 0.20), value: nav.novaSegment)
             .navigationBarHidden(true)
         }
         // Coach mark de Nova la primera vez que el usuario llega a esta
@@ -269,9 +286,18 @@ struct NovaView: View {
             segmentButton(.chat, label: "Chat")
         }
         .padding(3)
+        // v8 glassmorphism Gemini: pill traslúcido con .regularMaterial
+        // sobre el FocusAmbientCanvas — el halo violet/cobalto se filtra
+        // detrás. Hairline blanco arriba da el "rim light" de cristal y
+        // la sombra baja eleva el control sobre el canvas.
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                .fill(Theme.Colors.surfaceHigh)
+            Capsule(style: .continuous)
+                .fill(.regularMaterial)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.55), lineWidth: 0.6)
+                )
+                .shadow(color: Theme.Colors.cardShadow.opacity(0.35), radius: 10, y: 3)
         )
     }
 
@@ -298,10 +324,19 @@ struct NovaView: View {
             .foregroundStyle(isSelected ? Theme.Colors.textPrimary : Theme.Colors.textTertiary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.sm)
+            // v8: el segmento seleccionado es una Capsule blanca pura con
+            // sombra suave — flota sobre el material translúcido del padre,
+            // estilo Gemini/Apple segmented control premium.
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                Capsule(style: .continuous)
                     .fill(isSelected ? Theme.Colors.surface : Color.clear)
-                    .focusCardShadow()
+                    .shadow(
+                        color: isSelected
+                            ? Theme.Colors.cardShadow.opacity(0.55)
+                            : .clear,
+                        radius: 6,
+                        y: 2
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -400,8 +435,9 @@ struct NovaView: View {
 
     /// Layout estilo iMessage cuando hay conversación, y estilo Gemini
     /// cuando está vacío: hero centrado con NovaSparkMark + "¿Qué quieres
-    /// ordenar?" + chips de acciones rápidas. El input vive en `safeAreaInset`
-    /// para anclarse arriba del teclado.
+    /// ordenar?" + chips de acciones rápidas. El inputBar NO vive acá —
+    /// está en `safeAreaInset` a nivel raíz del body (v8), lo que arregla
+    /// el bug del teclado iOS tapando el input.
     private var chatContent: some View {
         Group {
             if store.novaMessages.isEmpty && !store.isNovaTyping {
@@ -410,19 +446,11 @@ struct NovaView: View {
                 chatScroll
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            inputBar
-        }
-        // `.immediately` da comportamiento predecible — un scroll cierra
-        // el teclado inmediatamente. `.interactively` causaba layouts
-        // inestables donde el inputBar se sentía "pegado" al teclado a
-        // medio bajar y desaparecía visualmente detrás de los chips.
-        .scrollDismissesKeyboard(.immediately)
-        // El `simultaneousGesture(TapGesture)` previo capturaba taps que
-        // CAÍAN sobre el TextField del inputBar — el flujo era: tap →
-        // dismiss keyboard → TextField gain focus → re-open keyboard,
-        // dejando UI inestable. Lo quitamos: el usuario cierra teclado
-        // con el botón "Listo" del toolbar o haciendo scroll.
+        // `.interactively` ahora se siente fluido porque el inputBar vive
+        // en safeAreaInset al nivel raíz — el scroll dismiss no compite
+        // con el reposicionamiento del input. El usuario también puede
+        // cerrar el teclado con el botón "Listo" del toolbar.
+        .scrollDismissesKeyboard(.interactively)
     }
 
     /// Theme 2.0: empty hero opinado. Antes "34pt light" se sentía amable
@@ -612,31 +640,35 @@ struct NovaView: View {
     /// el usuario espera. `isDictating: false` permanente porque no hay
     /// transcript inline; el sheet maneja la voz cuando se abre.
     private var inputBar: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(Theme.Colors.border)
-                .frame(height: Theme.Stroke.hairline)
-                .opacity(0.5)
-
-            FocusBarInput(
-                text: $draft,
-                placeholder: "Escríbele a Nova…",
-                onSubmit: submitDraft,
-                onMic: {
-                    HapticManager.shared.tap()
-                    showVoiceDictation = true
-                },
-                isDictating: false,
-                audioLevel: 0
-            )
-            .padding(.horizontal, Theme.Spacing.lg)
-            .padding(.top, Theme.Spacing.sm + 2)
-            .padding(.bottom, Theme.Spacing.sm)
-        }
-        .background(
-            Theme.Colors.background
-                .shadow(color: .black.opacity(0.06), radius: 4, y: -2)
+        FocusBarInput(
+            text: $draft,
+            placeholder: "Escríbele a Nova…",
+            onSubmit: submitDraft,
+            onMic: {
+                HapticManager.shared.tap()
+                showVoiceDictation = true
+            },
+            isDictating: false,
+            audioLevel: 0
         )
+        .padding(.horizontal, Theme.Spacing.lg)
+        .padding(.top, Theme.Spacing.sm + 2)
+        .padding(.bottom, Theme.Spacing.sm)
+        // v8 glassmorphism Gemini: la banda inferior usa .ultraThinMaterial
+        // sobre el canvas — los halos violet/cobalto se transparentan
+        // sutilmente detrás del input. Hairline blanco arriba marca la
+        // separación contra el scroll de mensajes sin pintar un divider
+        // sólido. La sombra interior asciende para sugerir profundidad.
+        .background(alignment: .top) {
+            ZStack(alignment: .top) {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                Rectangle()
+                    .fill(Color.white.opacity(0.45))
+                    .frame(height: 0.5)
+            }
+        }
+        .shadow(color: Color.black.opacity(0.05), radius: 10, y: -3)
     }
 
     private func submitDraft() {
@@ -700,8 +732,11 @@ private struct NovaMessageBubble: View {
         }
     }
 
-    /// Mensaje del usuario: burbuja sólida cobalto alineada a la derecha.
-    /// Sin gradient, sin shadow excesivo — limpio.
+    /// Mensaje del usuario: burbuja sólida cobalto alineada a la derecha
+    /// con corners asimétricos tipo Gemini/iMessage — el bottom-trailing
+    /// es chico (6pt) para sugerir el "tail" hacia el avatar imaginario,
+    /// el resto mantiene 22pt suaves. Sombra cobalto baja agrega profundidad
+    /// sin saturar.
     private var userRow: some View {
         HStack(alignment: .top, spacing: 0) {
             Spacer(minLength: Theme.Spacing.xxl + Theme.Spacing.md)
@@ -712,8 +747,19 @@ private struct NovaMessageBubble: View {
                 .padding(.horizontal, Theme.Spacing.md + 2)
                 .padding(.vertical, Theme.Spacing.sm + 3)
                 .background(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Theme.Colors.focusAccent)
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 22,
+                        bottomLeadingRadius: 22,
+                        bottomTrailingRadius: 6,
+                        topTrailingRadius: 22,
+                        style: .continuous
+                    )
+                    .fill(Theme.Colors.focusAccent)
+                    .shadow(
+                        color: Theme.Colors.focusAccent.opacity(0.28),
+                        radius: 10,
+                        y: 4
+                    )
                 )
                 .fixedSize(horizontal: false, vertical: true)
         }
