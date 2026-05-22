@@ -25,6 +25,7 @@
 		FA0000000000000000000080 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000070 /* AppSettings.swift */; };
 		FA0000000000000000000081 /* FocusDataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000071 /* FocusDataStore.swift */; };
 		FA0000000000000000000082 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000072 /* SharedComponents.swift */; };
+		FA00000000000000000000D0 /* NovaChatComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA00000000000000000000D1 /* NovaChatComponents.swift */; };
 		FA00000000000000000000B0 /* CoachMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA00000000000000000000B1 /* CoachMarks.swift */; };
 		FA0000000000000000000083 /* NovaInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000073 /* NovaInboxView.swift */; };
 		FA0000000000000000000084 /* FocusLocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000074 /* FocusLocalStore.swift */; };
@@ -68,6 +69,7 @@
 		FA0000000000000000000070 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		FA0000000000000000000071 /* FocusDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusDataStore.swift; sourceTree = "<group>"; };
 		FA0000000000000000000072 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		FA00000000000000000000D1 /* NovaChatComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaChatComponents.swift; sourceTree = "<group>"; };
 		FA00000000000000000000B1 /* CoachMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMarks.swift; sourceTree = "<group>"; };
 		FA0000000000000000000073 /* NovaInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaInboxView.swift; sourceTree = "<group>"; };
 		FA0000000000000000000074 /* FocusLocalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusLocalStore.swift; sourceTree = "<group>"; };
@@ -157,6 +159,7 @@
 			children = (
 				FA0000000000000000000050 /* Theme.swift */,
 				FA0000000000000000000072 /* SharedComponents.swift */,
+				FA00000000000000000000D1 /* NovaChatComponents.swift */,
 				FA00000000000000000000B1 /* CoachMarks.swift */,
 				FA0000000000000000000075 /* FocusConfig.swift */,
 			);
@@ -285,6 +288,7 @@
 				FA0000000000000000000017 /* ContentView.swift in Sources */,
 				FA0000000000000000000040 /* Theme.swift in Sources */,
 				FA0000000000000000000082 /* SharedComponents.swift in Sources */,
+				FA00000000000000000000D0 /* NovaChatComponents.swift in Sources */,
 				FA00000000000000000000B0 /* CoachMarks.swift in Sources */,
 				FA0000000000000000000085 /* FocusConfig.swift in Sources */,
 				FA0000000000000000000041 /* FocusEvent.swift in Sources */,

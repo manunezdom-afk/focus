@@ -237,6 +237,70 @@ enum Theme {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
+
+        // MARK: - Nova chat (glassmorphic dark — solo segmento Chat)
+        //
+        // Tokens aditivos para el "modo IA premium" del chat. El resto de la
+        // app sigue light. Estos colores asumen fondo violet-black profundo,
+        // por eso el texto y los stroke están calibrados para alto contraste
+        // sobre dark sin perder elegancia.
+
+        /// Fondo principal del chat — gradient vertical violet-black profundo
+        /// con ligero tinte azulado. Independiente del canvas claro de la app.
+        static let novaChatBackground = LinearGradient(
+            gradient: Gradient(stops: [
+                .init(color: Color(red: 0.05, green: 0.03, blue: 0.13), location: 0.00),
+                .init(color: Color(red: 0.07, green: 0.05, blue: 0.18), location: 0.45),
+                .init(color: Color(red: 0.03, green: 0.02, blue: 0.08), location: 1.00),
+            ]),
+            startPoint: .top,
+            endPoint: .bottom
+        )
+
+        /// Halo radial superior — irradia desde el top con tinte violet/electric
+        /// para que el chat no sea un rectángulo plano negro.
+        static let novaChatHalo = RadialGradient(
+            gradient: Gradient(stops: [
+                .init(color: Color(red: 0.357, green: 0.302, blue: 1.000).opacity(0.28), location: 0.0),
+                .init(color: Color(red: 0.220, green: 0.518, blue: 1.000).opacity(0.10), location: 0.55),
+                .init(color: Color.clear, location: 1.0),
+            ]),
+            center: UnitPoint(x: 0.5, y: 0.0),
+            startRadius: 0,
+            endRadius: 480
+        )
+
+        /// Glass fill base — blanco translúcido muy ligero para bubbles Nova
+        /// y chips sobre fondo dark.
+        static let novaGlassFill = Color.white.opacity(0.045)
+        /// Glass fill con tinte cobalto (para user bubble — diferenciador).
+        static let novaGlassUserFill = Color(red: 0.220, green: 0.518, blue: 1.000).opacity(0.18)
+        /// Borde glass estándar — translúcido, simula cristal iluminado.
+        static let novaGlassStroke = Color.white.opacity(0.12)
+        /// Borde glass con énfasis (focused, hover) — tinte violet.
+        static let novaGlassStrokeEmphasis = Color(red: 0.486, green: 0.486, blue: 1.000).opacity(0.45)
+
+        /// Texto sobre fondo dark — blanco puro para títulos/headings.
+        static let novaTextOnDark = Color.white
+        /// Texto sobre dark — gris plata legible para body (~78% white).
+        static let novaTextOnDarkSecondary = Color(white: 0.82)
+        /// Texto sobre dark — terciario apagado para metadata.
+        static let novaTextOnDarkTertiary = Color(white: 0.58)
+        /// Label "NOVA" sobre dark — lila pastel legible.
+        static let novaLabelOnDark = Color(red: 0.74, green: 0.72, blue: 1.0)
+
+        /// Glow morado difuminado para botones / focus rings / shadows.
+        static let novaGlow = Color(red: 0.486, green: 0.380, blue: 1.000).opacity(0.55)
+
+        /// Gradient para botón enviar y CTAs energéticos en dark.
+        static let novaSendGradient = LinearGradient(
+            gradient: Gradient(stops: [
+                .init(color: Color(red: 0.486, green: 0.380, blue: 1.000), location: 0.0),
+                .init(color: Color(red: 0.310, green: 0.275, blue: 1.000), location: 1.0),
+            ]),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     // MARK: - Typography

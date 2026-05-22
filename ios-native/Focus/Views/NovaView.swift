@@ -396,185 +396,84 @@ struct NovaView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Chat
+    // MARK: - Chat (glassmorphic dark — rediseño 2026-05)
+    //
+    // El segmento Chat entra en "modo IA premium": fondo violet-black
+    // glassmorphic, burbujas glass para usuario y Nova, markdown render
+    // con code blocks + copy, input flotante con auto-expand y glow,
+    // typing indicator hiper-minimalista. Bandeja y Acciones siguen
+    // light, igual que Mi Día/Calendario. La transición visual entre
+    // los segmentos refuerza la diferencia: el chat es donde la IA
+    // habla, los otros segmentos son workflow productivo.
 
-    /// Layout estilo iMessage cuando hay conversación, y estilo Gemini
-    /// cuando está vacío: hero centrado con NovaSparkMark + "¿Qué quieres
-    /// ordenar?" + chips de acciones rápidas. El input vive en `safeAreaInset`
-    /// para anclarse arriba del teclado.
     private var chatContent: some View {
-        Group {
-            if store.novaMessages.isEmpty && !store.isNovaTyping {
-                emptyChatHero
-            } else {
-                chatScroll
+        ZStack {
+            NovaChatBackdrop()
+
+            Group {
+                if store.novaMessages.isEmpty && !store.isNovaTyping {
+                    NovaEmptyChatHeroDark(
+                        onChip: { action in
+                            handleQuickAction(action)
+                        },
+                        showLiveChip: Self.isNovaLiveEnabled,
+                        onLive: Self.isNovaLiveEnabled
+                            ? {
+                                HapticManager.shared.tap()
+                                showNovaLive = true
+                            }
+                            : nil
+                    )
+                } else {
+                    chatScroll
+                }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             inputBar
         }
         // `.immediately` da comportamiento predecible — un scroll cierra
-        // el teclado inmediatamente. `.interactively` causaba layouts
-        // inestables donde el inputBar se sentía "pegado" al teclado a
-        // medio bajar y desaparecía visualmente detrás de los chips.
+        // el teclado inmediatamente.
         .scrollDismissesKeyboard(.immediately)
-        // El `simultaneousGesture(TapGesture)` previo capturaba taps que
-        // CAÍAN sobre el TextField del inputBar — el flujo era: tap →
-        // dismiss keyboard → TextField gain focus → re-open keyboard,
-        // dejando UI inestable. Lo quitamos: el usuario cierra teclado
-        // con el botón "Listo" del toolbar o haciendo scroll.
-    }
-
-    /// Theme 2.0: empty hero opinado. Antes "34pt light" se sentía amable
-    /// pero genérico (Apple Intelligence-like). Ahora displayHero 34pt
-    /// SemiBold con tracking -1.36 — peso visual definido sin perder
-    /// elegancia, alineado con Mi Día y Nova title.
-    private var emptyChatHero: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: Theme.Spacing.lg) {
-                Spacer(minLength: Theme.Spacing.xxxl + Theme.Spacing.md)
-                ZStack {
-                    // NovaPrism gradient (Theme 2.0) — stops opinados para
-                    // IA, distintos del legacy novaGradient.
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .fill(Theme.Colors.novaPrismGradient)
-                        .frame(width: 96, height: 96)
-                        .overlay(
-                            // Inner highlight specular — sensación 3D
-                            // coherente con NovaVoiceCore de E.
-                            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                                .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
-                        )
-                        .shadow(color: Theme.Colors.novaAccent.opacity(0.55), radius: 28, y: 10)
-                        .shadow(color: Theme.Colors.focusAccent.opacity(0.25), radius: 16, y: 4)
-                    NovaSparkMark(size: 42)
-                }
-                .padding(.bottom, Theme.Spacing.sm)
-
-                Text("¿Qué quieres ordenar?")
-                    .font(Theme.Typography.displayHero)
-                    .tracking(Theme.Tracking.displayHero)
-                    .foregroundStyle(Theme.Colors.textPrimary)
-                    .multilineTextAlignment(.center)
-
-                Text("Pídele a Nova un evento, una tarea, o que organice tu día.")
-                    .font(Theme.Typography.body)
-                    .tracking(Theme.Tracking.body)
-                    .foregroundStyle(Theme.Colors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(2)
-                    .frame(maxWidth: 320)
-                    .padding(.bottom, Theme.Spacing.lg)
-
-                VStack(spacing: Theme.Spacing.sm + 2) {
-                    if Self.isNovaLiveEnabled {
-                        novaLiveChip
-                    }
-                    emptyStateChip(.organizar, symbol: "sparkles", label: "Organizar mi día")
-                    emptyStateChip(.crearTarea, symbol: "checkmark.circle", label: "Crear tarea")
-                    emptyStateChip(.crearEvento, symbol: "calendar.badge.plus", label: "Agendar evento")
-                    emptyStateChip(.revisarPendientes, symbol: "tray.full", label: "Revisar pendientes")
-                }
-                .padding(.horizontal, Theme.Spacing.xl)
-
-                Spacer(minLength: Theme.Spacing.xl)
-            }
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    /// Chip destacado del empty state que abre Nova Live (sheet de voz).
-    /// Estilo distintivo: gradient violeta sólido para que sobresalga
-    /// del resto de chips (que son neutrales).
-    private var novaLiveChip: some View {
-        Button {
-            HapticManager.shared.tap()
-            showNovaLive = true
-        } label: {
-            HStack(spacing: Theme.Spacing.sm) {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("Hablar con Nova")
-                    .font(Theme.Typography.bodyBold)
-                    .foregroundStyle(.white)
-                Spacer()
-                Image(systemName: "waveform")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-            }
-            .padding(.horizontal, Theme.Spacing.md + 2)
-            .padding(.vertical, Theme.Spacing.md)
-            .frame(maxWidth: .infinity)
-            .background(
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [Theme.Colors.focusAccent, Theme.Colors.novaAccent],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .shadow(color: Theme.Colors.novaAccent.opacity(0.35), radius: 14, y: 5)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func emptyStateChip(_ action: NovaQuickAction, symbol: String, label: String) -> some View {
-        Button {
-            handleQuickAction(action)
-        } label: {
-            HStack(spacing: Theme.Spacing.sm) {
-                Image(systemName: symbol)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.novaAccent)
-                Text(label)
-                    .font(Theme.Typography.bodyEmphasized)
-                    .foregroundStyle(Theme.Colors.textPrimary)
-                Spacer()
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.textTertiary)
-            }
-            .padding(.horizontal, Theme.Spacing.md + 2)
-            .padding(.vertical, Theme.Spacing.md)
-            .frame(maxWidth: .infinity)
-            .background(
-                Capsule()
-                    .fill(Theme.Colors.surface)
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
-                    )
-                    .focusCardShadow()
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     private var chatScroll: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: Theme.Spacing.md) {
+                LazyVStack(spacing: Theme.Spacing.lg) {
                     ForEach(store.novaMessages) { msg in
-                        NovaMessageBubble(message: msg).id(msg.id)
+                        Group {
+                            if msg.role == .user {
+                                NovaGlassUserBubble(content: msg.content)
+                            } else {
+                                NovaGlassNovaBubble(content: msg.content)
+                            }
+                        }
+                        .id(msg.id)
+                        // Entrada suave: fade-in + slide-up sutil para cada
+                        // nuevo mensaje. La salida es solo opacity para que
+                        // los message id changes no muevan la altura.
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .offset(y: 10)),
+                            removal: .opacity
+                        ))
                     }
                     if store.isNovaTyping {
-                        NovaTypingIndicator()
+                        NovaPulseTypingIndicator()
                             .id(Self.typingAnchor)
-                            .transition(.opacity)
+                            .transition(.opacity.combined(with: .offset(y: 8)))
                     }
-                    // Anchor invisible al final — permite hacer scroll a "abajo
-                    // de todo" sin depender del último id (que puede cambiar
-                    // entre renders).
+                    // Anchor invisible al final — permite hacer scroll a
+                    // "abajo de todo" sin depender del último id.
                     Color.clear
                         .frame(height: 1)
                         .id(Self.chatBottomAnchor)
                 }
                 .padding(.horizontal, Theme.Spacing.lg)
-                .padding(.top, Theme.Spacing.md)
-                .padding(.bottom, Theme.Spacing.md)
+                .padding(.top, Theme.Spacing.lg)
+                .padding(.bottom, Theme.Spacing.lg)
+                .animation(Theme.Spring.entrance, value: store.novaMessages.count)
+                .animation(Theme.Spring.entrance, value: store.isNovaTyping)
             }
             .onChange(of: store.novaMessages.count) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true)
@@ -593,7 +492,7 @@ struct NovaView: View {
 
     private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
         if animated {
-            withAnimation(.easeOut(duration: 0.25)) {
+            withAnimation(.easeOut(duration: 0.28)) {
                 proxy.scrollTo(Self.chatBottomAnchor, anchor: .bottom)
             }
         } else {
@@ -601,42 +500,48 @@ struct NovaView: View {
         }
     }
 
-    /// v7 unificación de micrófonos: el input del chat de Nova ahora usa
-    /// el MISMO componente `FocusBarInput` que la barra de Mi Día. Mismo
-    /// diamante Nova breathing, mismo botón mic (glifo gris idle → fill
-    /// NovaPrism cuando dicta), mismo botón enviar cobalto sólido. Toda
-    /// la app comparte un único componente de entrada de IA.
+    /// Input bar glass del chat. Reemplaza el FocusBarInput compartido —
+    /// el chat es la única superficie dark de la app, así que tiene su
+    /// propio input bar (NovaGlassInputBar) sin afectar Mi Día/Calendario
+    /// que siguen usando FocusBarInput sobre fondo light.
     ///
-    /// El mic NO abre dictado inline en este input (a diferencia del de
-    /// Mi Día). Aquí abre el `VoiceDictationSheet` — flujo histórico que
-    /// el usuario espera. `isDictating: false` permanente porque no hay
-    /// transcript inline; el sheet maneja la voz cuando se abre.
+    /// El gradient encima del input crea un fade del scroll content hacia
+    /// la barra, evitando que un mensaje largo "termine cortado" pegado
+    /// al borde superior del input.
     private var inputBar: some View {
         VStack(spacing: 0) {
-            Rectangle()
-                .fill(Theme.Colors.border)
-                .frame(height: Theme.Stroke.hairline)
-                .opacity(0.5)
+            // Fade superior — gradient vertical transparent → fondo dark
+            // para suavizar el corte entre scroll content y la barra.
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color(red: 0.04, green: 0.02, blue: 0.10).opacity(0.65)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 14)
+            .allowsHitTesting(false)
 
-            FocusBarInput(
+            NovaGlassInputBar(
                 text: $draft,
                 placeholder: "Escríbele a Nova…",
                 onSubmit: submitDraft,
                 onMic: {
-                    HapticManager.shared.tap()
                     showVoiceDictation = true
-                },
-                isDictating: false,
-                audioLevel: 0
+                }
             )
             .padding(.horizontal, Theme.Spacing.lg)
-            .padding(.top, Theme.Spacing.sm + 2)
+            .padding(.top, 2)
             .padding(.bottom, Theme.Spacing.sm)
+            .background(
+                // Detrás del input: gradient + blur sutil para que el
+                // backdrop dark se difumine bajo el bar sin verse plano.
+                Color(red: 0.04, green: 0.02, blue: 0.10).opacity(0.70)
+                    .background(.ultraThinMaterial.opacity(0.40))
+                    .environment(\.colorScheme, .dark)
+            )
         }
-        .background(
-            Theme.Colors.background
-                .shadow(color: .black.opacity(0.06), radius: 4, y: -2)
-        )
     }
 
     private func submitDraft() {
@@ -686,143 +591,7 @@ private struct NovaActionCard: View {
     }
 }
 
-// MARK: - Chat message (estilo Gemini: respuesta de Nova fluye como texto,
-//                       sin burbuja; usuario sí mantiene burbuja sólida)
-
-private struct NovaMessageBubble: View {
-    let message: NovaMessage
-
-    var body: some View {
-        if message.role == .user {
-            userRow
-        } else {
-            novaRow
-        }
-    }
-
-    /// Mensaje del usuario: burbuja sólida cobalto alineada a la derecha.
-    /// Sin gradient, sin shadow excesivo — limpio.
-    private var userRow: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Spacer(minLength: Theme.Spacing.xxl + Theme.Spacing.md)
-            Text(message.content)
-                .font(Theme.Typography.subhead)
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.leading)
-                .padding(.horizontal, Theme.Spacing.md + 2)
-                .padding(.vertical, Theme.Spacing.sm + 3)
-                .background(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Theme.Colors.focusAccent)
-                )
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    /// Respuesta de Nova: fluye como texto regular con el spark mark
-    /// al costado izquierdo. SIN burbuja, SIN border, SIN shadow.
-    /// Igual que Gemini: el assistant "habla", no "manda mensajes".
-    private var novaRow: some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.md) {
-            novaSparkAvatar
-            VStack(alignment: .leading, spacing: 6) {
-                // Theme 2.0: label "NOVA" en captionMono — coherente con
-                // badges del timeline (PRÓXIMO, EN CURSO).
-                Text("Nova")
-                    .font(Theme.Typography.captionMono)
-                    .tracking(Theme.Tracking.captionMono)
-                    .foregroundStyle(Theme.Colors.novaAccent)
-                    .textCase(.uppercase)
-                Text(message.content)
-                    .font(Theme.Typography.body)
-                    .tracking(Theme.Tracking.body)
-                    .foregroundStyle(Theme.Colors.textPrimary)
-                    .multilineTextAlignment(.leading)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: Theme.Spacing.md)
-        }
-    }
-
-    /// Avatar mini de Nova: cuadrado redondeado con NovaPrism gradient.
-    /// Theme 2.0: cambio de novaGradient legacy → novaPrismGradient.
-    private var novaSparkAvatar: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Theme.Colors.novaPrismGradient)
-                .frame(width: 26, height: 26)
-            NovaSparkMark(size: 11)
-        }
-        .padding(.top, 2)
-    }
-}
-
-// MARK: - Typing indicator (3 puntos animados)
-
-/// Indicador "Nova está escribiendo": 3 puntos que pulsan en secuencia.
-/// Aparece debajo del último mensaje del usuario mientras `isNovaTyping == true`.
-private struct NovaTypingIndicator: View {
-    @State private var animating: Bool = false
-
-    var body: some View {
-        // Mismo layout que `novaRow` de NovaMessageBubble: avatar + dots
-        // alineados, sin burbuja con border. Mantiene la coherencia con
-        // las respuestas reales de Nova en el chat.
-        HStack(alignment: .top, spacing: Theme.Spacing.md) {
-            // Avatar Nova — gradient NovaPrism con leve "respiración" que
-            // sigue el ritmo del thinking.
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Theme.Colors.novaPrismGradient)
-                    .frame(width: 26, height: 26)
-                    .scaleEffect(animating ? 1.06 : 0.96)
-                    .shadow(
-                        color: Theme.Colors.novaAccent.opacity(animating ? 0.55 : 0.20),
-                        radius: animating ? 10 : 4
-                    )
-                    .animation(
-                        .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
-                        value: animating
-                    )
-                NovaSparkMark(size: 11)
-            }
-            .padding(.top, 2)
-
-            // v7: "Nova está pensando…" en captionMono UPPERCASE + 3 puntos
-            // gradient que respiran con phase staggered. Antes 3 dots planos
-            // sin label — se sentía pobre. Ahora se siente más conversacional.
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Nova está pensando")
-                    .font(Theme.Typography.captionMono)
-                    .tracking(Theme.Tracking.captionMono)
-                    .foregroundStyle(Theme.Colors.novaAccent)
-                    .textCase(.uppercase)
-                HStack(spacing: 6) {
-                    ForEach(0..<3) { i in
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Theme.Colors.focusAccent, Theme.Colors.novaAccent],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .frame(width: 8, height: 8)
-                            .scaleEffect(animating ? 1.0 : 0.50)
-                            .opacity(animating ? 1.0 : 0.40)
-                            .animation(
-                                .easeInOut(duration: 0.70)
-                                    .repeatForever(autoreverses: true)
-                                    .delay(0.18 * Double(i)),
-                                value: animating
-                            )
-                    }
-                }
-            }
-
-            Spacer(minLength: Theme.Spacing.md)
-        }
-        .onAppear { animating = true }
-    }
-}
+// Las bubbles del chat y el typing indicator viven ahora en
+// `Shared/NovaChatComponents.swift` (NovaGlassUserBubble, NovaGlassNovaBubble,
+// NovaPulseTypingIndicator). Aquí solo queda el shell del NovaView con
+// branding + segment control + dispatch de quick actions.
