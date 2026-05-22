@@ -21,11 +21,15 @@ struct NovaChatBackdrop: View {
 
     var body: some View {
         ZStack {
+            // `.container` (no `.all`) — extiende el fondo bajo el tab bar
+            // pero RESPETA el keyboard safe area. Sin esto, el `safeAreaInset`
+            // del inputBar no se reposiciona cuando aparece el teclado y la
+            // barra queda atrapada detrás del keyboard (solo se ve "Listo").
             Theme.Colors.novaChatBackground
-                .ignoresSafeArea(edges: [.bottom, .horizontal])
+                .ignoresSafeArea(.container, edges: [.bottom, .horizontal])
 
             Theme.Colors.novaChatHalo
-                .ignoresSafeArea(edges: [.bottom, .horizontal])
+                .ignoresSafeArea(.container, edges: [.bottom, .horizontal])
                 .allowsHitTesting(false)
 
             // Orb top-left — violet difuso.
