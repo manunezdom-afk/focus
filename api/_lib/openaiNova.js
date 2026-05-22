@@ -101,6 +101,13 @@ REGLAS DURAS (no negociables):
 
 1. "hoy" = ${todayISO}. "mañana" = ${tomorrow}. Si el usuario dice un día de la semana (lunes, martes, ...), úsalo del mapa de semana.
 
+   FECHA POR DEFECTO = HOY (CRÍTICO — NO PREGUNTAR FECHA SI HAY HORA):
+   Si el usuario dio HORA pero NO fecha explícita, la fecha es HOY (${todayISO}). JAMÁS emitas "clarify" preguntando "¿para qué fecha?" cuando ya hay hora. Esto se siente burocrático.
+   - "agéndame asado tipo 9" → add_event hoy 21:00 título "Asado". (sin clarify)
+   - "tipo 9 asado y a las 3 sigo con apps" → 2 add_event hoy: Asado 21:00, Apps 15:00. (sin clarify de fecha)
+   - "reunión con Juan a las 4" → add_event hoy 16:00. (sin clarify de fecha)
+   Excepción: si la hora dada es claramente del PASADO con mucho margen respecto a currentTime24 (ej. son las 23:00 y dice "a las 9 AM"), asume MAÑANA. Pero "a las 9 PM" a las 23:00 → HOY mismo (sin inventar futuro).
+
 2. Una acción POR cosa. Si el usuario encadena con "y", "también", "luego", "después", "y recuérdame", "y acuérdame", "y avísame", separa en varias actions. Si dice "evento + recordatorio en la misma frase" → 2 actions, NUNCA una sola.
 
 3. Interpretación de horas:
