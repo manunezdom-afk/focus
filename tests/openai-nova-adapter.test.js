@@ -425,16 +425,56 @@ test('endpoint shape: respuesta mapeada tiene los campos que NovaService decodif
 
 // ─── Defensa duration → endTime ────────────────────────────────────────────
 
-test('duration: con time + durationMinutes calcula endTime correcto (5:00 PM + 60 → 6:00 PM)', () => {
+test('duration: usuario dijo "por una hora" + durationMinutes:60 → endTime 6:00 PM', () => {
   const out = convertOpenAIToBackendResponse({
     openaiPayload: fakeOpenAIPayload({
-      actions: [event({ title: 'Gimnasio', time: '17:00', durationMinutes: 60, sourceText: 'gimnasio' })],
+      actions: [event({ title: 'Gimnasio', time: '17:00', durationMinutes: 60, sourceText: 'gimnasio por una hora' })],
     }),
-    userMessage: 'gimnasio a las 5',
+    userMessage: 'gimnasio a las 5 por una hora',
     reqId: 'rdur',
   })
   assert.equal(out.actions[0].event.time, '5:00 PM')
   assert.equal(out.actions[0].event.endTime, '6:00 PM')
+})
+
+test('duration safety net: usuario NO dijo duración + durationMinutes:60 → endTime NULL', () => {
+  // Regresión del bug 2026-05-23: el usuario decía "tengo que estudiar
+  // arte a las 2", el modelo emitía durationMinutes:60 default, y el
+  // adapter calculaba endTime "3:00 PM" → iOS mostraba bloque
+  // "14:00-15:00" con "1h". El usuario quería solo "14:00".
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({ title: 'Estudiar arte', time: '14:00', durationMinutes: 60, sourceText: 'estudiar arte' })],
+    }),
+    userMessage: 'tengo que estudiar arte a las 2',
+    reqId: 'rdur-safety',
+  })
+  assert.equal(out.actions[0].event.time, '2:00 PM')
+  assert.equal(out.actions[0].event.endTime, null,
+    'sin keyword de duración en el input, endTime debe quedar null aunque el modelo emita durationMinutes:60')
+})
+
+test('duration: "de 2 a 4" → rango explícito, respeta durationMinutes:120', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({ title: 'Estudiar', time: '14:00', durationMinutes: 120, sourceText: 'estudiar de 2 a 4' })],
+    }),
+    userMessage: 'estudiar de 2 a 4',
+    reqId: 'rdur-rango',
+  })
+  assert.equal(out.actions[0].event.time, '2:00 PM')
+  assert.equal(out.actions[0].event.endTime, '4:00 PM')
+})
+
+test('duration: "media hora" → respeta durationMinutes:30', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({ title: 'Caminar', time: '18:00', durationMinutes: 30, sourceText: 'caminar media hora' })],
+    }),
+    userMessage: 'caminar media hora a las 6',
+    reqId: 'rdur-media',
+  })
+  assert.equal(out.actions[0].event.endTime, '6:30 PM')
 })
 
 test('duration: reminder sin hora → convertido a add_task (no add_event)', () => {
