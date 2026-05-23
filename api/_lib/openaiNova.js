@@ -154,6 +154,7 @@ REGLAS DURAS (no negociables):
    - type:"create_reminder" SOLO cuando el usuario dice trigger explícito ("recuérdame", "acuérdame", "avísame", "que no se me olvide", "no te olvides") O cuando es claramente una nota sin compromiso de calendario.
    - Si dijo "avísame N minutos antes de X", emite UN solo create_event para X con reminderOffsetMinutes:N. NO emitas un create_reminder separado.
    - Si dijo "recuérdame X" sin evento padre y sin hora, emite create_reminder con time:null y dateISO heredado del contexto (si la frase tiene "mañana"/"hoy" cerca, úsalo).
+   - Si dijo "acuérdame que a las HH X" o "recuérdame X a las HH" (trigger reminder + hora propia, sin evento padre): emite create_reminder CON time = "HH:MM" y dateISO. Esto crea un recordatorio puntual a esa hora. NO emitas time:null en este caso — el time es la hora del recordatorio.
    - Si en la MISMA frase hay un evento ("tengo doctor a las 5") + recordatorio independiente ("y recuérdame llevar exámenes"): 2 actions. El recordatorio HEREDA dateISO del evento si no tiene fecha propia.
 
 7. CATEGORÍAS:
@@ -310,6 +311,19 @@ function timeStringTo12h(hhmm) {
   return `${h12}:${min.toString().padStart(2, '0')} ${ampm}`
 }
 
+/**
+ * "YYYY-MM-DD" en zona del servidor para comparar con dateISO emitido por
+ * el modelo. La elección de hoy vs semana para reminders sin hora es una
+ * heurística suave — no es crítico que esté en la TZ exacta del usuario
+ * porque el iOS también puede mover la categoría después.
+ */
+function todayISOFromDate(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 const CATEGORY_TO_ICON = {
   salud: 'local_hospital',
   reunion: 'groups',
@@ -427,6 +441,31 @@ export function convertOpenAIToBackendResponse({
     const date = typeof a.dateISO === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.dateISO) ? a.dateISO : null
     const cat = (typeof a.category === 'string' && CATEGORY_TO_ICON[a.category]) ? a.category : 'otro'
 
+    // create_reminder SIN hora → no podemos crear un FocusEvent (iOS exige
+    // startTime). Lo emitimos como add_task: una nota pendiente sin hora
+    // específica. El icon "alarm" + el trigger ("recuérdame") en el input
+    // ya marcan la intención; el iOS lo mostrará en Tareas. Antes esto
+    // caía silenciosamente porque iOS dropea add_event con time=null.
+    if (isReminder && !time12) {
+      const category = date && date === todayISOFromDate(new Date()) ? 'hoy' : 'semana'
+      safeActions.push({
+        type: 'add_task',
+        task: {
+          label: titleRaw,
+          priority: 'media',
+          category,
+        },
+        _meta: {
+          provider: 'openai',
+          sourceText: src,
+          confidence: a.confidence,
+          reqId,
+          convertedFromReminderNoTime: true,
+        },
+      })
+      continue
+    }
+
     // endTime se calcula client-side normalmente. Acá solo si tiene hora
     // Y duración > 0; el cliente puede usarlo. Para reminders, null.
     let endTime = null
@@ -444,9 +483,14 @@ export function convertOpenAIToBackendResponse({
       endTime = `${eH12}:${eM.toString().padStart(2, '0')} ${eAmPm}`
     }
 
+    // create_reminder CON hora → add_event con icon "alarm". iOS detecta
+    // isReminderHint vía userText ("acuérdame"/"recuérdame") + icon=alarm
+    // y crea el FocusEvent con isReminder=true en startTime. Antes el
+    // adapter forzaba time=null pensando que era "intencional" — pero
+    // sin time el iOS dropea la acción (FocusEvent.startTime no es opcional).
     const event = {
       title: titleRaw,
-      time: isReminder ? null : time12,
+      time: time12,
       endTime,
       date,
       section: isReminder ? 'evening' : (CATEGORY_TO_SECTION[cat] || 'evening'),
