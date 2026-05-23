@@ -168,7 +168,7 @@ test('caso 3-defensa: si el modelo emite título "Horas", el adapter lo descarta
 
 // ─── QA case 4: "mañana tengo doctor a las 5 y recuérdame llevar exámenes" ──
 
-test('caso 4: doctor + recordatorio → 2 actions, NUNCA una', () => {
+test('caso 4: doctor + recordatorio sin hora → 1 add_event + 1 add_task', () => {
   const out = convertOpenAIToBackendResponse({
     openaiPayload: fakeOpenAIPayload({
       actions: [
@@ -194,15 +194,16 @@ test('caso 4: doctor + recordatorio → 2 actions, NUNCA una', () => {
     reqId: 'r4',
   })
   assert.equal(out.actions.length, 2, JSON.stringify(out._dropped))
-  // Doctor
+  // Doctor → add_event normal.
+  assert.equal(out.actions[0].type, 'add_event')
   assert.equal(out.actions[0].event.title, 'Doctor')
   assert.equal(out.actions[0].event.time, '5:00 PM')
   assert.equal(out.actions[0].event.icon, 'local_hospital')
-  // Recordatorio
-  assert.equal(out.actions[1].event.title, 'Llevar los exámenes')
-  assert.equal(out.actions[1].event.time, null)
-  assert.equal(out.actions[1].event.icon, 'alarm')
-  assert.equal(out.actions[1].event.date, '2026-05-20')
+  // Recordatorio SIN hora → add_task. Antes era add_event con time=null
+  // → iOS lo dropeaba silenciosamente (FocusEvent.startTime no es
+  // opcional). Ahora se materializa en Tareas, visible al user.
+  assert.equal(out.actions[1].type, 'add_task')
+  assert.equal(out.actions[1].task.label, 'Llevar los exámenes')
 })
 
 // ─── QA case 5: "hoy a las 5 gimnasio y a las 8 estudiar" ──────────────────
@@ -257,7 +258,7 @@ test('caso 6-defensa: "Reunión" pelado sin persona/asunto se descarta', () => {
 
 // ─── QA case 7: "recuérdame llamar a mi mamá a las 6 y comprar cuaderno mañana"
 
-test('caso 7: reminder con hora + tarea mañana → 2 actions', () => {
+test('caso 7: reminder con hora + reminder sin hora → 1 add_event puntual + 1 add_task', () => {
   const out = convertOpenAIToBackendResponse({
     openaiPayload: fakeOpenAIPayload({
       actions: [
@@ -268,18 +269,52 @@ test('caso 7: reminder con hora + tarea mañana → 2 actions', () => {
     userMessage: 'recuérdame llamar a mi mamá a las 6 y comprar cuaderno mañana',
     reqId: 'r7',
   })
-  assert.equal(out.actions.length, 2)
+  assert.equal(out.actions.length, 2, JSON.stringify(out._dropped))
+  // Reminder CON hora → add_event con icon=alarm. iOS detecta isReminder
+  // por el icon + el trigger en userText y crea el FocusEvent con
+  // isReminder=true en startTime=18:00. CRÍTICO: el time DEBE venir, no
+  // null — antes se forzaba a null y el iOS silenciosamente droppeaba la
+  // acción porque FocusEvent.startTime no es opcional.
+  assert.equal(out.actions[0].type, 'add_event')
   assert.equal(out.actions[0].event.title, 'Llamar a mi mamá')
   assert.equal(out.actions[0].event.icon, 'alarm')
-  // reminder con hora: lo respetamos pero como reminder (time=null fuerza
-  // que se muestre en sección reminder, no como bloque con duración).
-  // En este caso el modelo dijo 18:00 → time se traduce, pero icon=alarm
-  // (siempre que type sea create_reminder).
-  // El adapter pone time=null para reminders. Esto es intencional: si el
-  // usuario quiere hora del reminder, usa reminderOffsets del evento padre.
-  assert.equal(out.actions[0].event.time, null)
-  assert.equal(out.actions[1].event.title, 'Comprar cuaderno')
-  assert.equal(out.actions[1].event.date, '2026-05-20')
+  assert.equal(out.actions[0].event.time, '6:00 PM')
+  // Reminder SIN hora → add_task (FocusEvent exige startTime; un reminder
+  // sin hora conceptualmente ES una tarea pendiente).
+  assert.equal(out.actions[1].type, 'add_task')
+  assert.equal(out.actions[1].task.label, 'Comprar cuaderno')
+  assert.equal(out.actions[1].task.category, 'semana')
+})
+
+test('caso 7b: "acuérdame que a las 2 estudiar arte" → add_event puntual con time + icon alarm', () => {
+  // Regresión del bug reportado el 2026-05-23: el usuario decía
+  // "acuérdame que a las 2 tengo que estudiar arte e ideas", Nova
+  // respondía "Listo, te recordaré..." pero NADA se agregaba al calendario
+  // porque el adapter forzaba time:null para create_reminder, y el iOS
+  // dropea add_event con time:null.
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [
+        reminder({
+          title: 'Estudiar arte e ideas',
+          dateText: 'hoy',
+          dateISO: '2026-05-19',
+          time: '14:00',
+          sourceText: 'estudiar arte e ideas',
+        }),
+      ],
+      userConfirmationText: 'Listo, te recordaré estudiar arte e ideas hoy a las 14:00.',
+    }),
+    userMessage: 'acuérdame que a las 2 tengo que estudiar arte e ideas',
+    reqId: 'r7b',
+  })
+  assert.equal(out.actions.length, 1, JSON.stringify(out._dropped))
+  assert.equal(out.actions[0].type, 'add_event')
+  assert.equal(out.actions[0].event.title, 'Estudiar arte e ideas')
+  assert.equal(out.actions[0].event.time, '2:00 PM')
+  assert.equal(out.actions[0].event.icon, 'alarm')
+  assert.equal(out.actions[0].event.date, '2026-05-19')
+  assert.equal(out.mode, 'chat_with_action')
 })
 
 // ─── QA case 8: "hoy tengo que entregar trabajo del Master" (sin hora) ─────
@@ -390,19 +425,59 @@ test('endpoint shape: respuesta mapeada tiene los campos que NovaService decodif
 
 // ─── Defensa duration → endTime ────────────────────────────────────────────
 
-test('duration: con time + durationMinutes calcula endTime correcto (5:00 PM + 60 → 6:00 PM)', () => {
+test('duration: usuario dijo "por una hora" + durationMinutes:60 → endTime 6:00 PM', () => {
   const out = convertOpenAIToBackendResponse({
     openaiPayload: fakeOpenAIPayload({
-      actions: [event({ title: 'Gimnasio', time: '17:00', durationMinutes: 60, sourceText: 'gimnasio' })],
+      actions: [event({ title: 'Gimnasio', time: '17:00', durationMinutes: 60, sourceText: 'gimnasio por una hora' })],
     }),
-    userMessage: 'gimnasio a las 5',
+    userMessage: 'gimnasio a las 5 por una hora',
     reqId: 'rdur',
   })
   assert.equal(out.actions[0].event.time, '5:00 PM')
   assert.equal(out.actions[0].event.endTime, '6:00 PM')
 })
 
-test('duration: reminder no calcula endTime (siempre null)', () => {
+test('duration safety net: usuario NO dijo duración + durationMinutes:60 → endTime NULL', () => {
+  // Regresión del bug 2026-05-23: el usuario decía "tengo que estudiar
+  // arte a las 2", el modelo emitía durationMinutes:60 default, y el
+  // adapter calculaba endTime "3:00 PM" → iOS mostraba bloque
+  // "14:00-15:00" con "1h". El usuario quería solo "14:00".
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({ title: 'Estudiar arte', time: '14:00', durationMinutes: 60, sourceText: 'estudiar arte' })],
+    }),
+    userMessage: 'tengo que estudiar arte a las 2',
+    reqId: 'rdur-safety',
+  })
+  assert.equal(out.actions[0].event.time, '2:00 PM')
+  assert.equal(out.actions[0].event.endTime, null,
+    'sin keyword de duración en el input, endTime debe quedar null aunque el modelo emita durationMinutes:60')
+})
+
+test('duration: "de 2 a 4" → rango explícito, respeta durationMinutes:120', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({ title: 'Estudiar', time: '14:00', durationMinutes: 120, sourceText: 'estudiar de 2 a 4' })],
+    }),
+    userMessage: 'estudiar de 2 a 4',
+    reqId: 'rdur-rango',
+  })
+  assert.equal(out.actions[0].event.time, '2:00 PM')
+  assert.equal(out.actions[0].event.endTime, '4:00 PM')
+})
+
+test('duration: "media hora" → respeta durationMinutes:30', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({ title: 'Caminar', time: '18:00', durationMinutes: 30, sourceText: 'caminar media hora' })],
+    }),
+    userMessage: 'caminar media hora a las 6',
+    reqId: 'rdur-media',
+  })
+  assert.equal(out.actions[0].event.endTime, '6:30 PM')
+})
+
+test('duration: reminder sin hora → convertido a add_task (no add_event)', () => {
   const out = convertOpenAIToBackendResponse({
     openaiPayload: fakeOpenAIPayload({
       actions: [reminder({ title: 'Llamar a Marcia', time: null })],
@@ -410,6 +485,23 @@ test('duration: reminder no calcula endTime (siempre null)', () => {
     userMessage: 'recuérdame llamar a Marcia',
     reqId: 'rdur2',
   })
+  assert.equal(out.actions[0].type, 'add_task')
+  assert.equal(out.actions[0].task.label, 'Llamar a Marcia')
+})
+
+test('duration: reminder CON hora → add_event con icon alarm + endTime null (punto en el tiempo)', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [reminder({ title: 'Llamar a Marcia', time: '18:30' })],
+    }),
+    userMessage: 'recuérdame llamar a Marcia a las 18:30',
+    reqId: 'rdur3',
+  })
+  assert.equal(out.actions[0].type, 'add_event')
+  assert.equal(out.actions[0].event.time, '6:30 PM')
+  assert.equal(out.actions[0].event.icon, 'alarm')
+  // No durationMinutes en el payload → endTime null. iOS aplica padding
+  // interno de 5min pero la UI lo muestra como punto en el tiempo.
   assert.equal(out.actions[0].event.endTime, null)
 })
 

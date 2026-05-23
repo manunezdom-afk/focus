@@ -141,8 +141,29 @@ REGLAS DURAS (no negociables):
      (a) Eliminar palabras temporales al inicio: "hoy", "mañana", "el lunes", "el martes", etc.
      (b) Eliminar expresiones de hora completas: "a las ocho 30", "a las 5", "a las 17:00", "a las ocho y media".
      (c) Eliminar números que son minutos de una hora en palabras: si el input tiene "ocho 30", el "30" no va al título.
+   - CORRIGE typos OBVIOS al armar el título (el usuario escribe rápido en el móvil y come letras o espacios). Reglas:
+     (i) Conjunciones pegadas: "arte enideas" → "arte e ideas" (el usuario tipeó "e ideas" sin espacio + 'n' extra). "pan yleche" → "pan y leche". "café eyogur" → "café y yogur". Patrón: si ves "X e[letras]" o "X y[letras]" donde [letras] forma una palabra real en español al separar la conjunción, sepáralas.
+     (ii) Doble letra obvia: "estudiarr" → "estudiar". "comerr" → "comer". (Solo cuando la versión con una letra es claramente la palabra esperada.)
+     (iii) Espacios faltantes entre palabras conocidas: "iral gym" → "ir al gym". "tengoque" → "tengo que" (esto último se strippea de todas formas, pero al detectar el typo no debe quedar como título).
+     (iv) Si después de strip queda una palabra que NO existe en español Y que difiere por 1 carácter de una composición válida (insertar espacio, quitar letra repetida), aplicar la corrección.
+   - SÉ CONSERVADOR con la corrección: solo aplica cuando la versión actual es claramente sin sentido en español. NO inventes palabras nuevas, NO cambies nombres propios (personas, lugares, marcas), NO "corrijas" abreviaciones legítimas ("gym", "uni", "u").
    - PROHIBIDO emitir título genérico vacío: "Horas", "Hoy", "Mañana", "Evento", "Recordatorio", "A las 5", "Reunión" sin persona/asunto, "Clase" sin materia, "Trabajo" sin sujeto.
    - Si el input es ambiguo y no puedes extraer un título real, emite type:"clarify" en vez de inventar.
+
+4b. DURACIÓN (durationMinutes — REGLA DURA):
+    El usuario NO suele especificar duración. Solo decir "a las X" significa: "que arranque a esa hora", NO "que dure 1 hora".
+    - durationMinutes:0 POR DEFAULT cuando el usuario solo dio hora de inicio. El cliente lo mostrará como punto en el tiempo ("14:00", sin "1h").
+    - durationMinutes > 0 SOLO cuando el usuario dijo EXPLÍCITAMENTE duración o rango de horas:
+      "por una hora" / "por 30 minutos" / "durante 2 horas" → durationMinutes:60/30/120
+      "media hora de X" / "una hora de X" / "2 horas de X" → durationMinutes:30/60/120
+      "de 2 a 4" / "desde las 2 hasta las 4" / "entre 2 y 4" → durationMinutes:120
+      "X de 9 a 11" → durationMinutes:120
+    - Ejemplos del bug (NO inventar duración):
+      "tengo que estudiar arte a las 2" → durationMinutes:0 (NO 60).
+      "reunión con Juan a las 3" → durationMinutes:0 (NO 60).
+      "gym a las 7" → durationMinutes:0 (NO 60).
+      "almuerzo con Marcia 14:00" → durationMinutes:0 (NO 60 ni 90).
+    - Si dudas, prefiere 0. Es más fácil que el usuario extienda un bloque que removerle 1 hora inventada.
 
 5. ANTI-CONTAMINACIÓN (CRÍTICO):
    - El campo sourceText debe contener UN fragmento LITERAL del input del usuario que originó esta acción. Sin paráfrasis.
@@ -154,6 +175,7 @@ REGLAS DURAS (no negociables):
    - type:"create_reminder" SOLO cuando el usuario dice trigger explícito ("recuérdame", "acuérdame", "avísame", "que no se me olvide", "no te olvides") O cuando es claramente una nota sin compromiso de calendario.
    - Si dijo "avísame N minutos antes de X", emite UN solo create_event para X con reminderOffsetMinutes:N. NO emitas un create_reminder separado.
    - Si dijo "recuérdame X" sin evento padre y sin hora, emite create_reminder con time:null y dateISO heredado del contexto (si la frase tiene "mañana"/"hoy" cerca, úsalo).
+   - Si dijo "acuérdame que a las HH X" o "recuérdame X a las HH" (trigger reminder + hora propia, sin evento padre): emite create_reminder CON time = "HH:MM" y dateISO. Esto crea un recordatorio puntual a esa hora. NO emitas time:null en este caso — el time es la hora del recordatorio.
    - Si en la MISMA frase hay un evento ("tengo doctor a las 5") + recordatorio independiente ("y recuérdame llevar exámenes"): 2 actions. El recordatorio HEREDA dateISO del evento si no tiene fecha propia.
 
 7. CATEGORÍAS:
@@ -310,6 +332,59 @@ function timeStringTo12h(hhmm) {
   return `${h12}:${min.toString().padStart(2, '0')} ${ampm}`
 }
 
+/**
+ * "YYYY-MM-DD" en zona del servidor para comparar con dateISO emitido por
+ * el modelo. La elección de hoy vs semana para reminders sin hora es una
+ * heurística suave — no es crítico que esté en la TZ exacta del usuario
+ * porque el iOS también puede mover la categoría después.
+ */
+function todayISOFromDate(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/**
+ * Detecta si el usuario MENCIONÓ explícitamente duración. Si no la
+ * mencionó, el adapter forzará durationMinutes:0 sin importar lo que
+ * devuelva el modelo — el modelo tiende a inventar 60 min default y eso
+ * crea bloques fantasma 14:00-15:00 cuando el usuario solo dijo "a las 2".
+ *
+ * Reglas:
+ * - "por N min/horas" / "durante N min/horas" → duración explícita.
+ * - "N hora(s)/minuto(s) de X" / "media hora de X" → duración explícita.
+ * - "de HH a HH" / "desde HH hasta HH" / "entre HH y HH" → rango = duración.
+ *
+ * NO califica como duración:
+ * - "a las N" / "en N min" (esto último es offset relativo, no duración).
+ * - Hora suelta "tipo las 2", "alrededor de las 2".
+ */
+function userMentionedDuration(message) {
+  if (typeof message !== 'string') return false
+  const m = message
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+  // Rango "de N a N" / "desde N hasta N" / "entre N y N" — al menos dos horas.
+  if (/\b(de|desde|entre)\s+(la(s)?\s+)?\d{1,2}(:\d{2})?\s+(a|hasta|y)\s+(la(s)?\s+)?\d{1,2}(:\d{2})?\b/.test(m)) {
+    return true
+  }
+  // "por/durante N (min|hora)" — bloque temporal explícito.
+  if (/\b(por|durante)\s+(una|un|media|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d{1,3})(\s+hora|\s+h\b|\s+minutos?|\s+min\b|\s+hrs?\b)/.test(m)) {
+    return true
+  }
+  // "N hora(s)/minuto(s) de X" — "una hora de gym".
+  if (/\b(una|un|media|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d{1,3})\s+(hora|horas|h|hs|hrs|minutos?|min)\s+de\s+/.test(m)) {
+    return true
+  }
+  // "media hora" / "cuarto de hora" — duraciones idiomáticas estándar.
+  if (/\b(media\s+hora|cuarto\s+de\s+hora|tres\s+cuartos\s+de\s+hora)\b/.test(m)) {
+    return true
+  }
+  return false
+}
+
 const CATEGORY_TO_ICON = {
   salud: 'local_hospital',
   reunion: 'groups',
@@ -427,15 +502,52 @@ export function convertOpenAIToBackendResponse({
     const date = typeof a.dateISO === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.dateISO) ? a.dateISO : null
     const cat = (typeof a.category === 'string' && CATEGORY_TO_ICON[a.category]) ? a.category : 'otro'
 
+    // create_reminder SIN hora → no podemos crear un FocusEvent (iOS exige
+    // startTime). Lo emitimos como add_task: una nota pendiente sin hora
+    // específica. El icon "alarm" + el trigger ("recuérdame") en el input
+    // ya marcan la intención; el iOS lo mostrará en Tareas. Antes esto
+    // caía silenciosamente porque iOS dropea add_event con time=null.
+    if (isReminder && !time12) {
+      const category = date && date === todayISOFromDate(new Date()) ? 'hoy' : 'semana'
+      safeActions.push({
+        type: 'add_task',
+        task: {
+          label: titleRaw,
+          priority: 'media',
+          category,
+        },
+        _meta: {
+          provider: 'openai',
+          sourceText: src,
+          confidence: a.confidence,
+          reqId,
+          convertedFromReminderNoTime: true,
+        },
+      })
+      continue
+    }
+
     // endTime se calcula client-side normalmente. Acá solo si tiene hora
     // Y duración > 0; el cliente puede usarlo. Para reminders, null.
+    //
+    // SAFETY NET (2026-05-23): el modelo tiende a inventar
+    // durationMinutes:60 default incluso cuando el usuario NO mencionó
+    // duración. Esto creaba bloques fantasma "14:00–15:00" cuando el user
+    // solo dijo "a las 2". Ahora, si el user no usó ningún keyword de
+    // duración ("por una hora", "de 2 a 4", "media hora"...), forzamos
+    // durationMinutes:0 → endTime null → iOS lo muestra como punto en el
+    // tiempo. El usuario puede extender después si quiere.
+    const userSaidDuration = userMentionedDuration(userMessage)
+    const effectiveDuration = userSaidDuration
+      ? (typeof a.durationMinutes === 'number' ? a.durationMinutes : 0)
+      : 0
     let endTime = null
-    if (!isReminder && time12 && typeof a.durationMinutes === 'number' && a.durationMinutes > 0) {
+    if (!isReminder && time12 && effectiveDuration > 0) {
       const [hStr, rest] = time12.split(':')
       const minStr = rest.slice(0, 2)
       const ampm = rest.slice(3)
       let h24 = parseInt(hStr, 10) % 12 + (ampm === 'PM' ? 12 : 0)
-      const totalMin = h24 * 60 + parseInt(minStr, 10) + a.durationMinutes
+      const totalMin = h24 * 60 + parseInt(minStr, 10) + effectiveDuration
       const eH24 = Math.floor((totalMin / 60) % 24)
       const eM = totalMin % 60
       const eAmPm = eH24 >= 12 ? 'PM' : 'AM'
@@ -444,9 +556,14 @@ export function convertOpenAIToBackendResponse({
       endTime = `${eH12}:${eM.toString().padStart(2, '0')} ${eAmPm}`
     }
 
+    // create_reminder CON hora → add_event con icon "alarm". iOS detecta
+    // isReminderHint vía userText ("acuérdame"/"recuérdame") + icon=alarm
+    // y crea el FocusEvent con isReminder=true en startTime. Antes el
+    // adapter forzaba time=null pensando que era "intencional" — pero
+    // sin time el iOS dropea la acción (FocusEvent.startTime no es opcional).
     const event = {
       title: titleRaw,
-      time: isReminder ? null : time12,
+      time: time12,
       endTime,
       date,
       section: isReminder ? 'evening' : (CATEGORY_TO_SECTION[cat] || 'evening'),
