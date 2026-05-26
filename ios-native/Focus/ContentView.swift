@@ -58,6 +58,17 @@ struct ContentView: View {
         // lo opuesto al easeInOut que empieza casi estático y se percibe como
         // freeze los primeros frames.
         ZStack {
+            // Capa de fondo base estable que previene filtraciones de color del
+            // canvas de la ventana durante la transición de crossfade.
+            if route == .boot {
+                Color(red: 0.118, green: 0.176, blue: 0.420)
+                    .ignoresSafeArea()
+            } else {
+                Theme.Colors.background
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+            }
+
             if route == .boot {
                 BootView()
                     .onAppear(perform: scheduleBootEnd)

@@ -14,14 +14,8 @@ struct BootView: View {
     @State private var opacity: Double = 0.0
     @State private var markScale: CGFloat = 0.88
     @State private var glowOpacity: Double = 0.0
-    /// Cuando true → el gradient deep + logo + wordmark hacen fade-out a 0
-    /// y queda visible el canvas light. Se activa antes del final del
-    /// Boot para morph a la paleta del MainTab.
-    @State private var morphToLight: Bool = false
     /// Opacity del gradiente radial. Arranca en 0 (solo cobalto plano,
-    /// matching el LaunchScreen iOS) y hace fade-in a 1 en los primeros
-    /// 300ms. Sin este fade-in, el primer frame del BootView mostraba
-    /// el radial al 100% inmediatamente → salto visible desde el cobalto
+    /// matching el cobalto
     /// plano del LaunchScreen (#1E2D6B) al gradient deep navy/indigo
     /// (centro #25388A, bordes #0F0A29). Microrotura confirmada con
     /// captura de video del launch (2026-05-26).
@@ -52,31 +46,20 @@ struct BootView: View {
 
     var body: some View {
         ZStack {
-            // v7: capa light DEBAJO de todo. Cuando morphToLight se activa,
-            // las capas oscuras hacen fade-out y revelan este canvas —
-            // coincide exactamente con `Theme.Colors.background` del MainTab
-            // → la transición Boot → MainTab no salta de color.
-            Theme.Colors.background
-                .ignoresSafeArea()
-
-            // v8 fix microrotura: capa cobalto plano matching el
-            // LaunchScreen iOS. Visible desde el primer paint del BootView
-            // — sin esta capa, el primer frame mostraba directo el radial
-            // gradient y se notaba un salto desde el cobalto plano del
-            // launch al radial deep navy. Hace fade-out junto con el radial
-            // cuando morphToLight = true para revelar el canvas light.
+            // Capa cobalto plano matching el LaunchScreen iOS.
+            // Visible desde el primer paint del BootView — sin esta capa,
+            // el primer frame mostraba directo el radial gradient y se notaba
+            // un salto desde el cobalto plano del launch al radial deep navy.
             Self.launchCobalt
                 .ignoresSafeArea()
-                .opacity(morphToLight ? 0 : 1)
 
-            // v8: el radial ahora arranca en opacity 0 y hace fade-in a 1
-            // en los primeros 300ms. Eso convierte la aparición del
-            // gradient en una "iluminación cinematográfica" sobre el
-            // cobalto plano (matching launch), en vez del salto abrupto
-            // que existía antes.
+            // El radial arranca en opacity 0 y hace fade-in a 1 en los primeros
+            // 300ms. Eso convierte la aparición del gradient en una "iluminación
+            // cinematográfica" sobre el cobalto plano (matching launch), en vez
+            // del salto abrupto que existía antes.
             bgRadial
                 .ignoresSafeArea()
-                .opacity(radialOpacity * (morphToLight ? 0 : 1))
+                .opacity(radialOpacity)
 
             VStack(spacing: 0) {
                 Spacer()
@@ -123,13 +106,9 @@ struct BootView: View {
                 Spacer()
                 Spacer()
             }
-            // v7: TODO el contenido (logo + wordmark) fade-out junto con
-            // el gradient cuando morphToLight = true. Solo queda visible
-            // el canvas light, matching el MainTab.
-            .opacity(morphToLight ? 0 : 1)
         }
         .onAppear {
-            // v8: fade-in del radial sobre el cobalto plano del launch.
+            // Fade-in del radial sobre el cobalto plano del launch.
             // 300ms es suficiente para que la "iluminación" del gradient
             // se perciba sin sentirse lenta — combina con el fade-in del
             // wordmark y del glow.
@@ -143,16 +122,6 @@ struct BootView: View {
             }
             withAnimation(.easeOut(duration: 0.45).delay(0.05)) {
                 glowOpacity = 1
-            }
-
-            // v7 morph: a los 400ms (de los 600ms totales del Boot) empieza
-            // a fade del gradient deep al canvas light. Cuando ContentView
-            // hace switch a .main a los 600ms, ya estamos sobre canvas
-            // matching → MainTab fade-in sin salto de color.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
-                withAnimation(.easeInOut(duration: 0.20)) {
-                    morphToLight = true
-                }
             }
         }
     }
