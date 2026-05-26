@@ -18,6 +18,20 @@ struct BootView: View {
     /// y queda visible el canvas light. Se activa antes del final del
     /// Boot para morph a la paleta del MainTab.
     @State private var morphToLight: Bool = false
+    /// Opacity del gradiente radial. Arranca en 0 (solo cobalto plano,
+    /// matching el LaunchScreen iOS) y hace fade-in a 1 en los primeros
+    /// 300ms. Sin este fade-in, el primer frame del BootView mostraba
+    /// el radial al 100% inmediatamente → salto visible desde el cobalto
+    /// plano del LaunchScreen (#1E2D6B) al gradient deep navy/indigo
+    /// (centro #25388A, bordes #0F0A29). Microrotura confirmada con
+    /// captura de video del launch (2026-05-26).
+    @State private var radialOpacity: Double = 0.0
+
+    /// Color cobalto EXACTO del LaunchScreen iOS — debe matchear
+    /// LaunchBackground asset (#1E2D6B = rgb 0.118/0.176/0.420). Esta
+    /// capa es la base sobre la que aparece el radial, garantizando
+    /// continuidad cromática desde el primer paint del BootView.
+    private static let launchCobalt = Color(red: 0.118, green: 0.176, blue: 0.420)
 
     /// Gradiente radial multi-stop: brillante cobalto en el centro,
     /// navy profundo intermedio, tinte indigo/violeta en los bordes.
@@ -38,16 +52,31 @@ struct BootView: View {
 
     var body: some View {
         ZStack {
-            // v7: capa light DEBAJO del gradient deep. Cuando morphToLight
-            // se activa, el gradient hace fade-out y revela este canvas
-            // — coincide exactamente con `Theme.Colors.background` del
-            // MainTab → la transición Boot → MainTab no salta de color.
+            // v7: capa light DEBAJO de todo. Cuando morphToLight se activa,
+            // las capas oscuras hacen fade-out y revelan este canvas —
+            // coincide exactamente con `Theme.Colors.background` del MainTab
+            // → la transición Boot → MainTab no salta de color.
             Theme.Colors.background
                 .ignoresSafeArea()
 
-            bgRadial
+            // v8 fix microrotura: capa cobalto plano matching el
+            // LaunchScreen iOS. Visible desde el primer paint del BootView
+            // — sin esta capa, el primer frame mostraba directo el radial
+            // gradient y se notaba un salto desde el cobalto plano del
+            // launch al radial deep navy. Hace fade-out junto con el radial
+            // cuando morphToLight = true para revelar el canvas light.
+            Self.launchCobalt
                 .ignoresSafeArea()
                 .opacity(morphToLight ? 0 : 1)
+
+            // v8: el radial ahora arranca en opacity 0 y hace fade-in a 1
+            // en los primeros 300ms. Eso convierte la aparición del
+            // gradient en una "iluminación cinematográfica" sobre el
+            // cobalto plano (matching launch), en vez del salto abrupto
+            // que existía antes.
+            bgRadial
+                .ignoresSafeArea()
+                .opacity(radialOpacity * (morphToLight ? 0 : 1))
 
             VStack(spacing: 0) {
                 Spacer()
@@ -100,6 +129,13 @@ struct BootView: View {
             .opacity(morphToLight ? 0 : 1)
         }
         .onAppear {
+            // v8: fade-in del radial sobre el cobalto plano del launch.
+            // 300ms es suficiente para que la "iluminación" del gradient
+            // se perciba sin sentirse lenta — combina con el fade-in del
+            // wordmark y del glow.
+            withAnimation(.easeOut(duration: 0.30)) {
+                radialOpacity = 1
+            }
             // Fade-in inicial — el splash se asienta.
             withAnimation(.easeOut(duration: 0.35)) {
                 opacity = 1
