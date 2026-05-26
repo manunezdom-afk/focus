@@ -195,14 +195,11 @@ struct LoginView: View {
                     .autocorrectionDisabled(true)
                     .submitLabel(.send)
                     .onSubmit { Task { await submitEmail() } }
-                    .toolbar {
-                        ToolbarItemGroup(placement: .keyboard) {
-                            Spacer()
-                            Button("Listo") { dismissKeyboard() }
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.focusAccent)
-                        }
-                    }
+                    // Sin `.toolbar(placement: .keyboard)`: cierra teclado
+                    // con submit del email o tap fuera. Consistencia con
+                    // Nova chat (que también lo eliminó porque el toolbar
+                    // keyboard es global y se mostraba flotando encima del
+                    // composer del chat).
             }
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.vertical, Theme.Spacing.md + 2)

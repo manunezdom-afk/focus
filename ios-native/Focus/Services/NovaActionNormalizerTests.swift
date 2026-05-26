@@ -2763,6 +2763,310 @@ enum NovaActionNormalizerTests {
             failures.append(msg)
         }
     }
+
+    // MARK: - 50-case validation pre-TestFlight
+
+    /// Suite de validación pre-TestFlight: 50 frases reales de usuario
+    /// chileno. Ejercita `NovaResponder.parseAll` + `cleanTitle` +
+    /// `extractExplicitEndTime` + flags de fast path. NO toca el store
+    /// (no crea eventos/tareas reales) ni llama al backend de IA.
+    ///
+    /// Cómo correr: setear `FOCUS_RUN_TESTS=50` y lanzar la app. Resultado
+    /// se imprime y se guarda en `Documents/focus-validation-50.log`.
+    ///
+    /// Criterio de aprobación: 45/50 PASS mínimo, sin fails críticos en
+    /// los casos {1, 2, 3, 6, 7, 11, 12, 21, 44}.
+    @discardableResult
+    static func runValidation50Cases() -> String {
+        typealias K = ParsedKind
+        typealias D = DayLabel
+        struct Case {
+            let id: Int
+            let input: String
+            let expectedKind: K
+            let expectedHour: Int?
+            let expectedHasEndHour: Bool?
+            let expectedDay: D?
+            let mustNotInventEndTime: Bool
+            let isCritical: Bool
+            let notes: String
+
+            init(id: Int, input: String, expectedKind: K,
+                 expectedHour: Int? = nil, expectedHasEndHour: Bool? = nil,
+                 expectedDay: D? = nil,
+                 mustNotInventEndTime: Bool = false, isCritical: Bool = false,
+                 notes: String = "") {
+                self.id = id
+                self.input = input
+                self.expectedKind = expectedKind
+                self.expectedHour = expectedHour
+                self.expectedHasEndHour = expectedHasEndHour
+                self.expectedDay = expectedDay
+                self.mustNotInventEndTime = mustNotInventEndTime
+                self.isCritical = isCritical
+                self.notes = notes
+            }
+        }
+
+        var cases: [Case] = []
+        // ── A: evento con hora de inicio sin término ─────────────────
+        cases.append(Case(id: 1, input: "dentista hoy a las 4",
+                 expectedKind: K.event, expectedHour: 16, expectedHasEndHour: false,
+                 expectedDay: D.today, mustNotInventEndTime: true, isCritical: true,
+                 notes: "16:00 punto, NO 16:00–17:00"))
+        cases.append(Case(id: 2, input: "mañana cumpleaños de Urrutia a las 6",
+                 expectedKind: K.event, expectedHour: 18, expectedHasEndHour: false,
+                 expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: true,
+                 notes: "18:00 punto"))
+        cases.append(Case(id: 3, input: "reunión con Juan a las 5",
+                 expectedKind: K.event, expectedHour: 17, expectedHasEndHour: false,
+                 expectedDay: D.today, mustNotInventEndTime: true, isCritical: true,
+                 notes: "17:00 punto"))
+        cases.append(Case(id: 4, input: "prueba de historia el viernes a las 10",
+                 expectedKind: K.event, expectedHour: 10, expectedHasEndHour: false,
+                 mustNotInventEndTime: true, isCritical: false,
+                 notes: "viernes 10:00 punto"))
+        cases.append(Case(id: 5, input: "clase de teorías mañana a las 8",
+                 expectedKind: K.event, expectedHour: 8, expectedHasEndHour: false,
+                 expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
+                 notes: "mañana 08:00 punto"))
+        // ── B: rango horario explícito ───────────────────────────────
+        cases.append(Case(id: 6, input: "reunión de 5 a 7",
+                 expectedKind: K.event, expectedHour: 17, expectedHasEndHour: true,
+                 expectedDay: D.today, mustNotInventEndTime: false, isCritical: true,
+                 notes: "17:00–19:00 rango real"))
+        cases.append(Case(id: 7, input: "clase a las 10 por dos horas",
+                 expectedKind: K.event, expectedHour: 10, expectedHasEndHour: true,
+                 expectedDay: D.today, mustNotInventEndTime: false, isCritical: true,
+                 notes: "10:00–12:00 rango real"))
+        cases.append(Case(id: 8, input: "entreno de 6 a 8",
+                 expectedKind: K.event, expectedHour: 18, expectedHasEndHour: true,
+                 expectedDay: D.today, mustNotInventEndTime: false, isCritical: false,
+                 notes: "18:00–20:00"))
+        cases.append(Case(id: 9, input: "junta con mi grupo mañana de 3 a 4",
+                 expectedKind: K.event, expectedHour: 15, expectedHasEndHour: true,
+                 expectedDay: D.tomorrow, mustNotInventEndTime: false, isCritical: false,
+                 notes: "mañana 15:00–16:00"))
+        cases.append(Case(id: 10, input: "psiquiatra el jueves de 12 a 1",
+                 expectedKind: K.event, expectedHour: 12, expectedHasEndHour: true,
+                 isCritical: false,
+                 notes: "jueves 12:00–13:00"))
+        // ── C: sin hora → recordatorio/pendiente ─────────────────────
+        cases.append(Case(id: 11, input: "fútbol hoy",
+                 expectedKind: K.task, expectedDay: D.today, mustNotInventEndTime: true, isCritical: true,
+                 notes: "tarea hoy, NO evento"))
+        cases.append(Case(id: 12, input: "estudiar lenguaje mañana",
+                 expectedKind: K.task, expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: true,
+                 notes: "tarea mañana"))
+        cases.append(Case(id: 13, input: "hacer trabajo de historia",
+                 expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tarea sin fecha"))
+        cases.append(Case(id: 14, input: "comprar pan",
+                 expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tarea"))
+        cases.append(Case(id: 15, input: "avisarle a mi profe que salí antes",
+                 expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tarea"))
+        cases.append(Case(id: 16, input: "mandarle mail a Juan Pablo hoy",
+                 expectedKind: K.task, expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tarea hoy"))
+        cases.append(Case(id: 17, input: "pagar la cuenta mañana",
+                 expectedKind: K.task, expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tarea mañana"))
+        cases.append(Case(id: 18, input: "llamar a mi mamá",
+                 expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tarea"))
+        cases.append(Case(id: 19, input: "ordenar mi pieza hoy",
+                 expectedKind: K.task, expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tarea hoy"))
+        cases.append(Case(id: 20, input: "subir el build de Focus",
+                 expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tarea"))
+        // ── D: preguntas → no crear nada ─────────────────────────────
+        cases.append(Case(id: 21, input: "qué tengo hoy",
+                 expectedKind: K.other, mustNotInventEndTime: false, isCritical: true,
+                 notes: "reviewToday, NO crear"))
+        cases.append(Case(id: 22, input: "qué tengo mañana",
+                 expectedKind: K.other, mustNotInventEndTime: false, isCritical: false,
+                 notes: "review, NO crear"))
+        cases.append(Case(id: 23, input: "qué me queda pendiente",
+                 expectedKind: K.other, mustNotInventEndTime: false, isCritical: false,
+                 notes: "reviewPending"))
+        cases.append(Case(id: 24, input: "organizar mi día",
+                 expectedKind: K.other, mustNotInventEndTime: false, isCritical: false,
+                 notes: "organizeDay"))
+        cases.append(Case(id: 25, input: "muéstrame mis pendientes de hoy",
+                 expectedKind: K.other, mustNotInventEndTime: false, isCritical: false,
+                 notes: "review"))
+        // ── E: frases chilenas/ambiguas ──────────────────────────────
+        cases.append(Case(id: 26, input: "mañana tipo 5 tengo que ir al doctor",
+                 expectedKind: K.event, expectedHour: 17, expectedHasEndHour: false,
+                 expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tipo 5 = 17:00 aprox"))
+        cases.append(Case(id: 27, input: "como a las 6 tengo cumpleaños",
+                 expectedKind: K.event, expectedHour: 18, expectedHasEndHour: false,
+                 mustNotInventEndTime: true, isCritical: false,
+                 notes: "como a las 6 = 18:00"))
+        cases.append(Case(id: 28, input: "hoy en la tarde estudiar para la prueba",
+                 expectedKind: K.task, expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
+                 notes: "franja sin hora exacta → tarea"))
+        cases.append(Case(id: 29, input: "mañana en la mañana ir al banco",
+                 expectedKind: K.task, expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
+                 notes: "franja → tarea"))
+        cases.append(Case(id: 30, input: "el viernes en la noche carrete",
+                 expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
+                 notes: "franja → tarea"))
+        cases.append(Case(id: 31, input: "tengo prueba de comunicación el miércoles",
+                 expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
+                 notes: "día sin hora → tarea"))
+        cases.append(Case(id: 32, input: "el lunes entregar portafolio",
+                 expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
+                 notes: "día sin hora → tarea"))
+        cases.append(Case(id: 33, input: "mañana 8 gimnasio",
+                 expectedKind: K.event, expectedHour: 8, expectedHasEndHour: false,
+                 expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
+                 notes: "8 → 8 ó 20 según heurística"))
+        cases.append(Case(id: 34, input: "a las 7 estudiar",
+                 expectedKind: K.event, expectedHour: 19, expectedHasEndHour: false,
+                 expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
+                 notes: "7pm probable hoy"))
+        cases.append(Case(id: 35, input: "hoy a las 9 terapia",
+                 expectedKind: K.event, expectedHour: 9, expectedHasEndHour: false,
+                 expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
+                 notes: "hoy 09:00 ó 21:00"))
+        // ── multicomandos (parseAll devuelve >1) ─────────────────────
+        cases.append(Case(id: 36, input: "mañana a las 6 tengo cumpleaños de Urrutia y comprar regalo",
+                 expectedKind: K.event, expectedHour: 18, expectedHasEndHour: false,
+                 expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
+                 notes: "1er intent: evento; idealmente +1 tarea regalo"))
+        cases.append(Case(id: 37, input: "hoy estudiar lenguaje y mandar mail a Juan Pablo",
+                 expectedKind: K.task, expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tareas, no eventos"))
+        cases.append(Case(id: 38, input: "mañana dentista a las 4 y después estudiar",
+                 expectedKind: K.event, expectedHour: 16, expectedHasEndHour: false,
+                 expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
+                 notes: "evento + tarea"))
+        cases.append(Case(id: 39, input: "reunión con grupo de 3 a 5 y después gym",
+                 expectedKind: K.event, expectedHour: 15, expectedHasEndHour: true,
+                 expectedDay: D.today, mustNotInventEndTime: false, isCritical: false,
+                 notes: "rango real + tarea gym"))
+        cases.append(Case(id: 40, input: "el jueves prueba a las 10 y entregar trabajo",
+                 expectedKind: K.event, expectedHour: 10, expectedHasEndHour: false,
+                 mustNotInventEndTime: true, isCritical: false,
+                 notes: "evento + tarea"))
+        // ── queries / edición ────────────────────────────────────────
+        cases.append(Case(id: 41, input: "no tengo nada hoy?",
+                 expectedKind: K.other, mustNotInventEndTime: false, isCritical: false,
+                 notes: "consulta, NO crear"))
+        cases.append(Case(id: 42, input: "borra el dentista de hoy",
+                 expectedKind: K.other, mustNotInventEndTime: false, isCritical: false,
+                 notes: "deleteEventByActivity"))
+        cases.append(Case(id: 43, input: "cambia la reunión de las 5 a las 6",
+                 expectedKind: K.other, mustNotInventEndTime: false, isCritical: false,
+                 notes: "rescheduleByActivity"))
+        // ── recordatorios explícitos ─────────────────────────────────
+        cases.append(Case(id: 44, input: "recuerdame tomar agua a las 8",
+                 expectedKind: K.reminder, expectedHour: 8, expectedHasEndHour: false,
+                 expectedDay: D.today, mustNotInventEndTime: true, isCritical: true,
+                 notes: "reminder con hora puntual, NO evento 1h"))
+        cases.append(Case(id: 45, input: "recuérdame llamar a mi papá mañana a las 11",
+                 expectedKind: K.reminder, expectedHour: 11, expectedHasEndHour: false,
+                 expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
+                 notes: "reminder mañana 11:00"))
+        cases.append(Case(id: 46, input: "pon una alarma para estudiar a las 7",
+                 expectedKind: K.reminder, expectedHour: 7, expectedHasEndHour: false,
+                 expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
+                 notes: "reminder con hora, NO evento 1h"))
+        // ── preparación / sin hora ───────────────────────────────────
+        cases.append(Case(id: 47, input: "necesito preparar la prueba del lunes",
+                 expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tarea"))
+        cases.append(Case(id: 48, input: "tengo que salir antes de teoría de comunicación",
+                 expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
+                 notes: "tarea sin hora"))
+        cases.append(Case(id: 49, input: "mañana tengo clases",
+                 expectedKind: K.task, expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
+                 notes: "día sin hora → tarea o clarify"))
+        cases.append(Case(id: 50, input: "agenda almuerzo con mi papá mañana",
+                 expectedKind: K.task, expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
+                 notes: "sin hora → tarea o clarify"))
+        var out = "===== NOVA 50-CASE VALIDATION =====\n"
+        out += "Fecha: \(Date())\n\n"
+        var passCount = 0
+        var failCount = 0
+        var criticalFails: [Int] = []
+        var rows: [String] = []
+
+        for c in cases {
+            let actions = runPipeline(c.input)
+            let first = actions.first
+            var problems: [String] = []
+            let actualKind = first?.kind ?? .other
+            let actualHour = first?.hour
+            let actualEndHour = first?.endHour
+            let actualDay = first?.day ?? .none
+
+            // 1) kind
+            if actualKind != c.expectedKind {
+                problems.append("kind=\(actualKind) (esperado \(c.expectedKind))")
+            }
+            // 2) hour
+            if let eh = c.expectedHour {
+                if actualHour != eh {
+                    problems.append("hour=\(String(describing: actualHour)) (esperado \(eh))")
+                }
+            }
+            // 3) endHour: si mustNotInventEndTime → endHour debe ser nil
+            if c.mustNotInventEndTime, actualEndHour != nil {
+                problems.append("endHour=\(actualEndHour!) (esperado nil, NO inventar)")
+            }
+            // 4) endHour visible cuando se espera (rango real)
+            if let hasEnd = c.expectedHasEndHour {
+                let actualHasEnd = (actualEndHour != nil)
+                if actualHasEnd != hasEnd {
+                    problems.append("hasEndHour=\(actualHasEnd) (esperado \(hasEnd))")
+                }
+            }
+            // 5) day si se especifica
+            if let ed = c.expectedDay, actualDay != ed {
+                problems.append("day=\(actualDay) (esperado \(ed))")
+            }
+
+            let pass = problems.isEmpty
+            if pass {
+                passCount += 1
+                rows.append(String(format: "  %2d ✓ PASS | %@ → %@ h=%@ end=%@ day=%@",
+                                   c.id, c.input,
+                                   String(describing: actualKind),
+                                   String(describing: actualHour),
+                                   String(describing: actualEndHour),
+                                   String(describing: actualDay)))
+            } else {
+                failCount += 1
+                if c.isCritical { criticalFails.append(c.id) }
+                rows.append(String(format: "  %2d ✗ FAIL%@ | %@ → %@ — %@",
+                                   c.id,
+                                   c.isCritical ? "🔴" : "",
+                                   c.input,
+                                   String(describing: actualKind),
+                                   problems.joined(separator: "; ")))
+            }
+        }
+
+        out += "RESULTADO: \(passCount)/\(cases.count) PASS  (\(failCount) FAIL)\n"
+        if !criticalFails.isEmpty {
+            out += "🔴 CRITICAL FAILS: \(criticalFails.map(String.init).joined(separator: ", "))\n"
+            out += "    → NO LISTO para TestFlight (criterio: 0 críticos)\n"
+        } else if passCount >= 45 {
+            out += "✅ LISTO para TestFlight (≥45/50 sin críticos)\n"
+        } else {
+            out += "⚠️  NO LISTO (<45/50)\n"
+        }
+        out += "\n--- DETALLE POR CASO ---\n"
+        out += rows.joined(separator: "\n")
+        out += "\n===== END =====\n"
+        return out
+    }
 }
 
 #endif

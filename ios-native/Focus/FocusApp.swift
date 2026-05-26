@@ -13,11 +13,10 @@ struct FocusApp: App {
         // `--run-nova-tests` en argv. Algunas combinaciones de simulador/
         // versión de iOS no propagan SIMCTL_CHILD_* a `ProcessInfo`, así
         // que aceptamos ambas formas.
-        let envFlag = ProcessInfo.processInfo.environment["FOCUS_RUN_TESTS"] == "1"
-        let argFlag = CommandLine.arguments.contains("--run-nova-tests")
-        if envFlag || argFlag {
-            // Marker file ANTES de runAll() para que sepamos que init() entró
-            // a esta rama. Si runAll() crashea, este file queda como evidencia.
+        let testFlag = ProcessInfo.processInfo.environment["FOCUS_RUN_TESTS"]
+        let argRunAll = CommandLine.arguments.contains("--run-nova-tests")
+        let argRun50 = CommandLine.arguments.contains("--run-nova-50")
+        if testFlag != nil || argRunAll || argRun50 {
             if let docs = FileManager.default.urls(
                 for: .documentDirectory, in: .userDomainMask
             ).first {
@@ -27,12 +26,23 @@ struct FocusApp: App {
                 )
             }
 
-            let result = NovaActionNormalizerTests.runAll()
+            // Flag "50" → ejecuta validation 50 casos; "1" o default →
+            // ejecuta runAll() (suite completa preexistente).
+            let runFiftyOnly = (testFlag == "50") || argRun50
+            let result: String
+            let outName: String
+            if runFiftyOnly {
+                result = NovaActionNormalizerTests.runValidation50Cases()
+                outName = "focus-validation-50.log"
+            } else {
+                result = NovaActionNormalizerTests.runAll()
+                outName = "focus-tests.log"
+            }
             print("===== NOVA TESTS =====\n\(result)\n=====================")
             if let docs = FileManager.default.urls(
                 for: .documentDirectory, in: .userDomainMask
             ).first {
-                let path = docs.appendingPathComponent("focus-tests.log")
+                let path = docs.appendingPathComponent(outName)
                 try? result.write(to: path, atomically: true, encoding: .utf8)
             }
         }

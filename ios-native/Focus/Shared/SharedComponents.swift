@@ -1050,19 +1050,11 @@ struct FocusBarInput: View {
                 // padding vertical mínimo para que el área de toque sea
                 // cómoda incluso con 1 línea.
                 .padding(.vertical, 4)
-                // Toolbar "Listo" sobre el teclado para cerrarlo
-                // explícitamente. iOS lo muestra solo cuando el campo está
-                // enfocado.
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Listo") {
-                            isFocused = false
-                        }
-                        .foregroundStyle(Theme.Colors.focusAccent)
-                        .fontWeight(.semibold)
-                    }
-                }
+                // Sin `.toolbar(placement: .keyboard)`: el botón "Listo"
+                // flotaba encima del composer del chat de Nova (toolbar
+                // del keyboard es global por app, persiste cross-view).
+                // El usuario cierra el teclado tocando fuera del input
+                // o haciendo scroll (que dispara `scrollDismissesKeyboard`).
 
             // Theme 2.0 fix: botones integrados al barra, sin círculos
             // sueltos con fondo cobalto-soft. El mic en idle es solo el
