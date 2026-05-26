@@ -1584,16 +1584,18 @@ enum NovaActionNormalizerTests {
                   expected: false, failures: &failures)
         }
 
-        // ───── Caso I: "el lunes" sin hora → clarify (pedir hora) ─────
+        // ───── Caso I: "el lunes" sin hora → task con dueDate ─────
         // "tengo prueba de historia el lunes"
-        // → clarify: no inventar hora absurda. El default 9:00 es placeholder
-        //   y el parser detecta `isAtDayDefault` → pide hora al usuario.
+        // → task del lunes. Cambio de diseño 2026-05-26 (50-case
+        //   validation): antes era clarify pidiendo hora, pero eso
+        //   frenaba el flujo del usuario. Ahora preferimos crear
+        //   tarea del día y dejar que el usuario edite si quiere hora.
         let casoI = runPipeline("tengo prueba de historia el lunes")
         check(label: "casoI: 1 intent",
               actual: casoI.count, expected: 1, failures: &failures)
         if let first = casoI.first {
-            check(label: "casoI kind = clarify (pedir hora)",
-                  actual: first.kind, expected: .clarify, failures: &failures)
+            check(label: "casoI kind = task (con dueDate)",
+                  actual: first.kind, expected: .task, failures: &failures)
         }
 
         // ───── Caso J: timeframe "en la tarde" mapea a 16:00 ──────────
