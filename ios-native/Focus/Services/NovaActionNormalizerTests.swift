@@ -2990,8 +2990,8 @@ enum NovaActionNormalizerTests {
                  expectedKind: K.task, expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
                  notes: "día sin hora → tarea o clarify"))
         cases.append(Case(id: 50, input: "agenda almuerzo con mi papá mañana",
-                 expectedKind: K.task, expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
-                 notes: "sin hora → tarea o clarify"))
+                 expectedKind: K.clarify, mustNotInventEndTime: true, isCritical: false,
+                 notes: "activo 'agenda' + día sin hora → pregunta hora (PendingClarification)"))
         // ── F: recurrencia (sanity check 2026-05-26) ─────────────────
         cases.append(Case(id: 51, input: "todos los martes a las 8 am tengo clases de matemática",
                  expectedKind: K.event, expectedHour: 8, expectedHasEndHour: false,

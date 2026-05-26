@@ -112,6 +112,18 @@ struct FocusEvent: Identifiable, Codable, Hashable {
     /// a la mochila" → offset=20, note="Echar las zapatillas a la mochila"
     /// anclado al evento "Partido" 15:00.
     var reminderNotes: [String]?
+    /// Subtítulo / contexto semántico del evento. Separación opcional
+    /// "X de Y" → title=X, subtitle=Y. Usado para representaciones más
+    /// legibles cuando el usuario menciona contexto al final:
+    /// - "reunión a las 8 de mindfulness" → title=Reunión, subtitle=Mindfulness
+    /// - "clase de teorías" → title=Clase, subtitle=Teorías
+    /// - "prueba de historia" → title=Prueba, subtitle=Historia
+    /// - "cumpleaños de Urrutia" → title=Cumpleaños, subtitle=Urrutia
+    ///
+    /// Optional para back-compat con eventos persistidos antes (el JSON
+    /// decoder usa decodeIfPresent para Optionals). Nil cuando el evento
+    /// es simple ("dentista hoy a las 4" → solo title, sin subtitle).
+    var subtitle: String?
 
     /// Origen efectivo del evento. Si `source` es nil (data legacy) lo
     /// tratamos como `.local`.
@@ -143,7 +155,8 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         isReminder: Bool? = nil,
         inferredDuration: Bool? = nil,
         reminderOffsets: [Int]? = nil,
-        reminderNotes: [String]? = nil
+        reminderNotes: [String]? = nil,
+        subtitle: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -164,6 +177,7 @@ struct FocusEvent: Identifiable, Codable, Hashable {
         self.inferredDuration = inferredDuration
         self.reminderOffsets = reminderOffsets
         self.reminderNotes = reminderNotes
+        self.subtitle = subtitle
     }
 
     /// Devuelve la nota custom para el offset en posición `index`. Maneja

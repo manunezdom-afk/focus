@@ -949,6 +949,72 @@ enum NovaActionNormalizer {
         return false
     }
 
+    // MARK: - Subtitle / contexto semántico
+
+    /// Intenta separar un título en `(activityTitle, contextSubtitle)`
+    /// usando el patrón "ACTIVIDAD de CONTEXTO" o "ACTIVIDAD con PERSONA".
+    /// Ejemplos:
+    ///   "Reunión a las 8 de mindfulness" → ("Reunión", "Mindfulness")
+    ///   "Clase de teorías"                → ("Clase", "Teorías")
+    ///   "Prueba de historia"              → ("Prueba", "Historia")
+    ///   "Cumpleaños de Urrutia"           → ("Cumpleaños", "Urrutia")
+    ///   "Entrega de portafolio"           → ("Entrega", "Portafolio")
+    ///   "Reunión con Juan"                → ("Reunión", "Juan")
+    ///
+    /// Devuelve nil si no hay separador claro o si el split queda con
+    /// alguna parte vacía. NO usar para títulos simples — el caller
+    /// puede dejar el título original si esta función devuelve nil.
+    ///
+    /// Sustantivos "actividad" reconocidos como Title: reunión, clase,
+    /// prueba, parcial, examen, final, entrega, cumpleaños, almuerzo,
+    /// cena, desayuno, taller, charla, sesión, evento, llamada,
+    /// conferencia, ensayo, presentación, entrevista. Si el inicio del
+    /// título matches uno de esos + " de " o " con ", split.
+    static func splitTitleSubtitle(_ rawTitle: String) -> (title: String, subtitle: String)? {
+        let activityWords: [String] = [
+            "reunión", "reunion", "clase", "prueba", "parcial", "examen",
+            "final", "entrega", "cumpleaños", "cumpleanos", "almuerzo",
+            "cena", "desayuno", "taller", "charla", "sesión", "sesion",
+            "evento", "llamada", "conferencia", "ensayo", "presentación",
+            "presentacion", "entrevista"
+        ]
+        let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lower = trimmed.lowercased()
+        // Detectar palabra de actividad al INICIO (puede ir con artículo
+        // tras: "la reunión", "el cumpleaños"). Strip artículos.
+        var startWord: String? = nil
+        for word in activityWords {
+            if lower.hasPrefix(word) || lower.hasPrefix("la \(word)") ||
+               lower.hasPrefix("el \(word)") || lower.hasPrefix("una \(word)") ||
+               lower.hasPrefix("un \(word)") {
+                startWord = word
+                break
+            }
+        }
+        guard let word = startWord else { return nil }
+        // Buscar " de " o " con " después del activity word.
+        // Capturar todo lo que va después como subtítulo.
+        let patterns = [" de ", " con "]
+        for separator in patterns {
+            if let range = lower.range(of: separator) {
+                let afterIdx = range.upperBound
+                let subtitleRaw = String(trimmed[afterIdx...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !subtitleRaw.isEmpty else { continue }
+                // Validación: el subtítulo no debe contener marcadores
+                // temporales que pertenezcan al título original (ej. "las
+                // 8" en "Reunión a las 8 de mindfulness" — el "a las 8"
+                // debería haber sido strippeado por cleanTitle antes).
+                // Mantener subtítulo conservador.
+                let titleCleaned = word.prefix(1).uppercased() + word.dropFirst()
+                let subtitleCleaned = subtitleRaw.prefix(1).uppercased() + subtitleRaw.dropFirst()
+                return (String(titleCleaned), String(subtitleCleaned))
+            }
+        }
+        return nil
+    }
+
     // MARK: - Reminder offsets ("X minutos antes")
 
     /// Extrae los minutos de offset que el usuario dijo en frases tipo:

@@ -1813,6 +1813,8 @@ enum NovaResponder {
             "tengo entrega",
             "tengo evento", "tengo cita", "tengo turno",
             "tengo médico", "tengo medico", "tengo doctor",
+            "tengo dentista", "tengo terapia", "tengo kinesiólogo", "tengo kinesiologo",
+            "tengo psicólogo", "tengo psicologo", "tengo psiquiatra",
             "salir a ", "salir con ", "salgo con ",
             "ir a ", "voy a ", "vamos a ",
             // Agregados 2026-05-26 (caso 29 del 50-test): "ir al X" / "voy
@@ -1831,16 +1833,52 @@ enum NovaResponder {
             if title.isEmpty {
                 return .clarify(reason: .eventNeedsTitle)
             }
-            // Distinguir hora EXACTA de franja coloquial: si solo hay
-            // franja ("en la tarde", "en la mañana"), tratar como tarea
-            // del día — no inventar 9am como evento. Cubre casos 29 (con
-            // "ir al ") y eventos como "mañana tengo clases", "agenda
-            // almuerzo mañana" donde no se dio hora exacta. Cubre 49, 50.
+            // Distinguir trigger ACTIVO (usuario quiere AGENDAR un evento
+            // ahora — debe preguntar hora si falta) vs PASIVO (usuario
+            // describe una obligación pasiva — task con dueDate basta).
+            // - Activos: "agenda", "agéndame", "ponme", "crea evento",
+            //   "nuevo evento", "agrega evento". El usuario invoca a Nova
+            //   a CREAR algo. Si falta hora, Nova debe preguntar →
+            //   clarify(.eventNeedsTime/.eventNeedsDateTime) → guarda
+            //   pending → user responde "a las 8" → completa el evento.
+            // - Pasivos: "tengo X", "X con persona". El usuario menciona.
+            //   Sin hora se trata como task (no requiere pregunta).
+            let activeTriggers = [
+                "agenda", "agéndame", "agendame", "agendar",
+                "agéndalo", "agendalo", "agéndala", "agendala",
+                "ponme", "crea evento", "crea un evento",
+                "nuevo evento", "agrega evento"
+            ]
+            // Citas profesionales que típicamente requieren hora específica:
+            // si el usuario las menciona sin hora, mejor preguntar que
+            // crear task ambiguo. Cubre casos B "tengo dentista" del prompt.
+            let medicalCueTriggers = [
+                "tengo médico", "tengo medico", "tengo doctor",
+                "tengo dentista", "tengo terapia",
+                "tengo cita", "tengo turno",
+                "tengo kinesiólogo", "tengo kinesiologo",
+                "tengo psicólogo", "tengo psicologo", "tengo psiquiatra"
+            ]
+            let isActiveTrigger = matchesAny(lower, activeTriggers)
+            let isMedicalCue = matchesAny(lower, medicalCueTriggers)
+            let needsExactTime = isActiveTrigger || isMedicalCue
+
             if let partial = when {
                 let hasExactTime = hasExactTimeMarker(lower)
                 if !hasExactTime {
-                    // Sin hora exacta → tarea con dueDate del día (preferir
-                    // sobre clarify, que freezea el flujo del usuario).
+                    if isActiveTrigger {
+                        // Activo + día sin hora → preguntar hora explícita.
+                        // Caller persiste PendingClarification para que el
+                        // siguiente turno "a las 8" complete el evento.
+                        // Solo activos ("agenda reunión mañana") activan
+                        // esto — médicos con día ya proveen contexto OK.
+                        return .clarify(reason: .eventNeedsTime(
+                            title: title, partialDate: partial
+                        ))
+                    }
+                    // Pasivo o médico + día sin hora → task del día (sin
+                    // freezar). "tengo dentista mañana" → task mañana es
+                    // razonable, el usuario completará con hora después.
                     return .createTask(
                         title: cleanTaskTitle(title, when: partial),
                         dueDate: partial, recurrence: recurrence,
@@ -1858,9 +1896,11 @@ enum NovaResponder {
                     recurrence: recurrence
                 )
             }
-            // Sin fecha tampoco → tarea sin dueDate (caso 31 "tengo prueba
-            // de comunicación el miércoles" cae acá si extractDateTime no
-            // resolvió el día; pero típicamente sí lo resuelve).
+            // Sin fecha tampoco.
+            if needsExactTime {
+                // "agenda reunión" / "tengo dentista" sin nada → preguntar día+hora.
+                return .clarify(reason: .eventNeedsDateTime(title: title))
+            }
             return .createTask(
                 title: cleanTaskTitle(title, when: nil),
                 dueDate: nil, recurrence: recurrence,
@@ -5968,8 +6008,17 @@ final class FocusDataStore: ObservableObject {
             resolvedNotes = nil
         }
 
+        // Subtitle: si el cleanedTitle contiene "ACTIVIDAD de CONTEXTO",
+        // split en (title, subtitle). Mismo trato que applyLocalNovaIntent.
+        let (finalTitle, finalSubtitle): (String, String?) = {
+            if let split = NovaActionNormalizer.splitTitleSubtitle(cleanedTitle) {
+                return (split.title, split.subtitle)
+            }
+            return (cleanedTitle, nil)
+        }()
+
         return FocusEvent(
-            title: cleanedTitle,
+            title: finalTitle,
             notes: payload.notes,
             startTime: startTime,
             endTime: endTime,
@@ -5978,7 +6027,8 @@ final class FocusDataStore: ObservableObject {
             isReminder: isReminderFlag,
             inferredDuration: inferredFlag,
             reminderOffsets: resolvedOffsets,
-            reminderNotes: resolvedNotes
+            reminderNotes: resolvedNotes,
+            subtitle: finalSubtitle
         )
     }
 
@@ -6287,6 +6337,14 @@ final class FocusDataStore: ObservableObject {
         persistNovaMessages()
         HapticManager.shared.tap()
         isNovaTyping = true
+
+        // [NovaMemory] Aprendizaje pasivo: si el usuario está enseñándole
+        // a Nova un alias o preferencia ("cuando diga teorías me refiero
+        // a Teorías de la Comunicación", "Juan Pablo es mi coordinador"),
+        // guardamos la memoria antes de procesar. Local only (UserDefaults).
+        if let learned = NovaMemoryStore.shared.tryLearnFromUserText(trimmed) {
+            print("[NovaMemory] learned category=\(learned.category.rawValue) key=\(learned.key)")
+        }
 
         // Pre-parse local: si el parser ya resuelve la intención sin
         // ambigüedad (correcciones, follow-ups, comandos meta, **y ahora
@@ -6678,8 +6736,21 @@ final class FocusDataStore: ObservableObject {
             guard let date = when else { return nil }
             // PASO 1: Limpiar título via normalizer (mismo pipeline que
             // backend path → consistencia 100%).
-            let title = NovaActionNormalizer.cleanTitle(rawTitle)
-            guard !title.isEmpty else { return nil }
+            let cleanedTitle = NovaActionNormalizer.cleanTitle(rawTitle)
+            guard !cleanedTitle.isEmpty else { return nil }
+
+            // PASO 1.5: separar título / subtítulo si el patrón "X de Y"
+            // matchea. "Reunión de mindfulness" → title=Reunión,
+            // subtitle=Mindfulness. Mantiene contexto sin saturar la
+            // primera línea visible en Mi Día. Si no matchea (título
+            // simple), subtitle queda nil y el comportamiento es igual
+            // que antes.
+            let (title, eventSubtitle): (String, String?) = {
+                if let split = NovaActionNormalizer.splitTitleSubtitle(cleanedTitle) {
+                    return (split.title, split.subtitle)
+                }
+                return (cleanedTitle, nil)
+            }()
 
             // PASO 2: isReminder unificado — del intent (wantsReminder)
             // O detectado en userText (trigger explícito "acuérdame" o
@@ -6783,7 +6854,8 @@ final class FocusDataStore: ObservableObject {
                         isReminder: isReminderFlag,
                         inferredDuration: inferredFlag,
                         reminderOffsets: extractedOffsets,
-                        reminderNotes: extractedNotes
+                        reminderNotes: extractedNotes,
+                        subtitle: eventSubtitle
                     )
                     addEvent(event)
                     if idx == 0 { lastId = event.id }
@@ -7409,5 +7481,324 @@ final class FocusDataStore: ObservableObject {
         dismissedDemoTaskTitles = []
         Task { await LocalNotificationService.shared.cancelAllReminders() }
         HapticManager.shared.success()
+    }
+}
+
+/// Memoria persistente de Nova — versión local (UserDefaults) que se
+/// usa antes de implementar tabla Supabase. Guarda preferencias, alias
+/// y reglas útiles del usuario que mejoran futuras interpretaciones.
+///
+/// Diseño: tipo enum-categorizado + key/value. Cada `NovaMemory` tiene
+/// categoría (preference, person_alias, course_alias, etc.), key (la
+/// frase del usuario o el alias), value (la expansión / valor real),
+/// timestamps y un flag isActive.
+///
+/// Persistencia: UserDefaults JSON-encoded array bajo
+/// `focus.v1.nova.memories`. Tope ~200 entradas; al pasarlo, se
+/// purgan las más antiguas inactivas. Migrable a Supabase en C5/C6
+/// con misma forma.
+///
+/// NO guardar info sensible (salud, ubicación, financiero) salvo que
+/// el usuario lo pida explícitamente. Por defecto los handlers que
+/// agregan memorias filtran categorías permitidas.
+enum NovaMemoryCategory: String, Codable, CaseIterable {
+    case preference          // "prefiero pendientes sin hora"
+    case personAlias         // "Juan Pablo = mi coordinador"
+    case courseAlias         // "teorías = Teorías de la Comunicación"
+    case projectContext      // "Focus, Kairos, Spark son mis proyectos"
+    case schedulingRule      // "mis clases suelen ser en la mañana"
+    case academicContext     // "mi universidad usa ramos"
+    case appBehaviorRule     // "no inventes duración de 1 hora"
+}
+
+/// Una entrada de memoria persistente.
+struct NovaMemory: Codable, Equatable, Identifiable {
+    var id: UUID
+    var category: NovaMemoryCategory
+    /// Clave de búsqueda — keyword o frase que el usuario suele decir
+    /// (ej. "teorías", "Juan Pablo", "fútbol"). Lowercased para match.
+    var key: String
+    /// Valor / expansión asociada (ej. "Teorías de la Comunicación",
+    /// "Juan Pablo Barros, coordinador").
+    var value: String
+    /// 0.0–1.0. Cuándo viene de un alias explícito ("cuando diga X me
+    /// refiero a Y") confidence = 1.0. Cuando viene de inferencia
+    /// pasiva, < 1.0.
+    var confidence: Double
+    /// "user_explicit", "inferred", "system_default".
+    var source: String
+    var createdAt: Date
+    var updatedAt: Date
+    var lastUsedAt: Date?
+    var isActive: Bool
+
+    init(
+        id: UUID = UUID(),
+        category: NovaMemoryCategory,
+        key: String,
+        value: String,
+        confidence: Double = 1.0,
+        source: String = "user_explicit",
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        lastUsedAt: Date? = nil,
+        isActive: Bool = true
+    ) {
+        self.id = id
+        self.category = category
+        self.key = key.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        self.value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.confidence = max(0, min(1, confidence))
+        self.source = source
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.lastUsedAt = lastUsedAt
+        self.isActive = isActive
+    }
+}
+
+/// Store local de NovaMemory. Singleton para acceso desde
+/// FocusDataStore. Persistencia inmediata en UserDefaults.
+final class NovaMemoryStore {
+    static let shared = NovaMemoryStore()
+
+    private let userDefaultsKey = "focus.v1.nova.memories"
+    private let maxEntries = 200
+    private var cache: [NovaMemory] = []
+
+    private init() {
+        loadFromDisk()
+    }
+
+    // MARK: - CRUD básico
+
+    /// Devuelve todas las memorias activas, ordenadas por recencia.
+    var activeMemories: [NovaMemory] {
+        cache.filter { $0.isActive }
+            .sorted { ($0.lastUsedAt ?? $0.updatedAt) > ($1.lastUsedAt ?? $1.updatedAt) }
+    }
+
+    /// Inserta o actualiza una memoria por (category, key). Si ya existía
+    /// una con la misma clave en la misma categoría, actualiza value +
+    /// confidence (toma el mayor) + updatedAt. Devuelve la versión final.
+    @discardableResult
+    func upsert(_ memory: NovaMemory) -> NovaMemory {
+        let normalizedKey = memory.key.lowercased()
+        if let existingIdx = cache.firstIndex(where: {
+            $0.category == memory.category && $0.key == normalizedKey
+        }) {
+            var existing = cache[existingIdx]
+            existing.value = memory.value
+            existing.confidence = max(existing.confidence, memory.confidence)
+            existing.source = memory.source
+            existing.updatedAt = Date()
+            existing.isActive = true
+            cache[existingIdx] = existing
+            saveToDisk()
+            return existing
+        }
+        let newMem = memory
+        cache.insert(newMem, at: 0)
+        purgeIfNeeded()
+        saveToDisk()
+        return newMem
+    }
+
+    /// Marca como inactiva (soft-delete). Para hard-delete usar `delete`.
+    func deactivate(id: UUID) {
+        guard let idx = cache.firstIndex(where: { $0.id == id }) else { return }
+        cache[idx].isActive = false
+        cache[idx].updatedAt = Date()
+        saveToDisk()
+    }
+
+    func delete(id: UUID) {
+        cache.removeAll { $0.id == id }
+        saveToDisk()
+    }
+
+    func clearAll() {
+        cache.removeAll()
+        saveToDisk()
+    }
+
+    // MARK: - Búsqueda relevante
+
+    /// Devuelve memorias cuya `key` aparece como substring en el texto
+    /// dado (case-insensitive). Ordenadas por confidence × recencia.
+    /// Usado para enriquecer el contexto al interpretar un mensaje.
+    func relevantMemories(for text: String, limit: Int = 5) -> [NovaMemory] {
+        let lower = text.lowercased()
+        let matches = activeMemories.filter { mem in
+            !mem.key.isEmpty && lower.contains(mem.key)
+        }
+        return Array(matches.prefix(limit))
+    }
+
+    /// Busca el value de una memoria por categoría + key exacta (lower).
+    /// Útil para expandir un alias: "teorías" → "Teorías de la Comunicación".
+    func valueFor(category: NovaMemoryCategory, key: String) -> String? {
+        let normalized = key.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let match = cache.first {
+            $0.isActive && $0.category == category && $0.key == normalized
+        }
+        if let match {
+            touchLastUsed(id: match.id)
+            return match.value
+        }
+        return nil
+    }
+
+    /// Marca una memoria como recientemente usada (mueve lastUsedAt).
+    /// Usado por relevantMemories cuando una memoria informa una
+    /// interpretación → la sube en el ranking.
+    func touchLastUsed(id: UUID) {
+        guard let idx = cache.firstIndex(where: { $0.id == id }) else { return }
+        cache[idx].lastUsedAt = Date()
+        // saveToDisk async para evitar I/O en cada touch
+        DispatchQueue.global(qos: .background).async { [weak self] in
+            self?.saveToDisk()
+        }
+    }
+
+    // MARK: - Persistencia
+
+    private func loadFromDisk() {
+        guard let data = UserDefaults.standard.data(forKey: userDefaultsKey) else {
+            cache = []
+            return
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            cache = try decoder.decode([NovaMemory].self, from: data)
+        } catch {
+            print("[NovaMemory] load failed: \(error). Reset cache.")
+            cache = []
+        }
+    }
+
+    private func saveToDisk() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            let data = try encoder.encode(cache)
+            UserDefaults.standard.set(data, forKey: userDefaultsKey)
+        } catch {
+            print("[NovaMemory] save failed: \(error)")
+        }
+    }
+
+    private func purgeIfNeeded() {
+        guard cache.count > maxEntries else { return }
+        // Borrar inactivas más antiguas primero.
+        cache.sort { (a, b) -> Bool in
+            if a.isActive != b.isActive { return a.isActive }  // activas primero
+            return a.updatedAt > b.updatedAt  // recientes primero
+        }
+        cache = Array(cache.prefix(maxEntries))
+    }
+}
+
+// MARK: - Detección de alias en el texto del usuario
+
+extension NovaMemoryStore {
+    /// Intenta detectar si el usuario está enseñándole a Nova un alias
+    /// con frases tipo:
+    ///   "cuando diga teorías me refiero a Teorías de la Comunicación"
+    ///   "Juan Pablo es mi coordinador"
+    ///   "Urrutia es mi amigo"
+    ///   "prefiero que los eventos sin hora queden como pendientes"
+    ///
+    /// Si detecta un alias claro, lo guarda y devuelve el NovaMemory
+    /// creado. Sin coincidencia retorna nil — el caller deja seguir
+    /// el flujo normal.
+    @discardableResult
+    func tryLearnFromUserText(_ text: String) -> NovaMemory? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lower = trimmed.lowercased()
+
+        // Patrón 1: "cuando diga X me refiero a Y" / "cuando digo X me refiero a Y"
+        let pattern1 = #"cuando dig[oa]\s+(.+?)\s+me refiero a\s+(.+)$"#
+        if let regex = try? NSRegularExpression(pattern: pattern1, options: [.caseInsensitive]),
+           let match = regex.firstMatch(
+                in: trimmed,
+                range: NSRange(trimmed.startIndex..., in: trimmed)
+           ),
+           match.numberOfRanges >= 3,
+           let r1 = Range(match.range(at: 1), in: trimmed),
+           let r2 = Range(match.range(at: 2), in: trimmed) {
+            let key = String(trimmed[r1])
+            let value = String(trimmed[r2])
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            // Heurística para clasificar:
+            // - si contiene "ramo/clase/curso/teoría/historia/lenguaje" → courseAlias
+            // - si parece nombre propio → personAlias
+            // - default → preference
+            let cat: NovaMemoryCategory = inferCategoryFromValue(value, originalKey: key)
+            return upsert(NovaMemory(
+                category: cat, key: key, value: value,
+                confidence: 1.0, source: "user_explicit"
+            ))
+        }
+
+        // Patrón 2: "X es mi Y" — "Juan Pablo es mi coordinador",
+        // "Urrutia es mi amigo", "Pepe es mi profesor de historia"
+        let pattern2 = #"^(.+?)\s+es mi\s+(.+)$"#
+        if let regex = try? NSRegularExpression(pattern: pattern2, options: [.caseInsensitive]),
+           let match = regex.firstMatch(
+                in: trimmed,
+                range: NSRange(trimmed.startIndex..., in: trimmed)
+           ),
+           match.numberOfRanges >= 3,
+           let r1 = Range(match.range(at: 1), in: trimmed),
+           let r2 = Range(match.range(at: 2), in: trimmed) {
+            let key = String(trimmed[r1])
+            let role = String(trimmed[r2])
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            // Si role menciona "profesor/coordinador/amigo/jefe/etc" es persona.
+            let personRoles = ["amigo", "amiga", "coordinador", "coordinadora",
+                               "profesor", "profesora", "compañero", "compañera",
+                               "jefe", "jefa", "asesor", "asesora", "mentor",
+                               "mentora", "padre", "madre", "hermano", "hermana",
+                               "papá", "papa", "mamá", "mama", "tío", "tia"]
+            let roleLower = role.lowercased()
+            let isPerson = personRoles.contains { roleLower.contains($0) }
+            if isPerson {
+                return upsert(NovaMemory(
+                    category: .personAlias, key: key, value: "\(key) (\(role))",
+                    confidence: 0.9, source: "user_explicit"
+                ))
+            }
+        }
+
+        // Patrón 3: "prefiero ..." → preference
+        if lower.hasPrefix("prefiero ") || lower.hasPrefix("me gusta ") {
+            return upsert(NovaMemory(
+                category: .preference, key: trimmed, value: trimmed,
+                confidence: 0.8, source: "user_explicit"
+            ))
+        }
+
+        return nil
+    }
+
+    private func inferCategoryFromValue(_ value: String, originalKey: String) -> NovaMemoryCategory {
+        let v = value.lowercased()
+        let courseHints = ["teoría", "teoria", "historia", "lenguaje", "matemática",
+                           "matematica", "literatura", "filosofía", "filosofia",
+                           "comunicación", "comunicacion", "ramo", "clase", "curso"]
+        if courseHints.contains(where: v.contains) {
+            return .courseAlias
+        }
+        // Si el value parece nombre propio + apellido (2+ palabras capitalizadas)
+        // y la key es corto → personAlias.
+        let words = value.split(separator: " ")
+        let capitalizedCount = words.filter { $0.first?.isUppercase ?? false }.count
+        if capitalizedCount >= 2 && originalKey.count <= 20 {
+            return .personAlias
+        }
+        return .preference
     }
 }
