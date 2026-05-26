@@ -2992,6 +2992,23 @@ enum NovaActionNormalizerTests {
         cases.append(Case(id: 50, input: "agenda almuerzo con mi papá mañana",
                  expectedKind: K.task, expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
                  notes: "sin hora → tarea o clarify"))
+        // ── F: recurrencia (sanity check 2026-05-26) ─────────────────
+        cases.append(Case(id: 51, input: "todos los martes a las 8 am tengo clases de matemática",
+                 expectedKind: K.event, expectedHour: 8, expectedHasEndHour: false,
+                 mustNotInventEndTime: true, isCritical: false,
+                 notes: "evento recurrente martes 08:00 — verifica recurrencia weeklyOn"))
+        cases.append(Case(id: 52, input: "todos los lunes a las 6 reunión con el equipo",
+                 expectedKind: K.event, expectedHour: 18, expectedHasEndHour: false,
+                 mustNotInventEndTime: true, isCritical: false,
+                 notes: "evento recurrente lunes 18:00 (AM/PM: 6pm noche)"))
+        cases.append(Case(id: 53, input: "todos los días a las 7 meditación",
+                 expectedKind: K.event, expectedHasEndHour: false,
+                 mustNotInventEndTime: true, isCritical: false,
+                 notes: "evento daily (7 ó 19 según heurística AM/PM)"))
+        cases.append(Case(id: 54, input: "miércoles y viernes a las 6 entreno",
+                 expectedKind: K.event, expectedHour: 18, expectedHasEndHour: false,
+                 mustNotInventEndTime: true, isCritical: false,
+                 notes: "multiWeekday miércoles+viernes 18:00"))
         var out = "===== NOVA 50-CASE VALIDATION =====\n"
         out += "Fecha: \(Date())\n\n"
         var passCount = 0
