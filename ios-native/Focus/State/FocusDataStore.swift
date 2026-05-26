@@ -5963,6 +5963,12 @@ final class FocusDataStore: ObservableObject {
     // MARK: - Nova
 
     func sendNovaMessage(_ text: String) {
+        // [NovaLatency] timestamps temporales para debug — quitar tras
+        // estabilizar tiempos. Cubren los 4 segmentos críticos:
+        // userSend → fastPath → ai → save → uiVisible.
+        let userSendTs = CFAbsoluteTimeGetCurrent()
+        print("[NovaLatency] userSend")
+
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         novaMessages.append(NovaMessage(role: .user, content: trimmed))
@@ -5971,26 +5977,44 @@ final class FocusDataStore: ObservableObject {
         isNovaTyping = true
 
         // Pre-parse local: si el parser ya resuelve la intención sin
-        // ambigüedad (correcciones, follow-ups, comandos meta), short-circuit
-        // el backend — backend no tiene `lastEventId` ni el pending local.
-        // Si el parser sugiere clarify con título, guardamos pending para
-        // que el siguiente turno corto pueda completarlo localmente.
+        // ambigüedad (correcciones, follow-ups, comandos meta, **y ahora
+        // también createEvent/createTask con título+fecha extraídos
+        // localmente**), short-circuit el backend — backend no tiene
+        // `lastEventId` ni el pending local, y para comandos simples
+        // viajar 600ms+ al modelo es perder UX. Si el parser sugiere
+        // clarify con título, guardamos pending para que el siguiente
+        // turno corto pueda completarlo localmente.
+        print("[NovaLatency] fastPathStart")
+        let fastPathStartTs = CFAbsoluteTimeGetCurrent()
         let preIntent = NovaResponder.parse(trimmed, context: novaContext)
         if shouldShortCircuitLocally(preIntent),
            let localReply = applyLocalNovaIntent(preIntent, userText: trimmed) {
-            // Mini-delay para que el typing indicator no parpadee, luego
-            // append y terminar — sin tocar backend.
+            let fastPathEndTs = CFAbsoluteTimeGetCurrent()
+            let fastPathMs = (fastPathEndTs - fastPathStartTs) * 1000
+            print(String(format: "[NovaLatency] fastPathEnd ms=%.1f", fastPathMs))
+
+            // Typing indicator floor reducido: 80ms en fast path (vs 350ms
+            // antes). El item ya está en Mi Día (mutación síncrona del
+            // store en applyLocalNovaIntent) — solo evitamos el parpadeo
+            // del indicador "escribiendo" en chat. 80ms es suficiente
+            // para que el indicador se vea sin frenar la respuesta.
             Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 350_000_000)
+                try? await Task.sleep(nanoseconds: 80_000_000)
                 await MainActor.run {
                     guard let self else { return }
                     self.novaMessages.append(NovaMessage(role: .nova, content: localReply))
                     self.persistNovaMessages()
                     self.isNovaTyping = false
+                    let uiTs = CFAbsoluteTimeGetCurrent()
+                    let totalMs = (uiTs - userSendTs) * 1000
+                    print(String(format: "[NovaLatency] uiVisible(fastPath) totalMs=%.1f", totalMs))
                 }
             }
             return
         }
+        let fastPathEndTs = CFAbsoluteTimeGetCurrent()
+        let fastPathMissedMs = (fastPathEndTs - fastPathStartTs) * 1000
+        print(String(format: "[NovaLatency] fastPathMiss ms=%.1f intent=%@", fastPathMissedMs, String(describing: preIntent)))
         if case .clarify(let reason) = preIntent,
            let pending = buildChatPendingClarification(from: reason, userText: trimmed) {
             setPendingClarification(pending)
@@ -6032,6 +6056,8 @@ final class FocusDataStore: ObservableObject {
 
             if let creds = self.syncCredentialsSnapshot() {
                 do {
+                    print("[NovaLatency] aiStart")
+                    let aiStartTs = CFAbsoluteTimeGetCurrent()
                     let result = try await NovaService.send(
                         message: trimmed,
                         events: visibleEvents,
@@ -6040,6 +6066,8 @@ final class FocusDataStore: ObservableObject {
                         accessToken: creds.accessToken,
                         surface: .novaChat
                     )
+                    let aiMs = (CFAbsoluteTimeGetCurrent() - aiStartTs) * 1000
+                    print(String(format: "[NovaLatency] aiEnd ms=%.1f", aiMs))
                     replyText = result.reply
                     actions = result.actions
                     smartActionsBlocked = result.smartActionsBlocked
@@ -6119,7 +6147,11 @@ final class FocusDataStore: ObservableObject {
 
             await MainActor.run {
                 // Aplicar las actions en el main actor (mutaciones del store).
+                print("[NovaLatency] saveStart")
+                let saveStartTs = CFAbsoluteTimeGetCurrent()
                 let outcome = self.applyBackendActions(actions, userText: trimmed)
+                let saveMs = (CFAbsoluteTimeGetCurrent() - saveStartTs) * 1000
+                print(String(format: "[NovaLatency] saveEnd ms=%.1f", saveMs))
                 // Componer texto final del mensaje de Nova:
                 // 1. reply del backend (si vino)
                 // 2. resumen de la mutación (si hubo)
@@ -6152,6 +6184,8 @@ final class FocusDataStore: ObservableObject {
                 self.novaMessages.append(NovaMessage(role: .nova, content: finalText))
                 self.persistNovaMessages()
                 self.isNovaTyping = false
+                let totalMs = (CFAbsoluteTimeGetCurrent() - userSendTs) * 1000
+                print(String(format: "[NovaLatency] uiVisible(backend) totalMs=%.1f fallback=%@", totalMs, usedFallback ? "yes" : "no"))
             }
         }
     }
@@ -6293,7 +6327,25 @@ final class FocusDataStore: ObservableObject {
             // Operaciones sobre tareas existentes (resueltas con fuzzy
             // match local). El backend no tiene visibilidad de IDs locales.
             return true
-        case .createEvent, .createTask:
+        case .createEvent(let title, let when, _, _, _, _, _):
+            // Fast path: si el parser local extrajo título Y fecha con
+            // seguridad, NO necesitamos al modelo IA. Antes este caso
+            // solo permitía short-circuit cuando había pending activo
+            // (follow-up), forzando "dentista hoy a las 4" a viajar
+            // 600ms+ al backend para crear algo que el parser local
+            // ya resolvió en <5ms. El normalizer garantiza título
+            // limpio; `when != nil` confirma que hubo marcador temporal.
+            if when != nil && !NovaActionNormalizer.cleanTitle(title).isEmpty {
+                return true
+            }
+            return novaContext.pendingIsActive
+        case .createTask(let title, _, _, _):
+            // Fast path: tareas sin hora explícita ("comprar pan",
+            // "estudiar lenguaje hoy") las resuelve el parser local
+            // en microsegundos. Solo título no-vacío como gate.
+            if !NovaActionNormalizer.cleanTitle(title).isEmpty {
+                return true
+            }
             return novaContext.pendingIsActive
         default:
             return false
@@ -6505,8 +6557,20 @@ final class FocusDataStore: ObservableObject {
             case .setTime(let h, let m):
                 let day = cal.startOfDay(for: event.startTime)
                 if let newStart = cal.date(bySettingHour: h, minute: m, second: 0, of: day) {
+                    // Preservar la naturaleza del evento al cambiar la hora.
+                    // Antes: `endTime = newStart + 1h` SIEMPRE — convertía un
+                    // recordatorio puntual ("dentista a las 4") en bloque de
+                    // 1h apenas el usuario dijera "muévelo a las 6". Mismo
+                    // fix que aplicamos en MiDiaView.correctLastEvent.
+                    let oldStart = event.startTime
+                    let wasPointInTime = event.displayAsPointInTime
                     event.startTime = newStart
-                    event.endTime = cal.date(byAdding: .hour, value: 1, to: newStart)
+                    if wasPointInTime {
+                        event.endTime = cal.date(byAdding: .minute, value: 5, to: newStart)
+                    } else if let oldEnd = event.endTime {
+                        let delta = oldEnd.timeIntervalSince(oldStart)
+                        event.endTime = newStart.addingTimeInterval(delta)
+                    }
                 }
             case .setLocation(let loc):
                 event.location = loc
