@@ -22,6 +22,10 @@ struct NovaView: View {
     @State private var showNovaLive: Bool = false
     @State private var showVoiceDictation: Bool = false
 
+    @StateObject private var dictationService = NovaLiveService()
+    @State private var isDictating: Bool = false
+    @State private var dictationDeniedMessage: String? = nil
+
     /// **Feature flag Nova Live**. La V1 actual (Speech framework + STT
     /// + envío a Nova) NO es la experiencia conversacional tipo
     /// ChatGPT/Gemini Live que querríamos para beta — es esencialmente
@@ -125,17 +129,46 @@ struct NovaView: View {
                 store.sendNovaMessage(transcript)
             }
         }
-        .sheet(isPresented: $showVoiceDictation) {
-            VoiceDictationSheet { transcript in
-                // Dictado del input del chat: el texto NO se envía solo,
-                // se carga en el draft para que el usuario lo revise y
-                // confirme con el botón enviar.
-                draft = transcript
+        .onChange(of: dictationService.state) { _, newState in
+            switch newState {
+            case .listening:
+                isDictating = true
+                dictationDeniedMessage = nil
+            case .processing:
+                isDictating = true
+            case .idle:
+                isDictating = false
+                let finalTranscript = dictationService.transcript
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !finalTranscript.isEmpty {
+                    draft = finalTranscript
+                }
+            case .denied:
+                isDictating = false
+                dictationDeniedMessage = "Activa el micrófono y voz en Ajustes del iPhone."
+            case .error(let msg):
+                isDictating = false
+                dictationDeniedMessage = msg
+            case .requestingPermissions:
+                isDictating = false
             }
-            .presentationDetents([.height(380)])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(Theme.Colors.background)
         }
+        .onChange(of: nav.selectedTab) { _, newTab in
+            if isDictating && newTab != .nova {
+                dictationService.cancel()
+            }
+        }
+        .alert("Sin permiso de voz", isPresented: .constant(dictationDeniedMessage != nil), actions: {
+            Button("Abrir Ajustes") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+                dictationDeniedMessage = nil
+            }
+            Button("Cerrar", role: .cancel) { dictationDeniedMessage = nil }
+        }, message: {
+            Text(dictationDeniedMessage ?? "")
+        })
         .onChange(of: nav.pendingNovaPrompt) { _, newPrompt in
             // Si Mi Día (u otra pantalla) llega con un texto pendiente, lo
             // disparamos al chat y limpiamos.
@@ -540,11 +573,14 @@ struct NovaView: View {
 
             NovaGlassInputBar(
                 text: $draft,
-                placeholder: "Escríbele a Nova…",
+                placeholder: isDictating ? "Habla ahora…" : "Escríbele a Nova…",
                 onSubmit: submitDraft,
                 onMic: {
-                    showVoiceDictation = true
-                }
+                    HapticManager.shared.tap()
+                    Task { await toggleInlineDictation() }
+                },
+                isDictating: isDictating,
+                audioLevel: CGFloat(dictationService.audioLevel)
             )
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.top, 2)
@@ -564,6 +600,24 @@ struct NovaView: View {
         guard !text.isEmpty else { return }
         draft = ""
         store.sendNovaMessage(text)
+    }
+
+    private func toggleInlineDictation() async {
+        if isDictating {
+            dictationService.stop()
+            return
+        }
+        let auth = await dictationService.currentAuthorizationStatus()
+        switch auth {
+        case .authorized:
+            await dictationService.start()
+        case .notDetermined:
+            if await dictationService.requestAuthorization() {
+                await dictationService.start()
+            }
+        case .denied:
+            dictationDeniedMessage = "Activa el micrófono y voz en Ajustes del iPhone para usar el dictado."
+        }
     }
 }
 

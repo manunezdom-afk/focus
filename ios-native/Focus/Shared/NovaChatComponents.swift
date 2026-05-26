@@ -542,15 +542,70 @@ struct NovaGlassInputBar: View {
     var placeholder: String = "Escríbele a Nova…"
     var onSubmit: () -> Void
     var onMic: () -> Void
+    var isDictating: Bool = false
+    var audioLevel: CGFloat = 0
 
     @FocusState private var isFocused: Bool
+    @State private var dictationPulse: Bool = false
 
     private var canSubmit: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var diamondScale: CGFloat {
+        guard isDictating else { return 1.0 }
+        let clamped = max(0, min(1, audioLevel))
+        return 1.0 + clamped * 0.25
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            inputRow
+            if isDictating {
+                FocusAudioVisualizer(
+                    level: Float(audioLevel),
+                    state: audioLevel > 0.08 ? .speaking : .listening,
+                    maxBarHeight: 28
+                )
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 4)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(Theme.Motion.easeInOutStandard, value: isDictating)
+    }
+
+    private var inputRow: some View {
         HStack(alignment: .bottom, spacing: 10) {
+            // Nova Diamond Sparkle
+            ZStack {
+                if isDictating {
+                    Circle()
+                        .strokeBorder(
+                            Theme.Colors.novaAccent.opacity(0.55),
+                            lineWidth: 2
+                        )
+                        .frame(width: 30, height: 30)
+                        .scaleEffect(dictationPulse ? 2.0 : 1.0)
+                        .opacity(dictationPulse ? 0 : 0.9)
+                        .animation(
+                            .easeOut(duration: 1.4).repeatForever(autoreverses: false),
+                            value: dictationPulse
+                        )
+                }
+                Circle()
+                    .fill(Theme.Colors.novaGradient)
+                    .frame(width: 30, height: 30)
+                    .shadow(
+                        color: Theme.Colors.novaAccent.opacity(isDictating ? 0.7 : 0.35),
+                        radius: isDictating ? 12 : 6,
+                        y: 0
+                    )
+                NovaSparkMark(size: 13)
+            }
+            .scaleEffect(diamondScale)
+            .animation(.easeOut(duration: 0.12), value: diamondScale)
+
             TextField(
                 "",
                 text: $text,
@@ -562,7 +617,6 @@ struct NovaGlassInputBar: View {
             .font(.system(size: 15, weight: .medium))
             .foregroundStyle(Theme.Colors.novaTextOnDark)
             .tint(Theme.Colors.novaLabelOnDark)
-            // Auto-expand hasta 6 líneas; pasado eso scrollea internamente.
             .lineLimit(1...6)
             .submitLabel(.send)
             .onSubmit {
@@ -580,26 +634,52 @@ struct NovaGlassInputBar: View {
                 }
             }
 
-            // Mic — glass icon button. Sin estado dictating inline; el padre
-            // abre el VoiceDictationSheet.
-            Button(action: {
-                HapticManager.shared.tap()
-                onMic()
-            }) {
-                Image(systemName: "mic.fill")
+            // Mic
+            Button(action: onMic) {
+                Image(systemName: isDictating ? "stop.fill" : "mic.fill")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.novaTextOnDarkSecondary)
+                    .foregroundStyle(
+                        isDictating
+                            ? Color.white
+                            : Theme.Colors.novaTextOnDarkSecondary
+                    )
                     .frame(width: 34, height: 34)
                     .background(
-                        Circle().fill(Color.white.opacity(0.07))
+                        Circle().fill(
+                            isDictating
+                                ? AnyShapeStyle(Theme.Colors.novaPrismGradient)
+                                : AnyShapeStyle(Color.white.opacity(0.07))
+                        )
                     )
                     .overlay(
-                        Circle().strokeBorder(Theme.Colors.novaGlassStroke, lineWidth: 0.8)
+                        Circle()
+                            .strokeBorder(
+                                isDictating ? Theme.Colors.novaAccent.opacity(0.45) : Theme.Colors.novaGlassStroke,
+                                lineWidth: isDictating ? 2.0 : 0.8
+                            )
+                            .scaleEffect(isDictating && dictationPulse ? 1.55 : 1.0)
+                            .opacity(isDictating && dictationPulse ? 0 : 1)
+                            .animation(
+                                isDictating
+                                    ? .easeOut(duration: 1.2).repeatForever(autoreverses: false)
+                                    : .default,
+                                value: dictationPulse
+                            )
                     )
             }
             .buttonStyle(NovaGlowIconButtonStyle())
+            .onChange(of: isDictating) { _, dictating in
+                if dictating {
+                    dictationPulse = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        dictationPulse = true
+                    }
+                } else {
+                    dictationPulse = false
+                }
+            }
 
-            // Send — gradient morado sólido + glow cuando hay texto.
+            // Send
             Button(action: {
                 if canSubmit {
                     HapticManager.shared.tap()
