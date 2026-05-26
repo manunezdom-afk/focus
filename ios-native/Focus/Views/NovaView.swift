@@ -461,27 +461,35 @@ struct NovaView: View {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
 
-            VStack(spacing: 0) {
-                Group {
-                    if store.novaMessages.isEmpty && !store.isNovaTyping {
-                        NovaEmptyChatHeroDark(
-                            onChip: { action in
-                                handleQuickAction(action)
-                            },
-                            showLiveChip: Self.isNovaLiveEnabled,
-                            onLive: Self.isNovaLiveEnabled
-                                ? {
-                                    HapticManager.shared.tap()
-                                    showNovaLive = true
-                                }
-                                : nil
-                        )
-                        .frame(maxHeight: .infinity)
-                    } else {
-                        chatScroll
-                    }
+            // El contenido del chat (hero vacío o scroll de mensajes) ya no
+            // comparte VStack con `inputBar`. El input se monta abajo como
+            // `safeAreaInset(edge: .bottom)` para que SwiftUI lo ancle
+            // idiomáticamente al borde inferior y lo eleve **automáticamente**
+            // cuando aparece el teclado. Con el VStack viejo, el composer
+            // dependía del relayout del stack y, junto al
+            // `.ignoresSafeArea(edges: .bottom)` del background, quedaba
+            // detrás del teclado en iPhones con notch chico o cuando el
+            // teclado tenía toolbar — solo se veía "Listo".
+            Group {
+                if store.novaMessages.isEmpty && !store.isNovaTyping {
+                    NovaEmptyChatHeroDark(
+                        onChip: { action in
+                            handleQuickAction(action)
+                        },
+                        showLiveChip: Self.isNovaLiveEnabled,
+                        onLive: Self.isNovaLiveEnabled
+                            ? {
+                                HapticManager.shared.tap()
+                                showNovaLive = true
+                            }
+                            : nil
+                    )
+                    .frame(maxHeight: .infinity)
+                } else {
+                    chatScroll
                 }
-
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 inputBar
             }
         }
@@ -593,10 +601,17 @@ struct NovaView: View {
             .background(
                 // Detrás del input: gradient + blur sutil para que el
                 // backdrop dark se difumine bajo el bar sin verse plano.
+                // `.container` (no default `.all`) — extiende el fondo bajo
+                // el home indicator pero **respeta el keyboard safe area**.
+                // Con `.all` (el default cuando se omite el primer arg),
+                // el background se extendería detrás del teclado y empujaba
+                // visualmente al composer fuera de vista. Mismo patrón que
+                // `NovaChatBackdrop` para que el inputBar quede pegado al
+                // borde superior del teclado sin overlaps.
                 Color(red: 0.04, green: 0.02, blue: 0.10).opacity(0.70)
                     .background(.ultraThinMaterial.opacity(0.40))
                     .environment(\.colorScheme, .dark)
-                    .ignoresSafeArea(edges: .bottom)
+                    .ignoresSafeArea(.container, edges: .bottom)
             )
         }
     }
