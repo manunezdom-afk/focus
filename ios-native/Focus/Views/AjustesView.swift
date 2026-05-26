@@ -724,7 +724,7 @@ struct AjustesView: View {
                         symbol: "play.rectangle",
                         tint: Theme.Colors.focusAccent,
                         title: "Ver tutorial otra vez",
-                        subtitle: "Repasá el onboarding de bienvenida.",
+                        subtitle: "Repasa el onboarding de bienvenida.",
                         trailing: .chevron
                     )
                 }

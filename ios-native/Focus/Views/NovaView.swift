@@ -263,7 +263,8 @@ struct NovaView: View {
     // MARK: - Segmented control
 
     private var segmentedControl: some View {
-        HStack(spacing: 0) {
+        let isChat = nav.novaSegment == .chat
+        return HStack(spacing: 0) {
             segmentButton(.bandeja, label: "Bandeja", badge: store.pendingDisplaySuggestions.count)
             segmentButton(.acciones, label: "Acciones")
             segmentButton(.chat, label: "Chat")
@@ -271,12 +272,18 @@ struct NovaView: View {
         .padding(3)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                .fill(Theme.Colors.surfaceHigh)
+                .fill(isChat ? AnyShapeStyle(Theme.Colors.novaGlassFill) : AnyShapeStyle(Theme.Colors.surfaceHigh))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .strokeBorder(isChat ? Theme.Colors.novaGlassStroke : Color.clear, lineWidth: 0.8)
+        )
+        .animation(.easeInOut(duration: 0.22), value: nav.novaSegment)
     }
 
     private func segmentButton(_ seg: NovaSegment, label: String, badge: Int = 0) -> some View {
         let isSelected = nav.novaSegment == seg
+        let isChat = nav.novaSegment == .chat
         return Button {
             HapticManager.shared.tick()
             withAnimation(.easeInOut(duration: 0.20)) {
@@ -295,13 +302,21 @@ struct NovaView: View {
                         .background(Capsule().fill(Theme.Colors.novaAccent))
                 }
             }
-            .foregroundStyle(isSelected ? Theme.Colors.textPrimary : Theme.Colors.textTertiary)
+            .foregroundStyle(
+                isSelected 
+                    ? (isChat ? Theme.Colors.novaTextOnDark : Theme.Colors.textPrimary) 
+                    : (isChat ? Theme.Colors.novaTextOnDarkSecondary.opacity(0.65) : Theme.Colors.textTertiary)
+            )
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.sm)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                    .fill(isSelected ? Theme.Colors.surface : Color.clear)
-                    .focusCardShadow()
+                    .fill(
+                        isSelected 
+                            ? (isChat ? AnyShapeStyle(Theme.Colors.novaGlassUserFill) : AnyShapeStyle(Theme.Colors.surface))
+                            : AnyShapeStyle(Color.clear)
+                    )
+                    .focusCardShadow(strong: isChat)
             )
         }
         .buttonStyle(.plain)

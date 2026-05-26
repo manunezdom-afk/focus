@@ -547,11 +547,11 @@ struct LoginView: View {
             ZStack {
                 if isLoading {
                     ProgressView()
-                        .tint(.white)
+                        .tint(isEnabled ? .white : Theme.Colors.textSecondary)
                 } else {
                     Text(title)
                         .font(Theme.Typography.bodyBold)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(isEnabled ? Color.white : Theme.Colors.textTertiary)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -567,7 +567,14 @@ struct LoginView: View {
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing))
-                        : AnyShapeStyle(Theme.Colors.focusAccent.opacity(0.30))
+                        : AnyShapeStyle(Theme.Colors.surfaceHigh)
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(
+                                isEnabled ? Color.clear : Theme.Colors.borderHairline,
+                                lineWidth: Theme.Stroke.hairline
+                            )
                     )
                     .shadow(
                         color: isEnabled ? Theme.Colors.focusAccent.opacity(0.40) : .clear,
