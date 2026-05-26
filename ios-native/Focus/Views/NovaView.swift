@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Nova como tab principal. Tres segmentos internos:
 /// - **Bandeja** (default): cards de decisiones de Nova con Aprobar/Posponer/Descartar.
@@ -26,6 +27,16 @@ struct NovaView: View {
     @State private var isDictating: Bool = false
     @State private var dictationDeniedMessage: String? = nil
 
+    /// Altura del teclado por encima del safe area inferior. Se actualiza
+    /// vía `NotificationCenter` (keyboardWillShow/Hide). Necesario porque
+    /// SwiftUI `safeAreaInset(edge: .bottom)` no eleva el composer del
+    /// chat de forma confiable cuando hay un sibling con
+    /// `.ignoresSafeArea()` (FocusAmbientCanvas) — bug visible en iOS 26.4
+    /// simulator: el composer queda atrapado detrás del teclado, solo se
+    /// ve el toolbar "Listo" nativo. Con observación manual + offset
+    /// aplicado al overlay del composer, garantizamos elevación correcta.
+    @State private var keyboardOverlap: CGFloat = 0
+
     /// **Feature flag Nova Live**. La V1 actual (Speech framework + STT
     /// + envío a Nova) NO es la experiencia conversacional tipo
     /// ChatGPT/Gemini Live que querríamos para beta — es esencialmente
@@ -43,37 +54,58 @@ struct NovaView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                // Theme 2.0 v4: ambient canvas animado tipo Gemini, mismo
-                // componente que Mi Día. Estado .thinking cuando Nova está
-                // tecleando una respuesta — los halos se intensifican,
-                // como si la IA "respirara" su procesamiento. .idle el
-                // resto. Reemplaza el RadialGradient estático que era el
-                // top + Theme.Colors.background.
-                FocusAmbientCanvas(state: store.isNovaTyping ? .thinking : .idle)
+            VStack(spacing: 0) {
+                branding
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.top, Theme.Spacing.lg)
 
-                VStack(spacing: 0) {
-                    branding
-                        .padding(.horizontal, Theme.Spacing.xl)
-                        // `.lg` para consistencia con Mi Día/Ajustes y aire
-                        // suficiente respecto al notch/Dynamic Island.
-                        .padding(.top, Theme.Spacing.lg)
+                segmentedControl
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.top, Theme.Spacing.lg)
+                    .padding(.bottom, Theme.Spacing.md)
 
-                    segmentedControl
-                        .padding(.horizontal, Theme.Spacing.xl)
-                        .padding(.top, Theme.Spacing.lg)
-                        .padding(.bottom, Theme.Spacing.md)
-
-                    Group {
-                        switch nav.novaSegment {
-                        case .bandeja:  bandejaContent
-                        case .acciones: accionesContent
-                        case .chat:     chatContent
-                        }
+                Group {
+                    switch nav.novaSegment {
+                    case .bandeja:  bandejaContent
+                    case .acciones: accionesContent
+                    case .chat:     chatContent
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // Composer del chat al final del VStack root.
+                if nav.novaSegment == .chat {
+                    inputBar
+                }
             }
+            // Elevación manual del VStack completo cuando aparece el
+            // keyboard. Approach last-resort porque SwiftUI default
+            // keyboard avoidance NO funcionaba aquí en iOS 26.4 sim
+            // (composer quedaba detrás del teclado pese a múltiples
+            // intentos con safeAreaInset, overlay+offset, background
+            // modifier). Con `.padding(.bottom, keyboardOverlap)` +
+            // `.ignoresSafeArea(.keyboard)` aplicado al VStack
+            // garantizamos que el composer se eleve consistentemente.
+            // Branding y segmented control se comprimen visualmente
+            // arriba (mismo patrón que WhatsApp/iMessage con scroll).
+            .padding(.bottom, keyboardOverlap)
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .animation(.easeOut(duration: 0.25), value: keyboardOverlap)
+            .background(
+                FocusAmbientCanvas(state: store.isNovaTyping ? .thinking : .idle)
+            )
             .navigationBarHidden(true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
+            guard let frame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
+            let scene = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first(where: { $0.activationState == .foregroundActive })
+            let bottomSafeArea = scene?.windows.first?.safeAreaInsets.bottom ?? 0
+            keyboardOverlap = max(0, frame.height - bottomSafeArea)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardOverlap = 0
         }
         // Coach mark de Nova la primera vez que el usuario llega a esta
         // tab. Mismo patrón que Mi Día y Calendario.
@@ -455,21 +487,15 @@ struct NovaView: View {
     // habla, los otros segmentos son workflow productivo.
 
     private var chatContent: some View {
+        // El `inputBar` se monta en el body principal vía
+        // `safeAreaInset(edge: .bottom)` aplicado al NavigationStack.
+        // Acá solo el contenido (backdrop + hero/scroll).
         ZStack {
             NovaChatBackdrop()
                 .onTapGesture {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
 
-            // El contenido del chat (hero vacío o scroll de mensajes) ya no
-            // comparte VStack con `inputBar`. El input se monta abajo como
-            // `safeAreaInset(edge: .bottom)` para que SwiftUI lo ancle
-            // idiomáticamente al borde inferior y lo eleve **automáticamente**
-            // cuando aparece el teclado. Con el VStack viejo, el composer
-            // dependía del relayout del stack y, junto al
-            // `.ignoresSafeArea(edges: .bottom)` del background, quedaba
-            // detrás del teclado en iPhones con notch chico o cuando el
-            // teclado tenía toolbar — solo se veía "Listo".
             Group {
                 if store.novaMessages.isEmpty && !store.isNovaTyping {
                     NovaEmptyChatHeroDark(
@@ -484,18 +510,13 @@ struct NovaView: View {
                             }
                             : nil
                     )
-                    .frame(maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     chatScroll
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                inputBar
-            }
         }
-        // `.immediately` da comportamiento predecible — un scroll cierra
-        // el teclado inmediatamente.
-        .scrollDismissesKeyboard(.immediately)
     }
 
     private var chatScroll: some View {

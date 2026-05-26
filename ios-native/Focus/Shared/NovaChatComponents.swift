@@ -640,16 +640,11 @@ struct NovaGlassInputBar: View {
                 if canSubmit { onSubmit() }
             }
             .padding(.vertical, 6)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Listo") {
-                        isFocused = false
-                    }
-                    .foregroundStyle(Theme.Colors.novaAccent)
-                    .fontWeight(.semibold)
-                }
-            }
+            // Sin `.toolbar(placement: .keyboard)`: el botón "Listo" que
+            // SwiftUI montaba ahí flotaba encima del propio composer y
+            // tapaba los botones mic + send. El usuario ya puede cerrar
+            // el teclado tocando fuera del input (tap en `NovaChatBackdrop`)
+            // o haciendo scroll en el chat.
 
             // Mic
             Button(action: onMic) {
