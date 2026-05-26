@@ -869,6 +869,86 @@ enum NovaActionNormalizer {
         return (nil, true)  // duración inferida, mostrar como punto
     }
 
+    // MARK: - Gates de hora explícita en `userText`
+
+    /// True si el usuario mencionó explícitamente una **hora-fin** o
+    /// duración del evento. Reconoce los mismos patrones que el parser
+    /// local (`FocusDataStore.extractExplicitEndTime`) más algunas
+    /// variantes naturales:
+    ///   - "de 5 a 7", "de las 17 a las 19", "5 a 7"
+    ///   - "hasta las 4", "hasta 16:00"
+    ///   - "por 2 horas", "durante 30 min", "por una hora"
+    ///   - "1h", "30 min" como complemento de "por/durante"
+    ///
+    /// Se usa para **gatear el `endTimeString` que devuelve el backend**:
+    /// si el modelo IA inventa una hora-fin pero el usuario nunca la dijo,
+    /// se ignora y el evento queda como punto en el tiempo.
+    static func userMentionedExplicitEndTime(in text: String) -> Bool {
+        let lower = text.lowercased()
+        let patterns: [String] = [
+            // "de X a Y" / "de las X a las Y" / "X a Y" con horas
+            #"\bde\s+(?:la?s?\s+)?\d{1,2}(?::\d{2})?\s+a\s+(?:la?s?\s+)?\d{1,2}(?::\d{2})?\b"#,
+            #"\b\d{1,2}(?::\d{2})?\s+a\s+(?:la?s?\s+)?\d{1,2}(?::\d{2})?\s*(?:de\s+la\s+(?:tarde|mañana|manana|noche))?\b"#,
+            // "hasta las X" / "hasta X"
+            #"\bhasta\s+(?:la?s?\s+)?\d{1,2}(?::\d{2})?\b"#,
+            // "por N horas" / "durante N min"
+            #"\b(?:por|durante)\s+\d{1,3}\s*(?:h|hs|hrs?|hora|horas|min|minutos?)\b"#,
+            // "por una hora" / "por media hora" / "por dos horas"
+            #"\b(?:por|durante)\s+(?:un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|media|medio)\s+(?:hora|horas|min|minutos?)\b"#,
+        ]
+        for pattern in patterns {
+            if lower.range(of: pattern, options: [.regularExpression]) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// True si el usuario mencionó algún marcador de **hora del día** en el
+    /// texto. Cubre formatos numéricos ("a las 4", "16:00", "tipo 5"),
+    /// horas en palabras ("a las tres"), tiempo relativo ("en 20 min"),
+    /// y marcadores de franja horaria ("esta tarde", "al mediodía").
+    ///
+    /// Usado para **gatear `addEvent` del backend**: si el modelo IA
+    /// quiere crear un evento horario pero el usuario solo dijo
+    /// "fútbol hoy" (sin hora), preferimos crear una tarea/recordatorio
+    /// del día en vez de un evento con hora inventada.
+    static func userMentionedAnyTimeOfDay(in text: String) -> Bool {
+        let lower = text.lowercased()
+        let patterns: [String] = [
+            // "a las 4", "a la 1", "a las 4:30"
+            #"\ba\s+la?s?\s+\d{1,2}(?::\d{2})?\b"#,
+            // "16:00", "4:30" — formato HH:MM puro
+            #"\b\d{1,2}:\d{2}\b"#,
+            // "tipo 3", "tipo las 5"
+            #"\btipo\s+(?:la?s?\s+)?\d{1,2}\b"#,
+            // "como a las 4", "a eso de las 6", "cerca de las 7"
+            #"\b(?:como\s+a|a\s+eso\s+de|cerca\s+de|alrededor\s+de)\s+la?s?\s+\d{1,2}\b"#,
+            // "5 am", "10pm", "8 hs", "9hrs"
+            #"\b\d{1,2}\s*(?:am|pm|hs|hrs?)\b"#,
+            // "en 20 min", "en 2 horas", "en 30"
+            #"\ben\s+\d{1,3}(?:\s+(?:min|minutos?|h|hs|hrs?|horas?))?\b"#,
+            // Horas en palabras tras "a las / tipo / como a las": "a las tres",
+            // "tipo cinco", "a eso de las seis".
+            #"\b(?:a\s+la?s?|tipo(?:\s+la?s?)?|como\s+a\s+la?s?|a\s+eso\s+de\s+la?s?|cerca\s+de\s+la?s?|alrededor\s+de\s+la?s?)\s+(?:una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieciséis|dieciseis|diecisiete|dieciocho|diecinueve|veinte|veintiuna|veintidós|veintidos|veintitrés|veintitres)\b"#,
+            // "hasta las X" / "de X a Y" también implican hora
+            #"\bhasta\s+(?:la?s?\s+)?\d{1,2}\b"#,
+            #"\bde\s+(?:la?s?\s+)?\d{1,2}\s+a\s+(?:la?s?\s+)?\d{1,2}\b"#,
+        ]
+        for pattern in patterns {
+            if lower.range(of: pattern, options: [.regularExpression]) != nil {
+                return true
+            }
+        }
+        // Franjas horarias coloquiales ("esta tarde", "al mediodía") cuentan
+        // como marcador de momento, no de hora exacta — para `addEvent` no
+        // las consideramos suficientes (el backend tendría que inventar igual
+        // una hora exacta dentro de la franja). Por diseño, devolvemos false
+        // y el evento se desvía a tarea. Si el producto quiere darles
+        // tratamiento especial (ej. inferir 13:00 para "mediodía"), agregar acá.
+        return false
+    }
+
     // MARK: - Reminder offsets ("X minutos antes")
 
     /// Extrae los minutos de offset que el usuario dijo en frases tipo:

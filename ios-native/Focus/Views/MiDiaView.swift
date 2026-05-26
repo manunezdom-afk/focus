@@ -1871,8 +1871,24 @@ struct MiDiaView: View {
             case .setTime(let h, let m):
                 let day = cal.startOfDay(for: event.startTime)
                 if let newStart = cal.date(bySettingHour: h, minute: m, second: 0, of: day) {
+                    // Preservar la naturaleza del evento al cambiar la hora.
+                    // Antes: `endTime = newStart + 1h` SIEMPRE — esto convertía
+                    // un recordatorio puntual ("dentista a las 4") en bloque
+                    // de 1h ("16:00–17:00") apenas el usuario decía "muévelo
+                    // a las 6". Ahora:
+                    //   - Si era recordatorio o duración inferida → trasladar
+                    //     el padding interno (5 min) sin asignar rango real.
+                    //   - Si tenía rango real → preservar la duración exacta
+                    //     (delta) y trasladarla a la nueva hora.
+                    let oldStart = event.startTime
+                    let wasPointInTime = event.displayAsPointInTime
                     event.startTime = newStart
-                    event.endTime = cal.date(byAdding: .hour, value: 1, to: newStart)
+                    if wasPointInTime {
+                        event.endTime = cal.date(byAdding: .minute, value: 5, to: newStart)
+                    } else if let oldEnd = event.endTime {
+                        let delta = oldEnd.timeIntervalSince(oldStart)
+                        event.endTime = newStart.addingTimeInterval(delta)
+                    }
                 }
             case .setLocation(let loc):
                 event.location = loc

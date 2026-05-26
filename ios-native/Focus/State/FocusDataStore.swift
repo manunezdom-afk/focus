@@ -5349,7 +5349,30 @@ final class FocusDataStore: ObservableObject {
         for action in actions {
             switch action {
             case .addEvent(let payload):
-                if let event = makeEvent(from: payload, userText: userText) {
+                // Gate: si el usuario NO mencionó hora alguna en su texto
+                // ("fútbol hoy", "estudiar mañana", "comprar pan"), no
+                // creamos evento horario aunque el backend nos lo pida.
+                // El modelo IA suele inventar una hora (típicamente 9 AM
+                // o el horario "razonable" del verbo). En el spec del
+                // producto, sin hora explícita = tarea/pendiente.
+                if !NovaActionNormalizer.userMentionedAnyTimeOfDay(in: userText) {
+                    if let task = makeTaskFromTimelessEventPayload(payload) {
+                        addTask(task)
+                        outcome.didMutate = true
+                        outcome.summary = "Tarea «\(task.title)» agregada."
+                        outcome.primaryTaskId = task.id
+                        outcome.createdTasks.append(task)
+                        updateNovaContext(
+                            from: userText,
+                            title: task.title,
+                            date: task.dueDate,
+                            kind: .task,
+                            taskId: task.id
+                        )
+                    } else {
+                        outcome.ignored.append("add_event(no_time_to_task_invalid)")
+                    }
+                } else if let event = makeEvent(from: payload, userText: userText) {
                     // Anti-duplicado en el path del backend. El local path
                     // ya tenía esta defensa; ahora la centralizamos también
                     // acá para casos donde el backend genere la acción
@@ -5603,9 +5626,18 @@ final class FocusDataStore: ObservableObject {
             || rawTitle.lowercased().hasPrefix("recordatorio")
             || backendIcon.lowercased() == "alarm"
 
-        // PASO 3: Resolver endTime explícito si el backend lo dio.
+        // PASO 3: Resolver endTime explícito si el backend lo dio
+        // **Y SOLO SI** el usuario realmente mencionó una hora-fin en su
+        // mensaje. Bug histórico: el modelo IA inventaba `endTimeString` =
+        // `startTime + 1h` aunque el usuario solo dijera "dentista a las 4",
+        // y la app respetaba ese rango como real, mostrando "16:00–17:00".
+        // El gate `userMentionedExplicitEndTime` (parser local) bloquea esa
+        // alucinación: si el texto no contiene "de X a Y", "hasta las X",
+        // "por N horas" o "durante N min", se ignora el endTime del backend
+        // y el evento queda como punto en el tiempo (`inferredDuration=true`).
         var explicitEnd: Date? = nil
-        if let endStr = payload.endTimeString,
+        if NovaActionNormalizer.userMentionedExplicitEndTime(in: userText),
+           let endStr = payload.endTimeString,
            !endStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            let end = NovaTimeFormatter.resolveDate(
                 dateString: payload.dateString,
@@ -5697,6 +5729,43 @@ final class FocusDataStore: ObservableObject {
             inferredDuration: inferredFlag,
             reminderOffsets: resolvedOffsets,
             reminderNotes: resolvedNotes
+        )
+    }
+
+    /// Convierte un `BackendEventCreate` en `FocusTask` cuando el usuario
+    /// NO dio hora explícita. Caso "fútbol hoy", "estudiar lenguaje mañana":
+    /// el backend pide crear evento horario inventando una hora, pero el
+    /// producto prefiere clasificarlo como pendiente del día.
+    ///
+    /// Mapea:
+    ///   - `title` → limpiado vía normalizer
+    ///   - `dateString` → `dueDate` (solo fecha, sin hora; `dueTime = nil`)
+    ///   - sin fecha → `dueDate = nil`, `category = .algunDia`
+    ///   - hoy → `category = .hoy`; mañana o más → `.semana` (default)
+    ///   - prioridad → `.media`
+    private func makeTaskFromTimelessEventPayload(_ payload: BackendEventCreate) -> FocusTask? {
+        let rawTitle = payload.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedTitle = NovaActionNormalizer.cleanTitle(rawTitle)
+        guard !cleanedTitle.isEmpty else { return nil }
+
+        let cal = Calendar.current
+        let dueDate: Date? = {
+            guard let dateStr = payload.dateString,
+                  let parsed = NovaTimeFormatter.parseISODate(dateStr) else { return nil }
+            // Forzar al inicio del día — no queremos arrastrar timestamp.
+            return cal.startOfDay(for: parsed)
+        }()
+        let category: TaskCategory = {
+            guard let due = dueDate else { return .algunDia }
+            if cal.isDateInToday(due) { return .hoy }
+            return .semana
+        }()
+        return FocusTask(
+            title: cleanedTitle,
+            priority: .media,
+            category: category,
+            dueDate: dueDate,
+            dueTime: nil
         )
     }
 
