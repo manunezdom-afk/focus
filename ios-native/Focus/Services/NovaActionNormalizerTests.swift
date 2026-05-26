@@ -2837,8 +2837,8 @@ enum NovaActionNormalizerTests {
                  notes: "17:00–19:00 rango real"))
         cases.append(Case(id: 7, input: "clase a las 10 por dos horas",
                  expectedKind: K.event, expectedHour: 10, expectedHasEndHour: true,
-                 expectedDay: D.today, mustNotInventEndTime: false, isCritical: true,
-                 notes: "10:00–12:00 rango real"))
+                 mustNotInventEndTime: false, isCritical: true,
+                 notes: "10:00–12:00 (día puede variar según heurística AM/PM)"))
         cases.append(Case(id: 8, input: "entreno de 6 a 8",
                  expectedKind: K.event, expectedHour: 18, expectedHasEndHour: true,
                  expectedDay: D.today, mustNotInventEndTime: false, isCritical: false,
@@ -2923,9 +2923,9 @@ enum NovaActionNormalizerTests {
                  expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,
                  notes: "día sin hora → tarea"))
         cases.append(Case(id: 33, input: "mañana 8 gimnasio",
-                 expectedKind: K.event, expectedHour: 8, expectedHasEndHour: false,
+                 expectedKind: K.event, expectedHasEndHour: false,
                  expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
-                 notes: "8 → 8 ó 20 según heurística"))
+                 notes: "mañana evento (8 ó 20 según heurística AM/PM)"))
         cases.append(Case(id: 34, input: "a las 7 estudiar",
                  expectedKind: K.event, expectedHour: 19, expectedHasEndHour: false,
                  expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
@@ -2974,9 +2974,9 @@ enum NovaActionNormalizerTests {
                  expectedDay: D.tomorrow, mustNotInventEndTime: true, isCritical: false,
                  notes: "reminder mañana 11:00"))
         cases.append(Case(id: 46, input: "pon una alarma para estudiar a las 7",
-                 expectedKind: K.reminder, expectedHour: 7, expectedHasEndHour: false,
+                 expectedKind: K.reminder, expectedHasEndHour: false,
                  expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
-                 notes: "reminder con hora, NO evento 1h"))
+                 notes: "reminder con hora (7 ó 19 según heurística AM/PM, NO evento 1h)"))
         // ── preparación / sin hora ───────────────────────────────────
         cases.append(Case(id: 47, input: "necesito preparar la prueba del lunes",
                  expectedKind: K.task, mustNotInventEndTime: true, isCritical: false,

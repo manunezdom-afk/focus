@@ -1432,13 +1432,26 @@ enum NovaResponder {
             "acordarme",
             "recuérdame", "recuerdame", "recordame", "recordarme",
             "no olvides", "no te olvides",
-            "que no se me olvide", "que me acuerde"
+            "que no se me olvide", "que me acuerde",
+            // Agregados 2026-05-26 (caso 46 del 50-test): "pon alarma"
+            // / "ponme alarma" / "alarma para" → recordatorio puntual,
+            // no evento horario.
+            "pon una alarma", "pon alarma", "ponme alarma", "ponme una alarma",
+            "alarma para", "alarma a las"
         ])
         // Obligación con hora puntual ("tengo que X a las N", "necesito X
-        // a las N", "debo X a las N") → recordatorio, no evento de 1h.
-        // Sin hora, "tengo que X" sigue siendo task (sección 5).
+        // a las N", "debo X a las N") → recordatorio, **salvo** cuando el
+        // verbo siguiente es de actividad/movimiento claro ("ir", "asistir",
+        // "llegar", "estar"). "tengo que ir al doctor a las 5" es un
+        // evento real, no un recordatorio puntual. Cubre caso 26 del 50-test.
+        let activityObligationPattern = #"\b(?:tengo que|necesito|debo)\s+(?:ir|asistir|llegar|estar|salir|venir|volver|pasar)\b"#
+        let hasActivityObligation = lower.range(
+            of: activityObligationPattern,
+            options: [.regularExpression]
+        ) != nil
         let isObligationWithTime = hasTimeMarker(lower)
             && matchesAny(lower, ["tengo que ", "necesito ", "debo "])
+            && !hasActivityObligation
         // Verbos puntuales (despertar/levantar/amanecer) — implican momento,
         // no duración. Centralizado en NovaActionNormalizer.
         let isPunctualVerb = NovaActionNormalizer.impliesPunctualReminder(in: lower)
@@ -1492,8 +1505,17 @@ enum NovaResponder {
         // ──────────────────────────────────────────────────────────────
         // 0. Correcciones al último intent: "no, mañana", "ponlo como tarea",
         //    "cámbialo a las 18", "en sala H013". Requieren contexto fresco.
+        //    **Excepción**: queries tipo "no tengo nada hoy" o
+        //    "qué tengo / muéstrame" caen como reviewToday (sección 3a),
+        //    no como corrección — el "no" inicial no es negación de la
+        //    propuesta previa. Cubre caso 41 del 50-test.
         // ──────────────────────────────────────────────────────────────
-        if isCorrectionStart(lower), context.isFresh {
+        let looksLikeQuery = matches(lower, [
+            "qué tengo", "que tengo", "no tengo nada",
+            "muéstrame", "muestrame", "qué hay", "que hay",
+            "ver mi día", "ver mi dia"
+        ])
+        if isCorrectionStart(lower), context.isFresh, !looksLikeQuery {
             // "bórralo" / "elimínalo" / "no, bórralo".
             if matches(lower, ["bórralo", "borralo", "elimínalo", "eliminalo", "borrar", "elimina eso"]) {
                 return .deleteLastItem
@@ -1625,7 +1647,15 @@ enum NovaResponder {
             "qué hay hoy", "que hay hoy",
             "qué tengo agendado", "que tengo agendado",
             "qué sigue", "que sigue", "qué hago ahora", "que hago ahora",
-            "qué más tengo", "que mas tengo"
+            "qué más tengo", "que mas tengo",
+            // Agregados 2026-05-26 (casos 22, 41 del 50-test):
+            "qué tengo mañana", "que tengo mañana", "que tengo manana",
+            "qué hay mañana", "que hay mañana",
+            "no tengo nada hoy", "no tengo nada mañana",
+            "muéstrame mis pendientes", "muestrame mis pendientes",
+            "muéstrame mi día", "muestrame mi dia", "muéstrame el día",
+            "ver mi día", "ver mi dia",
+            "qué tengo en el día", "que tengo en el dia"
         ]) {
             return .reviewToday
         }
@@ -1660,7 +1690,12 @@ enum NovaResponder {
             "ordéname la mañana", "ordename la manana",
             "arma mi día", "arma mi dia",
             "ármame el día", "armame el dia",
-            "acomoda mi día", "acomoda mi dia"
+            "acomoda mi día", "acomoda mi dia",
+            // Agregados 2026-05-26 (caso 24 del 50-test):
+            "organizar mi día", "organizar mi dia",
+            "organizar el día", "organizar el dia",
+            "ayúdame a organizar", "ayudame a organizar",
+            "ordenar mi día", "ordenar mi dia"
         ]) {
             return .organizeDay
         }
@@ -1726,6 +1761,43 @@ enum NovaResponder {
         }
 
         // ──────────────────────────────────────────────────────────────
+        // 5.5. Rango horario explícito sin verbo trigger.
+        //      "reunión de 5 a 7", "entreno de 6 a 8", "psiquiatra el
+        //      jueves de 12 a 1". El patrón "de N a M" es señal suficiente
+        //      de evento aunque el sustantivo no esté en eventTriggers.
+        //      Detección early para no caer a clarify cuando hay un
+        //      rango horario explícito claro. (Casos 6, 8, 10 del 50-test.)
+        // ──────────────────────────────────────────────────────────────
+        let hasNumericRange = lower.range(
+            of: #"\bde\s+(?:la?s?\s+)?\d{1,2}(?::\d{2})?\s+a\s+(?:la?s?\s+)?\d{1,2}(?::\d{2})?\b"#,
+            options: .regularExpression
+        ) != nil
+        if hasNumericRange, let when = extractDateTime(from: lower) {
+            // Título: strippeamos el rango "de N a M" y la palabra de día.
+            var titleRaw = stripDateTimeMarkers(stripLocationMarker(trimmed))
+            // Quitar el "de N a M" residual (el strip anterior puede no
+            // cubrir todas las variantes — ej. "de 5 a 7" sin "a las").
+            let rangePattern = #"\bde\s+(?:la?s?\s+)?\d{1,2}(?::\d{2})?\s+a\s+(?:la?s?\s+)?\d{1,2}(?::\d{2})?\b"#
+            titleRaw = titleRaw.replacingOccurrences(
+                of: rangePattern, with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
+            titleRaw = stripFillers(titleRaw)
+            let title = cleanupTitle(titleRaw)
+            if !title.isEmpty {
+                let location = extractLocation(from: trimmed)
+                let section = detectSection(in: lower)
+                let recurrence = detectRecurrence(lower)
+                let explicitEnd = extractExplicitEndTime(from: lower, startTime: when)
+                return .createEvent(
+                    title: title, when: when, endTime: explicitEnd,
+                    location: location, section: section,
+                    wantsReminder: wantsReminder, recurrence: recurrence
+                )
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────
         // 6. Evento — verbos amplios para capturar lenguaje natural
         //    incluyendo informal ("salir a", "buscar a", "ir a").
         // ──────────────────────────────────────────────────────────────
@@ -1743,6 +1815,9 @@ enum NovaResponder {
             "tengo médico", "tengo medico", "tengo doctor",
             "salir a ", "salir con ", "salgo con ",
             "ir a ", "voy a ", "vamos a ",
+            // Agregados 2026-05-26 (caso 29 del 50-test): "ir al X" / "voy
+            // al X" — la contracción "al" no matcheaba "a " trigger.
+            "ir al ", "voy al ", "vamos al ",
             "buscar a ", "ir a buscar ",
             "juntarme con ", "juntarnos con ", "junta con ", "me junto con ",
             "almuerzo con ", "cena con ", "desayuno con ", "café con "
@@ -1756,11 +1831,21 @@ enum NovaResponder {
             if title.isEmpty {
                 return .clarify(reason: .eventNeedsTitle)
             }
-            // Caso: hay título y día pero falta hora → preguntar hora.
+            // Distinguir hora EXACTA de franja coloquial: si solo hay
+            // franja ("en la tarde", "en la mañana"), tratar como tarea
+            // del día — no inventar 9am como evento. Cubre casos 29 (con
+            // "ir al ") y eventos como "mañana tengo clases", "agenda
+            // almuerzo mañana" donde no se dio hora exacta. Cubre 49, 50.
             if let partial = when {
-                let hasExplicitTime = hasTimeMarker(lower)
-                if !hasExplicitTime, isAtDayDefault(partial) {
-                    return .clarify(reason: .eventNeedsTime(title: title, partialDate: partial))
+                let hasExactTime = hasExactTimeMarker(lower)
+                if !hasExactTime {
+                    // Sin hora exacta → tarea con dueDate del día (preferir
+                    // sobre clarify, que freezea el flujo del usuario).
+                    return .createTask(
+                        title: cleanTaskTitle(title, when: partial),
+                        dueDate: partial, recurrence: recurrence,
+                        wantsReminder: wantsReminder
+                    )
                 }
                 let explicitEnd = extractExplicitEndTime(from: lower, startTime: partial)
                 return .createEvent(
@@ -1773,7 +1858,14 @@ enum NovaResponder {
                     recurrence: recurrence
                 )
             }
-            return .clarify(reason: .eventNeedsDateTime(title: title))
+            // Sin fecha tampoco → tarea sin dueDate (caso 31 "tengo prueba
+            // de comunicación el miércoles" cae acá si extractDateTime no
+            // resolvió el día; pero típicamente sí lo resuelve).
+            return .createTask(
+                title: cleanTaskTitle(title, when: nil),
+                dueDate: nil, recurrence: recurrence,
+                wantsReminder: wantsReminder
+            )
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -1784,12 +1876,19 @@ enum NovaResponder {
         let choreVerbs = [
             "comprar ", "llamar ", "responder ", "estudiar ",
             "preparar ", "revisar ", "leer ", "escribir ",
-            "mandar ", "enviar ", "pagar ", "ordenar ", "limpiar "
+            "mandar ", "enviar ", "pagar ", "ordenar ", "limpiar ",
+            // Agregados 2026-05-26 (50-case validation: 13, 15, 20):
+            "hacer ", "avisar ", "avisarle ", "subir ", "bajar ",
+            "terminar ", "entregar ", "buscar ", "armar ",
+            "mandarle ", "enviarle ", "decirle ", "contarle "
         ]
         if let title = extractAfter(trimmed, triggers: choreVerbs) {
             if title.isEmpty { return .clarify(reason: .taskNeedsTitle) }
             let when = extractDateTime(from: lower)
-            let hasExplicitTime = hasTimeMarker(lower)
+            // Usar hora **exacta** (no franja). "hoy en la tarde estudiar"
+            // tiene franja pero no hora — debe ser tarea, no evento 9am
+            // inventado. Cubre caso 28 del 50-test.
+            let hasExplicitTime = hasExactTimeMarker(lower)
             // Reconstruir el título incluyendo el verbo de chore (ej. "Comprar materiales").
             let verbUsed = firstMatchingTrigger(in: trimmed, triggers: choreVerbs) ?? ""
             let fullTitle = cleanTaskTitle(
@@ -1812,6 +1911,53 @@ enum NovaResponder {
             }
             let recurrence = detectRecurrence(lower)
             return .createTask(title: fullTitle, dueDate: when, recurrence: recurrence, wantsReminder: wantsReminder)
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // 7.5. Sustantivos comunes que SON la actividad sin verbo.
+        //      "fútbol hoy", "gimnasio mañana", "carrete el viernes",
+        //      "almuerzo con mi papá mañana". Si hay día pero NO hora →
+        //      tarea con dueDate. Si hay hora exacta → evento. Cubre
+        //      casos 11, 30, 50 del 50-test.
+        // ──────────────────────────────────────────────────────────────
+        let nounActivities = [
+            "fútbol", "futbol", "tenis", "básquetbol", "basquetbol", "baloncesto",
+            "natación", "natacion", "yoga", "pilates", "gym", "gimnasio",
+            "entreno", "entrenamiento", "trote",
+            "carrete", "fiesta", "previa", "junta",
+            "almuerzo", "cena", "desayuno", "once", "merienda",
+            "clases", "clase"
+        ]
+        let nounPattern = nounActivities.joined(separator: "|")
+        let nounRegex = "\\b(\(nounPattern))\\b"
+        if lower.range(of: nounRegex, options: [.regularExpression]) != nil {
+            let when = extractDateTime(from: lower)
+            // Hora exacta solamente: "carrete el viernes en la noche" tiene
+            // franja pero no hora → task del día, no evento 9am inventado.
+            let hasExplicitTime = hasExactTimeMarker(lower)
+            // Encontrar el sustantivo concreto para usarlo de título.
+            let foundNoun: String? = nounActivities.first(where: { noun in
+                lower.range(of: "\\b\(noun)\\b", options: [.regularExpression]) != nil
+            })
+            let nounTitle = foundNoun.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "Actividad"
+            if hasExplicitTime, let date = when {
+                // Hora explícita → evento puntual.
+                let location = extractLocation(from: trimmed)
+                let section = detectSection(in: lower)
+                let explicitEnd = extractExplicitEndTime(from: lower, startTime: date)
+                return .createEvent(
+                    title: nounTitle, when: date, endTime: explicitEnd,
+                    location: location, section: section,
+                    wantsReminder: wantsReminder, recurrence: nil
+                )
+            }
+            // Sin hora exacta (o sin marcador) → tarea con dueDate del día.
+            // "fútbol hoy" / "gimnasio mañana" / "almuerzo con mi papá mañana".
+            let dueDate = when
+            return .createTask(
+                title: nounTitle, dueDate: dueDate,
+                recurrence: nil, wantsReminder: wantsReminder
+            )
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -2895,6 +3041,24 @@ enum NovaResponder {
         if let mins = firstCaptureInt(lower, pattern: #"(?:por|durante) (\d{1,3})\s?(min|minutos?)"#, group: 1) {
             return cal.date(byAdding: .minute, value: mins, to: startTime)
         }
+        // Caso 4: "por <palabra> hora(s)" — "por dos horas", "por media hora",
+        // "por una hora y media". Soporta números escritos en palabras y
+        // medias horas explícitas. Indispensable para "clase a las 10 por
+        // dos horas" — sin esto el evento se crea como punto en vez de rango.
+        let wordToHours: [(pattern: String, hours: Int, minutes: Int)] = [
+            ("media", 0, 30),
+            ("una", 1, 0), ("un", 1, 0),
+            ("dos", 2, 0), ("tres", 3, 0), ("cuatro", 4, 0),
+            ("cinco", 5, 0), ("seis", 6, 0), ("siete", 7, 0),
+            ("ocho", 8, 0), ("nueve", 9, 0), ("diez", 10, 0)
+        ]
+        for entry in wordToHours {
+            let pattern = "(?:por|durante)\\s+\(entry.pattern)\\s+(?:hora|horas)"
+            if lower.range(of: pattern, options: [.regularExpression]) != nil {
+                let totalMins = entry.hours * 60 + entry.minutes
+                return cal.date(byAdding: .minute, value: totalMins, to: startTime)
+            }
+        }
         return nil
     }
 
@@ -2933,6 +3097,38 @@ enum NovaResponder {
             "al final del día", "al final del dia",
             "al amanecer"
         ]) {
+            return true
+        }
+        return false
+    }
+
+    /// Versión estricta de `hasTimeMarker`: solo true cuando hay **hora
+    /// exacta** explícita, NO franja coloquial ("en la tarde", "esta
+    /// noche"). Las franjas son señal de día con contexto, pero el usuario
+    /// no dijo una hora concreta — convertirlas en evento horario inventa
+    /// hora 9am o similar. Mejor crear tarea con dueDate del día.
+    ///
+    /// Usado por flujos que necesitan distinguir "comprar pan a las 5"
+    /// (evento horario) de "comprar pan en la tarde" (tarea del día).
+    /// Cubre casos 28, 30 del 50-test.
+    private static func hasExactTimeMarker(_ lower: String) -> Bool {
+        if firstCaptureInt(lower, pattern: #"a la?s? (\d{1,2})"#, group: 1) != nil { return true }
+        if firstCaptureInt(lower, pattern: #"\b(\d{1,2}):(\d{2})\b"#, group: 1) != nil { return true }
+        if firstCaptureInt(lower, pattern: #"\btipo\s+(?:las?\s+)?(\d{1,2})"#, group: 1) != nil { return true }
+        if firstCaptureInt(lower, pattern: #"\b(\d{1,2})\s*(am|pm|hs|hrs?)\b"#, group: 1) != nil { return true }
+        let wordHourPattern = #"\b(?:a la?s?|tipo (?:las? )?|como a la?s?|a eso de la?s?|cerca de la?s?|alrededor de la?s?)\s+"# + hourWordsRegex + #"\b"#
+        if lower.range(of: wordHourPattern, options: [.regularExpression, .caseInsensitive]) != nil {
+            return true
+        }
+        if lower.range(
+            of: #"\ben\s+\d{1,3}\s+(min|minutos?|h|hs|hrs?|horas?)\b"#,
+            options: .regularExpression
+        ) != nil { return true }
+        // Heurística "DÍA NÚMERO ACTIVIDAD": "mañana 8 gimnasio", "hoy 17 gym".
+        // El número solo después de "hoy/mañana/lunes/martes/..." se trata como hora.
+        // Cubre caso 33 del 50-test.
+        let dayNumPattern = #"\b(?:hoy|mañana|manana|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\s+(\d{1,2})\b(?!\s*(?:min|hora|hr|hs|h\b|:\d))"#
+        if lower.range(of: dayNumPattern, options: [.regularExpression, .caseInsensitive]) != nil {
             return true
         }
         return false
@@ -3734,6 +3930,15 @@ enum NovaResponder {
         }
         // 2) "a las 12" / "a la 1" / "a eso de las 3" / "cerca de las 3"
         if let h = firstCaptureInt(text, pattern: #"(?:a la?s?|eso de las?|cerca de las?|alrededor de las?) (\d{1,2})\b"#, group: 1), h < 24 {
+            return (adjustAmPm(hour: h, in: text), 0)
+        }
+        // 2b) "DÍA N actividad" — "mañana 8 gimnasio", "hoy 7 estudiar",
+        //     "el lunes 9 reunión". El N pegado al día sin "a las" es
+        //     interpretación coloquial chilena de hora. Cubre caso 33
+        //     del 50-test. Requiere que NO haya unidad temporal después
+        //     (para no chocar con "en 8 min").
+        let dayHourPattern = #"\b(?:hoy|mañana|manana|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\s+(\d{1,2})\b(?!\s*(?:min|hora|hr|hs|h\b|:\d|am|pm))"#
+        if let h = firstCaptureInt(text, pattern: dayHourPattern, group: 1), h < 24 {
             return (adjustAmPm(hour: h, in: text), 0)
         }
         // 3) "14:30" suelto. Igual que (1): si h <= 12, contexto puede
