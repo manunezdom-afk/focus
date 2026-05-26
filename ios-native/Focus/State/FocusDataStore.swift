@@ -2784,7 +2784,7 @@ enum NovaResponder {
 
     // MARK: - Recurrence
 
-    private static func detectRecurrence(_ lower: String) -> RecurrenceHint? {
+    static func detectRecurrence(_ lower: String) -> RecurrenceHint? {
         // 1) Day-by-day: "día por medio" / "cada 2 días" / "cada N días".
         if matches(lower, ["día por medio", "dia por medio", "cada dos días", "cada dos dias", "cada 2 días", "cada 2 dias"]) {
             return .everyNDays(n: 2)
@@ -5233,24 +5233,32 @@ final class FocusDataStore: ObservableObject {
     /// editar la "serie" entera requiere editar uno por uno.
     func expandLocalRecurrenceDates(start: Date, recurrence: RecurrenceHint) -> [Date] {
         let cal = Calendar.current
+        // Counts ampliados 2026-05-26 — el usuario espera que "todos los
+        // lunes" cubra el semestre o más, no solo 2 meses. Estos valores
+        // generan datos razonables sin saturar el storage local.
         switch recurrence {
         case .daily:
-            return makeFixedSeries(start: start, component: .day, increment: 1, count: 14)
+            // Mes completo de meditación/hábito diario.
+            return makeFixedSeries(start: start, component: .day, increment: 1, count: 30)
         case .weekly, .weeklyOn, .unspecified:
-            return makeFixedSeries(start: start, component: .weekOfYear, increment: 1, count: 8)
+            // 6 meses de clases semanales (típico semestre académico).
+            return makeFixedSeries(start: start, component: .weekOfYear, increment: 1, count: 26)
         case .biweeklyOn:
-            return makeFixedSeries(start: start, component: .weekOfYear, increment: 2, count: 8)
+            // ~6 meses con cadencia quincenal.
+            return makeFixedSeries(start: start, component: .weekOfYear, increment: 2, count: 13)
         case .everyNDays(let n):
             let safeN = max(1, min(n, 30))
-            return makeFixedSeries(start: start, component: .day, increment: safeN, count: 14)
+            // Cubre 60 días.
+            return makeFixedSeries(start: start, component: .day, increment: safeN, count: max(14, 60 / safeN))
         case .weekdays:
-            return expandWeekdayPattern(start: start, weekdays: [2, 3, 4, 5, 6], spanDays: 28)
+            // 60 días naturales, ~44 días hábiles (~2 meses laborales).
+            return expandWeekdayPattern(start: start, weekdays: [2, 3, 4, 5, 6], spanDays: 60)
         case .multiWeekday(let weekdays, _):
-            // Si la lista trae 2-3 días, expandimos 4 semanas; con más, 3 semanas.
-            let span = weekdays.count >= 4 ? 21 : 28
-            return expandWeekdayPattern(start: start, weekdays: weekdays, spanDays: span)
+            // ~3 meses.
+            return expandWeekdayPattern(start: start, weekdays: weekdays, spanDays: 90)
         case .monthly:
-            return makeFixedSeries(start: start, component: .month, increment: 1, count: 3)
+            // Semestre completo (6 meses).
+            return makeFixedSeries(start: start, component: .month, increment: 1, count: 6)
         }
         // Silencia warning de exhaustividad si Swift detecta unreachable
         // (no se da hoy porque todos los casos retornan).
@@ -5576,6 +5584,43 @@ final class FocusDataStore: ObservableObject {
                         )
                     } else {
                         outcome.ignored.append("add_event(no_time_to_task_invalid)")
+                    }
+                } else if let localRecurrence = NovaResponder.detectRecurrence(userText.lowercased()),
+                          let backendRecur = makeBackendRecurrence(
+                              from: localRecurrence,
+                              firstDateString: payload.dateString,
+                              firstTimeString: payload.timeString
+                          ) {
+                    // Backend devolvió `addEvent` simple para una frase con
+                    // recurrencia explícita ("todos los lunes a las 10").
+                    // El modelo IA no siempre invoca `addRecurringEvent`;
+                    // expandimos local detectando recurrence en userText.
+                    // Cubre caso del usuario 2026-05-26: "todos los lunes
+                    // tengo clases" creaba solo 1 evento. Ahora N (12 weekly).
+                    let created = expandRecurringEvent(
+                        payload: payload,
+                        recurrence: backendRecur,
+                        userText: userText
+                    )
+                    if !created.isEmpty {
+                        outcome.didMutate = true
+                        outcome.summary = "Listo. Te dejé «\(payload.title)» todos \(localRecurrence.label) (\(created.count) próximas)."
+                        outcome.primaryEventId = created.first?.id
+                        outcome.primaryIsReminder = created.first?.isReminder == true
+                        outcome.createdEvents.append(contentsOf: created)
+                        if let firstEvent = created.first {
+                            updateNovaContext(
+                                from: userText,
+                                title: firstEvent.title,
+                                date: firstEvent.startTime,
+                                location: firstEvent.location,
+                                section: firstEvent.section,
+                                kind: .event,
+                                eventId: firstEvent.id
+                            )
+                        }
+                    } else {
+                        outcome.ignored.append("add_event(recurrence_expand_failed)")
                     }
                 } else if let event = makeEvent(from: payload, userText: userText) {
                     // Anti-duplicado en el path del backend. El local path
@@ -6050,6 +6095,67 @@ final class FocusDataStore: ObservableObject {
 
     /// Expande un `add_recurring_event` a N `addEvent` locales. Conservador:
     /// máximo 31 instancias por acción (límite del backend).
+    /// Convierte un `RecurrenceHint` detectado localmente desde el texto
+    /// del usuario a un `BackendRecurrence` compatible con
+    /// `expandRecurringEvent`. Necesario cuando el backend devolvió un
+    /// `addEvent` simple para una frase que claramente tiene recurrencia
+    /// ("todos los lunes", "todos los días", "de lunes a viernes"). Sin
+    /// esto, la app creaba un solo evento.
+    ///
+    /// Limitaciones: hints que no mapean a {daily, weekdays, weekly} se
+    /// devuelven como `nil` (biweekly, monthly, multiWeekday, everyNDays).
+    /// El backend NO soporta esos patterns todavía en `expandRecurringEvent`;
+    /// el local path los maneja, pero no este fallback. Para esos, el
+    /// usuario verá un solo evento — aceptable hasta que el backend los
+    /// agregue.
+    private func makeBackendRecurrence(
+        from hint: RecurrenceHint,
+        firstDateString: String?,
+        firstTimeString: String?
+    ) -> BackendRecurrence? {
+        let cal = Calendar.current
+        // Calcular weekday Swift (1=dom..7=sáb) a partir del primer date.
+        let weekdaySwift: Int? = {
+            guard let dateStr = firstDateString,
+                  let date = NovaTimeFormatter.resolveDate(
+                      dateString: dateStr,
+                      timeString: firstTimeString
+                  )
+            else { return nil }
+            return cal.component(.weekday, from: date)
+        }()
+        // backend weekday: 0=dom, ..., 6=sáb. Swift weekday: 1=dom..7=sáb.
+        // → backend = (swift - 1) en rango 0..6.
+        let weekdayBackend: Int? = weekdaySwift.map { ($0 - 1) % 7 }
+
+        switch hint {
+        case .daily, .unspecified:
+            return BackendRecurrence(
+                pattern: "daily", weekday: nil,
+                count: 14, startDate: firstDateString
+            )
+        case .weekdays:
+            return BackendRecurrence(
+                pattern: "weekdays", weekday: nil,
+                count: 22, startDate: firstDateString
+            )
+        case .weekly:
+            return BackendRecurrence(
+                pattern: "weekly", weekday: weekdayBackend,
+                count: 12, startDate: firstDateString
+            )
+        case .weeklyOn:
+            return BackendRecurrence(
+                pattern: "weekly", weekday: weekdayBackend,
+                count: 12, startDate: firstDateString
+            )
+        case .biweeklyOn, .everyNDays, .multiWeekday, .monthly:
+            // Patterns no soportados por el backend expander; el local
+            // path (createEvent intent path) sí los maneja.
+            return nil
+        }
+    }
+
     private func expandRecurringEvent(
         payload: BackendEventCreate,
         recurrence: BackendRecurrence,
@@ -6065,15 +6171,16 @@ final class FocusDataStore: ObservableObject {
         let limit: Int
         let stride: Int
 
+        // Caps ampliados 2026-05-26: "todos los lunes" debe cubrir semestre.
         switch pattern {
         case "daily":
-            limit = min(recurrence.count ?? 30, 31)
+            limit = min(recurrence.count ?? 30, 60)
             stride = 1
         case "weekdays":
-            limit = min(recurrence.count ?? 22, 31)
-            stride = 1  // skip weekends abajo
+            limit = min(recurrence.count ?? 44, 60)  // ~2 meses laborales
+            stride = 1
         case "weekly":
-            limit = min(recurrence.count ?? 12, 31)
+            limit = min(recurrence.count ?? 26, 52)  // semestre o más
             stride = 7
         default:
             return []

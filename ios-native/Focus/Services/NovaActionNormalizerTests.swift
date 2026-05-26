@@ -3009,6 +3009,11 @@ enum NovaActionNormalizerTests {
                  expectedKind: K.event, expectedHour: 18, expectedHasEndHour: false,
                  mustNotInventEndTime: true, isCritical: false,
                  notes: "multiWeekday miércoles+viernes 18:00"))
+        // Caso real reportado por usuario 2026-05-26
+        cases.append(Case(id: 55, input: "acuerdame que para todos los lunes a las 10 tengo clases de matematica",
+                 expectedKind: K.reminder, expectedHour: 10, expectedHasEndHour: false,
+                 mustNotInventEndTime: true, isCritical: false,
+                 notes: "evento recurrente lunes 10 con acuérdame — debe expandir todas las semanas, no solo 1"))
         var out = "===== NOVA 50-CASE VALIDATION =====\n"
         out += "Fecha: \(Date())\n\n"
         var passCount = 0
