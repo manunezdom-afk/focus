@@ -457,28 +457,33 @@ struct NovaView: View {
     private var chatContent: some View {
         ZStack {
             NovaChatBackdrop()
-
-            Group {
-                if store.novaMessages.isEmpty && !store.isNovaTyping {
-                    NovaEmptyChatHeroDark(
-                        onChip: { action in
-                            handleQuickAction(action)
-                        },
-                        showLiveChip: Self.isNovaLiveEnabled,
-                        onLive: Self.isNovaLiveEnabled
-                            ? {
-                                HapticManager.shared.tap()
-                                showNovaLive = true
-                            }
-                            : nil
-                    )
-                } else {
-                    chatScroll
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
+
+            VStack(spacing: 0) {
+                Group {
+                    if store.novaMessages.isEmpty && !store.isNovaTyping {
+                        NovaEmptyChatHeroDark(
+                            onChip: { action in
+                                handleQuickAction(action)
+                            },
+                            showLiveChip: Self.isNovaLiveEnabled,
+                            onLive: Self.isNovaLiveEnabled
+                                ? {
+                                    HapticManager.shared.tap()
+                                    showNovaLive = true
+                                }
+                                : nil
+                        )
+                        .frame(maxHeight: .infinity)
+                    } else {
+                        chatScroll
+                    }
+                }
+
+                inputBar
             }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            inputBar
         }
         // `.immediately` da comportamiento predecible — un scroll cierra
         // el teclado inmediatamente.
@@ -591,6 +596,7 @@ struct NovaView: View {
                 Color(red: 0.04, green: 0.02, blue: 0.10).opacity(0.70)
                     .background(.ultraThinMaterial.opacity(0.40))
                     .environment(\.colorScheme, .dark)
+                    .ignoresSafeArea(edges: .bottom)
             )
         }
     }

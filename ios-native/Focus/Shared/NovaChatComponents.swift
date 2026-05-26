@@ -221,7 +221,7 @@ struct NovaMarkdownContent: View {
                         .font(Theme.Typography.body)
                         .tracking(Theme.Tracking.body)
                         .foregroundStyle(bodyColor)
-                        .lineSpacing(4)
+                        .lineSpacing(6)
                         .fixedSize(horizontal: false, vertical: true)
                 case .bulletList(let items):
                     VStack(alignment: .leading, spacing: 6) {
@@ -234,7 +234,7 @@ struct NovaMarkdownContent: View {
                                 Text(attributed(item))
                                     .font(Theme.Typography.body)
                                     .foregroundStyle(bodyColor)
-                                    .lineSpacing(4)
+                                    .lineSpacing(6)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
@@ -250,7 +250,7 @@ struct NovaMarkdownContent: View {
                                 Text(attributed(item))
                                     .font(Theme.Typography.body)
                                     .foregroundStyle(bodyColor)
-                                    .lineSpacing(4)
+                                    .lineSpacing(6)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
@@ -371,23 +371,23 @@ struct NovaGlassUserBubble: View {
                 .padding(.vertical, 11)
                 .background(
                     ZStack {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 20, bottomTrailingRadius: 4, topTrailingRadius: 20, style: .continuous)
                             .fill(.ultraThinMaterial)
                             .environment(\.colorScheme, .dark)
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 20, bottomTrailingRadius: 4, topTrailingRadius: 20, style: .continuous)
                             .fill(Theme.Colors.novaGlassUserFill)
                     }
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 20, bottomTrailingRadius: 4, topTrailingRadius: 20, style: .continuous)
                         .strokeBorder(
                             LinearGradient(
                                 colors: [
-                                    Color.white.opacity(0.30),
-                                    Color.white.opacity(0.08)
+                                    Color(red: 0.357, green: 0.302, blue: 1.000).opacity(0.40),
+                                    Color(red: 0.220, green: 0.518, blue: 1.000).opacity(0.15)
                                 ],
-                                startPoint: .top,
-                                endPoint: .bottom
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             ),
                             lineWidth: 0.8
                         )
@@ -430,23 +430,24 @@ struct NovaGlassNovaBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 ZStack {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 4, bottomTrailingRadius: 20, topTrailingRadius: 20, style: .continuous)
                         .fill(.ultraThinMaterial)
                         .environment(\.colorScheme, .dark)
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 4, bottomTrailingRadius: 20, topTrailingRadius: 20, style: .continuous)
                         .fill(Theme.Colors.novaGlassFill)
                 }
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 4, bottomTrailingRadius: 20, topTrailingRadius: 20, style: .continuous)
                     .strokeBorder(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(0.22),
+                                Color.white.opacity(0.25),
+                                Color(red: 0.357, green: 0.302, blue: 1.000).opacity(0.15),
                                 Color.white.opacity(0.05)
                             ],
-                            startPoint: .top,
-                            endPoint: .bottom
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         ),
                         lineWidth: 0.7
                     )
@@ -508,6 +509,11 @@ struct NovaPulseTypingIndicator: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .opacity(pulse ? 1.0 : 0.85)
+            .animation(
+                .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
+                value: pulse
+            )
             .background(
                 ZStack {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -519,7 +525,18 @@ struct NovaPulseTypingIndicator: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Theme.Colors.novaGlassStroke, lineWidth: 0.7)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.20),
+                                Color(red: 0.357, green: 0.302, blue: 1.000).opacity(0.12),
+                                Color.white.opacity(0.05)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.7
+                    )
             )
 
             Spacer(minLength: 12)
@@ -614,7 +631,7 @@ struct NovaGlassInputBar: View {
                 axis: .vertical
             )
             .focused($isFocused)
-            .font(.system(size: 15, weight: .medium))
+            .font(.system(size: 16, weight: .regular))
             .foregroundStyle(Theme.Colors.novaTextOnDark)
             .tint(Theme.Colors.novaLabelOnDark)
             .lineLimit(1...6)
@@ -734,7 +751,16 @@ struct NovaGlassInputBar: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(
                     isFocused
-                        ? AnyShapeStyle(Theme.Colors.novaGlassStrokeEmphasis)
+                        ? AnyShapeStyle(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.357, green: 0.302, blue: 1.000),
+                                    Color(red: 0.220, green: 0.518, blue: 1.000)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
                         : AnyShapeStyle(
                             LinearGradient(
                                 colors: [
@@ -749,10 +775,10 @@ struct NovaGlassInputBar: View {
                 )
         )
         .shadow(
-            color: isFocused ? Theme.Colors.novaGlow : Color.black.opacity(0.30),
-            radius: isFocused ? 22 : 14,
+            color: isFocused ? Color(red: 0.357, green: 0.302, blue: 1.000).opacity(0.35) : Color.black.opacity(0.25),
+            radius: isFocused ? 20 : 10,
             x: 0,
-            y: isFocused ? 8 : 6
+            y: isFocused ? 8 : 4
         )
         .animation(Theme.Motion.easeInOutStandard, value: isFocused)
     }
