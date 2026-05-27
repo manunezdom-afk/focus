@@ -6479,10 +6479,23 @@ final class FocusDataStore: ObservableObject {
 
         // [NovaMemory] Aprendizaje pasivo: si el usuario está enseñándole
         // a Nova un alias o preferencia ("cuando diga teorías me refiero
-        // a Teorías de la Comunicación", "Juan Pablo es mi coordinador"),
-        // guardamos la memoria antes de procesar. Local only (UserDefaults).
+        // a Teorías de la Comunicación", "Juan Pablo es mi coordinador",
+        // "la Agustina es mi polola"), guardamos la memoria Y ABORTAMOS
+        // el resto del flujo. Sin este short-circuit, el backend recibía
+        // el mismo texto y lo interpretaba como tarea ("Tarea «Agustina
+        // es mi polola» agregada") — bug reportado por user 2026-05-27.
+        //
+        // Nova responde inline con confirmación humana ("Listo, guardé
+        // que Agustina es tu polola.") y no llama al backend ni crea
+        // eventos/tareas a partir del mismo input.
         if let learned = NovaMemoryStore.shared.tryLearnFromUserText(trimmed) {
             print("[NovaMemory] learned category=\(learned.category.rawValue) key=\(learned.key)")
+            isNovaTyping = false
+            let reply = replyForLearnedMemory(learned)
+            novaMessages.append(NovaMessage(role: .nova, content: reply))
+            persistNovaMessages()
+            HapticManager.shared.success()
+            return
         }
 
         // [NovaMemory] Comandos directos sobre memoria — "qué sabes de mí",
@@ -7625,6 +7638,45 @@ final class FocusDataStore: ObservableObject {
     }
 
     // MARK: - Memoria (comandos directos de chat)
+
+    /// Genera el texto de confirmación humano cuando Nova ACABA de
+    /// aprender una memoria. La idea es que el user sienta "ah, lo
+    /// recordó" sin tener que ver acción técnica. Cada categoría usa
+    /// formato distinto para que se lea natural.
+    func replyForLearnedMemory(_ memory: NovaMemory) -> String {
+        switch memory.category {
+        case .personAlias:
+            // value tiene formato "Nombre (rol)" o "Nombre". Extraemos
+            // el rol para frase natural si está disponible.
+            if let openParen = memory.value.firstIndex(of: "("),
+               let closeParen = memory.value.lastIndex(of: ")") {
+                let name = memory.value[..<openParen]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let role = memory.value[memory.value.index(after: openParen)..<closeParen]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if role.lowercased().hasPrefix("mi ") {
+                    // "mi coordinador" / "mi hijo" — ya viene con posesivo.
+                    return "Listo, guardé que \(name) es \(role.lowercased())."
+                } else {
+                    // "coordinador" / "polola" — agregamos "tu".
+                    return "Listo, guardé que \(name) es tu \(role.lowercased())."
+                }
+            }
+            return "Listo, guardé que \(memory.value) es persona conocida."
+        case .courseAlias:
+            return "Listo, ya sé que cuando digas «\(memory.key)» te refieres a \(memory.value)."
+        case .preference:
+            return "Anotado. Lo tomo en cuenta para próximas sugerencias."
+        case .schedulingRule:
+            return "Listo, voy a respetar esa regla cuando agende cosas."
+        case .appBehaviorRule:
+            return "Listo, lo aplico de ahora en adelante."
+        case .projectContext:
+            return "Listo, lo agrego al contexto de tus proyectos."
+        case .academicContext:
+            return "Listo, lo guardo en tu contexto académico."
+        }
+    }
 
     /// Si `trimmed` es un comando directo sobre la memoria de Nova
     /// ("qué sabes de mí", "qué recuerdas", "olvida X", "olvida todo"),
