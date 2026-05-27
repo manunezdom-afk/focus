@@ -5915,6 +5915,46 @@ final class FocusDataStore: ObservableObject {
                 // silenciosamente (es transparente para el usuario).
                 outcome.ignored.append("remember(skipped_v1)")
 
+            case .saveMemory(let key, let value, let categoryStr):
+                // V2 (2026-05-27): el LLM (OpenAI w/ reasoning) detectó
+                // memoria personal. Persistimos en NovaMemoryStore.
+                let category = NovaMemoryCategory(rawValue: categoryStr) ?? .preference
+                let saved = NovaMemoryStore.shared.upsert(NovaMemory(
+                    category: category,
+                    key: key,
+                    value: value,
+                    confidence: 0.95,
+                    source: "llm_openai"
+                ))
+                outcome.didMutate = true
+                // Si el backend ya armó un userConfirmationText (reply),
+                // ese gana — usamos solo summary genérico como fallback.
+                if outcome.summary.isEmpty {
+                    outcome.summary = "Listo, guardé eso."
+                }
+                HapticManager.shared.success()
+                print("[NovaMemory:llm] saved \(saved.category.rawValue) key=\(saved.key)")
+
+            case .forgetMemory(let key):
+                // V2: el user pidió olvidar algo. "__all__" = clear total.
+                if key == "__all__" {
+                    NovaMemoryStore.shared.clearAll()
+                    outcome.didMutate = true
+                    if outcome.summary.isEmpty {
+                        outcome.summary = "Listo, borré todas las memorias."
+                    }
+                } else {
+                    let matches = NovaMemoryStore.shared.allActiveMemoriesHuman(maxEntries: 100)
+                        .filter { $0.text.lowercased().contains(key.lowercased()) }
+                    for m in matches { NovaMemoryStore.shared.deactivate(id: m.id) }
+                    outcome.didMutate = !matches.isEmpty
+                    if outcome.summary.isEmpty {
+                        outcome.summary = matches.isEmpty
+                            ? "No tenía nada sobre «\(key)»."
+                            : "Listo, olvidé eso."
+                    }
+                }
+
             case .unsupported(let typeName):
                 outcome.ignored.append("unsupported(\(typeName))")
             }
@@ -6477,31 +6517,23 @@ final class FocusDataStore: ObservableObject {
         HapticManager.shared.tap()
         isNovaTyping = true
 
-        // [NovaMemory] Aprendizaje pasivo: si el usuario está enseñándole
-        // a Nova un alias o preferencia ("cuando diga teorías me refiero
-        // a Teorías de la Comunicación", "Juan Pablo es mi coordinador",
-        // "la Agustina es mi polola"), guardamos la memoria Y ABORTAMOS
-        // el resto del flujo. Sin este short-circuit, el backend recibía
-        // el mismo texto y lo interpretaba como tarea ("Tarea «Agustina
-        // es mi polola» agregada") — bug reportado por user 2026-05-27.
+        // [NovaMemory V2 — 2026-05-27] El aprendizaje de memoria (X es mi Y,
+        // mi mamá se llama Susana, etc.) ahora lo hace el LLM (OpenAI con
+        // reasoning) en el backend, NO el parser local con listas hardcoded.
+        // Razón: el usuario pidió "que funcione como ChatGPT — tiene info
+        // del mundo, debería saber todo". El LLM entiende "polola/novia/
+        // pareja/etc" sin que tengamos que mantener listas.
         //
-        // Nova responde inline con confirmación humana ("Listo, guardé
-        // que Agustina es tu polola.") y no llama al backend ni crea
-        // eventos/tareas a partir del mismo input.
-        if let learned = NovaMemoryStore.shared.tryLearnFromUserText(trimmed) {
-            print("[NovaMemory] learned category=\(learned.category.rawValue) key=\(learned.key)")
-            isNovaTyping = false
-            let reply = replyForLearnedMemory(learned)
-            novaMessages.append(NovaMessage(role: .nova, content: reply))
-            persistNovaMessages()
-            HapticManager.shared.success()
-            return
-        }
+        // El backend devuelve `save_memory` action cuando detecta enseñanza
+        // → applyBackendActions la persiste en NovaMemoryStore.
+        //
+        // tryLearnFromUserText SIGUE existiendo como fallback offline (si
+        // backend cae). Lo invoca runLocalFallback en el catch del backend.
 
         // [NovaMemory] Comandos directos sobre memoria — "qué sabes de mí",
         // "olvida X", "olvida todo". Atajamos antes del parse normal porque
-        // son meta-comandos: no son eventos/tareas, solo lectura/edición de
-        // la memoria. Se responden inline en el chat sin ir al backend.
+        // son meta-comandos LOCALES de la app (leer/borrar UserDefaults).
+        // El LLM no puede ejecutarlos directamente; los manejamos acá.
         if let memoryReply = handleMemoryCommand(trimmed: trimmed) {
             isNovaTyping = false
             novaMessages.append(NovaMessage(role: .nova, content: memoryReply))
@@ -6622,7 +6654,10 @@ final class FocusDataStore: ObservableObject {
                         tasks: visibleTasks,
                         history: priorHistory,
                         accessToken: creds.accessToken,
-                        surface: .novaChat
+                        surface: .novaChat,
+                        userMemories: NovaMemoryStore.shared
+                            .allActiveMemoriesHuman(maxEntries: 30)
+                            .map { $0.text }
                     )
                     let aiMs = (CFAbsoluteTimeGetCurrent() - aiStartTs) * 1000
                     print(String(format: "[NovaLatency] aiEnd ms=%.1f", aiMs))

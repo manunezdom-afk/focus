@@ -101,7 +101,8 @@ enum NovaService {
         surface: Surface = .inlineMiDia,
         timezone: TimeZone = .current,
         now: Date = Date(),
-        discussedEventIds: [UUID] = []
+        discussedEventIds: [UUID] = [],
+        userMemories: [String] = []
     ) async throws -> Result {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw NovaServiceError.emptyMessage }
@@ -128,7 +129,8 @@ enum NovaService {
             history: history.map { BackendHistoryEntry(role: $0.role.rawValue, content: $0.content) },
             clientNow: Int(now.timeIntervalSince1970 * 1000),
             clientTimezone: timezone.identifier,
-            discussedEventIds: discussedEventIds.map { $0.uuidString }
+            discussedEventIds: discussedEventIds.map { $0.uuidString },
+            userMemories: userMemories.isEmpty ? nil : userMemories
         )
 
         do {
@@ -302,6 +304,12 @@ private struct BackendRequestPayload: Encodable {
     /// pide "acuérdame de X" sin nombrar evento, anclamos al primero de
     /// esta lista que coincida por contexto temático.
     let discussedEventIds: [String]
+    /// Memoria persistente del usuario (V2 2026-05-27). Array de líneas
+    /// humanas tipo "Juan Pablo es mi coordinador" o "teorías = Teorías
+    /// de la Comunicación". El backend OpenAI las inyecta al system prompt
+    /// para que GPT pueda resolver referencias sin repreguntar.
+    /// Opcional para back-compat con backend Anthropic que ignora el campo.
+    let userMemories: [String]?
 
     enum CodingKeys: String, CodingKey {
         case message
@@ -313,6 +321,7 @@ private struct BackendRequestPayload: Encodable {
         case clientNow
         case clientTimezone
         case discussedEventIds
+        case userMemories
     }
 }
 
@@ -432,8 +441,13 @@ enum BackendAction {
     case toggleTask(id: String)
     /// Borrar tarea.
     case deleteTask(id: String)
-    /// Memoria sobre el usuario — V1: no se persiste, solo se loguea.
+    /// Memoria sobre el usuario — V1 (legacy): no se persiste, solo se loguea.
     case remember
+    /// V2 (2026-05-27): el LLM (OpenAI w/ reasoning) detectó que el user
+    /// está enseñando algo personal. Persistimos en NovaMemoryStore.
+    case saveMemory(key: String, value: String, category: String)
+    /// V2: el user pidió olvidar. `key == "__all__"` → clear total.
+    case forgetMemory(key: String)
     /// Type desconocido — guardamos el name para diagnóstico.
     case unsupported(typeName: String)
 }
@@ -552,9 +566,34 @@ private struct RawAction: Decodable {
             }
         case "remember":
             self.decoded = .remember
+        case "save_memory":
+            let mem = try? c.decode(MemoryDecoded.self, forKey: .memory)
+            if let mem, !mem.key.isEmpty, !mem.value.isEmpty {
+                self.decoded = .saveMemory(
+                    key: mem.key,
+                    value: mem.value,
+                    category: mem.category ?? "preference"
+                )
+            } else {
+                self.decoded = .unsupported(typeName: rawType)
+            }
+        case "forget_memory":
+            let mem = try? c.decode(MemoryDecoded.self, forKey: .memory)
+            if let mem, !mem.key.isEmpty {
+                self.decoded = .forgetMemory(key: mem.key)
+            } else {
+                self.decoded = .unsupported(typeName: rawType)
+            }
         default:
             self.decoded = .unsupported(typeName: rawType)
         }
+    }
+
+    /// Shape de memoria en action JSON: `{key, value, category}`.
+    private struct MemoryDecoded: Decodable {
+        let key: String
+        let value: String
+        let category: String?
     }
 
     // MARK: - Subdecoders

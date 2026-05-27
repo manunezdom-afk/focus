@@ -263,24 +263,36 @@ export default async function handler(req, res) {
   const reqId = (typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].trim())
     || crypto.randomUUID()
 
-  // Provider switch — beta-13 introduce OpenAI como alternativa. Por
-  // default seguimos en Anthropic (mismo flow, sin cambios). Para activar
-  // OpenAI: setear `NOVA_PROVIDER=openai` Y `OPENAI_API_KEY` en Vercel.
+  // Provider switch — user spec 2026-05-27: queremos OpenAI con reasoning
+  // como provider principal. Para fallback a Anthropic Claude (legacy):
+  // setear NOVA_PROVIDER=anthropic. Para forzar OpenAI explícito: ='openai'
+  // (default si OPENAI_API_KEY está seteado).
+  //
   // El cliente iOS NO conoce el provider — recibe el mismo shape de
   // respuesta gracias al adapter en openaiNova.js.
-  const provider = (process.env.NOVA_PROVIDER || 'anthropic').toLowerCase().trim()
+  const explicitProvider = (process.env.NOVA_PROVIDER || '').toLowerCase().trim()
+  const openaiKeyAvailable = (process.env.OPENAI_API_KEY?.trim()?.length || 0) > 0
+  const provider = explicitProvider
+    || (openaiKeyAvailable ? 'openai' : 'anthropic')
   if (provider === 'openai') {
     const openaiKey = process.env.OPENAI_API_KEY?.trim()
     if (!openaiKey) {
       console.error(`[focus-assistant][${reqId}] NOVA_PROVIDER=openai pero falta OPENAI_API_KEY`)
       return res.status(503).json({ error: 'no_openai_key', message: 'Provider OpenAI mal configurado.' })
     }
+    // Memorias del usuario — el cliente las manda en `userMemories` (array
+    // de strings humanas). Se inyectan al system prompt para que el LLM
+    // pueda resolver referencias y NO repreguntar lo que ya sabe.
+    const userMemories = Array.isArray(req?.body?.userMemories)
+      ? req.body.userMemories.filter(s => typeof s === 'string' && s.trim().length > 0).slice(0, 30)
+      : []
     const openaiPrompt = buildOpenAISystemPrompt({
       tz: dateContext.tz,
       todayISO: dateContext.todayISO,
       tomorrow: dateContext.tomorrow,
       currentTime24: dateContext.currentTime24,
       weekDates: dateContext.weekDates,
+      memories: userMemories,
     })
     try {
       const start = Date.now()
@@ -290,6 +302,8 @@ export default async function handler(req, res) {
         model: process.env.OPENAI_NOVA_MODEL,
         apiKey: openaiKey,
         reqId,
+        history,  // turnos previos del chat (ya viene parseado arriba)
+        reasoningEffort: process.env.OPENAI_REASONING_EFFORT || 'medium',
       })
       const rawText = extractResponsesText(data)
       let parsed

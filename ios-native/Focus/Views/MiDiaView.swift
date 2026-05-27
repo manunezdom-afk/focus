@@ -483,24 +483,13 @@ struct MiDiaView: View {
     ///    aunque el backend haya respondido.
     /// 3. Llamar backend con accessToken; fallback local en errores recuperables.
     private func resolveNovaResponse(for trimmed: String) async -> InlineNovaResponse {
-        // Short-circuit MEMORIA — APRENDIZAJE: si el usuario está
-        // enseñándole un alias o preferencia ("la agustina es mi polola",
-        // "Juan Pablo es mi coordinador", "cuando diga X me refiero a Y",
-        // "mi mamá se llama Susana"), GUARDAMOS la memoria y devolvemos
-        // confirmación. NO llamamos al backend (creaba tasks bogus —
-        // bug reportado 2026-05-27 con screenshot de "la agustina es mi
-        // polola" → "Tarea agregada").
-        if let learned = NovaMemoryStore.shared.tryLearnFromUserText(trimmed) {
-            let reply = store.replyForLearnedMemory(learned)
-            HapticManager.shared.success()
-            return InlineNovaResponse(
-                userText: trimmed,
-                summary: reply,
-                tone: .success
-            )
-        }
-
-        // Short-circuit MEMORIA — COMANDO: "qué sabes de mí", "olvida X".
+        // [NovaMemory V2 — 2026-05-27] Aprendizaje de memoria ahora lo hace
+        // el LLM (OpenAI con reasoning). El backend devuelve `save_memory`
+        // action cuando detecta enseñanza → applyBackendActions persiste.
+        //
+        // Solo manejamos LOCALMENTE los comandos meta de memoria
+        // ("qué sabes de mí", "olvida X") porque son operaciones sobre
+        // UserDefaults que el LLM no puede ejecutar directamente.
         if let memoryReply = store.handleMemoryCommand(trimmed: trimmed) {
             return InlineNovaResponse(
                 userText: trimmed,
@@ -592,7 +581,10 @@ struct MiDiaView: View {
                 history: history,
                 accessToken: creds.accessToken,
                 surface: .inlineMiDia,
-                discussedEventIds: discussedIds
+                discussedEventIds: discussedIds,
+                userMemories: NovaMemoryStore.shared
+                    .allActiveMemoriesHuman(maxEntries: 30)
+                    .map { $0.text }
             )
             // Registrar la respuesta del backend.
             await MainActor.run {

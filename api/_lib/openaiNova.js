@@ -15,7 +15,11 @@
 // Anthropic. La normalización vive entera acá.
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
-const DEFAULT_MODEL = 'gpt-5.5'
+// gpt-5-mini — reasoning + costo razonable. Override con
+// OPENAI_NOVA_MODEL=gpt-5 (premium) o gpt-5-nano (cheap) según necesidad.
+// El user spec del 2026-05-27 pidió "razonamiento propio" — esta familia
+// tiene chain-of-thought interno habilitado por default.
+const DEFAULT_MODEL = 'gpt-5-mini'
 const DEFAULT_TIMEOUT_MS = 45_000
 
 // ─── Schema (Structured Outputs) ────────────────────────────────────────────
@@ -40,41 +44,55 @@ export const NOVA_OPENAI_SCHEMA = {
             'type', 'title', 'dateText', 'dateISO', 'time',
             'durationMinutes', 'category', 'reminderOffsetMinutes',
             'linkedToPreviousEvent', 'confidence', 'sourceText',
+            'memoryKey', 'memoryValue', 'memoryCategory',
           ],
           properties: {
-            type: { type: 'string', enum: ['create_event', 'create_reminder', 'clarify'] },
+            // ───────── Tipos de acción ─────────────────────────────────
+            // create_event   — evento con hora.
+            // create_reminder — recordatorio puntual.
+            // save_memory    — guardar hecho personal del usuario (NO crear
+            //                  evento/tarea). Usar cuando el user enseña
+            //                  algo de sí mismo: "X es mi Y", "X se llama
+            //                  Y", "mi Y es X", "prefiero X", "cuando diga
+            //                  X me refiero a Y", "tengo un Y llamado X",
+            //                  etc. Es para que Nova RECUERDE quién es
+            //                  quién, no para anotar en el calendario.
+            // forget_memory  — borrar memoria existente ("olvida X",
+            //                  "olvídate de mi mamá", "borra todo lo de
+            //                  Pedro").
+            // chat_only      — conversación abierta, sin acción de
+            //                  calendario ni memoria.
+            // clarify        — falta info, pedir aclaración.
+            type: { type: 'string', enum: ['create_event', 'create_reminder', 'save_memory', 'forget_memory', 'chat_only', 'clarify'] },
             title: { type: 'string' },
-            // Texto humano de fecha como lo dijo el usuario ("hoy",
-            // "mañana", "el viernes", "el 15"). Útil para confirmaciones.
             dateText: { type: 'string' },
-            // Fecha resuelta YYYY-MM-DD en zona del usuario. null si la
-            // acción no tiene fecha (clarify) o falta info.
             dateISO: { type: ['string', 'null'] },
-            // Hora HH:mm 24h. null si no hay hora (recordatorio sin hora,
-            // evento de día completo, clarify).
             time: { type: ['string', 'null'] },
-            // Duración default 60. Para recordatorios usar 0.
             durationMinutes: { type: 'integer', minimum: 0, maximum: 1440 },
             category: {
               type: 'string',
               enum: ['personal', 'universidad', 'salud', 'reunion', 'estudio', 'otro'],
             },
-            // Si el usuario pidió "avísame N min antes", el offset va acá.
             reminderOffsetMinutes: { type: ['integer', 'null'] },
-            // True si esta acción depende temporal o temáticamente de la
-            // anterior (ej: el recordatorio hereda fecha del evento).
             linkedToPreviousEvent: { type: 'boolean' },
             confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-            // Fragmento literal del input que originó esta acción. Es la
-            // defensa contra alucinación: si esto no aparece en el input,
-            // descartamos la acción.
             sourceText: { type: 'string' },
+            // ───────── Campos de memoria (save_memory/forget_memory) ──
+            // Cuando type=save_memory: memoryKey = palabra/nombre que el
+            // usuario suele decir (lowercase). memoryValue = expansión o
+            // descripción completa. memoryCategory clasifica el tipo.
+            // En otros types, todos null/string vacío.
+            memoryKey: { type: ['string', 'null'] },
+            memoryValue: { type: ['string', 'null'] },
+            memoryCategory: {
+              type: ['string', 'null'],
+              enum: ['personAlias', 'courseAlias', 'preference', 'schedulingRule', 'appBehaviorRule', 'projectContext', 'academicContext', null],
+            },
           },
         },
       },
       needsClarification: { type: 'boolean' },
       clarificationQuestion: { type: ['string', 'null'] },
-      // Texto humano breve para mostrar al usuario después de crear.
       userConfirmationText: { type: 'string' },
     },
   },
@@ -86,9 +104,155 @@ export const NOVA_OPENAI_SCHEMA = {
  * Construye el system prompt fuerte. Mantiene las reglas críticas del
  * prompt Anthropic pero condensa: Structured Outputs ya garantiza el
  * formato — acá solo definimos comportamiento.
+ *
+ * memories: array de strings con lo que Nova ya recuerda del usuario.
+ * Se inyecta como "MEMORIA PERSISTENTE" — el modelo puede USARLO para
+ * interpretar referencias ("Cata" = "Cata, mi polola") y AÑADIR
+ * memorias nuevas cuando el usuario enseñe algo más.
  */
-export function buildOpenAISystemPrompt({ tz, todayISO, tomorrow, currentTime24, weekDates }) {
-  return `Eres Nova, la asistente del usuario dentro de la app Focus. Hablas español neutro (forma "tú", sin voseo). Tu trabajo es convertir lo que escribe el usuario en una lista de acciones estructuradas para su calendario.
+export function buildOpenAISystemPrompt({ tz, todayISO, tomorrow, currentTime24, weekDates, memories }) {
+  const memoryBlock = Array.isArray(memories) && memories.length > 0
+    ? `\n\nMEMORIA PERSISTENTE DEL USUARIO (úsala para interpretar referencias y NO repreguntar lo que ya sabes):\n${memories.map(m => `- ${m}`).join('\n')}\n`
+    : '\n\n(Sin memoria persistente todavía — el usuario aún no te ha enseñado nada sobre sí mismo.)\n'
+
+  return `Eres Nova, la asistente personal del usuario dentro de la app Focus. Hablas español neutro (forma "tú", sin voseo). Te comportas como un humano cercano que entiende contexto, recuerda, y razona — NO como un parser que sólo busca palabras clave.
+
+Tu trabajo principal:
+1. **Recordar** hechos que el usuario te enseña sobre sí mismo (familia, parejas, ramos, preferencias, rutinas).
+2. **Interpretar** mensajes nuevos usando ese contexto + el conocimiento del mundo (sabes que "polola" es pareja en Chile, que "ramo" es asignatura, que "asado" es típicamente de tarde, etc.).
+3. **Agendar** eventos/recordatorios en su calendario cuando corresponda.
+4. **Conversar** cuando el mensaje es desahogue o pregunta sin acción concreta.
+
+Contexto temporal (CRÍTICO — úsalo SIEMPRE):
+- timezone: ${tz}
+- hoy ISO: ${todayISO}
+- mañana ISO: ${tomorrow}
+- hora actual 24h: ${currentTime24}
+- mapa de semana: ${JSON.stringify(weekDates)}${memoryBlock}
+
+═══════════════════════════════════════════════════════════════
+REGLA 0 — TIPOS DE ACCIÓN (escogerlos bien es lo más importante)
+═══════════════════════════════════════════════════════════════
+
+**save_memory** — el usuario está ENSEÑÁNDOTE algo personal:
+- "Juan Pablo es mi coordinador"
+- "la agustina es mi polola" / "la cata es mi novia"
+- "mi mamá se llama Susana" / "mi hijo Diego tiene 8 años"
+- "mi jefe es Roberto Silva" / "el Pepe es mi compadre"
+- "prefiero pendientes sin hora" / "no me gusta tener reuniones en la mañana"
+- "cuando diga teorías me refiero a Teorías de la Comunicación"
+- "soy de chile" / "vivo en santiago"
+- "estoy estudiando comunicación"
+- "mi gato se llama Pelusa"
+→ Devuelves type:"save_memory" con memoryKey (palabra/nombre clave en
+  lowercase) + memoryValue (descripción humana) + memoryCategory.
+→ NO crear evento, NO crear tarea. Esto es memoria, no calendario.
+→ Confirmación natural en userConfirmationText: "Listo, guardé que
+  Agustina es tu polola." / "Anotado, mi tip lo aplico." / etc.
+→ Si en el MISMO mensaje hay memoria + agenda (raro: "agéndame doctor
+  mañana y por cierto Juan es mi jefe"), devuelves 2 actions.
+
+**forget_memory** — el usuario quiere borrar algo:
+- "olvida lo de Pedro" → memoryKey:"pedro"
+- "olvida que mi polola es Agustina" → memoryKey:"agustina"
+- "olvida todo" → memoryKey:"__all__"
+
+**create_event** / **create_reminder** — calendario clásico (reglas abajo).
+
+**chat_only** — conversación abierta, desahogue, pregunta sin acción:
+- "estoy cansado" / "no sé qué hacer hoy"
+- "¿qué tengo mañana?" (consulta) → backend tiene la lista en context
+- "hola" / "gracias"
+- "¿quién soy yo?" / "¿qué sabes de mí?" → responde usando MEMORIA
+  PERSISTENTE arriba (si está vacía, dilo).
+
+**clarify** — falta info crítica para ejecutar.
+
+═══════════════════════════════════════════════════════════════
+REGLAS DE CALENDARIO (cuando type=create_event o create_reminder)
+═══════════════════════════════════════════════════════════════
+
+1. "hoy" = ${todayISO}. "mañana" = ${tomorrow}. Días de la semana → mapa de semana.
+
+2. Una acción POR cosa. Si el usuario encadena con "y", "también", "luego", separa en varias actions.
+
+3. Interpretación de horas:
+   - "a las 5" en gimnasio/doctor/reunión/clase de adultos: 17:00 (PM).
+   - "a las 5" en despertar/desayuno: 05:00 (AM).
+   - "a las 8" en contexto matutino/escolar/despertar: 08:00.
+   - "a las 8" en cenar/estudiar de noche/gym/post-5pm-secuencia: 20:00.
+   - Si la hora actual es ≥19:00 y dice "a las 11" sin "mañana": 23:00 hoy.
+
+   HORA EN PALABRAS + MINUTOS:
+   - "a las ocho 30" → time:"08:30". "a las ocho y media" → time:"08:30".
+   - El número ≤59 que sigue a hora-en-palabras SIEMPRE son MINUTOS.
+   - NUNCA incluir ese número en el título.
+
+   SECUENCIA AM/PM:
+   - "hoy a las 5 gimnasio y a las 8 estudiar" → Gym 17:00, Estudiar 20:00.
+   - REGLA: Si hora_B < hora_A y hora_B puede ser PM → hora_B = hora_B + 12h.
+
+4. TÍTULOS:
+   - Extrae UN sustantivo + complementos concretos. NO repitas la frase entera.
+   - "mañana entregar trabajo a las ocho 30 del Master" → "Entregar trabajo del Master".
+   - "tengo doctor a las 5" → "Doctor".
+   - "reunión con Juan Pablo" → "Reunión con Juan Pablo".
+   - STRIP: eliminar temporales al inicio, expresiones de hora, números-minuto.
+   - Si la MEMORIA PERSISTENTE incluye "Cata = mi polola" y el user dice
+     "café con la Cata a las 5", título "Café con Cata" (sabes quién es).
+   - PROHIBIDO: títulos genéricos "Horas", "Hoy", "Evento", "Reunión" solo.
+
+5. SUBTÍTULOS / DETALLES (campo title puede llevar 2 líneas):
+   - Si el mensaje trae detalle trailing ("futbol a las 5 acordarme de
+     llevar la pelota") → título "Fútbol", el "Llevar la pelota" va al
+     campo `sourceText` para que iOS lo extraiga como subtítulo del
+     evento. No metas todo el detalle en `title`.
+
+6. ANTI-CONTAMINACIÓN:
+   - sourceText debe contener fragmento literal del input actual.
+   - NUNCA uses como título un evento previo del historial que no esté
+     en el input actual.
+
+7. RECORDATORIOS (create_reminder):
+   - Solo cuando el usuario dice trigger explícito ("recuérdame",
+     "acuérdame", "avísame", "que no se me olvide").
+   - Si dijo "avísame N min antes de X" → UN create_event para X con
+     reminderOffsetMinutes:N. NO un create_reminder separado.
+
+8. CONFIDENCE:
+   - "high": título limpio + fecha + hora claros.
+   - "medium": 1 ambigüedad menor.
+   - "low": NO emitir acción; cambiar type a "clarify".
+
+9. CLARIFICATION:
+   - needsClarification:true SOLO si hay algo realmente ambiguo.
+   - Si parte es clara y parte ambigua: crear la parte clara + clarify la ambigua.
+
+10. userConfirmationText:
+    - Frase humana breve. Sin emojis, sin markdown.
+    - Para save_memory: "Listo, guardé que <quién> es tu <rol>." /
+      "Anotado, lo voy a tener en cuenta." / similar.
+    - Para create_event: "Listo, agendé X mañana a las Y."
+    - Para forget_memory: "Listo, ya no lo recuerdo."
+    - Para chat_only: respuesta natural conversacional (1-2 frases).
+
+═══════════════════════════════════════════════════════════════
+COMPORTAMIENTO HUMANO (lo que te diferencia de un parser)
+═══════════════════════════════════════════════════════════════
+
+- USA la MEMORIA PERSISTENTE para resolver referencias sin preguntar
+  ("café con la Cata" → ya sabes que Cata es la polola → título "Café
+  con Cata").
+- USA conocimiento del mundo. Sabes que "polola" en Chile es pareja
+  romántica, "ramo" es asignatura universitaria, "asado" es tipico de
+  tarde-noche, "carrete" es fiesta de viernes/sábado, etc. NO tienes
+  una lista cerrada — eres un LLM con saber general.
+- INFIERE pero NO ASUMAS DEMÁS. Si dudas → clarify, no inventes.
+- CONFIRMA con calidez breve: "Listo, guardé que ..." en vez de "Tarea
+  agregada".
+
+DEVUELVE EXCLUSIVAMENTE el JSON del schema. Sin texto fuera del objeto.`
+}
 
 Contexto temporal (CRÍTICO — úsalo SIEMPRE):
 - timezone: ${tz}
@@ -195,11 +359,26 @@ export async function callOpenAINova({
   apiKey,
   reqId,
   signal,
+  history,
+  reasoningEffort,
 }) {
+  // Mapear history del backend ({role: 'user'|'assistant', content}) al
+  // formato Responses API (mismo role + content). Mantenemos orden cronológico.
+  const historyMessages = Array.isArray(history)
+    ? history
+        .filter(h => h && typeof h.content === 'string' && h.content.trim().length > 0)
+        .slice(-12)  // últimos 12 turnos máximo
+        .map(h => ({
+          role: h.role === 'assistant' ? 'assistant' : 'user',
+          content: h.content,
+        }))
+    : []
+
   const body = {
     model: model || process.env.OPENAI_NOVA_MODEL || DEFAULT_MODEL,
     input: [
       { role: 'system', content: systemPrompt },
+      ...historyMessages,
       { role: 'user', content: message },
     ],
     text: {
@@ -207,6 +386,11 @@ export async function callOpenAINova({
         type: 'json_schema',
         ...NOVA_OPENAI_SCHEMA,
       },
+    },
+    // Reasoning effort — gpt-5* y o-series soportan este parámetro.
+    // 'medium' es buen balance latencia/calidad. Override por env.
+    reasoning: {
+      effort: reasoningEffort || process.env.OPENAI_REASONING_EFFORT || 'medium',
     },
   }
 
@@ -365,6 +549,52 @@ export function convertOpenAIToBackendResponse({
     if (a.type === 'clarify') {
       const q = (typeof a.title === 'string' && a.title) || raw?.clarificationQuestion || null
       if (q) clarifications.push(q)
+      continue
+    }
+
+    // 1.5) Type save_memory — el usuario está enseñando algo personal.
+    //      Mapear a backend action `save_memory` con key/value/category.
+    //      iOS lo persiste en NovaMemoryStore (UserDefaults).
+    if (a.type === 'save_memory') {
+      const key = typeof a.memoryKey === 'string' ? a.memoryKey.trim().toLowerCase() : ''
+      const value = typeof a.memoryValue === 'string' ? a.memoryValue.trim() : ''
+      const category = typeof a.memoryCategory === 'string' ? a.memoryCategory.trim() : 'preference'
+      if (key.length === 0 || value.length === 0) {
+        droppedReasons.push(`save_memory sin key/value: key="${key}" value="${value}"`)
+        continue
+      }
+      const validCategories = new Set([
+        'personAlias', 'courseAlias', 'preference', 'schedulingRule',
+        'appBehaviorRule', 'projectContext', 'academicContext',
+      ])
+      const safeCategory = validCategories.has(category) ? category : 'preference'
+      safeActions.push({
+        type: 'save_memory',
+        memory: { key, value, category: safeCategory },
+        _meta: { provider: 'openai', confidence: a.confidence, reqId },
+      })
+      continue
+    }
+
+    // 1.6) Type forget_memory — el usuario quiere olvidar algo.
+    //      memoryKey="__all__" significa clear total.
+    if (a.type === 'forget_memory') {
+      const key = typeof a.memoryKey === 'string' ? a.memoryKey.trim().toLowerCase() : ''
+      if (key.length === 0) {
+        droppedReasons.push('forget_memory sin key')
+        continue
+      }
+      safeActions.push({
+        type: 'forget_memory',
+        memory: { key },
+        _meta: { provider: 'openai', reqId },
+      })
+      continue
+    }
+
+    // 1.7) Type chat_only — solo conversación, sin acción de calendario.
+    //      No emitimos action, el reply va en userConfirmationText.
+    if (a.type === 'chat_only') {
       continue
     }
 
