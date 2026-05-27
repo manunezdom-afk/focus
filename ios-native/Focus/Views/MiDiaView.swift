@@ -1081,9 +1081,24 @@ struct MiDiaView: View {
         case .annotateTaskCorrection, .annotateDependency:
             // Corrección/dependencia sobre tareas locales por fuzzy match.
             return true
-        case .createEvent, .createTask:
-            // Solo si el local resolvió un follow-up con pending activo —
-            // significa que estaba completando una pregunta previa.
+        case .createEvent(let title, let when, _, _, _, _, _):
+            // Fast path Mi Día: si el parser local extrajo título Y fecha,
+            // confiamos y short-circuit el backend. Antes solo se permitía
+            // con pending activo — eso hacía que "reunión a las 5" viajara
+            // al backend, que terminaba preguntando "¿qué día?" aunque el
+            // contexto de Mi Día implica hoy. Bug reportado 2026-05-27.
+            // El normalizer garantiza título limpio; `when != nil` confirma
+            // que extractDateTime ya resolvió (hora sin fecha → hoy).
+            if when != nil && !NovaActionNormalizer.cleanTitle(title).isEmpty {
+                return true
+            }
+            return store.novaContext.pendingIsActive
+        case .createTask(let title, _, _, _):
+            // Fast path: tareas con título no vacío resuelven local en
+            // microsegundos. Misma regla que sendNovaMessage del chat.
+            if !NovaActionNormalizer.cleanTitle(title).isEmpty {
+                return true
+            }
             return store.novaContext.pendingIsActive
         default:
             return false

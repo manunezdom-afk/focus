@@ -3014,6 +3014,23 @@ enum NovaActionNormalizerTests {
                  expectedKind: K.reminder, expectedHour: 10, expectedHasEndHour: false,
                  mustNotInventEndTime: true, isCritical: false,
                  notes: "evento recurrente lunes 10 con acuérdame — debe expandir todas las semanas, no solo 1"))
+        // Casos del bug Mi Día reportado 2026-05-27: hora sin fecha → hoy, no preguntar
+        cases.append(Case(id: 56, input: "reunión de mindfulness con cristina a las 5",
+                 expectedKind: K.event, expectedHasEndHour: false,
+                 expectedDay: D.today, mustNotInventEndTime: true, isCritical: true,
+                 notes: "Mi Día: hora 5 sin fecha → HOY 17:00, no preguntar"))
+        cases.append(Case(id: 57, input: "reunión con cristina a las 5",
+                 expectedKind: K.event, expectedHasEndHour: false,
+                 expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
+                 notes: "hora sin fecha → hoy"))
+        cases.append(Case(id: 58, input: "recuérdame llamar a cristina a las 5",
+                 expectedKind: K.reminder, expectedHasEndHour: false,
+                 expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
+                 notes: "reminder hora sin fecha → hoy"))
+        cases.append(Case(id: 59, input: "tengo que salir al cumpleaños de Urrutia a las 8",
+                 expectedKind: K.event, expectedHasEndHour: false,
+                 expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
+                 notes: "título debe ser Cumpleaños Urrutia, no Salir; hoy"))
         var out = "===== NOVA 50-CASE VALIDATION =====\n"
         out += "Fecha: \(Date())\n\n"
         var passCount = 0
@@ -3059,9 +3076,10 @@ enum NovaActionNormalizerTests {
             let pass = problems.isEmpty
             if pass {
                 passCount += 1
-                rows.append(String(format: "  %2d ✓ PASS | %@ → %@ h=%@ end=%@ day=%@",
+                rows.append(String(format: "  %2d ✓ PASS | %@ → %@ title=%@ h=%@ end=%@ day=%@",
                                    c.id, c.input,
                                    String(describing: actualKind),
+                                   first?.title ?? "",
                                    String(describing: actualHour),
                                    String(describing: actualEndHour),
                                    String(describing: actualDay)))
