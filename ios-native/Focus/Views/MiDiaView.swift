@@ -3067,6 +3067,19 @@ private struct TimelineEventRow: View {
                         .foregroundStyle(Theme.Colors.textPrimary)
                         .lineLimit(2)
 
+                    // Subtítulo / detalle (ej. "Llevar la pelota") debajo del
+                    // título, en peso secundario. Solo se muestra si existe.
+                    // No se renderiza espacio si subtitle es nil → la card no
+                    // crece innecesariamente para eventos simples.
+                    if let subtitle = event.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(density.metaFont)
+                            .foregroundStyle(Theme.Colors.textSecondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     HStack(spacing: 4) {
                         Image(systemName: event.section.symbol)
                             .font(.system(size: density == .spacious ? 12 : 11))

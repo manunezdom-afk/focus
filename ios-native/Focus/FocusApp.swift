@@ -16,7 +16,8 @@ struct FocusApp: App {
         let testFlag = ProcessInfo.processInfo.environment["FOCUS_RUN_TESTS"]
         let argRunAll = CommandLine.arguments.contains("--run-nova-tests")
         let argRun50 = CommandLine.arguments.contains("--run-nova-50")
-        if testFlag != nil || argRunAll || argRun50 {
+        let argRunSubtitle50 = CommandLine.arguments.contains("--run-subtitle-50")
+        if testFlag != nil || argRunAll || argRun50 || argRunSubtitle50 {
             if let docs = FileManager.default.urls(
                 for: .documentDirectory, in: .userDomainMask
             ).first {
@@ -26,12 +27,18 @@ struct FocusApp: App {
                 )
             }
 
-            // Flag "50" → ejecuta validation 50 casos; "1" o default →
-            // ejecuta runAll() (suite completa preexistente).
+            // Flag "subtitle50" → suite del user spec 2026-05-27 (50 casos
+            // con expectativa de subtitle).
+            // Flag "50" → suite anterior (kind/hour/end-time).
+            // Flag "1" o default → runAll() legacy.
+            let runSubtitle50 = (testFlag == "subtitle50") || argRunSubtitle50
             let runFiftyOnly = (testFlag == "50") || argRun50
             let result: String
             let outName: String
-            if runFiftyOnly {
+            if runSubtitle50 {
+                result = NovaActionNormalizerTests.runValidationSubtitle50Cases()
+                outName = "focus-validation-subtitle50.log"
+            } else if runFiftyOnly {
                 result = NovaActionNormalizerTests.runValidation50Cases()
                 outName = "focus-validation-50.log"
             } else {

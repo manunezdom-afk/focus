@@ -55,6 +55,24 @@ enum NovaActionNormalizer {
         return reminderTriggers.contains { lower.contains($0) }
     }
 
+    /// True cuando `userText` empieza con un trigger de recordatorio.
+    /// Más restrictivo que `isReminderTrigger`: solo cuenta si el trigger
+    /// es la PRIMERA palabra significativa. Usado para distinguir:
+    ///   - "recuérdame a las 5 llevar la pelota" → SÍ es reminder
+    ///   - "futbol a las 5 acordarme de llevar la pelota" → NO es reminder
+    ///     (trigger mid-sentence + detail extraído como subtítulo)
+    static func startsWithReminderTrigger(in userText: String) -> Bool {
+        let lower = userText.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return reminderTriggers.contains { trigger in
+            // Match al inicio + boundary (espacio/puntuación o fin).
+            guard lower.hasPrefix(trigger) else { return false }
+            let after = lower.dropFirst(trigger.count)
+            return after.isEmpty || after.first?.isWhitespace == true
+                || after.first?.isPunctuation == true
+        }
+    }
+
     /// Verbos que implican una **acción puntual** y se tratan como
     /// recordatorio (sin duración + notificación si toggle activo)
     /// aunque el usuario no haya dicho "acuérdame".
@@ -69,7 +87,14 @@ enum NovaActionNormalizer {
     ///     inventado. Si el usuario quiere bloquear "almuerzo con Pedro de
     ///     1 a 3" puede usar "de N a M" y se respeta el endTime explícito.
     private static let punctualVerbPattern: String =
-        #"\b(despertar(me|te|se|nos|los)?|despertame|despertarnos|despierto|despierta|levantar(me|te|se|nos|los)?|levantame|levantarnos|levanto|levanta|amanecer|amanezca|amanezco|comer|comerme|comida|cenar|cena|cenamos|almorzar|almuerzo|almorzamos|desayunar|desayuno|desayunamos|merendar|merienda|tomar\s+once)\b"#
+        // ACCIONES verbales (despertar/comer/cenar/...) — verbo en forma
+        // de acción, sugiere momento puntual.
+        // Después del user spec 2026-05-27 NO incluimos los sustantivos
+        // (comida|cena|almuerzo|desayuno|merienda) porque "almuerzo con
+        // mi papá a las 2" debe ser EVENTO con subtítulo, no recordatorio
+        // puntual. "Comer a las 7" sigue siendo reminder porque el verbo
+        // 'comer' es claramente acción puntual sin contexto de duración.
+        #"\b(despertar(me|te|se|nos|los)?|despertame|despertarnos|despierto|despierta|levantar(me|te|se|nos|los)?|levantame|levantarnos|levanto|levanta|amanecer|amanezca|amanezco|comer|comerme|cenar|cenamos|almorzar|almorzamos|desayunar|desayunamos|merendar|tomar\s+once)\b"#
 
     /// True cuando el texto contiene un verbo puntual (despertar/levantar/
     /// amanecer/comer/cenar/almorzar/desayunar/merendar). Estos verbos
@@ -482,7 +507,7 @@ enum NovaActionNormalizer {
             //     frecuentes en eventos sociales/profesionales. NO incluye
             //     "casa/oficina/trabajo" porque ya van por la regla 3b-ter
             //     (location stripping cuando hay verbo de movimiento).
-            #"^\s*(salir|ir|me\s+voy|me\s+salgo|voy|vamos)\s+(al?|a\s+la|a\s+los|a\s+las)\s+(?=(cumplea[ñn]os|fiesta|reuni[oó]n|matrimonio|boda|funeral|entrenamiento|clase|clases|concierto|partido|cena|almuerzo|cita|m[eé]dico|doctor|dentista|peluquer[ií]?a?|gym|gimnasio|hospital|cl[ií]nica|misa|onom[aá]stico|aeropuerto|mall|cine|teatro|consulta|consultorio))\b"#,
+            #"^\s*(salir|ir|me\s+voy|me\s+salgo|voy|vamos)\s+(al?|a\s+la|a\s+los|a\s+las)\s+(?=(cumplea[ñn]os|cumple|fiesta|reuni[oó]n|matrimonio|boda|funeral|entrenamiento|clase|clases|concierto|partido|cena|almuerzo|cita|m[eé]dico|doctor|dentista|peluquer[ií]?a?|gym|gimnasio|hospital|cl[ií]nica|misa|onom[aá]stico|aeropuerto|mall|cine|teatro|consulta|consultorio|farmacia|supermercado|banco|kiosko|kiosco|f[eé]ria))\b"#,
             // 5. "Seguir + [gerund]" → strip "seguir" para dejar el verbo
             //    activo ("seguir trabajando" → "trabajando"). Apunta al
             //    caso del user: "tengo que seguir trabajando con focus"
@@ -614,6 +639,151 @@ enum NovaActionNormalizer {
         //     idiomático. Whitelist conservadora para evitar romper
         //     palabras no-verbales que terminen en -ando/-iendo.
         result = stripGerunds(in: result)
+
+        // 8d. Normalizar "cumple/cumpleaños de (la|el)? Person" →
+        //     "cumple/cumpleaños Person". Drop del conector "de"/"de la"/
+        //     "de el" + capitaliza la persona. Preserva la palabra del
+        //     usuario (cumple vs cumpleaños).
+        //
+        //     Ejemplos (user spec 2026-05-27):
+        //       "cumpleaños de Urrutia" → "Cumpleaños Urrutia"
+        //       "cumple de la Cata"     → "Cumple Cata"
+        //       "cumpleaños del Pedro"  → "Cumpleaños Pedro"
+        if let regex = try? NSRegularExpression(
+            pattern: #"\b(cumple(?:años|anos)?)\s+de(?:l)?(?:\s+(?:la|el))?\s+([a-záéíóúñA-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ]+)\b"#,
+            options: [.caseInsensitive]
+        ) {
+            let ns = result as NSString
+            let matches = regex.matches(in: result, range: NSRange(location: 0, length: ns.length))
+            for match in matches.reversed() {
+                guard match.numberOfRanges >= 3 else { continue }
+                let activity = ns.substring(with: match.range(at: 1))
+                let person = ns.substring(with: match.range(at: 2))
+                let personCap = person.prefix(1).uppercased() + person.dropFirst()
+                result = (result as NSString)
+                    .replacingCharacters(in: match.range, with: "\(activity) \(personCap)")
+            }
+        }
+
+        // 8e. "con/a mi|tu|su Family" → "con/a Family". User spec:
+        //     "almuerzo con mi papá" → "Almuerzo con papá"
+        //     "llamar a mi mamá" → "Llamar a mamá"
+        //     El posesivo es redundante cuando el sustantivo familiar lo
+        //     implica. Whitelist conservadora para no tocar otros sustantivos.
+        result = result.replacingOccurrences(
+            of: #"\b(con|a)\s+(?:mi|tu|su|nuestro|nuestra)\s+(pap[aá]|mam[aá]|hermano|hermana|hijo|hija|padre|madre|abuelo|abuela|t[ií]o|t[ií]a|primo|prima|esposo|esposa|novio|novia|polola|pololo|amigo|amiga|jefe|jefa)\b"#,
+            with: "$1 $2",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        // 8f. Capitalizar palabras tras "con " y "a " que parezcan nombres
+        //     propios (lowercase + ≥3 letras), excluyendo sustantivos comunes
+        //     y artículos. User spec:
+        //       "reunión con cristina" → "Reunión con Cristina"
+        //       "llamar a cristina"    → "Llamar a Cristina"
+        //
+        //     Lista de exclusión: artículos, números, pronombres, sustantivos
+        //     genéricos que aparecen tras "con/a" pero no son nombres.
+        let nameCapSkipList: Set<String> = [
+            "las", "los", "una", "uno", "casa", "oficina", "trabajo", "pega",
+            "pieza", "jardin", "jardín", "patio", "escuela", "colegio",
+            "liceo", "gimnasio", "gym", "consulta", "consultorio",
+            "farmacia", "supermercado", "banco", "mall", "cine", "teatro",
+            "comer", "salir", "ir", "ver", "comprar", "hacer", "estudiar",
+            "trabajar", "hablar", "cargar", "leer", "escribir", "tomar",
+            "almorzar", "cenar", "desayunar", "merendar", "dormir",
+            "despertar", "levantar", "mediodía", "mediodia", "tarde",
+            "noche", "mañana", "manana", "siesta", "dos", "tres", "cuatro",
+            "cinco", "seis", "siete", "ocho", "nueve", "diez", "once",
+            "doce", "trece", "catorce", "quince", "veinte", "treinta",
+            "pap", "mam", "papá", "mamá", "papa", "mama", "hermano",
+            "hermana", "hijo", "hija", "padre", "madre", "abuelo", "abuela",
+            "tío", "tía", "tio", "tia", "primo", "prima", "esposo", "esposa",
+            "novio", "novia", "polola", "pololo", "amigo", "amiga", "jefe",
+            "jefa", "pelota", "botines", "agua", "audífonos", "audifonos",
+            "regalo", "copete", "bebidas", "cartas", "computador", "pauta",
+            "antes", "ortografía", "ortografia", "certificado", "radiografía",
+            "radiografia", "exámenes", "examenes", "proyecto", "postre",
+            "libro", "bugs", "subtítulos", "subtitulos", "testflight",
+            "carnet", "leche", "remedios", "pelota", "pan", "mail",
+            "matemática", "matematica", "historia", "lenguaje", "redacción",
+            "redaccion", "teorías", "teorias", "comunicación", "comunicacion",
+            "portafolio", "mindfulness", "focus", "nova",
+        ]
+        let nameCapPatterns: [String] = [
+            #"\bcon\s+([a-záéíóúñ])([a-záéíóúñ]{2,})\b"#,
+            #"\ba\s+([a-záéíóúñ])([a-záéíóúñ]{2,})\b"#,
+        ]
+        for pattern in nameCapPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+                let ns = result as NSString
+                let matches = regex.matches(in: result, range: NSRange(location: 0, length: ns.length))
+                for match in matches.reversed() {
+                    guard match.numberOfRanges >= 3 else { continue }
+                    let firstLetter = ns.substring(with: match.range(at: 1))
+                    let rest = ns.substring(with: match.range(at: 2))
+                    let fullWord = (firstLetter + rest).lowercased()
+                    if nameCapSkipList.contains(fullWord) { continue }
+                    // Preserva el prefijo (con/a) y separador — solo cambia
+                    // la inicial del sustantivo.
+                    let prefixRange = NSRange(
+                        location: match.range.location,
+                        length: match.range(at: 1).location - match.range.location
+                    )
+                    let prefixStr = ns.substring(with: prefixRange)
+                    result = (result as NSString).replacingCharacters(
+                        in: match.range,
+                        with: "\(prefixStr)\(firstLetter.uppercased())\(rest)"
+                    )
+                }
+            }
+        }
+
+        // 8g. Strip trailing detail action chain. Cuando un verbo de detalle
+        //     ("llevar", "comprar", "hablar", etc.) aparece DESPUÉS de
+        //     contenido sustantivo en el título, lo strippeamos — el
+        //     detalle se re-extrae como subtítulo vía
+        //     `extractEventDetail(from: userText)`.
+        //
+        //     Casos del user spec 2026-05-27:
+        //       "futbol llevar la pelota"  → "futbol"
+        //       "supermercado comprar leche" → "supermercado"
+        //       "trabajar en Nova arreglar subtítulos" → "trabajar en Nova"
+        //
+        //     Anclaje en `^...$` + non-greedy en el prefijo garantiza que se
+        //     captura solo cuando el verbo viene PRECEDIDO por contenido.
+        //     "comprar pan" sin contenido antes NO matchea (es el título).
+        if let regex = try? NSRegularExpression(
+            pattern: "^(\\S+(?:\\s+\\S+){0,15}?)\\s+(?:\(detailActionVerbs)|no\\s+olvidar(?:me)?)\\s+\\S+(?:\\s+\\S+)*$",
+            options: [.caseInsensitive]
+        ) {
+            let ns = result as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            if let match = regex.firstMatch(in: result, range: range),
+               match.numberOfRanges >= 2 {
+                let prefix = ns.substring(with: match.range(at: 1))
+                let trimmedPrefix = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedPrefix.isEmpty {
+                    result = trimmedPrefix
+                }
+            }
+        }
+
+        // 8h. Strip "por el tema (de) X" trailing — capturado como subtítulo
+        //     prefijado "Tema X" por extractEventDetail.
+        result = result.replacingOccurrences(
+            of: #"\s+por\s+el\s+tema(?:\s+de)?\s+\S+(?:\s+\S+)*$"#,
+            with: " ",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        // 8i. Re-collapse después de strips 8d-8h.
+        result = result
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 9. Capitalize primera letra del título si no lo está.
         guard let firstChar = result.first else { return "" }
@@ -951,68 +1121,193 @@ enum NovaActionNormalizer {
 
     // MARK: - Subtitle / contexto semántico
 
-    /// Intenta separar un título en `(activityTitle, contextSubtitle)`
-    /// usando el patrón "ACTIVIDAD de CONTEXTO" o "ACTIVIDAD con PERSONA".
-    /// Ejemplos:
-    ///   "Reunión a las 8 de mindfulness" → ("Reunión", "Mindfulness")
-    ///   "Clase de teorías"                → ("Clase", "Teorías")
-    ///   "Prueba de historia"              → ("Prueba", "Historia")
-    ///   "Cumpleaños de Urrutia"           → ("Cumpleaños", "Urrutia")
-    ///   "Entrega de portafolio"           → ("Entrega", "Portafolio")
-    ///   "Reunión con Juan"                → ("Reunión", "Juan")
+    /// Separa un título en `(activityTitle, contextSubtitle)` cuando empieza
+    /// con "reunión" + " de " + tópico. Caso de uso del user spec:
+    ///   "Reunión de mindfulness con Cristina" → ("Reunión", "Mindfulness con Cristina")
     ///
-    /// Devuelve nil si no hay separador claro o si el split queda con
-    /// alguna parte vacía. NO usar para títulos simples — el caller
-    /// puede dejar el título original si esta función devuelve nil.
+    /// IMPORTANTE — restricciones de diseño:
+    /// - **Solo "reunión"/"reunion"** dispara split. Cualquier otra palabra
+    ///   de actividad ("clase", "prueba", "entrega", "almuerzo", ...) deja
+    ///   el "de X" pegado al título ("Clase de redacción", "Prueba de
+    ///   teorías", "Almuerzo con papá") — match al spec del usuario donde
+    ///   ese "de X" identifica al evento, no es contexto separable.
+    /// - " con " **nunca** es separador. "Reunión con Cristina" se conserva
+    ///   como un solo título.
+    /// - "Cumpleaños de Person" se normaliza en `cleanTitle` (drop "de"),
+    ///   no acá. Por eso "Cumpleaños Urrutia" llega ya como un solo bloque
+    ///   y este método devuelve nil.
     ///
-    /// Sustantivos "actividad" reconocidos como Title: reunión, clase,
-    /// prueba, parcial, examen, final, entrega, cumpleaños, almuerzo,
-    /// cena, desayuno, taller, charla, sesión, evento, llamada,
-    /// conferencia, ensayo, presentación, entrevista. Si el inicio del
-    /// título matches uno de esos + " de " o " con ", split.
+    /// El detalle trailing ("acordarme de llevar la pelota", "hablar de
+    /// mindfulness", "comprar regalo") se extrae por separado vía
+    /// `extractEventDetail(from: userText)` — esta función NO lo maneja.
     static func splitTitleSubtitle(_ rawTitle: String) -> (title: String, subtitle: String)? {
-        let activityWords: [String] = [
-            "reunión", "reunion", "clase", "prueba", "parcial", "examen",
-            "final", "entrega", "cumpleaños", "cumpleanos", "almuerzo",
-            "cena", "desayuno", "taller", "charla", "sesión", "sesion",
-            "evento", "llamada", "conferencia", "ensayo", "presentación",
-            "presentacion", "entrevista"
-        ]
         let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let lower = trimmed.lowercased()
-        // Detectar palabra de actividad al INICIO (puede ir con artículo
-        // tras: "la reunión", "el cumpleaños"). Strip artículos.
-        var startWord: String? = nil
-        for word in activityWords {
-            if lower.hasPrefix(word) || lower.hasPrefix("la \(word)") ||
-               lower.hasPrefix("el \(word)") || lower.hasPrefix("una \(word)") ||
-               lower.hasPrefix("un \(word)") {
-                startWord = word
-                break
-            }
+        // Solo "reunión"/"reunion" — con o sin artículo opcional. Otras
+        // actividades quedan intactas (ver doc).
+        let triggers = ["reunión", "reunion", "la reunión", "la reunion",
+                        "una reunión", "una reunion"]
+        guard let trigger = triggers.first(where: { lower.hasPrefix($0) }) else {
+            return nil
         }
-        guard let word = startWord else { return nil }
-        // Buscar " de " o " con " después del activity word.
-        // Capturar todo lo que va después como subtítulo.
-        let patterns = [" de ", " con "]
-        for separator in patterns {
-            if let range = lower.range(of: separator) {
-                let afterIdx = range.upperBound
-                let subtitleRaw = String(trimmed[afterIdx...])
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !subtitleRaw.isEmpty else { continue }
-                // Validación: el subtítulo no debe contener marcadores
-                // temporales que pertenezcan al título original (ej. "las
-                // 8" en "Reunión a las 8 de mindfulness" — el "a las 8"
-                // debería haber sido strippeado por cleanTitle antes).
-                // Mantener subtítulo conservador.
-                let titleCleaned = word.prefix(1).uppercased() + word.dropFirst()
-                let subtitleCleaned = subtitleRaw.prefix(1).uppercased() + subtitleRaw.dropFirst()
-                return (String(titleCleaned), String(subtitleCleaned))
-            }
+        // Necesitamos " de " DESPUÉS del trigger.
+        let afterTriggerStart = lower.index(lower.startIndex, offsetBy: trigger.count)
+        let afterTrigger = lower[afterTriggerStart...]
+        guard let deRange = afterTrigger.range(of: " de ") else { return nil }
+        let absoluteAfterDe = lower.index(deRange.upperBound, offsetBy: 0)
+        let subtitleRaw = String(trimmed[absoluteAfterDe...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !subtitleRaw.isEmpty else { return nil }
+        // Subtítulo no debe ser solo un artículo o conector residual.
+        let lowSub = subtitleRaw.lowercased()
+        if ["la", "el", "los", "las", "un", "una"].contains(lowSub) { return nil }
+        let titleCap = "Reunión"
+        let subtitleCap = subtitleRaw.prefix(1).uppercased() + subtitleRaw.dropFirst()
+        return (titleCap, String(subtitleCap))
+    }
+
+    // MARK: - Detalle / subtítulo trailing extraído del userText
+
+    /// Verbos de acción que típicamente describen un DETALLE anclado a un
+    /// evento (no son el título del evento mismo). Cuando uno de estos
+    /// aparece DESPUÉS de un marcador de hora o tras un trigger de
+    /// recordatorio, capturamos verbo+complemento como subtítulo.
+    ///
+    /// Lista derivada del user spec (test 50-case): llevar, comprar, traer,
+    /// preparar, hablar, imprimir, estudiar, revisar, pedir, arreglar,
+    /// mandar, hacer, firmar, entregar, enviar, sacar, cargar, recoger,
+    /// terminar, finalizar.
+    private static let detailActionVerbs: String =
+        "llevar|llevarme|comprar|comprarme|traer|traerme|preparar|prepararme|hablar|imprimir|estudiar|revisar|revisarme|pedir|pedirme|arreglar|arreglarme|mandar|mandarme|hacer|firmar|entregar|entregarme|enviar|enviarme|sacar|sacarme|cargar|recoger|terminar|finalizar"
+
+    /// Extrae el detalle trailing del `userText` original y devuelve:
+    /// - `strippedText`: userText sin el span del detalle (útil si el
+    ///   parser llamó a este método para reconstruir el título).
+    /// - `detail`: el subtítulo limpio, capitalizado, o `nil` si no hay
+    ///   match.
+    ///
+    /// Patrones que detecta (en orden de prioridad):
+    /// 1. **Trigger explícito + acción** —
+    ///    `acuérdame de llevar X`, `acordarme de comprar X`, `recordarme
+    ///    de traer X`, `avísame de hablar de X`.
+    /// 2. **"no olvidar / no te olvides / que no se me olvide" + acción** —
+    ///    `no olvidar exámenes`, `no te olvides de llevar X`.
+    /// 3. **"por el tema (de) X"** — `por el tema mindfulness` →
+    ///    `Tema mindfulness`. Se prefija "Tema" para que el subtítulo
+    ///    se lea natural y respete la convención del spec.
+    /// 4. **Verbo de detalle trailing sin trigger** — `llevar X` /
+    ///    `comprar X` / etc. al FINAL del texto, siempre y cuando haya
+    ///    contenido sustantivo antes (heurística: el verbo no puede
+    ///    estar en la posición 0, debe haber al menos un sustantivo o
+    ///    marcador de hora antes). Esto cubre "futbol a las 5 llevar
+    ///    la pelota" sin requerir trigger explícito.
+    ///
+    /// Notas:
+    /// - "estudiar antes" se captura como detail aunque no haya "X" después.
+    /// - Conserva mayúsculas/minúsculas del original (no fuerza lowercase).
+    /// - Si el match cubre "todo" el userText (no queda título antes),
+    ///   devuelve `(userText, nil)` — eso significa que ESE verbo es el
+    ///   evento, no el detalle (ej. "comprar regalo" solo).
+    static func extractEventDetail(from userText: String) -> (strippedText: String, detail: String?) {
+        let lower = userText.lowercased()
+        let originalNS = userText as NSString
+        let lowerNS = lower as NSString
+        let fullRange = NSRange(location: 0, length: lowerNS.length)
+
+        // Patrón 1 — trigger explícito + acción (captura verbo+rest).
+        let triggerPattern = "\\b(?:acu[eé]rdame|acordarme|recu[eé]rdame|recordarme|recordame|av[ií]same|acu[eé]rdate)\\s+de\\s+((?:\(detailActionVerbs)|no\\s+olvidar(?:me)?)\\s+[^.,;!?]+?)\\s*(?:$|[.,;!?])"
+        // Patrón 2 — "no olvides / que no se me olvide" + acción.
+        let noOlvidesPattern = "\\b(?:no\\s+(?:te\\s+)?olvides|que\\s+no\\s+se\\s+me\\s+olvide)(?:\\s+de)?\\s+((?:\(detailActionVerbs))\\s+[^.,;!?]+?)\\s*(?:$|[.,;!?])"
+        // Patrón 3 — "no olvidar X" como verbo de detalle directo.
+        let noOlvidarPattern = "\\b(no\\s+olvidar(?:me)?\\s+[^.,;!?]+?)\\s*(?:$|[.,;!?])"
+        // Patrón 4 — "por el tema (de) X" → prefijo "Tema".
+        let temaPattern = "\\bpor\\s+el\\s+tema(?:\\s+de)?\\s+(.+?)\\s*(?:$|[.,;!?])"
+        // Patrón 5 — verbo trailing sin trigger (requiere contenido antes).
+        // El `.{1,400}?` non-greedy + `\\s+\\S+` asegura ≥1 palabra antes.
+        let trailingVerbPattern = "\\S+.{1,400}?\\s+((?:\(detailActionVerbs))\\s+[^.,;!?]+?)\\s*(?:$|[.,;!?])"
+
+        // Orden importa — más específico primero.
+        struct Attempt {
+            let pattern: String
+            let prefix: String?  // si != nil, prepend al detail capturado
+            let captureIdx: Int
         }
-        return nil
+        let attempts: [Attempt] = [
+            Attempt(pattern: triggerPattern, prefix: nil, captureIdx: 1),
+            Attempt(pattern: noOlvidesPattern, prefix: nil, captureIdx: 1),
+            Attempt(pattern: noOlvidarPattern, prefix: nil, captureIdx: 1),
+            Attempt(pattern: temaPattern, prefix: "Tema", captureIdx: 1),
+            Attempt(pattern: trailingVerbPattern, prefix: nil, captureIdx: 1),
+        ]
+
+        for attempt in attempts {
+            guard let regex = try? NSRegularExpression(pattern: attempt.pattern, options: [.caseInsensitive]) else { continue }
+            guard let match = regex.firstMatch(in: lower, range: fullRange),
+                  match.numberOfRanges > attempt.captureIdx,
+                  match.range(at: attempt.captureIdx).location != NSNotFound else { continue }
+
+            let captureRange = match.range(at: attempt.captureIdx)
+            let rawCapture = originalNS.substring(with: captureRange)
+            let cleanedCapture = cleanEventDetail(rawCapture)
+            guard !cleanedCapture.isEmpty else { continue }
+
+            let detail: String
+            if let pref = attempt.prefix {
+                // "Tema" + sustantivo en minúscula ("Tema banco", "Tema mindfulness").
+                let lowerCapture = cleanedCapture.prefix(1).lowercased() + cleanedCapture.dropFirst()
+                detail = "\(pref) \(lowerCapture)"
+            } else {
+                detail = cleanedCapture
+            }
+
+            // Stripped: conservamos todo lo que va ANTES del detalle (la
+            // posición del capture group). Sin esto, patrones tipo
+            // `\S+.{1,400}?\s+(llevar X)` matchean desde el inicio y
+            // dejan strippedText vacío. Mantener el prefijo permite que
+            // `adjustAmPm` (que usa strippedText para detectHourContext)
+            // siga viendo el contexto del título principal ("gimnasio",
+            // "terapia", "doctor"), no solo el detalle.
+            let captureLoc = captureRange.location
+            let stripped: String = {
+                guard captureLoc > 0 else { return "" }
+                let prefix = originalNS.substring(to: captureLoc)
+                return prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+            }()
+            let collapsed = stripped
+                .components(separatedBy: .whitespacesAndNewlines)
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+
+            return (collapsed, detail)
+        }
+
+        return (userText, nil)
+    }
+
+    /// Limpia el texto extraído como detalle. Capitaliza primera letra,
+    /// elimina puntuación trailing, conserva mayúsculas/acentos internos.
+    private static func cleanEventDetail(_ raw: String) -> String {
+        var d = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip "de " inicial si quedó huérfano (caso raro tras regex).
+        if d.lowercased().hasPrefix("de ") {
+            d = String(d.dropFirst(3))
+        }
+        // Strip fillers comunes.
+        let fillers = [#"\bpor favor\b"#, #"\bporfa(vor)?\b"#]
+        for pattern in fillers {
+            d = d.replacingOccurrences(of: pattern, with: " ",
+                                       options: [.regularExpression, .caseInsensitive])
+        }
+        d = d.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let first = d.first, first.isLowercase {
+            d = first.uppercased() + d.dropFirst()
+        }
+        return d
     }
 
     // MARK: - Reminder offsets ("X minutos antes")

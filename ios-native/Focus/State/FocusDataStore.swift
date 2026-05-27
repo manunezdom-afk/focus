@@ -1272,6 +1272,31 @@ enum NovaResponder {
                 }
             }
             if looksLikeOffset { continue }
+            // Excepción adicional (user spec 2026-05-27): si el trigger va
+            // seguido de "de <verbo-de-detalle>" (llevar/comprar/traer/etc.)
+            // o de "no olvidar X", entonces es un DETALLE del evento previo,
+            // NO una acción separada. Caso central:
+            //   "futbol a las 5 acordarme de llevar la pelota"
+            //     → seg1 evento Fútbol + subtítulo "Llevar la pelota"
+            //   debe quedar como UN solo ítem, no dos.
+            //
+            // El extractor `NovaActionNormalizer.extractEventDetail` re-captura
+            // ese mismo span desde el `userText` original para usarlo como
+            // subtitle del evento principal.
+            let detailVerbAlt = "llevar(?:me)?|comprar(?:me)?|traer(?:me)?|preparar(?:me)?|hablar|imprimir|estudiar|revisar(?:me)?|pedir(?:me)?|arreglar(?:me)?|mandar(?:me)?|hacer|firmar|entregar(?:me)?|enviar(?:me)?|sacar(?:me)?|cargar|recoger|terminar|finalizar"
+            let detailFollowupPatterns: [String] = [
+                "^\\s*de\\s+(?:\(detailVerbAlt))\\s+",
+                "^\\s*(?:no\\s+olvidar(?:me)?)\\s+",
+                "^\\s*por\\s+el\\s+tema\\b",
+            ]
+            var looksLikeDetail = false
+            for pattern in detailFollowupPatterns {
+                if rightLower.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil {
+                    looksLikeDetail = true
+                    break
+                }
+            }
+            if looksLikeDetail { continue }
             // Inserta marker justo antes del trigger.
             let resultNs = result as NSString
             result = resultNs.replacingCharacters(
@@ -1918,11 +1943,50 @@ enum NovaResponder {
             "preparar ", "revisar ", "leer ", "escribir ",
             "mandar ", "enviar ", "pagar ", "ordenar ", "limpiar ",
             // Agregados 2026-05-26 (50-case validation: 13, 15, 20):
-            "hacer ", "avisar ", "avisarle ", "subir ", "bajar ",
+            "hacer ", "avisar ", "avisarle ", "subir ",
             "terminar ", "entregar ", "buscar ", "armar ",
             "mandarle ", "enviarle ", "decirle ", "contarle "
+            // NOTA (2026-05-27): "bajar " removido — extractAfter usa
+            // búsqueda de substring (no word-bounded), por lo que "bajar "
+            // matchea dentro de "trabajar en …" → seccion 7 toma el verbo
+            // incorrecto y descarta "trabajar" del título. "Bajar" como
+            // chore es raro; los pocos casos los maneja la sección 8.
         ]
-        if let title = extractAfter(trimmed, triggers: choreVerbs) {
+        // Pre-check (user spec 2026-05-27): si el chore verb está al FINAL
+        // como detalle de un evento previo ("cumpleaños de Urrutia a las 8
+        // comprar regalo"), NO lo usemos como verbo principal — el
+        // `extractEventDetail` ya lo capturará como subtítulo y queremos
+        // que la sección 8 (evento puntual con hora) extraiga el título
+        // verdadero ("Cumpleaños Urrutia"). Sin este guard, la sección 7
+        // se quedaba con "Comprar regalo" como evento y perdía el evento real.
+        //
+        // Salvaguarda: SOLO skip cuando hay HORA EXACTA. Sin hora exacta
+        // (solo franja "en la tarde"), el chore verb ES el evento principal
+        // (la franja no construye un evento horario). Caso #28 legacy:
+        // "hoy en la tarde estudiar para la prueba" → task estudiar, NO
+        // clarify por falta de título.
+        let shouldSkipChoreVerbs: Bool = {
+            guard NovaActionNormalizer.extractEventDetail(from: trimmed).detail != nil else {
+                return false
+            }
+            guard hasExactTimeMarker(lower) else { return false }
+            let lowerForChore = trimmed.lowercased()
+            for verb in choreVerbs {
+                if let rng = lowerForChore.range(of: verb) {
+                    let prefixCount = lowerForChore[..<rng.lowerBound]
+                        .components(separatedBy: .whitespaces)
+                        .filter { !$0.isEmpty }
+                        .count
+                    // ≥2 palabras antes del chore verb = es detalle, no
+                    // verbo principal. "comprar pan" (0 palabras antes) →
+                    // chore verb principal. "supermercado a las 7 comprar
+                    // leche" (4 palabras antes) → detalle.
+                    if prefixCount >= 2 { return true }
+                }
+            }
+            return false
+        }()
+        if !shouldSkipChoreVerbs, let title = extractAfter(trimmed, triggers: choreVerbs) {
             if title.isEmpty { return .clarify(reason: .taskNeedsTitle) }
             let when = extractDateTime(from: lower)
             // Usar hora **exacta** (no franja). "hoy en la tarde estudiar"
@@ -3487,7 +3551,12 @@ enum NovaResponder {
     /// va al inicio del texto y la siguiente palabra es una letra simple.
     private static func stripLeadingArticle(_ text: String) -> String {
         let lower = text.lowercased()
-        for article in ["la ", "el ", "las ", "los "] {
+        // Solo singular ("la "/"el ") — son típicos de nombres propios
+        // coloquiales ("la Cata", "el Juan") que normalizamos a sin
+        // artículo. "los"/"las" SE CONSERVAN porque suelen ir con
+        // sustantivos comunes plurales ("los cabros", "las tías") que
+        // pierden naturalidad si se les quita el artículo.
+        for article in ["la ", "el "] {
             if lower.hasPrefix(article) {
                 let dropped = String(text.dropFirst(article.count))
                 return capitalizeFirst(dropped)
@@ -3677,8 +3746,27 @@ enum NovaResponder {
     /// "a la agustina" → "a Agustina"; "con el carlos" → "con Carlos".
     /// Conservador — solo casos donde el artículo precede a palabra
     /// minúscula simple (sin números ni puntuación).
+    ///
+    /// Preposiciones soportadas: "a", "con", "de", "para". Excluye "por"
+    /// porque típicamente introduce CONTEXTO sustantivo común ("por el
+    /// tema", "por la mañana", "por el trabajo"), no nombre propio.
+    /// Si capitalizamos esos casos rompemos el step 8h que strippea
+    /// "por el tema X" como detalle.
+    ///
+    /// Sustantivos comunes que NO son nombres propios (skip-list) —
+    /// evita "a Comer", "a Tema", "con Casa" del contexto coloquial.
+    private static let nonProperNounsAfterArticle: Set<String> = [
+        "tema", "trabajo", "casa", "oficina", "universidad", "colegio",
+        "escuela", "liceo", "facu", "facultad", "gym", "gimnasio",
+        "comida", "almuerzo", "cena", "desayuno", "merienda", "once",
+        "comer", "almorzar", "cenar", "desayunar",
+        "mañana", "manana", "tarde", "noche", "mediodía", "mediodia",
+        "proyecto", "ramo", "curso", "clase", "clases", "prueba",
+        "tarea", "tareas", "examen", "parcial", "final", "entrega"
+    ]
+
     private static func normalizeProperNounsAfterArticles(_ text: String) -> String {
-        let pattern = #"\b(a|con|de|para|por) (la|las|el|los) ([a-záéíóúñ]+)\b"#
+        let pattern = #"\b(a|con|de|para) (la|las|el|los) ([a-záéíóúñ]+)\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return text
         }
@@ -3692,6 +3780,8 @@ enum NovaResponder {
             let nounRange = match.range(at: 3)
             let prep = ns.substring(with: prepRange)
             let noun = ns.substring(with: nounRange)
+            // Skip si el sustantivo es común (no nombre propio).
+            if nonProperNounsAfterArticle.contains(noun.lowercased()) { continue }
             let capitalized = noun.prefix(1).uppercased() + noun.dropFirst()
             let replacement = "\(prep) \(capitalized)"
             result = (result as NSString).replacingCharacters(in: match.range, with: replacement)
@@ -3700,11 +3790,20 @@ enum NovaResponder {
     }
 
     private static func stripLocationMarker(_ text: String) -> String {
-        // " en <X>" hasta fin o coma/punto. Lo quitamos del título.
+        // " en <X>" hasta fin o coma/punto. Lo quitamos del título — PERO
+        // solo cuando X empieza en MINÚSCULA. Si empieza en mayúscula
+        // ("Nova", "Google", "Slack"), es típicamente un nombre propio /
+        // producto que forma parte del título, no una ubicación física
+        // ("trabajar en Nova" debe quedar como título "Trabajar en Nova",
+        // no "Trabajar"). User spec 2026-05-27.
+        //
+        // Lookahead `(?=[a-záéíóúñ])` exige el primer carácter del noun
+        // después de "en " en minúsculas. Sin case-insensitive flag para
+        // que la lookahead respete la caja real.
         text.replacingOccurrences(
-            of: #" en [^.,;\n]+"#,
+            of: #" en (?=[a-záéíóúñ])[^.,;\n]+"#,
             with: "",
-            options: [.regularExpression, .caseInsensitive]
+            options: [.regularExpression]
         )
     }
 
@@ -3780,20 +3879,16 @@ enum NovaResponder {
         if let (h, m) = hm {
             let start = cal.startOfDay(for: base)
             base = cal.date(bySettingHour: h, minute: m, second: 0, of: start) ?? start
-            // Política V1: si NO se dio día explícito, mantenemos **HOY** aun
-            // si la hora ya pasó. Es más predecible que adivinar
-            // (martes 12 · 03:00 era el bug). El usuario corrige con
-            // "no, mañana" usando contexto.
+            // Política Mi Día (user spec 2026-05-27): si NO se dio día
+            // explícito, mantenemos HOY aunque la hora ya haya pasado.
+            // "dentista a las 9" a las 17:00 → hoy 09:00 (en pasado),
+            // no mañana 09:00. La timeline muestra "TERMINADO" para
+            // pasados pero el ítem queda en el día correcto. Si el
+            // usuario quiere mañana, dice "mañana a las 9".
             //
-            // Solo bumpeamos si la hora pasó *y* el verbo no implica algo
-            // inminente, *y* el offset es muy grande (>4h). Eso captura
-            // "a las 9" tipeado a la 1am (claramente quería 9am).
-            if !dayWasExplicit, base <= now {
-                let gap = now.timeIntervalSince(base)  // segundos en el pasado
-                if !isImminentActivity(lower), gap > 14_400 {  // > 4 horas
-                    base = cal.date(byAdding: .day, value: 1, to: base) ?? base
-                }
-            }
+            // Removido el bump-to-tomorrow cuando gap > 4h — generaba
+            // sorpresa para el caso típico de eventos cotidianos
+            // (dentista, asado, cumpleaños) tras la hora actual.
             return base
         }
         // Día sin hora explícita: si el usuario nombró una FRANJA HORARIA
@@ -4183,6 +4278,16 @@ enum NovaResponder {
     /// que toma `Date()` real.
     static func adjustAmPm(hour: Int, in text: String, currentHour: Int) -> Int {
         guard hour <= 12 else { return hour }
+        // User spec 2026-05-27: el SUBTÍTULO (parte trailing capturada por
+        // `extractEventDetail`) NO debe influir en AM/PM del evento
+        // principal. Caso real: "terapia a las 6 hablar de la universidad"
+        // — la "universidad" en el detalle fuerza forceAM por la regla
+        // school context y resulta en 06:00 cuando el usuario espera
+        // 18:00 (terapia es PM context). Strippeamos el detalle antes
+        // de pasar a detectHourContext.
+        let workingText = NovaActionNormalizer
+            .extractEventDetail(from: text)
+            .strippedText
 
         // 1) AM explícito.
         if text.range(of: #"\b\d{1,2}\s*(am|a\.m\.)\b"#, options: .regularExpression) != nil
@@ -4197,15 +4302,21 @@ enum NovaResponder {
             return hour == 12 ? 12 : hour + 12
         }
 
-        // 3) Verb context override antes de la regla coloquial.
-        switch detectHourContext(in: text) {
+        // 3) Verb context override antes de la regla coloquial. Usa el
+        //    texto SIN el detalle trailing — eso evita que palabras del
+        //    subtítulo ("hablar de la universidad" → "universidad" como
+        //    school context) fuercen AM cuando el evento principal
+        //    ("terapia") implica PM.
+        switch detectHourContext(in: workingText) {
         case .forceAM:
             // School/morning override SOLO aplica a horas típicas de mañana
             // (6-12). Para 1-5, la frase "clase a las 1:30" suele ser una
             // clase de TARDE — no debe colapsar a 01:30. En esos casos
             // dejamos pasar a la regla coloquial 1-7 → PM más abajo.
             if hour >= 6 && hour <= 12 {
-                let amHour = (hour == 12) ? 0 : hour
+                // "Clase a las 12" → 12:00 NOON, no 00:00 medianoche.
+                // Sólo cuando el usuario dice "12 am" explícito caemos a 0.
+                let amHour = (hour == 12) ? 12 : hour
                 // ──────────────────────────────────────────────────────
                 // FUTURE-FIRST OVERRIDE (Caso F del spec):
                 // "hoy tengo clase a las 7" a las 14:00 → 19:00, NO 07:00.
@@ -4341,11 +4452,17 @@ enum NovaResponder {
         //    - fútbol/partido/futbol → casi siempre tarde (los matches AM
         //      son raros y el usuario los marcaría con "am" explícito)
         //    - "salida"/"trago"/"copas"/"after"/"bar" → tarde-noche
+        //    - Eventos sociales con hora coloquial: cumpleaños/cumple/fiesta/
+        //      asado/junta/cena/comida/almuerzo (cuando se nombra como SUSTANTIVO,
+        //      no como verbo) → tarde/noche. User spec 2026-05-27.
+        //    - Citas: doctor/terapia/médico → tarde por defecto. NO incluye
+        //      dentista (típicamente 9 AM) ni psiquiatra (cubierto por
+        //      regla coloquial 1-7 → PM cuando aplica).
         //
         //    Mantener la lista corta y solo cubre verbos cuyo significado
         //    temporal en español rioplatense/chileno es claramente vespertino.
         //    Bug fix beta: "recuérdame dormir a las 11" caía como 11:00 AM.
-        let pmContextPattern = #"\b(dormir|durmiendo|duermo|duerme|acostar(me|te|se|nos)?|gym|gimnasio|entrenar|entrenando|entrenamiento|f[uú]tbol|futbol|partido|correr|trotar|running|salir\s+a\s+correr|salir\s+a\s+trotar)\b"#
+        let pmContextPattern = #"\b(dormir|durmiendo|duermo|duerme|acostar(me|te|se|nos)?|gym|gimnasio|entrenar|entrenando|entrenamiento|f[uú]tbol|futbol|partido|correr|trotar|running|salir\s+a\s+correr|salir\s+a\s+trotar|cumplea[nñ]os|cumple|fiesta|carrete|previa|asado|junta|cena|comida|almuerzo|caf[eé]|doctor|doctora|m[eé]dico|m[eé]dica|terapia|aniversario)\b"#
         if lower.range(of: pmContextPattern, options: .regularExpression) != nil {
             return .forcePM
         }
@@ -6008,9 +6125,26 @@ final class FocusDataStore: ObservableObject {
             resolvedNotes = nil
         }
 
-        // Subtitle: si el cleanedTitle contiene "ACTIVIDAD de CONTEXTO",
-        // split en (title, subtitle). Mismo trato que applyLocalNovaIntent.
+        // Subtitle: dos fuentes posibles, en orden de prioridad:
+        //   1. Detalle trailing extraído del userText
+        //      (ej. "futbol a las 5 acordarme de llevar la pelota" →
+        //       subtitle "Llevar la pelota"). Esto cubre la mayoría
+        //       de los casos del user spec 2026-05-27.
+        //   2. Split del title si empieza con "reunión de X"
+        //      (ej. "Reunión de mindfulness con Cristina" → title
+        //       "Reunión", subtitle "Mindfulness con Cristina").
+        //
+        //   Si ambos aplican (raro pero posible), gana el detalle
+        //   trailing y se descarta el split (porque el detalle es
+        //   más específico — viene del propio texto del usuario).
+        let trailingDetail = NovaActionNormalizer
+            .extractEventDetail(from: userText).detail
         let (finalTitle, finalSubtitle): (String, String?) = {
+            if let detail = trailingDetail {
+                // Si el cleanedTitle es solo "Reunión" tras strip del detalle,
+                // mantenemos como tal. El detalle gana como subtítulo.
+                return (cleanedTitle, detail)
+            }
             if let split = NovaActionNormalizer.splitTitleSubtitle(cleanedTitle) {
                 return (split.title, split.subtitle)
             }
@@ -6739,13 +6873,23 @@ final class FocusDataStore: ObservableObject {
             let cleanedTitle = NovaActionNormalizer.cleanTitle(rawTitle)
             guard !cleanedTitle.isEmpty else { return nil }
 
-            // PASO 1.5: separar título / subtítulo si el patrón "X de Y"
-            // matchea. "Reunión de mindfulness" → title=Reunión,
-            // subtitle=Mindfulness. Mantiene contexto sin saturar la
-            // primera línea visible en Mi Día. Si no matchea (título
-            // simple), subtitle queda nil y el comportamiento es igual
-            // que antes.
+            // PASO 1.5: resolver subtítulo. Dos fuentes (prioridad arriba):
+            //   1. Detalle trailing del userText
+            //      ("futbol a las 5 acordarme de llevar la pelota" →
+            //       subtitle "Llevar la pelota"). Es la fuente principal
+            //       en post-2026-05-27 para no perder contexto humano.
+            //   2. Split "Reunión de X" del cleanedTitle
+            //      ("Reunión de mindfulness con Cristina" → title
+            //       "Reunión", subtitle "Mindfulness con Cristina").
+            //
+            //   Si ambos existen, el detalle trailing gana porque proviene
+            //   directamente del texto del usuario y suele ser más rico.
+            let trailingDetail = NovaActionNormalizer
+                .extractEventDetail(from: userText).detail
             let (title, eventSubtitle): (String, String?) = {
+                if let detail = trailingDetail {
+                    return (cleanedTitle, detail)
+                }
                 if let split = NovaActionNormalizer.splitTitleSubtitle(cleanedTitle) {
                     return (split.title, split.subtitle)
                 }
@@ -6755,9 +6899,26 @@ final class FocusDataStore: ObservableObject {
             // PASO 2: isReminder unificado — del intent (wantsReminder)
             // O detectado en userText (trigger explícito "acuérdame" o
             // verbo puntual implícito tipo "despertarme/levantarme").
-            let isReminderHint = wantsReminder
-                || NovaActionNormalizer.isReminderTrigger(in: userText)
-                || NovaActionNormalizer.impliesPunctualReminder(in: userText)
+            //
+            // Detail-aware suppression (user spec 2026-05-27):
+            //   - Si el userText EMPIEZA con trigger ("recuérdame …") →
+            //     reminder (intención explícita).
+            //   - Si NO empieza con trigger pero hay `trailingDetail` →
+            //     el trigger mid-sentence fue consumido por la extracción
+            //     → NO se marca el evento como reminder (caso "futbol a
+            //     las 5 acordarme de llevar la pelota": evento Fútbol +
+            //     subtítulo Llevar la pelota, NO recordatorio).
+            //   - Si no hay detail → comportamiento clásico (cualquier
+            //     trigger o verbo puntual marca reminder).
+            let isReminderHint: Bool = {
+                if NovaActionNormalizer.startsWithReminderTrigger(in: userText) {
+                    return true
+                }
+                if trailingDetail != nil { return false }
+                return wantsReminder
+                    || NovaActionNormalizer.isReminderTrigger(in: userText)
+                    || NovaActionNormalizer.impliesPunctualReminder(in: userText)
+            }()
 
             // PASO 3: endTime via normalizer (centralizado).
             let endResolution = NovaActionNormalizer.resolveEndTime(

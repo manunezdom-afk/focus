@@ -2650,6 +2650,12 @@ enum NovaActionNormalizerTests {
         /// Permite testear que un mismo bloque conserva su offset sin
         /// crearse como ítem duplicado.
         let reminderOffsetMinutes: Int?
+        /// Subtítulo / detalle anclado al evento. Resuelto con la misma
+        /// lógica que usa `applyLocalNovaIntent`:
+        /// 1º `extractEventDetail` (trailing detail del userText), si no
+        /// hay → 2º `splitTitleSubtitle` (split "reunión de X"), si no
+        /// hay → nil.
+        let subtitle: String?
     }
 
     enum DayLabel: String, Equatable {
@@ -2662,23 +2668,54 @@ enum NovaActionNormalizerTests {
     /// que el test pueda chequear ese resultado también.
     private static func runPipeline(_ text: String) -> [ParsedAction] {
         let intents = NovaResponder.parseAll(text)
+        // Detalle trailing del userText — resuelto una vez por input para
+        // que TODOS los intents (createEvent, createTask) compartan el
+        // mismo subtítulo si aplica. Coincide con la lógica que usan
+        // `applyLocalNovaIntent.createEvent` y `makeEvent` (backend).
+        let trailingDetail = NovaActionNormalizer.extractEventDetail(from: text).detail
         return intents.compactMap { intent -> ParsedAction? in
             switch intent {
             case let .createEvent(rawTitle, when, explicitEnd, _, section, wantsReminder, _):
-                let title = NovaActionNormalizer.cleanTitle(rawTitle)
+                let cleanedTitle = NovaActionNormalizer.cleanTitle(rawTitle)
+                // Subtítulo: detalle trailing > split "Reunión de X" > nil.
+                let (resolvedTitle, resolvedSubtitle): (String, String?) = {
+                    if let detail = trailingDetail {
+                        return (cleanedTitle, detail)
+                    }
+                    if let split = NovaActionNormalizer.splitTitleSubtitle(cleanedTitle) {
+                        return (split.title, split.subtitle)
+                    }
+                    return (cleanedTitle, nil)
+                }()
                 let hour = when.map { Calendar.current.component(.hour, from: $0) }
                 let minute = when.map { Calendar.current.component(.minute, from: $0) }
                 let endHour = explicitEnd.map { Calendar.current.component(.hour, from: $0) }
                 let day = dayLabel(for: when)
-                let reminder = wantsReminder
-                    || NovaActionNormalizer.isReminderTrigger(in: text)
-                    || NovaActionNormalizer.impliesPunctualReminder(in: text)
+                // Detail-aware reminder suppression (user spec 2026-05-27):
+                //   - Si el texto EMPIEZA con trigger ("recuérdame ...") →
+                //     reminder kind (intención explícita del usuario).
+                //   - Si NO empieza con trigger pero hay trailingDetail →
+                //     el "acordarme" mid-sentence fue consumido por la
+                //     extracción → kind=event (el evento PRINCIPAL es lo
+                //     que va antes del trigger).
+                //   - Si no hay detail → comportamiento clásico (cualquier
+                //     trigger o verbo puntual marca reminder).
+                let reminder: Bool = {
+                    if NovaActionNormalizer.startsWithReminderTrigger(in: text) {
+                        return true
+                    }
+                    if trailingDetail != nil { return false }
+                    return wantsReminder
+                        || NovaActionNormalizer.isReminderTrigger(in: text)
+                        || NovaActionNormalizer.impliesPunctualReminder(in: text)
+                }()
                 let offset = NovaActionNormalizer.extractReminderOffset(from: text)
                 return ParsedAction(
                     kind: reminder ? .reminder : .event,
-                    title: title, hour: hour, minute: minute, endHour: endHour, day: day,
+                    title: resolvedTitle, hour: hour, minute: minute, endHour: endHour, day: day,
                     section: section, isReminder: reminder,
-                    reminderOffsetMinutes: offset
+                    reminderOffsetMinutes: offset,
+                    subtitle: resolvedSubtitle
                 )
             case let .createTask(rawTitle, dueDate, _, wantsReminder):
                 let title = NovaActionNormalizer.cleanTitle(rawTitle)
@@ -2691,19 +2728,22 @@ enum NovaActionNormalizerTests {
                 return ParsedAction(
                     kind: .task, title: title, hour: hour, minute: minute, endHour: nil, day: day,
                     section: nil, isReminder: reminder,
-                    reminderOffsetMinutes: nil
+                    reminderOffsetMinutes: nil,
+                    subtitle: trailingDetail
                 )
             case .clarify:
                 return ParsedAction(
                     kind: .clarify, title: "", hour: nil, minute: nil, endHour: nil, day: .none,
                     section: nil, isReminder: false,
-                    reminderOffsetMinutes: nil
+                    reminderOffsetMinutes: nil,
+                    subtitle: nil
                 )
             default:
                 return ParsedAction(
                     kind: .other, title: "", hour: nil, minute: nil, endHour: nil, day: .none,
                     section: nil, isReminder: false,
-                    reminderOffsetMinutes: nil
+                    reminderOffsetMinutes: nil,
+                    subtitle: nil
                 )
             }
         }
@@ -2933,9 +2973,9 @@ enum NovaActionNormalizerTests {
                  expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
                  notes: "7pm probable hoy"))
         cases.append(Case(id: 35, input: "hoy a las 9 terapia",
-                 expectedKind: K.event, expectedHour: 9, expectedHasEndHour: false,
+                 expectedKind: K.event, expectedHour: 21, expectedHasEndHour: false,
                  expectedDay: D.today, mustNotInventEndTime: true, isCritical: false,
-                 notes: "hoy 09:00 ó 21:00"))
+                 notes: "hoy 21:00 (terapia ahora va a PM context per user spec 2026-05-27)"))
         // ── multicomandos (parseAll devuelve >1) ─────────────────────
         cases.append(Case(id: 36, input: "mañana a las 6 tengo cumpleaños de Urrutia y comprar regalo",
                  expectedKind: K.event, expectedHour: 18, expectedHasEndHour: false,
@@ -3103,6 +3143,467 @@ enum NovaActionNormalizerTests {
             out += "✅ LISTO para TestFlight (≥45/50 sin críticos)\n"
         } else {
             out += "⚠️  NO LISTO (<45/50)\n"
+        }
+        out += "\n--- DETALLE POR CASO ---\n"
+        out += rows.joined(separator: "\n")
+        out += "\n===== END =====\n"
+        return out
+    }
+
+    // MARK: - 50-case validation SUBTITLE / detail extraction (2026-05-27)
+
+    /// Suite de 50 frases reales del user spec del 2026-05-27. Cada caso
+    /// chequea que Nova:
+    ///   - extrae correctamente el evento principal (kind, hora, día);
+    ///   - conserva el detalle/subtítulo como `subtitle` (NO lo pierde
+    ///     ni lo mete en el título);
+    ///   - normaliza "Cumpleaños de Person" → "Cumpleaños Person";
+    ///   - no convierte un evento con hora en recordatorio genérico.
+    ///
+    /// Cómo correr: setear `FOCUS_RUN_TESTS=subtitle50` (o agregar el arg
+    /// `--run-subtitle-50` al scheme) y lanzar la app. Resultado se
+    /// imprime y se guarda en `Documents/focus-validation-subtitle50.log`.
+    @discardableResult
+    static func runValidationSubtitle50Cases() -> String {
+        typealias K = ParsedKind
+        typealias D = DayLabel
+        struct Case {
+            let id: Int
+            let input: String
+            let expectedKind: K
+            /// Si != nil, comprueba que el título coincida exactamente
+            /// (case-insensitive). Si nil, no se chequea el título.
+            let expectedTitleLower: String?
+            /// Si != nil, comprueba que `subtitle` esté presente y empiece
+            /// con este texto (case-insensitive). Si nil, no se chequea.
+            /// Si == "" (vacío), comprueba que `subtitle` sea nil/vacío.
+            let expectedSubtitlePrefix: String?
+            let expectedHour: Int?
+            let expectedDay: D?
+            let notes: String
+
+            init(id: Int, input: String, expectedKind: K,
+                 expectedTitleLower: String?,
+                 expectedSubtitlePrefix: String?,
+                 expectedHour: Int? = nil,
+                 expectedDay: D? = nil,
+                 notes: String = "") {
+                self.id = id
+                self.input = input
+                self.expectedKind = expectedKind
+                self.expectedTitleLower = expectedTitleLower
+                self.expectedSubtitlePrefix = expectedSubtitlePrefix
+                self.expectedHour = expectedHour
+                self.expectedDay = expectedDay
+                self.notes = notes
+            }
+        }
+
+        var cases: [Case] = []
+        // ── 1-5: futbol/deporte con detail "llevar X" ────────────────
+        cases.append(Case(id: 1,
+            input: "futbol a las 5 acordarme de llevar la pelota",
+            expectedKind: K.event,
+            expectedTitleLower: "futbol",
+            expectedSubtitlePrefix: "llevar la pelota",
+            expectedHour: 17, expectedDay: D.today,
+            notes: "MAIN BUG: detail Llevar la pelota"))
+        cases.append(Case(id: 2,
+            input: "fútbol a las 5 llevar la pelota",
+            expectedKind: K.event,
+            expectedTitleLower: "fútbol",
+            expectedSubtitlePrefix: "llevar la pelota",
+            expectedHour: 17, expectedDay: D.today))
+        cases.append(Case(id: 3,
+            input: "partido a las 7 llevar botines",
+            expectedKind: K.event,
+            expectedTitleLower: "partido",
+            expectedSubtitlePrefix: "llevar botines",
+            expectedHour: 19, expectedDay: D.today))
+        cases.append(Case(id: 4,
+            input: "entrenamiento a las 6 llevar agua",
+            expectedKind: K.event,
+            expectedTitleLower: "entrenamiento",
+            expectedSubtitlePrefix: "llevar agua",
+            expectedHour: 18, expectedDay: D.today))
+        cases.append(Case(id: 5,
+            input: "gimnasio a las 8 llevar audífonos",
+            expectedKind: K.event,
+            expectedTitleLower: "gimnasio",
+            expectedSubtitlePrefix: "llevar audífonos",
+            expectedDay: D.today,
+            notes: "hour 8 o 20 según AM/PM"))
+        // ── 6-10: reunión / llamada con persona y/o tópico ───────────
+        cases.append(Case(id: 6,
+            input: "reunión de mindfulness con cristina a las 5",
+            expectedKind: K.event,
+            expectedTitleLower: "reunión",
+            expectedSubtitlePrefix: "mindfulness con cristina",
+            expectedHour: 17, expectedDay: D.today,
+            notes: "split reunión + subtítulo Mindfulness con Cristina"))
+        cases.append(Case(id: 7,
+            input: "mindfulness con cristina a las 5",
+            expectedKind: K.event,
+            expectedTitleLower: "mindfulness con cristina",
+            expectedSubtitlePrefix: "",
+            expectedHour: 17, expectedDay: D.today,
+            notes: "sin subtítulo"))
+        cases.append(Case(id: 8,
+            input: "reunión con cristina a las 5",
+            expectedKind: K.event,
+            expectedTitleLower: "reunión con cristina",
+            expectedSubtitlePrefix: "",
+            expectedHour: 17, expectedDay: D.today,
+            notes: "NO debe splitear con"))
+        cases.append(Case(id: 9,
+            input: "llamada con cristina a las 5 hablar de mindfulness",
+            expectedKind: K.event,
+            expectedTitleLower: "llamada con cristina",
+            expectedSubtitlePrefix: "hablar de mindfulness",
+            expectedHour: 17, expectedDay: D.today))
+        cases.append(Case(id: 10,
+            input: "llamar a cristina a las 5 por el tema mindfulness",
+            expectedKind: K.event,
+            expectedTitleLower: "llamar a cristina",
+            expectedSubtitlePrefix: "tema mindfulness",
+            expectedHour: 17, expectedDay: D.today,
+            notes: "por el tema → Tema mindfulness"))
+        // ── 11-15: cumpleaños / fiesta ───────────────────────────────
+        cases.append(Case(id: 11,
+            input: "cumpleaños de Urrutia a las 8 comprar regalo",
+            expectedKind: K.event,
+            expectedTitleLower: "cumpleaños urrutia",
+            expectedSubtitlePrefix: "comprar regalo",
+            expectedHour: 20, expectedDay: D.today,
+            notes: "drop 'de' en cumpleaños de Person"))
+        cases.append(Case(id: 12,
+            input: "salir al cumpleaños de Urrutia a las 8",
+            expectedKind: K.event,
+            expectedTitleLower: "cumpleaños urrutia",
+            expectedSubtitlePrefix: "",
+            expectedHour: 20, expectedDay: D.today,
+            notes: "strip 'salir al' + drop 'de'"))
+        cases.append(Case(id: 13,
+            input: "cumple de la Cata a las 9 llevar copete",
+            expectedKind: K.event,
+            expectedTitleLower: "cumple cata",
+            expectedSubtitlePrefix: "llevar copete",
+            expectedHour: 21, expectedDay: D.today,
+            notes: "drop 'de la' + capitalize Cata"))
+        cases.append(Case(id: 14,
+            input: "asado donde Juan a las 7 llevar bebidas",
+            expectedKind: K.event,
+            expectedTitleLower: "asado donde juan",
+            expectedSubtitlePrefix: "llevar bebidas",
+            expectedHour: 19, expectedDay: D.today))
+        cases.append(Case(id: 15,
+            input: "junta con los cabros a las 6 llevar cartas",
+            expectedKind: K.event,
+            expectedTitleLower: "junta con los cabros",
+            expectedSubtitlePrefix: "llevar cartas",
+            expectedHour: 18, expectedDay: D.today))
+        // ── 16-20: clase / prueba / entrega ──────────────────────────
+        cases.append(Case(id: 16,
+            input: "clase de contenidos digitales a las 10 llevar computador",
+            expectedKind: K.event,
+            expectedTitleLower: "clase de contenidos digitales",
+            expectedSubtitlePrefix: "llevar computador",
+            expectedHour: 10, expectedDay: D.today,
+            notes: "clase de X NO splitea"))
+        cases.append(Case(id: 17,
+            input: "clase de redacción a las 12 imprimir pauta",
+            expectedKind: K.event,
+            expectedTitleLower: "clase de redacción",
+            expectedSubtitlePrefix: "imprimir pauta",
+            expectedHour: 12, expectedDay: D.today))
+        cases.append(Case(id: 18,
+            input: "prueba de teorías a las 3 estudiar antes",
+            expectedKind: K.event,
+            expectedTitleLower: "prueba de teorías",
+            expectedSubtitlePrefix: "estudiar antes",
+            expectedHour: 15, expectedDay: D.today))
+        cases.append(Case(id: 19,
+            input: "entrega de portafolio a las 11 revisar ortografía",
+            expectedKind: K.event,
+            expectedTitleLower: "entrega de portafolio",
+            expectedSubtitlePrefix: "revisar ortografía",
+            expectedHour: 11, expectedDay: D.today))
+        cases.append(Case(id: 20,
+            input: "reunión con Juan Pablo a las 4 llevar certificado",
+            expectedKind: K.event,
+            expectedTitleLower: "reunión con juan pablo",
+            expectedSubtitlePrefix: "llevar certificado",
+            expectedHour: 16, expectedDay: D.today))
+        // ── 21-25: salud / personal ──────────────────────────────────
+        cases.append(Case(id: 21,
+            input: "psiquiatra a las 5 pedir certificado",
+            expectedKind: K.event,
+            expectedTitleLower: "psiquiatra",
+            expectedSubtitlePrefix: "pedir certificado",
+            expectedHour: 17, expectedDay: D.today))
+        cases.append(Case(id: 22,
+            input: "terapia a las 6 hablar de la universidad",
+            expectedKind: K.event,
+            expectedTitleLower: "terapia",
+            expectedSubtitlePrefix: "hablar de la universidad",
+            expectedHour: 18, expectedDay: D.today))
+        cases.append(Case(id: 23,
+            input: "dentista a las 9 llevar radiografía",
+            expectedKind: K.event,
+            expectedTitleLower: "dentista",
+            expectedSubtitlePrefix: "llevar radiografía",
+            expectedHour: 9, expectedDay: D.today))
+        cases.append(Case(id: 24,
+            input: "doctor a las 8 no olvidar exámenes",
+            expectedKind: K.event,
+            expectedTitleLower: "doctor",
+            expectedSubtitlePrefix: "no olvidar exámenes",
+            expectedDay: D.today,
+            notes: "hour 8 o 20"))
+        cases.append(Case(id: 25,
+            input: "almuerzo con mi papá a las 2 hablar del proyecto",
+            expectedKind: K.event,
+            expectedTitleLower: "almuerzo con papá",
+            expectedSubtitlePrefix: "hablar del proyecto",
+            expectedHour: 14, expectedDay: D.today,
+            notes: "strip 'mi' + subtitle Hablar del proyecto"))
+        // ── 26-30: comidas / sociales / trabajo ──────────────────────
+        cases.append(Case(id: 26,
+            input: "comida con mi mamá a las 8 llevar postre",
+            expectedKind: K.event,
+            expectedTitleLower: "comida con mamá",
+            expectedSubtitlePrefix: "llevar postre",
+            expectedHour: 20, expectedDay: D.today))
+        cases.append(Case(id: 27,
+            input: "café con la Cata a las 5 llevar libro",
+            expectedKind: K.event,
+            expectedTitleLower: "café con cata",
+            expectedSubtitlePrefix: "llevar libro",
+            expectedHour: 17, expectedDay: D.today))
+        cases.append(Case(id: 28,
+            input: "reunión Focus a las 6 revisar bugs",
+            expectedKind: K.event,
+            expectedTitleLower: "reunión focus",
+            expectedSubtitlePrefix: "revisar bugs",
+            expectedHour: 18, expectedDay: D.today))
+        cases.append(Case(id: 29,
+            input: "trabajar en Nova a las 7 arreglar subtítulos",
+            expectedKind: K.event,
+            expectedTitleLower: "trabajar en nova",
+            expectedSubtitlePrefix: "arreglar subtítulos",
+            expectedHour: 19, expectedDay: D.today))
+        cases.append(Case(id: 30,
+            input: "llamada con Claude a las 4 revisar TestFlight",
+            expectedKind: K.event,
+            expectedTitleLower: "llamada con claude",
+            expectedSubtitlePrefix: "revisar testflight",
+            expectedHour: 16, expectedDay: D.today))
+        // ── 31-36: con día diferente (mañana / día semana) ───────────
+        cases.append(Case(id: 31,
+            input: "mañana fútbol a las 5 llevar pelota",
+            expectedKind: K.event,
+            expectedTitleLower: "fútbol",
+            expectedSubtitlePrefix: "llevar pelota",
+            expectedHour: 17, expectedDay: D.tomorrow))
+        cases.append(Case(id: 32,
+            input: "mañana reunión con cristina a las 5 hablar de mindfulness",
+            expectedKind: K.event,
+            expectedTitleLower: "reunión con cristina",
+            expectedSubtitlePrefix: "hablar de mindfulness",
+            expectedHour: 17, expectedDay: D.tomorrow))
+        cases.append(Case(id: 33,
+            input: "mañana cumpleaños de Urrutia a las 8 comprar regalo",
+            expectedKind: K.event,
+            expectedTitleLower: "cumpleaños urrutia",
+            expectedSubtitlePrefix: "comprar regalo",
+            expectedHour: 20, expectedDay: D.tomorrow))
+        cases.append(Case(id: 34,
+            input: "el viernes partido a las 7 llevar botines",
+            expectedKind: K.event,
+            expectedTitleLower: "partido",
+            expectedSubtitlePrefix: "llevar botines",
+            expectedHour: 19,
+            notes: "próximo viernes"))
+        cases.append(Case(id: 35,
+            input: "el lunes clase a las 10 llevar computador",
+            expectedKind: K.event,
+            expectedTitleLower: "clase",
+            expectedSubtitlePrefix: "llevar computador",
+            expectedHour: 10,
+            notes: "próximo lunes"))
+        cases.append(Case(id: 36,
+            input: "el sábado asado a las 8 llevar bebidas",
+            expectedKind: K.event,
+            expectedTitleLower: "asado",
+            expectedSubtitlePrefix: "llevar bebidas",
+            expectedHour: 20,
+            notes: "próximo sábado"))
+        // ── 37-42: recordatorios explícitos / verbos puntuales ──────
+        cases.append(Case(id: 37,
+            input: "recuérdame a las 5 llevar la pelota",
+            expectedKind: K.reminder,
+            expectedTitleLower: nil,
+            expectedSubtitlePrefix: nil,
+            expectedHour: 17, expectedDay: D.today,
+            notes: "reminder Llevar la pelota — title libre"))
+        cases.append(Case(id: 38,
+            input: "recuérdame comprar regalo a las 6",
+            expectedKind: K.reminder,
+            expectedTitleLower: nil,
+            expectedSubtitlePrefix: nil,
+            expectedHour: 18, expectedDay: D.today))
+        cases.append(Case(id: 39,
+            input: "acuérdame llamar a mi mamá a las 7",
+            expectedKind: K.reminder,
+            expectedTitleLower: "llamar a mamá",
+            expectedSubtitlePrefix: nil,
+            expectedHour: 19, expectedDay: D.today,
+            notes: "strip 'mi' antes de mamá"))
+        cases.append(Case(id: 40,
+            input: "recordarme mandar mail a Juan Pablo a las 4",
+            expectedKind: K.reminder,
+            expectedTitleLower: "mandar mail a juan pablo",
+            expectedSubtitlePrefix: nil,
+            expectedHour: 16, expectedDay: D.today))
+        cases.append(Case(id: 41,
+            input: "tengo que pagar la cuenta a las 8",
+            expectedKind: K.reminder,
+            expectedTitleLower: "pagar la cuenta",
+            expectedSubtitlePrefix: nil,
+            notes: "user spec dice 'Recordatorio Pagar la cuenta'"))
+        cases.append(Case(id: 42,
+            input: "comprar remedios a las 5",
+            expectedKind: K.event,
+            expectedTitleLower: "comprar remedios",
+            expectedSubtitlePrefix: nil,
+            expectedHour: 17, expectedDay: D.today,
+            notes: "comprar es el título (no detail) cuando va al inicio"))
+        // ── 43-45: lugares con detail ────────────────────────────────
+        cases.append(Case(id: 43,
+            input: "ir a la farmacia a las 6 comprar remedios",
+            expectedKind: K.event,
+            expectedTitleLower: "farmacia",
+            expectedSubtitlePrefix: "comprar remedios",
+            expectedHour: 18, expectedDay: D.today,
+            notes: "strip 'ir a la' + subtitle Comprar remedios"))
+        cases.append(Case(id: 44,
+            input: "supermercado a las 7 comprar leche",
+            expectedKind: K.event,
+            expectedTitleLower: "supermercado",
+            expectedSubtitlePrefix: "comprar leche",
+            expectedHour: 19, expectedDay: D.today))
+        cases.append(Case(id: 45,
+            input: "banco a las 12 llevar carnet",
+            expectedKind: K.event,
+            expectedTitleLower: "banco",
+            expectedSubtitlePrefix: "llevar carnet",
+            expectedHour: 12, expectedDay: D.today))
+        // ── 46-50: queries / edición / clarify ───────────────────────
+        cases.append(Case(id: 46,
+            input: "qué tengo hoy",
+            expectedKind: K.other,
+            expectedTitleLower: nil,
+            expectedSubtitlePrefix: nil,
+            notes: "reviewToday, NO crear"))
+        cases.append(Case(id: 47,
+            input: "qué me queda pendiente",
+            expectedKind: K.other,
+            expectedTitleLower: nil,
+            expectedSubtitlePrefix: nil,
+            notes: "reviewPending"))
+        cases.append(Case(id: 48,
+            input: "borra fútbol",
+            expectedKind: K.other,
+            expectedTitleLower: nil,
+            expectedSubtitlePrefix: nil,
+            notes: "delete, NO crear"))
+        cases.append(Case(id: 49,
+            input: "cambia fútbol a las 6",
+            expectedKind: K.other,
+            expectedTitleLower: nil,
+            expectedSubtitlePrefix: nil,
+            notes: "reschedule, NO duplicar"))
+        cases.append(Case(id: 50,
+            input: "agenda una reunión algún día con cristina",
+            expectedKind: K.clarify,
+            expectedTitleLower: nil,
+            expectedSubtitlePrefix: nil,
+            notes: "ambiguo → preguntar fecha/hora"))
+
+        var out = "===== NOVA SUBTITLE-50 VALIDATION (user spec 2026-05-27) =====\n"
+        out += "Fecha: \(Date())\n\n"
+        var passCount = 0
+        var failCount = 0
+        var failedIds: [Int] = []
+        var rows: [String] = []
+
+        for c in cases {
+            let actions = runPipeline(c.input)
+            let first = actions.first
+            var problems: [String] = []
+            let actualKind = first?.kind ?? .other
+            let actualTitle = first?.title ?? ""
+            let actualSubtitle = first?.subtitle ?? ""
+            let actualHour = first?.hour
+            let actualDay = first?.day ?? .none
+
+            // 1) kind
+            if actualKind != c.expectedKind {
+                problems.append("kind=\(actualKind) (esperado \(c.expectedKind))")
+            }
+            // 2) title (case-insensitive exact)
+            if let expectedTitleLower = c.expectedTitleLower {
+                if actualTitle.lowercased() != expectedTitleLower {
+                    problems.append("title=\"\(actualTitle)\" (esperado lowercase \"\(expectedTitleLower)\")")
+                }
+            }
+            // 3) subtitle (case-insensitive prefix, o vacío)
+            if let expected = c.expectedSubtitlePrefix {
+                if expected.isEmpty {
+                    if !actualSubtitle.isEmpty {
+                        problems.append("subtitle=\"\(actualSubtitle)\" (esperado vacío)")
+                    }
+                } else {
+                    if !actualSubtitle.lowercased().contains(expected.lowercased()) {
+                        problems.append("subtitle=\"\(actualSubtitle)\" (esperado contiene \"\(expected)\")")
+                    }
+                }
+            }
+            // 4) hour si se especifica
+            if let eh = c.expectedHour, actualHour != eh {
+                problems.append("hour=\(String(describing: actualHour)) (esperado \(eh))")
+            }
+            // 5) day si se especifica
+            if let ed = c.expectedDay, actualDay != ed {
+                problems.append("day=\(actualDay) (esperado \(ed))")
+            }
+
+            let pass = problems.isEmpty
+            if pass {
+                passCount += 1
+                rows.append(String(format: "  %2d ✓ PASS | \"%@\" → kind=%@ title=\"%@\" sub=\"%@\" h=%@ day=%@",
+                                   c.id, c.input,
+                                   String(describing: actualKind),
+                                   actualTitle, actualSubtitle,
+                                   String(describing: actualHour),
+                                   String(describing: actualDay)))
+            } else {
+                failCount += 1
+                failedIds.append(c.id)
+                rows.append(String(format: "  %2d ✗ FAIL | \"%@\" → kind=%@ title=\"%@\" sub=\"%@\" — %@",
+                                   c.id, c.input,
+                                   String(describing: actualKind),
+                                   actualTitle, actualSubtitle,
+                                   problems.joined(separator: "; ")))
+            }
+        }
+
+        out += "RESULTADO: \(passCount)/\(cases.count) PASS  (\(failCount) FAIL)\n"
+        if failCount == 0 {
+            out += "✅ TODOS PASS — Nova conserva subtítulos correctamente.\n"
+        } else {
+            out += "FAILS: \(failedIds.map(String.init).joined(separator: ", "))\n"
+            out += "    → NO LISTO para TestFlight si quedan casos críticos.\n"
         }
         out += "\n--- DETALLE POR CASO ---\n"
         out += rows.joined(separator: "\n")
