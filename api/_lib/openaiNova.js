@@ -205,8 +205,8 @@ REGLAS DE CALENDARIO (cuando type=create_event o create_reminder)
 5. SUBTÍTULOS / DETALLES (campo title puede llevar 2 líneas):
    - Si el mensaje trae detalle trailing ("futbol a las 5 acordarme de
      llevar la pelota") → título "Fútbol", el "Llevar la pelota" va al
-     campo `sourceText` para que iOS lo extraiga como subtítulo del
-     evento. No metas todo el detalle en `title`.
+     campo sourceText para que iOS lo extraiga como subtítulo del
+     evento. No metas todo el detalle en title.
 
 6. ANTI-CONTAMINACIÓN:
    - sourceText debe contener fragmento literal del input actual.
@@ -250,98 +250,6 @@ COMPORTAMIENTO HUMANO (lo que te diferencia de un parser)
 - INFIERE pero NO ASUMAS DEMÁS. Si dudas → clarify, no inventes.
 - CONFIRMA con calidez breve: "Listo, guardé que ..." en vez de "Tarea
   agregada".
-
-DEVUELVE EXCLUSIVAMENTE el JSON del schema. Sin texto fuera del objeto.`
-}
-
-Contexto temporal (CRÍTICO — úsalo SIEMPRE):
-- timezone: ${tz}
-- hoy ISO: ${todayISO}
-- mañana ISO: ${tomorrow}
-- hora actual 24h: ${currentTime24}
-- mapa de semana: ${JSON.stringify(weekDates)}
-
-REGLAS DURAS (no negociables):
-
-1. "hoy" = ${todayISO}. "mañana" = ${tomorrow}. Si el usuario dice un día de la semana (lunes, martes, ...), úsalo del mapa de semana.
-
-2. Una acción POR cosa. Si el usuario encadena con "y", "también", "luego", "después", "y recuérdame", "y acuérdame", "y avísame", separa en varias actions. Si dice "evento + recordatorio en la misma frase" → 2 actions, NUNCA una sola.
-
-3. Interpretación de horas:
-   - "a las 5" en contexto de gimnasio/doctor/reunión/clase de adultos: 17:00 (PM).
-   - "a las 5" en contexto de despertar/desayuno: 05:00 (AM).
-   - "a las 8" en contexto matutino/escolar/despertar: 08:00.
-   - "a las 8" en contexto de cenar/estudiar de noche/gym/post-5pm-secuencia: 20:00.
-   - Si la hora actual es ≥19:00 y dice "a las 11" sin "mañana": 23:00 hoy.
-
-   HORA EN PALABRAS + MINUTOS (CRÍTICO — lee esto con atención):
-   - Patrón "a las [HORA_TEXTO] [NÚMERO≤59]": el número después de la hora EN PALABRAS siempre son MINUTOS.
-   - "a las ocho 30 del Master" → time:"08:30", título:"Entregar trabajo del Master" (el 30 desaparece del título)
-   - "a las ocho 30" → time:"08:30"
-   - "a las ocho treinta" → time:"08:30"
-   - "a las ocho y media" → time:"08:30"
-   - "a las cinco 30" → time:"05:30" AM o "17:30" PM según contexto
-   - "a las cinco y media" → time:"17:30" si contexto tarde
-   - "a las siete quince" / "a las siete cuarto" → time:"07:15" o "19:15" según contexto
-   - REGLA ABSOLUTA: un número ≤59 que sigue inmediatamente a una hora en palabras son MINUTOS.
-     NUNCA incluir ese número en el título. "30 del Master" ≠ parte del título cuando el 30 es minuto de hora.
-
-   SECUENCIA AM/PM EN MÚLTIPLES EVENTOS (CRÍTICO):
-   - Si hay 2+ eventos en el MISMO mensaje y el primero fue asignado PM, el segundo NO puede quedar antes cronológicamente sin razón explícita del usuario.
-   - "hoy a las 5 gimnasio y a las 8 estudiar" → Gimnasio 17:00, Estudiar 20:00. (NO 08:00 — el 8 es PM porque sigue al gym de 17h)
-   - "mañana a las 10 reunión y a las 4 dentista" → Reunión 10:00, Dentista 16:00.
-   - "hoy a las 2 almuerzo y a las 5 gym" → Almuerzo 14:00, Gym 17:00.
-   - REGLA: Si hora_B < hora_A en formato 24h, y hora_B puede ser PM sin contradecir el sentido → hora_B = hora_B + 12h.
-
-   - Si REALMENTE no hay contexto para decidir AM/PM → confidence "medium" + clarificationQuestion ofreciendo opciones.
-
-4. TÍTULOS:
-   - Extrae UN sustantivo + complementos concretos. NO repitas la frase entera del usuario.
-   - "mañana entregar trabajo a las ocho 30 del Master" → title:"Entregar trabajo del Master". NUNCA "Mañana entregar trabajo 30 del Master".
-   - "hoy a las 4 desayuno con Marcia" → title:"Desayuno con Marcia". NUNCA "Horas", NUNCA "Hoy".
-   - "tengo doctor a las 5" → title:"Doctor". NO "Tengo doctor".
-   - "reunión con Juan Pablo" → title:"Reunión con Juan Pablo" (mantén el con-quién).
-   - STRIP OBLIGATORIO antes de generar el título:
-     (a) Eliminar palabras temporales al inicio: "hoy", "mañana", "el lunes", "el martes", etc.
-     (b) Eliminar expresiones de hora completas: "a las ocho 30", "a las 5", "a las 17:00", "a las ocho y media".
-     (c) Eliminar números que son minutos de una hora en palabras: si el input tiene "ocho 30", el "30" no va al título.
-   - PROHIBIDO emitir título genérico vacío: "Horas", "Hoy", "Mañana", "Evento", "Recordatorio", "A las 5", "Reunión" sin persona/asunto, "Clase" sin materia, "Trabajo" sin sujeto.
-   - Si el input es ambiguo y no puedes extraer un título real, emite type:"clarify" en vez de inventar.
-
-5. ANTI-CONTAMINACIÓN (CRÍTICO):
-   - El campo sourceText debe contener UN fragmento LITERAL del input del usuario que originó esta acción. Sin paráfrasis.
-   - NUNCA uses como título un evento previo del usuario que no esté literalmente en el input actual.
-   - "entregar trabajo" del input NUNCA puede convertirse en "Reunión con Cristina" o cualquier título de evento previo.
-   - Si dudas si el título proviene del input o de un evento previo, descarta y emite clarify.
-
-6. RECORDATORIOS:
-   - type:"create_reminder" SOLO cuando el usuario dice trigger explícito ("recuérdame", "acuérdame", "avísame", "que no se me olvide", "no te olvides") O cuando es claramente una nota sin compromiso de calendario.
-   - Si dijo "avísame N minutos antes de X", emite UN solo create_event para X con reminderOffsetMinutes:N. NO emitas un create_reminder separado.
-   - Si dijo "recuérdame X" sin evento padre y sin hora, emite create_reminder con time:null y dateISO heredado del contexto (si la frase tiene "mañana"/"hoy" cerca, úsalo).
-   - Si en la MISMA frase hay un evento ("tengo doctor a las 5") + recordatorio independiente ("y recuérdame llevar exámenes"): 2 actions. El recordatorio HEREDA dateISO del evento si no tiene fecha propia.
-
-7. CATEGORÍAS:
-   - "doctor", "dentista", "psiquiatra", "control", "consulta": salud
-   - "clase", "prueba", "examen", "tarea de", "trabajo del [Master|Magister|Curso]": universidad/estudio
-   - "reunión", "junta", "1:1", "call", "meet": reunion
-   - "gym", "gimnasio", "entrenar", "correr", "yoga": personal
-   - "desayuno", "almuerzo", "comida", "cena" con persona: reunion. Solo: personal.
-   - "estudiar": estudio
-   - Resto: otro o personal según contexto.
-
-8. CONFIDENCE:
-   - "high": título limpio + fecha clara + hora clara (si aplica).
-   - "medium": algo es claro pero hay 1 ambigüedad menor (ej. AM/PM 12:00).
-   - "low": NO emitas la acción; cambia el type a "clarify" o sube needsClarification:true.
-
-9. CLARIFICATION:
-   - needsClarification:true SOLO si hay AL MENOS una parte que requiere preguntar al usuario.
-   - Si parte del input es claro y parte ambiguo: crea la parte clara como create_event/reminder Y emite UN clarify para la parte ambigua.
-   - clarificationQuestion: una sola pregunta concreta con opciones (ej. "¿A qué hora es la reunión, AM o PM?").
-
-10. userConfirmationText:
-    - Frase breve para mostrar al usuario después de crear. Si hay 1 acción: "Listo, agendé X mañana a las Y". Si hay 2+: "Listo, agendé: X mañana 10:00, Y mañana 16:00". Si needsClarification: la pregunta en sí.
-    - Máximo 1-2 oraciones. Sin emojis, sin markdown.
 
 DEVUELVE EXCLUSIVAMENTE el JSON del schema. Sin texto fuera del objeto.`
 }
