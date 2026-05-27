@@ -5929,7 +5929,7 @@ final class FocusDataStore: ObservableObject {
                 outcome.didMutate = true
                 // Si el backend ya armó un userConfirmationText (reply),
                 // ese gana — usamos solo summary genérico como fallback.
-                if outcome.summary.isEmpty {
+                if (outcome.summary ?? "").isEmpty {
                     outcome.summary = "Listo, guardé eso."
                 }
                 HapticManager.shared.success()
@@ -5940,7 +5940,7 @@ final class FocusDataStore: ObservableObject {
                 if key == "__all__" {
                     NovaMemoryStore.shared.clearAll()
                     outcome.didMutate = true
-                    if outcome.summary.isEmpty {
+                    if (outcome.summary ?? "").isEmpty {
                         outcome.summary = "Listo, borré todas las memorias."
                     }
                 } else {
@@ -5948,7 +5948,7 @@ final class FocusDataStore: ObservableObject {
                         .filter { $0.text.lowercased().contains(key.lowercased()) }
                     for m in matches { NovaMemoryStore.shared.deactivate(id: m.id) }
                     outcome.didMutate = !matches.isEmpty
-                    if outcome.summary.isEmpty {
+                    if (outcome.summary ?? "").isEmpty {
                         outcome.summary = matches.isEmpty
                             ? "No tenía nada sobre «\(key)»."
                             : "Listo, olvidé eso."

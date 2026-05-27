@@ -80,11 +80,11 @@ enum NovaActionValidator {
                 }
 
             case .editEvent, .deleteEvent, .toggleTask, .deleteTask,
-                 .remember, .unsupported:
-                // Acciones de mantenimiento/edición — el riesgo es bajo,
-                // pasan tal cual. Si edit_event tuviera un updates.title
-                // sucio, lo dejamos pasar; el caso edge se ve raro pero
-                // no rompe el calendario.
+                 .remember, .saveMemory, .forgetMemory, .unsupported:
+                // Acciones de mantenimiento/edición + memoria — el riesgo es
+                // bajo, pasan tal cual. saveMemory/forgetMemory (V2 2026-05-27)
+                // van directo al NovaMemoryStore sin tocar calendario, así que
+                // anti-basura no aplica.
                 safe.append(action)
             }
         }
@@ -401,7 +401,7 @@ enum NovaActionValidator {
             case .addEvent, .addTask, .addRecurringEvent:
                 demoted.append(action)
             case .editEvent, .deleteEvent, .toggleTask, .deleteTask,
-                 .remember, .unsupported:
+                 .remember, .saveMemory, .forgetMemory, .unsupported:
                 safe.append(action)
             }
         }
