@@ -3755,6 +3755,26 @@ enum NovaActionNormalizerTests {
                createdHere.count >= 7,
                "count=\(createdHere.count)")
 
+        // M16: BUG-USER 2026-05-27 16:45 — "la agustina es mi polola"
+        //      pattern 'X es mi Y' debe match con "la X" como key, "polola"
+        //      en personRoles list.
+        let learn16 = NovaMemoryStore.shared.tryLearnFromUserText("la agustina es mi polola")
+        record(16, "BUG-USER 'la agustina es mi polola'",
+               learn16?.category == .personAlias,
+               "category=\(learn16?.category.rawValue ?? "nil") key=\(learn16?.key ?? "nil") value=\(learn16?.value ?? "nil")")
+
+        // M17: variante sin "la" — "agustina es mi polola"
+        let learn17 = NovaMemoryStore.shared.tryLearnFromUserText("agustina es mi polola")
+        record(17, "'agustina es mi polola' (sin 'la')",
+               learn17?.category == .personAlias,
+               "category=\(learn17?.category.rawValue ?? "nil") key=\(learn17?.key ?? "nil")")
+
+        // M18: variante con "Cristina es mi novia"
+        let learn18 = NovaMemoryStore.shared.tryLearnFromUserText("Cristina es mi novia")
+        record(18, "'Cristina es mi novia'",
+               learn18?.category == .personAlias,
+               "category=\(learn18?.category.rawValue ?? "nil") key=\(learn18?.key ?? "nil")")
+
         out += "RESULTADO: \(passCount)/\(passCount + failCount) PASS  (\(failCount) FAIL)\n"
         if failCount == 0 {
             out += "✅ TODOS PASS — memoria de Nova funciona end-to-end.\n"

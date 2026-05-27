@@ -8066,7 +8066,18 @@ extension NovaMemoryStore {
         }
 
         // Patrón 2: "X es mi Y" — "Juan Pablo es mi coordinador",
-        // "Urrutia es mi amigo", "Pepe es mi profesor de historia"
+        // "Urrutia es mi amigo", "la agustina es mi polola",
+        // "Cristina es mi novia".
+        //
+        // Tres condiciones para tratarlo como personAlias:
+        //   (a) role en personRoles ampliada — cubre familia, pareja,
+        //       trabajo, estudios, vecinos, mascotas.
+        //   (b) O bien `key` empieza con "la "/"el " (típico chileno
+        //       coloquial para nombres propios: "la Cata", "el Juan").
+        //   (c) O bien `key` empieza con mayúscula (nombre propio claro).
+        //
+        // En cualquiera de los tres casos, strippeamos "la "/"el " del key
+        // y lo capitalizamos antes de guardar.
         let pattern2 = #"^(.+?)\s+es mi\s+(.+)$"#
         if let regex = try? NSRegularExpression(pattern: pattern2, options: [.caseInsensitive]),
            let match = regex.firstMatch(
@@ -8076,20 +8087,71 @@ extension NovaMemoryStore {
            match.numberOfRanges >= 3,
            let r1 = Range(match.range(at: 1), in: trimmed),
            let r2 = Range(match.range(at: 2), in: trimmed) {
-            let key = String(trimmed[r1])
+            let rawKey = String(trimmed[r1])
             let role = String(trimmed[r2])
                 .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
-            // Si role menciona "profesor/coordinador/amigo/jefe/etc" es persona.
-            let personRoles = ["amigo", "amiga", "coordinador", "coordinadora",
-                               "profesor", "profesora", "compañero", "compañera",
-                               "jefe", "jefa", "asesor", "asesora", "mentor",
-                               "mentora", "padre", "madre", "hermano", "hermana",
-                               "papá", "papa", "mamá", "mama", "tío", "tia"]
+
+            // Lista AMPLIADA de roles personales (Spanish + chileno).
+            let personRoles: Set<String> = [
+                // familia directa
+                "papá", "papa", "mamá", "mama", "padre", "madre",
+                "hermano", "hermana", "hijo", "hija",
+                // familia extendida
+                "tío", "tia", "tía", "tio", "primo", "prima",
+                "abuelo", "abuela", "sobrino", "sobrina",
+                "cuñado", "cuñada", "cunado", "cunada",
+                "suegro", "suegra", "ahijado", "ahijada",
+                // pareja
+                "esposo", "esposa", "marido", "señora",
+                "novio", "novia", "pareja",
+                "polola", "pololo",  // chileno
+                "compañero", "compañera",  // pareja informal
+                // amistad
+                "amigo", "amiga", "amix", "mejor amigo", "mejor amiga",
+                "vecino", "vecina", "compadre", "comadre",
+                // trabajo
+                "jefe", "jefa", "coordinador", "coordinadora",
+                "asesor", "asesora", "mentor", "mentora",
+                "colega", "asistente", "secretario", "secretaria",
+                "socio", "socia", "supervisor", "supervisora",
+                // estudios
+                "profesor", "profesora", "profe",
+                "maestro", "maestra", "tutor", "tutora",
+                // salud
+                "doctor", "doctora", "psicólogo", "psicologa",
+                "psicóloga", "psicologo", "kinesiólogo", "kinesiologo",
+                "psiquiatra", "terapeuta",
+                // mascotas
+                "perro", "perra", "gato", "gata", "mascota"
+            ]
             let roleLower = role.lowercased()
-            let isPerson = personRoles.contains { roleLower.contains($0) }
-            if isPerson {
+            // Match exacto del rol O substring (cubre "profesor de historia",
+            // "mejor amiga del colegio", etc.).
+            let isKnownRole = personRoles.contains(roleLower)
+                || personRoles.contains { roleLower.hasPrefix($0 + " ") || roleLower.hasPrefix($0 + ",") }
+                || personRoles.contains { roleLower.contains(" " + $0 + " ") || roleLower.hasSuffix(" " + $0) }
+
+            // Strip "la "/"el " del key (chileno coloquial: "la Cata" → "Cata").
+            let cleanKey: String = {
+                var k = rawKey
+                if let r = k.range(of: #"^(?:la|el|las|los)\s+"#,
+                                    options: [.regularExpression, .caseInsensitive]) {
+                    k = String(k[r.upperBound...])
+                }
+                return k.trimmingCharacters(in: .whitespacesAndNewlines)
+            }()
+
+            // Determinar si key parece nombre propio.
+            let cleanKeyHadArticle = cleanKey != rawKey
+            let keyStartsUpper = cleanKey.first?.isUppercase ?? false
+            let looksLikePerson = isKnownRole || cleanKeyHadArticle || keyStartsUpper
+
+            if looksLikePerson && !cleanKey.isEmpty {
+                let displayName = cleanKey.prefix(1).uppercased() + cleanKey.dropFirst()
                 return upsert(NovaMemory(
-                    category: .personAlias, key: key, value: "\(key) (\(role))",
+                    category: .personAlias,
+                    key: cleanKey.lowercased(),
+                    value: "\(displayName) (\(role))",
                     confidence: 0.9, source: "user_explicit"
                 ))
             }
