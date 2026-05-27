@@ -3529,6 +3529,15 @@ enum NovaActionNormalizerTests {
             expectedTitleLower: nil,
             expectedSubtitlePrefix: nil,
             notes: "ambiguo → preguntar fecha/hora"))
+        // BUG-USER 2026-05-27 16:30 — orden distinto: "a las N" entre el
+        // topic y "con persona". Reportado con screenshot.
+        cases.append(Case(id: 51,
+            input: "tengo una reunión de mindfulness a las 5 con cristina",
+            expectedKind: K.event,
+            expectedTitleLower: "reunión",
+            expectedSubtitlePrefix: "mindfulness con cristina",
+            expectedHour: 17, expectedDay: D.today,
+            notes: "BUG-USER: 'tengo una' prefix + 'a las 5' entre topic y 'con X'"))
 
         var out = "===== NOVA SUBTITLE-50 VALIDATION (user spec 2026-05-27) =====\n"
         out += "Fecha: \(Date())\n\n"
