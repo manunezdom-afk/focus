@@ -326,6 +326,21 @@ struct AjustesView: View {
 
                 Divider().overlay(Theme.Colors.border).padding(.leading, 60)
 
+                NavigationLink {
+                    NovaMemoryListView()
+                } label: {
+                    AjustesRow(
+                        symbol: "list.bullet.rectangle",
+                        tint: Theme.Colors.novaAccent,
+                        title: "Lo que Nova recuerda",
+                        subtitle: "Revisa y borra memorias guardadas",
+                        trailing: .chevron
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(Theme.Colors.border).padding(.leading, 60)
+
                 AjustesRow(
                     symbol: "mic",
                     tint: Theme.Colors.novaAccent,
@@ -980,3 +995,185 @@ struct CalendarConnectionSheet: Identifiable {
     AjustesView()
         .environmentObject(FocusDataStore())
 }
+
+// MARK: - NovaMemoryListView (inline en AjustesView.swift por pbxproj —
+// archivos nuevos no se registran automáticamente y romperían el build).
+
+/// Vista de "Mi memoria con Nova" — lista todas las memorias que Nova
+/// guarda sobre el usuario (alias de personas, ramos, preferencias).
+/// Permite borrar cada una con swipe.
+///
+/// Se accede desde Ajustes → Nova → "Lo que Nova recuerda".
+struct NovaMemoryListView: View {
+    /// State local — recargamos al hacer un delete porque NovaMemoryStore
+    /// no es @Published. Si en el futuro lo convertimos a ObservableObject,
+    /// quitamos esta capa.
+    @State private var entries: [(category: NovaMemoryCategory, text: String, id: UUID)] = []
+    @State private var showClearAll = false
+
+    var body: some View {
+        ZStack {
+            Theme.Colors.surface.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    Text(headerText)
+                        .font(Theme.Typography.body)
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                        .padding(.horizontal, Theme.Spacing.lg)
+                        .padding(.top, Theme.Spacing.md)
+
+                    if entries.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(NovaMemoryCategory.allCases, id: \.self) { cat in
+                            let group = entries.filter { $0.category == cat }
+                            if !group.isEmpty {
+                                section(for: cat, entries: group)
+                            }
+                        }
+                    }
+
+                    if !entries.isEmpty {
+                        Button(role: .destructive) {
+                            showClearAll = true
+                        } label: {
+                            Text("Borrar todas las memorias")
+                                .font(Theme.Typography.bodyEmphasized)
+                                .foregroundStyle(Theme.Colors.danger)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(Theme.Colors.danger.opacity(0.08))
+                                )
+                        }
+                        .padding(.horizontal, Theme.Spacing.lg)
+                        .padding(.top, Theme.Spacing.md)
+                    }
+                }
+                .padding(.bottom, Theme.Spacing.xxl)
+            }
+        }
+        .navigationTitle("Lo que Nova recuerda")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { reload() }
+        .alert("¿Borrar todas las memorias?", isPresented: $showClearAll) {
+            Button("Cancelar", role: .cancel) { }
+            Button("Borrar todo", role: .destructive) {
+                NovaMemoryStore.shared.clearAll()
+                reload()
+                HapticManager.shared.warning()
+            }
+        } message: {
+            Text("Esto borra todos los aliases, preferencias y reglas que Nova aprendió de ti. Esta acción no se puede deshacer.")
+        }
+    }
+
+    // MARK: - Subvistas
+
+    private var headerText: String {
+        if entries.isEmpty {
+            return "Cuando le cuentas cosas a Nova («Juan Pablo es mi coordinador», «teorías es Teorías de la Comunicación»), las guarda acá para entenderte mejor después."
+        }
+        let n = entries.count
+        return "Nova recuerda \(n) cosa\(n == 1 ? "" : "s") sobre ti. Desliza una para borrarla o dile en el chat «olvida X»."
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "brain.head.profile")
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(Theme.Colors.textTertiary)
+            Text("Sin memorias guardadas")
+                .font(Theme.Typography.bodyEmphasized)
+                .foregroundStyle(Theme.Colors.textPrimary)
+            Text("Ejemplo: dile a Nova «mi mamá se llama Susana» y se acordará la próxima vez.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, Theme.Spacing.lg)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Spacing.xxl)
+    }
+
+    private func section(
+        for cat: NovaMemoryCategory,
+        entries group: [(category: NovaMemoryCategory, text: String, id: UUID)]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text(label(for: cat))
+                .font(Theme.Typography.captionEmphasized)
+                .foregroundStyle(Theme.Colors.textTertiary)
+                .padding(.horizontal, Theme.Spacing.lg)
+
+            VStack(spacing: 0) {
+                ForEach(Array(group.enumerated()), id: \.element.id) { idx, entry in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: icon(for: cat))
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Theme.Colors.novaAccent)
+                            .frame(width: 22, alignment: .center)
+                        Text(entry.text)
+                            .font(Theme.Typography.body)
+                            .foregroundStyle(Theme.Colors.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button {
+                            NovaMemoryStore.shared.deactivate(id: entry.id)
+                            reload()
+                            HapticManager.shared.tick()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 18))
+                                .foregroundStyle(Theme.Colors.textTertiary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.vertical, 12)
+                    if idx < group.count - 1 {
+                        Divider().overlay(Theme.Colors.border)
+                            .padding(.leading, Theme.Spacing.md + 22 + 12)
+                    }
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Theme.Colors.surfaceElevated)
+            )
+            .padding(.horizontal, Theme.Spacing.lg)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func reload() {
+        entries = NovaMemoryStore.shared.allActiveMemoriesHuman(maxEntries: 100)
+    }
+
+    private func label(for cat: NovaMemoryCategory) -> String {
+        switch cat {
+        case .personAlias:     return "PERSONAS"
+        case .courseAlias:     return "RAMOS / CURSOS"
+        case .preference:      return "PREFERENCIAS"
+        case .schedulingRule:  return "REGLAS DE HORARIO"
+        case .appBehaviorRule: return "REGLAS DE LA APP"
+        case .projectContext:  return "PROYECTOS"
+        case .academicContext: return "CONTEXTO ACADÉMICO"
+        }
+    }
+
+    private func icon(for cat: NovaMemoryCategory) -> String {
+        switch cat {
+        case .personAlias:     return "person.fill"
+        case .courseAlias:     return "book.fill"
+        case .preference:      return "heart.fill"
+        case .schedulingRule:  return "calendar"
+        case .appBehaviorRule: return "gearshape.fill"
+        case .projectContext:  return "folder.fill"
+        case .academicContext: return "graduationcap.fill"
+        }
+    }
+}
+

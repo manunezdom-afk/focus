@@ -5272,6 +5272,11 @@ final class FocusDataStore: ObservableObject {
         uploadEvent(event)
         syncLocalNotification(for: event)
         HapticManager.shared.success()
+        // [NovaMemory Phase 3] Aprendizaje pasivo desde eventos creados:
+        // si el título menciona personas ("Cumpleaños de Urrutia",
+        // "Reunión con Juan Pablo"), guardamos low-confidence personAlias.
+        // Próxima vez que el user mencione esa persona, Nova ya la conoce.
+        NovaMemoryStore.shared.passivelyLearnFromEvent(title: event.title)
     }
 
     func deleteEvent(_ id: UUID) {
@@ -6480,6 +6485,24 @@ final class FocusDataStore: ObservableObject {
             print("[NovaMemory] learned category=\(learned.category.rawValue) key=\(learned.key)")
         }
 
+        // [NovaMemory] Comandos directos sobre memoria — "qué sabes de mí",
+        // "olvida X", "olvida todo". Atajamos antes del parse normal porque
+        // son meta-comandos: no son eventos/tareas, solo lectura/edición de
+        // la memoria. Se responden inline en el chat sin ir al backend.
+        if let memoryReply = handleMemoryCommand(trimmed: trimmed) {
+            isNovaTyping = false
+            novaMessages.append(NovaMessage(role: .nova, content: memoryReply))
+            persistNovaMessages()
+            return
+        }
+
+        // [NovaMemory] Expansión de aliases: aplicar courseAlias antes de
+        // parsear. "tengo prueba de teorías" → "tengo prueba de Teorías de
+        // la Comunicación" si existe esa memoria. Solo afecta a la copia
+        // que va al parser; el novaMessages mantiene el texto original
+        // del usuario para no contaminar el historial visible.
+        let expandedTrimmed = NovaMemoryStore.shared.expandAliases(in: trimmed)
+
         // Pre-parse local: si el parser ya resuelve la intención sin
         // ambigüedad (correcciones, follow-ups, comandos meta, **y ahora
         // también createEvent/createTask con título+fecha extraídos
@@ -6490,7 +6513,7 @@ final class FocusDataStore: ObservableObject {
         // turno corto pueda completarlo localmente.
         print("[NovaLatency] fastPathStart")
         let fastPathStartTs = CFAbsoluteTimeGetCurrent()
-        let preIntent = NovaResponder.parse(trimmed, context: novaContext)
+        let preIntent = NovaResponder.parse(expandedTrimmed, context: novaContext)
         if shouldShortCircuitLocally(preIntent),
            let localReply = applyLocalNovaIntent(preIntent, userText: trimmed) {
             let fastPathEndTs = CFAbsoluteTimeGetCurrent()
@@ -6526,7 +6549,7 @@ final class FocusDataStore: ObservableObject {
 
         // History snapshot ANTES de meter el mensaje del usuario en el
         // history — el server espera turnos anteriores, no el actual.
-        let priorHistory: [NovaService.HistoryEntry] = novaMessages
+        let chatHistory: [NovaService.HistoryEntry] = novaMessages
             .dropLast()  // sacar el del usuario que acabamos de pushear
             .suffix(12)
             .map { msg in
@@ -6535,6 +6558,24 @@ final class FocusDataStore: ObservableObject {
                     content: msg.content
                 )
             }
+        // [NovaMemory Phase 1] Inyectamos memorias relevantes como un
+        // turno PREVIO del assistant — el LLM ve "Recuerdo de turnos
+        // anteriores: ..." y puede usar esa info para interpretar el
+        // mensaje actual. Aditivo: si no hay memorias, history queda igual.
+        //
+        // Esto NO contamina `novaMessages` (la UI sigue mostrando solo
+        // los turnos reales del chat) — solo viaja al backend.
+        let memoryContext = NovaMemoryStore.shared.memoryContextLine(for: trimmed)
+        let priorHistory: [NovaService.HistoryEntry]
+        if let memoryContext {
+            let memoryEntry = NovaService.HistoryEntry(
+                role: .assistant,
+                content: memoryContext
+            )
+            priorHistory = [memoryEntry] + chatHistory
+        } else {
+            priorHistory = chatHistory
+        }
 
         // Snapshot de eventos/tareas para mandar al backend (mismas
         // ventanas que Mi Día inline).
@@ -6583,7 +6624,8 @@ final class FocusDataStore: ObservableObject {
                     // un 500 + "acuérdame X mañana" no creaba nada.
                     let (replyJoined, executed) = await MainActor.run {
                         () -> (String, Bool) in
-                        let intents = NovaResponder.parseAll(trimmed, context: self.novaContext)
+                        let expanded = NovaMemoryStore.shared.expandAliases(in: trimmed)
+                        let intents = NovaResponder.parseAll(expanded, context: self.novaContext)
                         var parts: [String] = []
                         var anyExecuted = false
                         for intent in intents {
@@ -6608,7 +6650,8 @@ final class FocusDataStore: ObservableObject {
                 } catch {
                     let replyJoined = await MainActor.run {
                         () -> String in
-                        let intents = NovaResponder.parseAll(trimmed, context: self.novaContext)
+                        let expanded = NovaMemoryStore.shared.expandAliases(in: trimmed)
+                        let intents = NovaResponder.parseAll(expanded, context: self.novaContext)
                         var parts: [String] = []
                         for intent in intents {
                             if let r = self.applyLocalNovaIntent(intent, userText: trimmed) {
@@ -7581,6 +7624,72 @@ final class FocusDataStore: ObservableObject {
         }
     }
 
+    // MARK: - Memoria (comandos directos de chat)
+
+    /// Si `trimmed` es un comando directo sobre la memoria de Nova
+    /// ("qué sabes de mí", "qué recuerdas", "olvida X", "olvida todo"),
+    /// devuelve el reply listo para mostrar. Caller debería abortar el
+    /// procesamiento normal y mostrar este texto.
+    ///
+    /// Devuelve `nil` si NO es un comando de memoria → caller continúa
+    /// con parse/backend normal.
+    func handleMemoryCommand(trimmed: String) -> String? {
+        let lower = trimmed.lowercased()
+
+        // 1) Lectura: "¿qué sabes de mí?" / "qué recuerdas" / "muéstrame tu memoria"
+        let readPatterns = [
+            "qué sabes de mí", "que sabes de mi", "qué sabes de mi",
+            "qué recuerdas", "que recuerdas",
+            "muéstrame tu memoria", "muestrame tu memoria",
+            "qué tienes guardado", "que tienes guardado",
+            "qué tienes en memoria", "que tienes en memoria"
+        ]
+        if readPatterns.contains(where: { lower.contains($0) }) {
+            let memories = NovaMemoryStore.shared.allActiveMemoriesHuman(maxEntries: 20)
+            guard !memories.isEmpty else {
+                return "Todavía no tengo nada guardado. Cuéntame cosas sobre ti — quiénes son las personas importantes, qué ramos llevas, qué prefieres — y voy memorizando."
+            }
+            let bullets = memories.map { "• \($0.text)" }.joined(separator: "\n")
+            return "Esto es lo que recuerdo de ti:\n\(bullets)\n\nSi algo está mal o ya no aplica, dime «olvida X»."
+        }
+
+        // 2) Borrado individual: "olvida X" / "olvídate de X" / "borra de tu memoria X"
+        let forgetPatterns: [String] = [
+            #"^olvid[aá](?:te de)?\s+(.+)$"#,
+            #"^borra de tu memoria\s+(.+)$"#,
+            #"^quita de tu memoria\s+(.+)$"#,
+            #"^elimina de tu memoria\s+(.+)$"#
+        ]
+        for pattern in forgetPatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let ns = trimmed as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            guard let match = regex.firstMatch(in: trimmed, range: range),
+                  match.numberOfRanges >= 2 else { continue }
+            let target = ns.substring(with: match.range(at: 1))
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡ "))
+            // Caso especial: "olvida todo" / "todo" → clear all.
+            if ["todo", "todas", "toda", "todos"].contains(target.lowercased()) {
+                NovaMemoryStore.shared.clearAll()
+                return "Listo, borré todas las memorias que tenía guardadas."
+            }
+            // Buscar memorias cuya key o value contenga `target`.
+            let lowerTarget = target.lowercased()
+            let matches = NovaMemoryStore.shared.allActiveMemoriesHuman(maxEntries: 100)
+                .filter { $0.text.lowercased().contains(lowerTarget) }
+            guard !matches.isEmpty else {
+                return "No tengo nada guardado sobre «\(target)»."
+            }
+            for m in matches {
+                NovaMemoryStore.shared.deactivate(id: m.id)
+            }
+            let label = matches.count == 1 ? "una memoria" : "\(matches.count) memorias"
+            return "Listo, olvidé \(label) relacionada\(matches.count == 1 ? "" : "s") con «\(target)»."
+        }
+
+        return nil
+    }
+
     // MARK: - Ajustes
 
     func updateSettings(_ mutator: (inout AppSettings) -> Void) {
@@ -7942,7 +8051,162 @@ extension NovaMemoryStore {
             ))
         }
 
+        // Patrón 4 (Phase 3 — 2026-05-27): "X se llama Y" / "Y se llama X"
+        // Captura nombres propios. Ej: "mi mamá se llama Susana".
+        let pattern4 = #"^(.+?)\s+se llama\s+(.+)$"#
+        if let regex = try? NSRegularExpression(pattern: pattern4, options: [.caseInsensitive]),
+           let match = regex.firstMatch(
+                in: trimmed,
+                range: NSRange(trimmed.startIndex..., in: trimmed)
+           ),
+           match.numberOfRanges >= 3,
+           let r1 = Range(match.range(at: 1), in: trimmed),
+           let r2 = Range(match.range(at: 2), in: trimmed) {
+            let entity = String(trimmed[r1])
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            let name = String(trimmed[r2])
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            // Si "entity" empieza con "mi/tu/su" → relación familiar/profesional.
+            // Guardamos doble: nombre → entity, entity → nombre (resolución
+            // bidireccional sencilla).
+            return upsert(NovaMemory(
+                category: .personAlias,
+                key: name.lowercased(),
+                value: "\(name) (\(entity))",
+                confidence: 0.95, source: "user_explicit"
+            ))
+        }
+
+        // Patrón 5: "tengo un/una Y llamado/a X" — "tengo un hijo llamado Diego"
+        let pattern5 = #"^tengo\s+(?:un|una)\s+(.+?)\s+llamad[oa]\s+(.+)$"#
+        if let regex = try? NSRegularExpression(pattern: pattern5, options: [.caseInsensitive]),
+           let match = regex.firstMatch(
+                in: trimmed,
+                range: NSRange(trimmed.startIndex..., in: trimmed)
+           ),
+           match.numberOfRanges >= 3,
+           let r1 = Range(match.range(at: 1), in: trimmed),
+           let r2 = Range(match.range(at: 2), in: trimmed) {
+            let role = String(trimmed[r1])
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            let name = String(trimmed[r2])
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            return upsert(NovaMemory(
+                category: .personAlias,
+                key: name.lowercased(),
+                value: "\(name) (mi \(role))",
+                confidence: 0.95, source: "user_explicit"
+            ))
+        }
+
+        // Patrón 6: "mi Y es X" — variant of "X es mi Y" pero invertido.
+        // "mi coordinador es Juan Pablo" → personAlias(Juan Pablo, "Juan Pablo (mi coordinador)").
+        let pattern6 = #"^mi\s+(.+?)\s+es\s+(.+)$"#
+        if let regex = try? NSRegularExpression(pattern: pattern6, options: [.caseInsensitive]),
+           let match = regex.firstMatch(
+                in: trimmed,
+                range: NSRange(trimmed.startIndex..., in: trimmed)
+           ),
+           match.numberOfRanges >= 3,
+           let r1 = Range(match.range(at: 1), in: trimmed),
+           let r2 = Range(match.range(at: 2), in: trimmed) {
+            let role = String(trimmed[r1])
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            let name = String(trimmed[r2])
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?¿¡"))
+            // Solo si name parece nombre propio (mayúscula al inicio o
+            // varias palabras).
+            if let first = name.first, first.isUppercase {
+                return upsert(NovaMemory(
+                    category: .personAlias,
+                    key: name.lowercased(),
+                    value: "\(name) (mi \(role))",
+                    confidence: 0.9, source: "user_explicit"
+                ))
+            }
+        }
+
+        // Patrón 7: "no me gusta X" / "no quiero X" → preference negativa.
+        if lower.hasPrefix("no me gusta ") || lower.hasPrefix("no quiero ") || lower.hasPrefix("odio ") {
+            return upsert(NovaMemory(
+                category: .preference,
+                key: trimmed.lowercased(),
+                value: trimmed,
+                confidence: 0.85, source: "user_explicit"
+            ))
+        }
+
         return nil
+    }
+
+    // MARK: - Inferencia pasiva desde eventos (Phase 3)
+
+    /// Llamado tras crear un evento: si el título contiene "con [Nombre]"
+    /// y el nombre se ve como nombre propio, registra alias suave (low
+    /// confidence). El usuario puede ratificar después con "X es mi Y".
+    ///
+    /// Ej: usuario crea "Cumpleaños de Urrutia" → guardamos personAlias
+    /// suave para "Urrutia". Próxima vez que diga "Urrutia" Nova tiene
+    /// señal de que es una persona conocida.
+    func passivelyLearnFromEvent(title: String) {
+        let lowerTitle = title.lowercased()
+        // Patrón A: "[noun] con [Name]"
+        if let regex = try? NSRegularExpression(
+            pattern: #"\bcon\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)?)"#,
+            options: []
+        ) {
+            let ns = title as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            if let m = regex.firstMatch(in: title, range: range),
+               m.numberOfRanges >= 2 {
+                let name = ns.substring(with: m.range(at: 1))
+                // Skip familia (papá/mamá/etc) — esos no son personas únicas.
+                let familyWords: Set<String> = ["papá", "mamá", "papa", "mama",
+                    "hermano", "hermana", "hijo", "hija", "padre", "madre",
+                    "tío", "tía", "tio", "tia", "primo", "prima", "abuelo",
+                    "abuela", "novio", "novia", "esposo", "esposa", "amigo",
+                    "amiga", "polola", "pololo", "jefe", "jefa"]
+                if !familyWords.contains(name.lowercased()) {
+                    upsert(NovaMemory(
+                        category: .personAlias,
+                        key: name.lowercased(),
+                        value: name,
+                        confidence: 0.4, source: "inferred_event"
+                    ))
+                }
+            }
+        }
+        // Patrón B: "[noun] de [Name]" (cumpleaños de Urrutia, etc).
+        // Solo cuando la palabra inicial es un evento social (cumpleaños,
+        // cumple, fiesta, asado) — evita falsos positivos en "clase de
+        // historia", "prueba de matemáticas", etc.
+        let socialEvents = ["cumpleaños", "cumple", "fiesta", "asado", "matrimonio", "boda", "aniversario"]
+        let socialRegexPart = socialEvents.joined(separator: "|")
+        // El `de\s+(?:la\s+|el\s+)?` opcional: matches "de ", "de la ",
+        // "de el "; SIN "la/el" sigue capturando ("cumpleaños de Urrutia"
+        // → "Urrutia"; "cumpleaños de la Cata" → "Cata"; "cumpleaños Cata"
+        // → "Cata"). Sin el "?" intermedio, "de Urrutia" sin la/el fallaba.
+        if let regex = try? NSRegularExpression(
+            pattern: "\\b(?:\(socialRegexPart))\\s+(?:de\\s+(?:la\\s+|el\\s+)?)?([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)?)",
+            options: [.caseInsensitive]
+        ) {
+            let ns = title as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            if let m = regex.firstMatch(in: title, range: range),
+               m.numberOfRanges >= 2 {
+                let name = ns.substring(with: m.range(at: 1))
+                let familyWords: Set<String> = ["papá", "mamá", "papa", "mama"]
+                if !familyWords.contains(name.lowercased()) {
+                    upsert(NovaMemory(
+                        category: .personAlias,
+                        key: name.lowercased(),
+                        value: name,
+                        confidence: 0.45, source: "inferred_social_event"
+                    ))
+                }
+            }
+        }
+        _ = lowerTitle  // evitar warning unused
     }
 
     private func inferCategoryFromValue(_ value: String, originalKey: String) -> NovaMemoryCategory {
@@ -7961,5 +8225,94 @@ extension NovaMemoryStore {
             return .personAlias
         }
         return .preference
+    }
+}
+
+// MARK: - Memory READ helpers (Phase 1 — wire-up 2026-05-27)
+
+extension NovaMemoryStore {
+    /// Sustituye en `text` cada `key` de courseAlias por su `value`.
+    /// Solo aplica para courseAlias — los personAlias no se sustituyen
+    /// (queremos preservar el nombre propio en el título; el rol se
+    /// inyecta como contexto al backend, no se sustituye en el texto).
+    ///
+    /// Word-boundary case-insensitive. Devuelve el texto modificado.
+    /// Si no hay match, devuelve el texto original sin tocar.
+    ///
+    /// Ejemplo:
+    ///   Memoria: courseAlias("teorías" → "Teorías de la Comunicación")
+    ///   Input:   "tengo prueba de teorías el viernes"
+    ///   Output:  "tengo prueba de Teorías de la Comunicación el viernes"
+    func expandAliases(in text: String) -> String {
+        let courseAliases = cache.filter { $0.isActive && $0.category == .courseAlias }
+        guard !courseAliases.isEmpty else { return text }
+        var result = text
+        for alias in courseAliases {
+            guard !alias.key.isEmpty else { continue }
+            let escapedKey = NSRegularExpression.escapedPattern(for: alias.key)
+            let pattern = "\\b\(escapedKey)\\b"
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+                continue
+            }
+            let ns = result as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            let before = result
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: alias.value)
+            if result != before {
+                touchLastUsed(id: alias.id)
+            }
+        }
+        return result
+    }
+
+    /// Devuelve una sola línea de "contexto" listo para inyectar al backend
+    /// como un turno previo del chat. Formato humano:
+    ///   "Recuerdo de turnos anteriores: Juan Pablo es tu coordinador;
+    ///   teorías = Teorías de la Comunicación; prefieres pendientes sin hora."
+    ///
+    /// Limita a `limit` memorias (top-N por confidence + recencia) para no
+    /// inundar el prompt. Solo memorias relevantes al `text` actual o, si
+    /// no hay match específico, las top-N por recencia global.
+    ///
+    /// Devuelve `nil` si no hay memorias activas — caller no agrega entry.
+    func memoryContextLine(for text: String, limit: Int = 8) -> String? {
+        let relevant = relevantMemories(for: text, limit: limit)
+        let pool = relevant.isEmpty
+            ? Array(activeMemories.prefix(limit))
+            : relevant
+        guard !pool.isEmpty else { return nil }
+        let fragments: [String] = pool.compactMap { mem in
+            switch mem.category {
+            case .personAlias:
+                return mem.value
+            case .courseAlias:
+                return "\(mem.key) = \(mem.value)"
+            case .preference, .schedulingRule, .appBehaviorRule:
+                return mem.value
+            case .projectContext, .academicContext:
+                return mem.value
+            }
+        }
+        guard !fragments.isEmpty else { return nil }
+        return "Recuerdo de turnos anteriores: \(fragments.joined(separator: "; "))."
+    }
+
+    /// Devuelve TODAS las memorias activas como texto humano (sin filtro
+    /// por relevancia). Usado por comando "¿qué sabes de mí?" y por la
+    /// vista "Mi memoria con Nova" en Ajustes.
+    func allActiveMemoriesHuman(maxEntries: Int = 50) -> [(category: NovaMemoryCategory, text: String, id: UUID)] {
+        Array(activeMemories.prefix(maxEntries)).map { mem in
+            let line: String
+            switch mem.category {
+            case .personAlias:    line = mem.value
+            case .courseAlias:    line = "\(mem.key) → \(mem.value)"
+            case .preference:     line = mem.value
+            case .schedulingRule: line = mem.value
+            case .appBehaviorRule:line = mem.value
+            case .projectContext: line = mem.value
+            case .academicContext:line = mem.value
+            }
+            return (mem.category, line, mem.id)
+        }
     }
 }

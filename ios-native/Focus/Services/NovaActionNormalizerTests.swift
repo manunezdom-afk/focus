@@ -3619,6 +3619,153 @@ enum NovaActionNormalizerTests {
         out += "\n===== END =====\n"
         return out
     }
+
+    // MARK: - Memory validation suite (Phase 1-3 wire-up, 2026-05-27)
+
+    /// Suite que valida la wiring de NovaMemoryStore — pattern de
+    /// aprendizaje, expansión de aliases y comandos directos.
+    /// Idempotente: limpia el store al final.
+    @discardableResult
+    static func runValidationMemoryCases() -> String {
+        var out = "===== NOVA MEMORY VALIDATION =====\n"
+        out += "Fecha: \(Date())\n\n"
+        var passCount = 0
+        var failCount = 0
+        var rows: [String] = []
+
+        // Snapshot del estado actual del store para restaurar al final.
+        // Evita contaminar la memoria real del usuario al correr tests.
+        let snapshotIds = NovaMemoryStore.shared.activeMemories.map { $0.id }
+        defer {
+            // Eliminar SOLO las memorias creadas durante el test.
+            let after = NovaMemoryStore.shared.activeMemories.map { $0.id }
+            for id in after where !snapshotIds.contains(id) {
+                NovaMemoryStore.shared.delete(id: id)
+            }
+        }
+
+        func record(_ id: Int, _ label: String, _ passed: Bool, _ detail: String) {
+            if passed {
+                passCount += 1
+                rows.append(String(format: "  %2d ✓ PASS | %@ — %@", id, label, detail))
+            } else {
+                failCount += 1
+                rows.append(String(format: "  %2d ✗ FAIL | %@ — %@", id, label, detail))
+            }
+        }
+
+        // M1: aprendizaje patrón "X es mi Y"
+        let learn1 = NovaMemoryStore.shared.tryLearnFromUserText("Juan Pablo es mi coordinador")
+        record(1, "learn 'X es mi Y'",
+               learn1?.category == .personAlias && learn1?.key == "juan pablo",
+               "category=\(learn1?.category.rawValue ?? "nil") key=\(learn1?.key ?? "nil")")
+
+        // M2: aprendizaje "cuando diga X me refiero a Y"
+        let learn2 = NovaMemoryStore.shared.tryLearnFromUserText(
+            "cuando diga teorías me refiero a Teorías de la Comunicación"
+        )
+        record(2, "learn 'cuando diga X me refiero a Y'",
+               learn2?.category == .courseAlias && learn2?.key == "teorías",
+               "category=\(learn2?.category.rawValue ?? "nil") key=\(learn2?.key ?? "nil") value=\(learn2?.value ?? "")")
+
+        // M3: aprendizaje "X se llama Y"
+        let learn3 = NovaMemoryStore.shared.tryLearnFromUserText("mi mamá se llama Susana")
+        record(3, "learn 'X se llama Y'",
+               learn3?.category == .personAlias && learn3?.key == "susana",
+               "category=\(learn3?.category.rawValue ?? "nil") key=\(learn3?.key ?? "nil")")
+
+        // M4: aprendizaje "tengo un Y llamado X"
+        let learn4 = NovaMemoryStore.shared.tryLearnFromUserText("tengo un hijo llamado Diego")
+        record(4, "learn 'tengo un Y llamado X'",
+               learn4?.category == .personAlias && learn4?.key == "diego",
+               "category=\(learn4?.category.rawValue ?? "nil") key=\(learn4?.key ?? "nil")")
+
+        // M5: aprendizaje "mi Y es X" (orden invertido)
+        let learn5 = NovaMemoryStore.shared.tryLearnFromUserText("mi jefe es Roberto Silva")
+        record(5, "learn 'mi Y es X'",
+               learn5?.category == .personAlias && learn5?.key == "roberto silva",
+               "category=\(learn5?.category.rawValue ?? "nil") key=\(learn5?.key ?? "nil")")
+
+        // M6: aprendizaje "prefiero ..."
+        let learn6 = NovaMemoryStore.shared.tryLearnFromUserText("prefiero pendientes sin hora")
+        record(6, "learn 'prefiero X'",
+               learn6?.category == .preference,
+               "category=\(learn6?.category.rawValue ?? "nil")")
+
+        // M7: aprendizaje "no me gusta X"
+        let learn7 = NovaMemoryStore.shared.tryLearnFromUserText("no me gusta tener reuniones en la mañana")
+        record(7, "learn 'no me gusta X'",
+               learn7?.category == .preference,
+               "category=\(learn7?.category.rawValue ?? "nil")")
+
+        // M8: NO aprende cuando no hay patrón
+        let learn8 = NovaMemoryStore.shared.tryLearnFromUserText("hola, cómo estás")
+        record(8, "ignore non-pattern text",
+               learn8 == nil,
+               "result=\(learn8 == nil ? "nil ✓" : "unexpected match")")
+
+        // M9: expansión de courseAlias
+        // (depende de M2 que guardó "teorías" → "Teorías de la Comunicación")
+        let expanded = NovaMemoryStore.shared.expandAliases(
+            in: "tengo prueba de teorías el viernes"
+        )
+        record(9, "expandAliases courseAlias",
+               expanded.contains("Teorías de la Comunicación"),
+               "result=\"\(expanded)\"")
+
+        // M10: NO expande personAlias (preserva nombre propio en texto)
+        let expanded2 = NovaMemoryStore.shared.expandAliases(in: "reunión con Juan Pablo")
+        record(10, "do NOT expand personAlias",
+               !expanded2.contains("coordinador"),
+               "result=\"\(expanded2)\"")
+
+        // M11: memoryContextLine genera línea de contexto
+        let ctx = NovaMemoryStore.shared.memoryContextLine(
+            for: "tengo reunión con Juan Pablo", limit: 5
+        )
+        record(11, "memoryContextLine produces text",
+               ctx != nil && ctx!.contains("Juan Pablo"),
+               "ctx=\(ctx ?? "nil")")
+
+        // M12: relevantMemories filtra por substring
+        let rel = NovaMemoryStore.shared.relevantMemories(for: "estudiar para teorías")
+        record(12, "relevantMemories filters by key",
+               rel.contains { $0.key == "teorías" },
+               "found=\(rel.map { $0.key }.joined(separator: ","))")
+
+        // M13: passivelyLearnFromEvent — captura persona desde título
+        NovaMemoryStore.shared.passivelyLearnFromEvent(title: "Cumpleaños de Urrutia")
+        let urrutia = NovaMemoryStore.shared.activeMemories.first { $0.key == "urrutia" }
+        record(13, "passivelyLearnFromEvent('Cumpleaños de Urrutia')",
+               urrutia != nil,
+               "urrutia memory found=\(urrutia != nil)")
+
+        // M14: passivelyLearnFromEvent NO captura "papá" / "mamá"
+        let beforeCount = NovaMemoryStore.shared.activeMemories.count
+        NovaMemoryStore.shared.passivelyLearnFromEvent(title: "Almuerzo con papá")
+        let afterCount = NovaMemoryStore.shared.activeMemories.count
+        record(14, "passive learn skips family words",
+               afterCount == beforeCount,
+               "before=\(beforeCount) after=\(afterCount)")
+
+        // M15: allActiveMemoriesHuman incluye todas las memorias activas creadas
+        let humans = NovaMemoryStore.shared.allActiveMemoriesHuman()
+        let createdHere = humans.filter { !snapshotIds.contains($0.id) }
+        record(15, "allActiveMemoriesHuman returns created entries",
+               createdHere.count >= 7,
+               "count=\(createdHere.count)")
+
+        out += "RESULTADO: \(passCount)/\(passCount + failCount) PASS  (\(failCount) FAIL)\n"
+        if failCount == 0 {
+            out += "✅ TODOS PASS — memoria de Nova funciona end-to-end.\n"
+        } else {
+            out += "⚠️  Hay fallos — revisar wiring.\n"
+        }
+        out += "\n--- DETALLE POR CASO ---\n"
+        out += rows.joined(separator: "\n")
+        out += "\n===== END =====\n"
+        return out
+    }
 }
 
 #endif
