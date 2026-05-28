@@ -483,17 +483,30 @@ struct MiDiaView: View {
     ///    aunque el backend haya respondido.
     /// 3. Llamar backend con accessToken; fallback local en errores recuperables.
     private func resolveNovaResponse(for trimmed: String) async -> InlineNovaResponse {
-        // [NovaMemory V2 — 2026-05-27] Aprendizaje de memoria ahora lo hace
-        // el LLM (OpenAI con reasoning). El backend devuelve `save_memory`
-        // action cuando detecta enseñanza → applyBackendActions persiste.
-        //
-        // Solo manejamos LOCALMENTE los comandos meta de memoria
-        // ("qué sabes de mí", "olvida X") porque son operaciones sobre
-        // UserDefaults que el LLM no puede ejecutar directamente.
+        // [NovaMemory V3 — 2026-05-28] Comandos meta de memoria SIEMPRE
+        // local ("qué sabes de mí", "olvida X") — son operaciones sobre
+        // UserDefaults.
         if let memoryReply = store.handleMemoryCommand(trimmed: trimmed) {
             return InlineNovaResponse(
                 userText: trimmed,
                 summary: memoryReply,
+                tone: .success
+            )
+        }
+
+        // [NovaMemory V3] APRENDIZAJE local como PRIMERA línea: "X es mi Y",
+        // "la agustina es mi polola", "mi mamá se llama Susana", etc.
+        // Lo detectamos con `tryLearnFromUserText` (lista de roles ampliada
+        // post-2026-05-27) y guardamos AL TIRO — funciona en demo, offline
+        // y logueado. Instant, sin esperar al backend. Si el LLM además lo
+        // ve, hace upsert idempotente. Esto arregla el caso demo donde
+        // "la agustina es mi polola" devolvía "cuéntame más detalle".
+        if let learned = NovaMemoryStore.shared.tryLearnFromUserText(trimmed) {
+            let reply = store.replyForLearnedMemory(learned)
+            HapticManager.shared.success()
+            return InlineNovaResponse(
+                userText: trimmed,
+                summary: reply,
                 tone: .success
             )
         }

@@ -6517,27 +6517,28 @@ final class FocusDataStore: ObservableObject {
         HapticManager.shared.tap()
         isNovaTyping = true
 
-        // [NovaMemory V2 — 2026-05-27] El aprendizaje de memoria (X es mi Y,
-        // mi mamá se llama Susana, etc.) ahora lo hace el LLM (OpenAI con
-        // reasoning) en el backend, NO el parser local con listas hardcoded.
-        // Razón: el usuario pidió "que funcione como ChatGPT — tiene info
-        // del mundo, debería saber todo". El LLM entiende "polola/novia/
-        // pareja/etc" sin que tengamos que mantener listas.
-        //
-        // El backend devuelve `save_memory` action cuando detecta enseñanza
-        // → applyBackendActions la persiste en NovaMemoryStore.
-        //
-        // tryLearnFromUserText SIGUE existiendo como fallback offline (si
-        // backend cae). Lo invoca runLocalFallback en el catch del backend.
-
-        // [NovaMemory] Comandos directos sobre memoria — "qué sabes de mí",
-        // "olvida X", "olvida todo". Atajamos antes del parse normal porque
-        // son meta-comandos LOCALES de la app (leer/borrar UserDefaults).
-        // El LLM no puede ejecutarlos directamente; los manejamos acá.
+        // [NovaMemory V3 — 2026-05-28] Comandos meta de memoria SIEMPRE
+        // local ("qué sabes de mí", "olvida X") — operaciones sobre
+        // UserDefaults que el LLM no puede ejecutar.
         if let memoryReply = handleMemoryCommand(trimmed: trimmed) {
             isNovaTyping = false
             novaMessages.append(NovaMessage(role: .nova, content: memoryReply))
             persistNovaMessages()
+            return
+        }
+
+        // [NovaMemory V3] APRENDIZAJE local como PRIMERA línea (funciona en
+        // demo/offline/logueado). "X es mi Y", "la agustina es mi polola",
+        // "mi mamá se llama Susana". Detección robusta (lista ampliada).
+        // Guarda al tiro + responde, sin esperar backend. Si el LLM además
+        // lo ve, hace upsert idempotente. Arregla caso demo 2026-05-28
+        // donde memoria no se guardaba al haber quitado este short-circuit.
+        if let learned = NovaMemoryStore.shared.tryLearnFromUserText(trimmed) {
+            isNovaTyping = false
+            let reply = replyForLearnedMemory(learned)
+            novaMessages.append(NovaMessage(role: .nova, content: reply))
+            persistNovaMessages()
+            HapticManager.shared.success()
             return
         }
 
