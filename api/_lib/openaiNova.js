@@ -68,7 +68,10 @@ export const NOVA_OPENAI_SCHEMA = {
             dateText: { type: 'string' },
             dateISO: { type: ['string', 'null'] },
             time: { type: ['string', 'null'] },
-            durationMinutes: { type: 'integer', minimum: 0, maximum: 1440 },
+            // NOTA: OpenAI strict structured outputs NO soporta minimum/
+            // maximum/minLength/etc. Validación de rango se hace en el
+            // converter (clamp 0..1440). Solo `type` + `enum` permitidos.
+            durationMinutes: { type: 'integer' },
             category: {
               type: 'string',
               enum: ['personal', 'universidad', 'salud', 'reunion', 'estudio', 'otro'],
@@ -82,12 +85,11 @@ export const NOVA_OPENAI_SCHEMA = {
             // usuario suele decir (lowercase). memoryValue = expansión o
             // descripción completa. memoryCategory clasifica el tipo.
             // En otros types, todos null/string vacío.
+            // NOTA: enum nullable sin `null` en la lista — el null lo cubre
+            // `type: [..., 'null']`. Categoría validada en el converter.
             memoryKey: { type: ['string', 'null'] },
             memoryValue: { type: ['string', 'null'] },
-            memoryCategory: {
-              type: ['string', 'null'],
-              enum: ['personAlias', 'courseAlias', 'preference', 'schedulingRule', 'appBehaviorRule', 'projectContext', 'academicContext', null],
-            },
+            memoryCategory: { type: ['string', 'null'] },
           },
         },
       },
@@ -567,13 +569,18 @@ export function convertOpenAIToBackendResponse({
 
     // endTime se calcula client-side normalmente. Acá solo si tiene hora
     // Y duración > 0; el cliente puede usarlo. Para reminders, null.
+    // Clamp 0..1440 acá (el schema ya no lo restringe — OpenAI strict no
+    // soporta minimum/maximum).
+    const durationMin = typeof a.durationMinutes === 'number'
+      ? Math.max(0, Math.min(1440, a.durationMinutes))
+      : 0
     let endTime = null
-    if (!isReminder && time12 && typeof a.durationMinutes === 'number' && a.durationMinutes > 0) {
+    if (!isReminder && time12 && durationMin > 0) {
       const [hStr, rest] = time12.split(':')
       const minStr = rest.slice(0, 2)
       const ampm = rest.slice(3)
       let h24 = parseInt(hStr, 10) % 12 + (ampm === 'PM' ? 12 : 0)
-      const totalMin = h24 * 60 + parseInt(minStr, 10) + a.durationMinutes
+      const totalMin = h24 * 60 + parseInt(minStr, 10) + durationMin
       const eH24 = Math.floor((totalMin / 60) % 24)
       const eM = totalMin % 60
       const eAmPm = eH24 >= 12 ? 'PM' : 'AM'
