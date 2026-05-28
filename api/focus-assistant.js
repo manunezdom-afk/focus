@@ -159,6 +159,42 @@ export default async function handler(req, res) {
   setCorsHeaders(req, res, { methods: 'POST, OPTIONS' })
 
   if (req.method === 'OPTIONS') return res.status(200).end()
+
+  // [DIAG TEMPORAL 2026-05-28 — REMOVER tras diagnóstico] Self-test sin auth
+  // para verificar el provider en prod. NO expone secretos: solo presencia de
+  // keys (boolean), el modelo, y el status/tipo de error de un ping a OpenAI.
+  if (req.method === 'GET' && req.query?.selftest) {
+    const oaKey = process.env.OPENAI_API_KEY?.trim()
+    const anKey = process.env.ANTHROPIC_API_KEY?.trim()
+    const model = process.env.OPENAI_NOVA_MODEL?.trim() || 'gpt-5-mini'
+    const explicit = (process.env.NOVA_PROVIDER || '').toLowerCase().trim()
+    const out = {
+      provider: explicit || (oaKey ? 'openai' : 'anthropic'),
+      novaProviderEnv: explicit || null,
+      hasOpenAIKey: !!oaKey,
+      hasAnthropicKey: !!anKey,
+      model,
+    }
+    if (oaKey) {
+      try {
+        const r = await fetch('https://api.openai.com/v1/responses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${oaKey}` },
+          body: JSON.stringify({ model, input: 'ping', max_output_tokens: 16 }),
+        })
+        out.openai = { httpStatus: r.status, ok: r.ok }
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}))
+          out.openai.errorType = j?.error?.type || j?.error?.code || null
+          out.openai.errorMessage = (j?.error?.message || '').slice(0, 200)
+        }
+      } catch (e) {
+        out.openai = { ok: false, errorMessage: String(e?.message || e).slice(0, 200) }
+      }
+    }
+    return res.status(200).json(out)
+  }
+
   if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' })
   if (rejectCrossSiteUnsafe(req, res)) return
 
@@ -214,7 +250,13 @@ export default async function handler(req, res) {
   const smartActionsBlocked = !smartCheck.ok
 
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim()
-  if (!apiKey) return res.status(503).json({ error: 'no_api_key' })
+  // Necesitamos AL MENOS un provider configurado. Antes exigíamos siempre
+  // ANTHROPIC_API_KEY incluso para el path OpenAI — un setup OpenAI-only (o
+  // un Anthropic key borrado en una reconfig) devolvía 503 y el cliente caía
+  // al parser local en silencio (bug 2026-05-28).
+  if (!apiKey && !(process.env.OPENAI_API_KEY?.trim())) {
+    return res.status(503).json({ error: 'no_api_key' })
+  }
 
   const body = req.body || {}
   const { message, location = null, contacts = [], profile = null, behavior = null } = body
@@ -274,12 +316,8 @@ export default async function handler(req, res) {
   const openaiKeyAvailable = (process.env.OPENAI_API_KEY?.trim()?.length || 0) > 0
   const provider = explicitProvider
     || (openaiKeyAvailable ? 'openai' : 'anthropic')
-  if (provider === 'openai') {
-    const openaiKey = process.env.OPENAI_API_KEY?.trim()
-    if (!openaiKey) {
-      console.error(`[focus-assistant][${reqId}] NOVA_PROVIDER=openai pero falta OPENAI_API_KEY`)
-      return res.status(503).json({ error: 'no_openai_key', message: 'Provider OpenAI mal configurado.' })
-    }
+  if (provider === 'openai' && process.env.OPENAI_API_KEY?.trim()) {
+    const openaiKey = process.env.OPENAI_API_KEY.trim()
     // Memorias del usuario — el cliente las manda en `userMemories` (array
     // de strings humanas). Se inyectan al system prompt para que el LLM
     // pueda resolver referencias y NO repreguntar lo que ya sabe.
@@ -310,13 +348,10 @@ export default async function handler(req, res) {
       try {
         parsed = JSON.parse(rawText)
       } catch (e) {
-        console.error(`[focus-assistant][${reqId}] OpenAI JSON parse failed:`, e.message)
-        return res.status(502).json({
-          error: 'llm_bad_output',
-          requestId: reqId,
-          reply: 'No pude procesar la respuesta. Repite el mensaje, por favor.',
-          actions: [],
-        })
+        // JSON inválido de OpenAI → tratar como fallo del provider y caer a
+        // Claude (catch externo). Antes devolvía 502 y el cliente caía al
+        // parser local.
+        throw new Error(`OpenAI bad JSON: ${e.message}`)
       }
       const mapped = convertOpenAIToBackendResponse({
         openaiPayload: parsed,
@@ -363,21 +398,30 @@ export default async function handler(req, res) {
       return res.status(200).json(mapped)
     } catch (err) {
       const status = err?.status || 500
-      console.error(`[focus-assistant][${reqId}] OpenAI call failed (${status}):`, err?.message?.slice(0, 200))
-      if (status === 401 || status === 403) {
-        return res.status(503).json({ error: 'invalid_openai_key', requestId: reqId, message: 'Provider OpenAI no autorizado.' })
+      const canFallbackToClaude = !!apiKey
+      console.error(`[focus-assistant][${reqId}] OpenAI call failed (${status}): ${err?.message?.slice(0, 200)}${canFallbackToClaude ? ' — fallback a Claude' : ''}`)
+      // RED DE SEGURIDAD (2026-05-28): si OpenAI falla (key inválida tras
+      // rotarla, modelo inaccesible, schema rechazado, timeout…) y hay
+      // ANTHROPIC_API_KEY, NO devolvemos error — caemos al path Claude de
+      // abajo (sin return). Así Nova sigue siendo una IA real (mundo +
+      // razonamiento) en vez de degradar al parser local tonto. El usuario
+      // reportó "sigue local pese a estar logueado": era exactamente esto —
+      // OpenAI fallaba en silencio y el cliente caía al parser determinista.
+      if (!canFallbackToClaude) {
+        if (status === 401 || status === 403) {
+          return res.status(503).json({ error: 'invalid_openai_key', requestId: reqId, message: 'Provider OpenAI no autorizado.' })
+        }
+        if (status === 429) {
+          return res.status(429).json({ error: 'upstream_rate_limit', requestId: reqId, message: 'Demasiadas solicitudes a OpenAI. Espera un momento.' })
+        }
+        return res.status(502).json({
+          error: 'upstream_error',
+          requestId: reqId,
+          reply: 'Tuve un problema con Nova. Vuelve a intentarlo.',
+          actions: [],
+        })
       }
-      if (status === 429) {
-        return res.status(429).json({ error: 'upstream_rate_limit', requestId: reqId, message: 'Demasiadas solicitudes a OpenAI. Espera un momento.' })
-      }
-      // Cualquier otro error: 502, el cliente cae a fallback local con
-      // mensaje humano (igual que con Anthropic caído).
-      return res.status(502).json({
-        error: 'upstream_error',
-        requestId: reqId,
-        reply: 'Tuve un problema con Nova. Vuelve a intentarlo.',
-        actions: [],
-      })
+      // canFallbackToClaude === true: no return → sigue al bloque Anthropic.
     }
   }
 
