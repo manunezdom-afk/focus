@@ -6922,25 +6922,17 @@ final class FocusDataStore: ObservableObject {
             // Operaciones sobre tareas existentes (resueltas con fuzzy
             // match local). El backend no tiene visibilidad de IDs locales.
             return true
-        case .createEvent(let title, let when, _, _, _, _, _):
-            // Fast path: si el parser local extrajo título Y fecha con
-            // seguridad, NO necesitamos al modelo IA. Antes este caso
-            // solo permitía short-circuit cuando había pending activo
-            // (follow-up), forzando "dentista hoy a las 4" a viajar
-            // 600ms+ al backend para crear algo que el parser local
-            // ya resolvió en <5ms. El normalizer garantiza título
-            // limpio; `when != nil` confirma que hubo marcador temporal.
-            if when != nil && !NovaActionNormalizer.cleanTitle(title).isEmpty {
-                return true
-            }
-            return novaContext.pendingIsActive
-        case .createTask(let title, _, _, _):
-            // Fast path: tareas sin hora explícita ("comprar pan",
-            // "estudiar lenguaje hoy") las resuelve el parser local
-            // en microsegundos. Solo título no-vacío como gate.
-            if !NovaActionNormalizer.cleanTitle(title).isEmpty {
-                return true
-            }
+        case .createEvent, .createTask:
+            // V2 (2026-05-28) — user spec "que use GPT con razonamiento":
+            // La creación de eventos/tareas NUEVOS ahora va al LLM (GPT-5
+            // con reasoning). El parser local producía basura tipo
+            // "Q jugar counter más o menos" para "tengo q jugar counter a
+            // la 1 más o menos". GPT entiende "q"="que", "más o menos"=
+            // hora aproximada → título limpio "Jugar Counter".
+            //
+            // ÚNICA excepción: si hay un pending follow-up activo (Nova
+            // preguntó "¿a qué hora?" y el user respondió "a las 5"), el
+            // backend GPT NO tiene ese contexto local → resolvemos local.
             return novaContext.pendingIsActive
         default:
             return false

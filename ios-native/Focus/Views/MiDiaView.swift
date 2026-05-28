@@ -1099,24 +1099,16 @@ struct MiDiaView: View {
         case .annotateTaskCorrection, .annotateDependency:
             // Corrección/dependencia sobre tareas locales por fuzzy match.
             return true
-        case .createEvent(let title, let when, _, _, _, _, _):
-            // Fast path Mi Día: si el parser local extrajo título Y fecha,
-            // confiamos y short-circuit el backend. Antes solo se permitía
-            // con pending activo — eso hacía que "reunión a las 5" viajara
-            // al backend, que terminaba preguntando "¿qué día?" aunque el
-            // contexto de Mi Día implica hoy. Bug reportado 2026-05-27.
-            // El normalizer garantiza título limpio; `when != nil` confirma
-            // que extractDateTime ya resolvió (hora sin fecha → hoy).
-            if when != nil && !NovaActionNormalizer.cleanTitle(title).isEmpty {
-                return true
-            }
-            return store.novaContext.pendingIsActive
-        case .createTask(let title, _, _, _):
-            // Fast path: tareas con título no vacío resuelven local en
-            // microsegundos. Misma regla que sendNovaMessage del chat.
-            if !NovaActionNormalizer.cleanTitle(title).isEmpty {
-                return true
-            }
+        case .createEvent, .createTask:
+            // V2 (2026-05-28) — user spec "que use GPT con razonamiento":
+            // creación NUEVA de eventos/tareas va al LLM (GPT-5 reasoning).
+            // El parser local generaba títulos basura ("Q jugar counter más
+            // o menos") porque no entiende "q"="que" ni "más o menos"=hora
+            // aproximada. GPT sí. Único short-circuit: pending follow-up
+            // (GPT no tiene ese contexto local).
+            //
+            // Nota: el system prompt de GPT ya maneja "hora sin fecha → hoy"
+            // (regla Mi Día), así que no reintroduce el bug de "¿qué día?".
             return store.novaContext.pendingIsActive
         default:
             return false
