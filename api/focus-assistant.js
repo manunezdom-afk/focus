@@ -22,7 +22,7 @@ const MODEL_ID = 'claude-haiku-4-5-20251001'
 // Sonnet 4.6 = fallback "premium" cuando Haiku falla en escenarios críticos
 // (ediciones de calendario sin verbo explícito, JSON inválido tras reintento,
 // truncation por max_tokens). Más caro pero solo se usa en ~3-8% de requests.
-const FALLBACK_MODEL_ID = 'claude-sonnet-4-6-20251022'
+const FALLBACK_MODEL_ID = 'claude-sonnet-4-6'
 
 // Necesario en Pro plan: por defecto Vercel mata la función a los 10s, lo
 // cual era menor que el timeout de 25s del SDK de Anthropic — el handler
