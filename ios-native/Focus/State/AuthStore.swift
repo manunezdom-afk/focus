@@ -20,6 +20,9 @@ final class AuthStore: ObservableObject {
     @Published var isWorking: Bool = false
 
     private let expiresAtKey = "focus.v1.auth.expiresAt"
+    /// Guard de reentrancia para que múltiples gatillos de refresh (init +
+    /// scenePhase) no disparen llamadas concurrentes al endpoint de token.
+    private var isRefreshing = false
 
     init() {
         if let session = loadPersistedSession() {
@@ -50,7 +53,35 @@ final class AuthStore: ObservableObject {
     /// llama desde `init()` cuando la sesión está expirada. Si falla, limpia
     /// los tokens locales y manda al usuario a Login con un mensaje claro.
     /// **No toca datos locales** (eventos/tareas/etc) — solo limpia auth.
-    private func attemptRefresh(using expired: SupabaseSession) async {
+    /// Refresca proactivamente si el access token ya expiró o está por
+    /// expirar (buffer 120s). Seguro de llamar seguido. Se invoca al volver
+    /// la app a primer plano (scenePhase `.active`).
+    ///
+    /// **Por qué existe (bug 2026-05-28):** antes el refresh SOLO corría en
+    /// `init()`. Una sesión viva más que el TTL del access token (~1h) — app
+    /// mucho rato en foreground o reanudada de background sin matarla —
+    /// quedaba con el token expirado: Nova recibía 401 y el cliente caía al
+    /// parser local en silencio, y `Sincronizar ahora` devolvía "rechazado
+    /// por RLS". Ahora renovamos al reactivarse la app.
+    func refreshIfNeeded() {
+        guard case .loggedIn(let session) = state else { return }
+        guard !session.refreshToken.isEmpty else { return }
+        let secondsToExpiry = session.expiresAt.timeIntervalSinceNow
+        guard secondsToExpiry < 120 else { return }   // todavía fresco
+        guard !isRefreshing else { return }
+        // Si ya expiró, un refresh fallido SÍ desloguea (token muerto). Si
+        // solo está por expirar, un fallo transitorio NO debe desloguear —
+        // reintentamos en la próxima reactivación.
+        let alreadyExpired = secondsToExpiry <= 0
+        Task { [weak self] in
+            await self?.attemptRefresh(using: session, hardLogoutOnFail: alreadyExpired)
+        }
+    }
+
+    private func attemptRefresh(using expired: SupabaseSession, hardLogoutOnFail: Bool = true) async {
+        if isRefreshing { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
         do {
             let renewed = try await AuthService.refreshSession(refreshToken: expired.refreshToken)
             // Si Supabase no devolvió user (algunas configs no incluyen),

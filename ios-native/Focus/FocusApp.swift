@@ -5,6 +5,7 @@ struct FocusApp: App {
     @StateObject private var dataStore = FocusDataStore()
     @StateObject private var authStore = AuthStore()
     @StateObject private var coachMarks = CoachMarksStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         #if DEBUG
@@ -91,6 +92,15 @@ struct FocusApp: App {
             .task(id: authChangeId) {
                 syncAuthIntoDataStore()
             }
+            // Al reactivarse la app, renovar el token si está por expirar.
+            // Antes el refresh solo corría en AuthStore.init() → una sesión
+            // viva > TTL del token quedaba con token muerto y Nova caía al
+            // parser local (bug 2026-05-28).
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    authStore.refreshIfNeeded()
+                }
+            }
             // Bootstrap notificaciones locales: al arrancar la app,
             // re-asegurar que cada recordatorio futuro tenga su notif
             // programada. iOS no persiste notifs locales al reinstalar
@@ -107,7 +117,11 @@ struct FocusApp: App {
     private var authChangeId: String {
         switch authStore.state {
         case .loggedIn(let session):
-            return "loggedIn:\(session.userId)"
+            // Incluir expiresAt → cuando un refresh renueva el token, el id
+            // cambia y `.task(id:)` re-empuja las nuevas credenciales al
+            // dataStore (si solo usáramos userId, el token renovado no
+            // llegaría a syncCredentials y Nova seguiría con el viejo).
+            return "loggedIn:\(session.userId):\(session.expiresAt.timeIntervalSince1970)"
         case .demo:
             return "demo"
         case .loggedOut, .codeSent, .loading:
