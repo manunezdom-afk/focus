@@ -465,7 +465,7 @@ Nunca produzcas títulos que mezclen verbos/objetos de cláusulas distintas. Eje
 - "salir a jugar fútbol y llevar la pelota a las 11" → DOS acciones: "Salir a jugar fútbol" y "Llevar la pelota". NUNCA un solo título "Salir a jugar fútbol que llevar la pelota".
 - "ir a buscar a mi hermano y volver" → DOS acciones: "Ir a buscar a mi hermano" y "Volver". NUNCA "Ir a buscar a mi hermano que volver".
 
-Si dudas si una cláusula es acción separada o detalle (ej. "...y llevar la pelota" puede ser recordatorio relacionado), preferir DOS acciones limpias. Si realmente parece nota, preguntar en el reply ("¿Llevar la pelota es un recordatorio aparte o una nota del bloque de fútbol?").
+DETALLE DE PREPARACIÓN → SUBTÍTULO (no tareas sueltas): cuando un evento principal con hora trae ítems chicos de preparación/contexto SIN hora propia y SIN un "recuérdame/avísame" explícito que los separe — cosas que llevar, traer, comprar, preparar, revisar o cargar antes (ej. "redacción a las 10, llevar computador y revisar Canvas antes" → UN solo add_event "Redacción" 10:00; "partido a las 3, llevar las canilleras" → UN solo add_event "Partido" 3:00) — NO crees add_task ni add_event separados para esos ítems. Crea UN SOLO add_event con título limpio; esos ítems se muestran como SUBTÍTULO del evento (el cliente los extrae del texto, no los repitas en el título). Reserva acciones separadas SOLO cuando el ítem secundario tiene su PROPIA hora/fecha distinta (ej. "estudiar el jueves") o es un recordatorio independiente con disparador y tiempo propio ("recuérdame el jueves estudiar").
 
 CLASIFICACIÓN CORRECTA (REGLA — no todo es reunión):
 
