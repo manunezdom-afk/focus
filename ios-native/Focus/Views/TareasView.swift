@@ -133,7 +133,9 @@ struct TareasView: View {
         if showingExamples {
             return "Lo que tienes pendiente, en un solo lugar."
         }
-        let pending = store.tasks.filter { !$0.done }.count
+        // Excluimos recordatorios: viven en Mi Día, no cuentan como pendientes
+        // de la lista de Tareas.
+        let pending = store.tasks.filter { !$0.done && !$0.isReminder }.count
         if pending == 0 { return "No tienes pendientes. Disfruta el momento." }
         if pending == 1 { return "1 tarea pendiente. Vamos por ella." }
         return "\(pending) tareas pendientes. Una por una."
@@ -158,7 +160,9 @@ struct TareasView: View {
     @ViewBuilder
     private var sectionsList: some View {
         VStack(spacing: Theme.Spacing.xl) {
-            ForEach(TaskCategory.allCases) { cat in
+            // taskListCases excluye .recordatorio: los recordatorios sin hora
+            // viven en Mi Día, no en la lista de Tareas.
+            ForEach(TaskCategory.taskListCases) { cat in
                 let cats = filteredTasks(in: cat)
                 if !cats.isEmpty {
                     section(category: cat, tasks: cats)
@@ -229,7 +233,7 @@ struct TareasView: View {
     }
 
     private var hasAnyResult: Bool {
-        TaskCategory.allCases.contains { !filteredTasks(in: $0).isEmpty }
+        TaskCategory.taskListCases.contains { !filteredTasks(in: $0).isEmpty }
     }
 
     private var emptyTitle: String {
@@ -431,7 +435,7 @@ struct NuevaTareaSheet: View {
                         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                             Text("CATEGORÍA").sectionLabelStyle()
                             HStack(spacing: Theme.Spacing.sm) {
-                                ForEach(TaskCategory.allCases) { cat in
+                                ForEach(TaskCategory.taskListCases) { cat in
                                     FilterChip(label: cat.displayName, isSelected: category == cat) {
                                         category = cat
                                     }

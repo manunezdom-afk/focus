@@ -27,14 +27,23 @@ struct NovaView: View {
     @State private var isDictating: Bool = false
     @State private var dictationDeniedMessage: String? = nil
 
-    /// Altura del teclado por encima del safe area inferior. Se actualiza
-    /// vía `NotificationCenter` (keyboardWillShow/Hide). Necesario porque
-    /// SwiftUI `safeAreaInset(edge: .bottom)` no eleva el composer del
-    /// chat de forma confiable cuando hay un sibling con
-    /// `.ignoresSafeArea()` (FocusAmbientCanvas) — bug visible en iOS 26.4
-    /// simulator: el composer queda atrapado detrás del teclado, solo se
-    /// ve el toolbar "Listo" nativo. Con observación manual + offset
-    /// aplicado al overlay del composer, garantizamos elevación correcta.
+    /// Altura del teclado por encima del safe area inferior. Necesario
+    /// porque SwiftUI `safeAreaInset(edge: .bottom)` no eleva el composer
+    /// del chat de forma confiable cuando hay un sibling con
+    /// `.ignoresSafeArea()` (FocusAmbientCanvas): el composer queda atrapado
+    /// detrás del teclado. Por eso desactivamos el avoidance automático
+    /// (`.ignoresSafeArea(.keyboard)`) y elevamos el composer a mano.
+    ///
+    /// Se actualiza vía `keyboardWillChangeFrame` (NO el par
+    /// `willShow`/`willHide`). Motivo del bug que el usuario reportaba —el
+    /// teclado sube y la barra de texto desaparece detrás—: el `TextField`
+    /// del composer es multilínea (`axis: .vertical`); al enfocarlo iOS
+    /// reajusta el teclado (barra predictiva, autocompletado) emitiendo a
+    /// veces un `keyboardWillHide` espurio DESPUÉS del `willShow`. Eso dejaba
+    /// `keyboardOverlap = 0` con el teclado aún visible → el composer caía al
+    /// fondo, tapado. `willChangeFrame` dispara en TODOS los reajustes y
+    /// siempre trae el frame final correcto, así que el overlap nunca se
+    /// queda obsoleto en 0.
     @State private var keyboardOverlap: CGFloat = 0
 
     /// **Feature flag Nova Live**. La V1 actual (Speech framework + STT
@@ -96,16 +105,14 @@ struct NovaView: View {
             )
             .navigationBarHidden(true)
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
-            guard let frame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
-            let scene = UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .first(where: { $0.activationState == .foregroundActive })
-            let bottomSafeArea = scene?.windows.first?.safeAreaInsets.bottom ?? 0
-            keyboardOverlap = max(0, frame.height - bottomSafeArea)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            keyboardOverlap = 0
+        // Solo `willChangeFrame`: dispara en aparición, ocultamiento y
+        // reajustes. Al ocultarse, el frame baja del borde inferior y el
+        // overlap resuelve a 0 solo. NO escuchamos `willHide` a propósito:
+        // un `willHide` espurio (que iOS emite al reajustar la barra
+        // predictiva del TextField multilínea) ponía el overlap en 0 con el
+        // teclado aún arriba → el composer desaparecía detrás del teclado.
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            updateKeyboardOverlap(from: note)
         }
         // Coach mark de Nova la primera vez que el usuario llega a esta
         // tab. Mismo patrón que Mi Día y Calendario.
@@ -219,6 +226,29 @@ struct NovaView: View {
                 nav.pendingNovaPrompt = nil
             }
         }
+    }
+
+    /// Recalcula cuánto del composer queda tapado por el teclado a partir
+    /// del frame final que reporta iOS. Tomamos `endFrame.minY` (borde
+    /// superior del teclado en coordenadas de pantalla) en vez de
+    /// `endFrame.height`: cuando el teclado se oculta, su frame queda por
+    /// debajo del borde inferior (minY ≈ alto de la ventana) y el overlap
+    /// resuelve a 0 solo, sin depender de un `willHide`. El composer vive
+    /// sobre el safe area inferior, así que descontamos ese inset para no
+    /// elevarlo de más.
+    private func updateKeyboardOverlap(from note: Notification) {
+        guard
+            let endFrame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+        else { return }
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        guard let window = scene?.windows.first(where: { $0.isKeyWindow }) ?? scene?.windows.first else {
+            keyboardOverlap = 0
+            return
+        }
+        let overlap = window.bounds.height - endFrame.minY - window.safeAreaInsets.bottom
+        keyboardOverlap = max(0, overlap)
     }
 
     // MARK: - Quick action dispatch

@@ -849,15 +849,17 @@ extension TaskPriority {
 extension TaskCategory {
     fileprivate var backendLabel: String {
         switch self {
-        case .hoy:      return "hoy"
-        case .semana:   return "semana"
-        case .algunDia: return "algún día"
+        case .hoy:          return "hoy"
+        case .semana:       return "semana"
+        case .algunDia:     return "algún día"
+        case .recordatorio: return "recordatorio"
         }
     }
 
     static func fromBackendLabel(_ raw: String?) -> TaskCategory {
         guard let raw = raw?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
               !raw.isEmpty else { return .hoy }
+        if raw.contains("recordatorio") || raw.contains("reminder") { return .recordatorio }
         if raw.contains("semana") { return .semana }
         if raw.contains("algún") || raw.contains("algun") { return .algunDia }
         return .hoy

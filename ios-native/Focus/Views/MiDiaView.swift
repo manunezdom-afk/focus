@@ -52,6 +52,15 @@ struct MiDiaView: View {
             .filter { !store.dismissedDemoEventTitles.contains($0.title) }
     }
 
+    /// Recordatorios sin hora a mostrar hoy en Mi Día (categoría
+    /// `.recordatorio`, pendientes, sin fecha o con fecha de hoy). Son las
+    /// capturas rápidas que Nova crea cuando el usuario no da hora — viven
+    /// aquí, NO en la pestaña Tareas. Solo datos reales: en demo no
+    /// inventamos recordatorios falsos.
+    private var displayReminders: [FocusTask] {
+        store.todayReminders()
+    }
+
     /// Recordatorios cuya hora ya pasó y siguen sin "atender". Se muestran
     /// arriba en Mi Día como una fila compacta con acciones (completar /
     /// borrar / reprogramar). Solo aparecen si hay alguno — sino la
@@ -148,15 +157,19 @@ struct MiDiaView: View {
                             .padding(.horizontal, Theme.Spacing.xl)
                     }
 
-                    // Mi Día = SOLO eventos del calendario (con sus chips de
-                    // reminder anclados). La sección "Pendientes de hoy" se
-                    // retiró 2026-05-15 porque duplicaba la pestaña Tareas
-                    // sin agregar valor — los pendientes viven ahí, no en
-                    // la vista de timeline. Los reminders custom (texto
-                    // anclado al evento) se ven dentro del card del evento
-                    // padre, así que la sección de pendientes no aportaba.
+                    // Mi Día = bloques con hora (timeline) + recordatorios sin
+                    // hora (sección propia, formato distinto). Las tareas con
+                    // fecha siguen viviendo en la pestaña Tareas; aquí solo
+                    // aparecen las capturas sin hora (category .recordatorio)
+                    // para que el día no se vea "libre" cuando hay algo
+                    // pendiente. Los reminders anclados a un evento (texto
+                    // "N min antes") se ven dentro del card del evento padre.
 
                     timelineSection
+
+                    if !displayReminders.isEmpty {
+                        recordatoriosSection
+                    }
 
                     nextDayPreviewSection
 
@@ -301,19 +314,27 @@ struct MiDiaView: View {
     }
 
 
-    /// Subtítulo del header: solo el estado del día con el conteo de
-    /// bloques (eventos). Después de retirar "Pendientes de hoy" (2026-05-15),
-    /// el contador de pendientes ya no aparece acá — vive en la pestaña
-    /// Tareas. Ejemplos:
-    /// - 0 bloques → "Día libre"
-    /// - 1 bloque  → "1 bloque"
-    /// - 3 bloques → "3 bloques"
+    /// Subtítulo del header: estado del día con el conteo de bloques (eventos
+    /// con hora) y de recordatorios (capturas sin hora que viven en Mi Día).
+    /// Ejemplos:
+    /// - 0 bloques, 0 recordatorios → "Día libre"
+    /// - 2 bloques                  → "2 bloques"
+    /// - 1 recordatorio             → "1 recordatorio"
+    /// - 2 bloques + 1 recordatorio → "2 bloques · 1 recordatorio"
     private var headerSubtitle: String {
         let blocks = displayEvents.count
-        if blocks == 0 {
+        let reminders = displayReminders.count
+        if blocks == 0 && reminders == 0 {
             return "Día libre"
         }
-        return blocks == 1 ? "1 bloque" : "\(blocks) bloques"
+        var parts: [String] = []
+        if blocks > 0 {
+            parts.append(blocks == 1 ? "1 bloque" : "\(blocks) bloques")
+        }
+        if reminders > 0 {
+            parts.append(reminders == 1 ? "1 recordatorio" : "\(reminders) recordatorios")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var bandejaButton: some View {
@@ -1679,10 +1700,10 @@ struct MiDiaView: View {
     private func executeIntent(_ intent: NovaIntent, userText: String) -> InlineNovaResponse {
         switch intent {
         case .createTask(let title, let dueDate, let recurrence, let wantsReminder):
-            // Si hay fecha y es hoy/mañana/esta semana, usamos esa categoría;
-            // si es más lejos, .algunDia. La category se mantiene compatible
-            // con el modelo existente; dueDate es metadata adicional.
-            let category = categoryForDueDate(dueDate)
+            // Sin fecha → recordatorio (se muestra en Mi Día, fuera de la
+            // pestaña Tareas). Con fecha → tarea en su bucket temporal. Regla
+            // centralizada en TaskCategory.forNovaDueDate.
+            let category = TaskCategory.forNovaDueDate(dueDate)
             let task = FocusTask(
                 title: title,
                 priority: .media,
@@ -1697,10 +1718,20 @@ struct MiDiaView: View {
                 kind: .task,
                 taskId: task.id
             )
-            // Las tareas no envían notificación local (sólo eventos). Si el
-            // user pidió aviso ("acuérdame"), le decimos por qué — sin
-            // prometer un push remoto futuro.
-            let reminderNote = wantsReminder ? " Como tarea no envía aviso al iPhone — agéndalo como evento con hora si quieres que te avise." : ""
+            // Ni tareas ni recordatorios envían notificación local (sólo
+            // eventos con hora). Si el user pidió aviso, le decimos por qué.
+            let reminderNote = wantsReminder ? " Para que te avise al iPhone, agéndalo como evento con hora." : ""
+            // Recordatorio sin hora: NO va a Tareas, se ve aquí mismo en Mi
+            // Día, así que no ofrecemos "Ver tarea".
+            if category == .recordatorio {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "Listo, lo dejé como recordatorio.",
+                    details: "«\(title)» — sin hora, lo verás en Mi Día.\(reminderNote)",
+                    action: .dismiss,
+                    tone: .success
+                )
+            }
             let dueLabel: String? = {
                 guard let d = dueDate else { return nil }
                 let cal = Calendar.current
@@ -1717,12 +1748,7 @@ struct MiDiaView: View {
                     action: .openTasksList
                 )
             }
-            let summary: String
-            if let due = dueLabel {
-                summary = "Tarea creada para \(due)."
-            } else {
-                summary = "Tarea creada en pendientes de hoy."
-            }
+            let summary = dueLabel.map { "Tarea creada para \($0)." } ?? "Tarea creada."
             return InlineNovaResponse(
                 userText: userText,
                 summary: summary,
@@ -2392,20 +2418,6 @@ struct MiDiaView: View {
         }
     }
 
-    /// Mapea una fecha de deadline a la categoría legacy del modelo
-    /// `FocusTask` (hoy / semana / algún día). Necesario hasta que migremos
-    /// a categorías derivadas de la fecha real.
-    private func categoryForDueDate(_ date: Date?) -> TaskCategory {
-        guard let date else { return .hoy }
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return .hoy }
-        // Mañana o cualquier día dentro de los próximos 7 días → semana.
-        if let diff = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: date)).day,
-           diff >= 1 && diff <= 7 {
-            return .semana
-        }
-        return .algunDia
-    }
 
     private func clarifyHeadline(_ reason: NovaIntent.ClarifyReason) -> String {
         switch reason {
@@ -2653,23 +2665,34 @@ struct MiDiaView: View {
             .padding(.horizontal, Theme.Spacing.xl)
 
             if displayEvents.isEmpty {
-                // 2026-05-14: el botón ahora navega directo al CHAT de Nova
-                // (no a Bandeja). Antes `nav.openNova()` sin args caía en el
-                // segmento por defecto `.bandeja` — un usuario que toca
-                // "Hablar con Nova" espera abrir conversación, no inbox de
-                // sugerencias. `aiStyledAction: true` aplica el degrade
-                // violeta→azul (estilo Gemini) que pidió el usuario para
-                // comunicar visualmente "esto va a la IA".
-                EmptyStateView(
-                    symbol: "sun.max",
-                    title: "Tu día está libre",
-                    message: "Agrega un bloque o pídele a Nova que lo organice.",
-                    actionLabel: "Hablar con Nova",
-                    action: { nav.openNova(segment: .chat) },
-                    aiStyledAction: true
-                )
-                .frame(minHeight: 260)
-                .padding(.horizontal, Theme.Spacing.xl)
+                if displayReminders.isEmpty {
+                    // 2026-05-14: el botón ahora navega directo al CHAT de Nova
+                    // (no a Bandeja). Antes `nav.openNova()` sin args caía en el
+                    // segmento por defecto `.bandeja` — un usuario que toca
+                    // "Hablar con Nova" espera abrir conversación, no inbox de
+                    // sugerencias. `aiStyledAction: true` aplica el degrade
+                    // violeta→azul (estilo Gemini) que pidió el usuario para
+                    // comunicar visualmente "esto va a la IA".
+                    EmptyStateView(
+                        symbol: "sun.max",
+                        title: "Tu día está libre",
+                        message: "Agrega un bloque o pídele a Nova que lo organice.",
+                        actionLabel: "Hablar con Nova",
+                        action: { nav.openNova(segment: .chat) },
+                        aiStyledAction: true
+                    )
+                    .frame(minHeight: 260)
+                    .padding(.horizontal, Theme.Spacing.xl)
+                } else {
+                    // Hay recordatorios pero ningún bloque con hora. No
+                    // mostramos el empty-state "libre" (mentiría): los
+                    // recordatorios, abajo, son el contenido del día.
+                    Text("No tienes bloques con hora hoy.")
+                        .font(Theme.Typography.subhead)
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                        .padding(.horizontal, Theme.Spacing.xl)
+                        .padding(.bottom, Theme.Spacing.xs)
+                }
             } else {
                 let shown = showAllEvents
                     ? displayEvents
@@ -2745,6 +2768,46 @@ struct MiDiaView: View {
                     .padding(.top, Theme.Spacing.xs)
                 }
             }
+        }
+    }
+
+    // MARK: - Recordatorios (sin hora)
+
+    /// Sección de recordatorios de hoy. Formato deliberadamente distinto al
+    /// del timeline de eventos: filas tipo checklist con tinte del color de
+    /// recordatorio y glifo de campana, SIN la banda lateral de hora que
+    /// distingue a los bloques con hora. Así el usuario los diferencia de un
+    /// vistazo: con hora = evento, sin hora = recordatorio.
+    private var recordatoriosSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("RECORDATORIOS")
+                    .sectionLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, Theme.Spacing.xl)
+
+            VStack(spacing: Theme.Spacing.sm) {
+                ForEach(displayReminders) { task in
+                    SwipeToDelete(enabled: true) {
+                        store.deleteTask(task.id)
+                        toast.success("Recordatorio eliminado", symbol: "trash.fill")
+                    } content: {
+                        MiDiaReminderRow(task: task) {
+                            store.toggleTask(task.id)
+                        }
+                    }
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            store.deleteTask(task.id)
+                            toast.success("Recordatorio eliminado", symbol: "trash.fill")
+                        } label: {
+                            Label("Eliminar", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, Theme.Spacing.xl)
         }
     }
 
@@ -3274,9 +3337,13 @@ private struct TimelineEventRow: View {
     }
 }
 
-// MARK: - Task row compacto (sin subtareas inline)
+// MARK: - Recordatorio row (sin hora)
 
-private struct MiDiaTaskRow: View {
+/// Fila de un recordatorio en Mi Día. Diseño a propósito DISTINTO al de un
+/// bloque del timeline (`TimelineEventRow`): sin banda lateral de color ni
+/// hora, fondo tintado con el color de recordatorio y un glifo de campana
+/// bajo el título. El checkbox completa el recordatorio (lo saca de la lista).
+private struct MiDiaReminderRow: View {
     let task: FocusTask
     let onToggle: () -> Void
 
@@ -3287,39 +3354,37 @@ private struct MiDiaTaskRow: View {
         }) {
             HStack(spacing: Theme.Spacing.md) {
                 Image(systemName: task.done ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 20))
-                    .foregroundStyle(task.done ? Theme.Colors.success : Theme.Colors.textTertiary)
+                    .font(.system(size: 22))
+                    .foregroundStyle(task.done ? Theme.Colors.success : Theme.Colors.sectionReminder)
 
-                Circle()
-                    .fill(task.priority.color)
-                    .frame(width: 6, height: 6)
-                    .opacity(task.done ? 0.4 : 1)
-
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(task.title)
                         .font(Theme.Typography.bodyEmphasized)
                         .foregroundStyle(task.done ? Theme.Colors.textTertiary : Theme.Colors.textPrimary)
                         .strikethrough(task.done, color: Theme.Colors.textTertiary)
                         .multilineTextAlignment(.leading)
-                    if task.hasSubtasks {
-                        Text("\(task.completedSubtaskCount)/\(task.subtasks.count) subtareas")
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.textTertiary)
+
+                    HStack(spacing: 5) {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Recordatorio")
+                            .font(Theme.Typography.captionEmphasized)
                     }
+                    .foregroundStyle(Theme.Colors.sectionReminder)
+                    .opacity(task.done ? 0.5 : 1)
                 }
 
                 Spacer()
             }
             .padding(.horizontal, Theme.Spacing.lg)
-            .padding(.vertical, Theme.Spacing.sm + 2)
+            .padding(.vertical, Theme.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                    .fill(Theme.Colors.surface)
+                    .fill(Theme.Colors.sectionReminder.opacity(0.08))
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
-                            .strokeBorder(Theme.Colors.border, lineWidth: Theme.Stroke.hairline)
+                            .strokeBorder(Theme.Colors.sectionReminder.opacity(0.22), lineWidth: Theme.Stroke.hairline)
                     )
-                    .focusCardShadow()
             )
         }
         .buttonStyle(.plain)
