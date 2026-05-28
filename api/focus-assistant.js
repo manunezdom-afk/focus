@@ -159,42 +159,6 @@ export default async function handler(req, res) {
   setCorsHeaders(req, res, { methods: 'POST, OPTIONS' })
 
   if (req.method === 'OPTIONS') return res.status(200).end()
-
-  // [DIAG TEMPORAL 2026-05-28 — REMOVER tras diagnóstico] Self-test sin auth
-  // para verificar el provider en prod. NO expone secretos: solo presencia de
-  // keys (boolean), el modelo, y el status/tipo de error de un ping a OpenAI.
-  if (req.method === 'GET' && req.query?.selftest) {
-    const oaKey = process.env.OPENAI_API_KEY?.trim()
-    const anKey = process.env.ANTHROPIC_API_KEY?.trim()
-    const model = process.env.OPENAI_NOVA_MODEL?.trim() || 'gpt-5-mini'
-    const explicit = (process.env.NOVA_PROVIDER || '').toLowerCase().trim()
-    const out = {
-      provider: explicit || (oaKey ? 'openai' : 'anthropic'),
-      novaProviderEnv: explicit || null,
-      hasOpenAIKey: !!oaKey,
-      hasAnthropicKey: !!anKey,
-      model,
-    }
-    if (oaKey) {
-      try {
-        const r = await fetch('https://api.openai.com/v1/responses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${oaKey}` },
-          body: JSON.stringify({ model, input: 'ping', max_output_tokens: 16 }),
-        })
-        out.openai = { httpStatus: r.status, ok: r.ok }
-        if (!r.ok) {
-          const j = await r.json().catch(() => ({}))
-          out.openai.errorType = j?.error?.type || j?.error?.code || null
-          out.openai.errorMessage = (j?.error?.message || '').slice(0, 200)
-        }
-      } catch (e) {
-        out.openai = { ok: false, errorMessage: String(e?.message || e).slice(0, 200) }
-      }
-    }
-    return res.status(200).json(out)
-  }
-
   if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' })
   if (rejectCrossSiteUnsafe(req, res)) return
 
