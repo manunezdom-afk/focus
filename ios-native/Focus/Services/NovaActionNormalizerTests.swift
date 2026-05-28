@@ -3538,6 +3538,23 @@ enum NovaActionNormalizerTests {
             expectedSubtitlePrefix: "mindfulness con cristina",
             expectedHour: 17, expectedDay: D.today,
             notes: "BUG-USER: 'tengo una' prefix + 'a las 5' entre topic y 'con X'"))
+        // BUG-USER 2026-05-28 — "tengo q jugar counter a la 1 más o menos"
+        // dejaba título "Q jugar counter más o menos". Debe limpiar "q"
+        // (=que) y "más o menos" (aproximación).
+        cases.append(Case(id: 52,
+            input: "tengo q jugar counter a la 1 más o menos",
+            expectedKind: K.event,
+            expectedTitleLower: "jugar counter",
+            expectedSubtitlePrefix: "",
+            expectedHour: 13, expectedDay: D.today,
+            notes: "BUG-USER: 'tengo q' → strip que; 'más o menos' → strip"))
+        cases.append(Case(id: 53,
+            input: "tengo q jugar counter más o menos a las 2",
+            expectedKind: K.event,
+            expectedTitleLower: "jugar counter",
+            expectedSubtitlePrefix: "",
+            expectedHour: 14, expectedDay: D.today,
+            notes: "BUG-USER variante: 'más o menos' antes de la hora"))
 
         var out = "===== NOVA SUBTITLE-50 VALIDATION (user spec 2026-05-27) =====\n"
         out += "Fecha: \(Date())\n\n"

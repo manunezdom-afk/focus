@@ -209,6 +209,14 @@ enum NovaActionNormalizer {
             // 3b. Marcador de "Para [temporal]" leading — debe ir antes
             // que strip de days sueltos.
             #"^\s*para\s+(mañana|manana|hoy|esta\s+(tarde|noche|mañana|manana)|en\s+la\s+(tarde|noche|mañana|manana)|el\s+(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)|pasado\s+mañana|pasado\s+manana|al\s+mediod[ií]a)\b"#,
+            // Aproximación coloquial "más o menos" / "mas o menos" — marca
+            // que la hora es aproximada ("a la 1 más o menos"). Es metadata,
+            // no parte del título. User report 2026-05-28: "tengo q jugar
+            // counter a la 1 más o menos" dejaba "más o menos" en el título.
+            #"\bm[aá]s o menos\b"#,
+            #"\bmas o menos\b"#,
+            #"\baproximadamente\b"#,
+            #"\bm[aá]s\s+o\s+menos\b"#,
             // Horas en dígitos.
             #"\ba la?s? \d{1,2}(:\d{2})?\s*(am|pm|hrs?|de la (mañana|manana|tarde|noche))?\b"#,
             #"\b\d{1,2}:\d{2}\b"#,
@@ -479,8 +487,13 @@ enum NovaActionNormalizer {
             // 1. "Tengo ganas de X" → X (antes que "tengo X" para evitar que
             //    el patrón general consuma solo "tengo ").
             #"^\s*tengo\s+ganas\s+de\s+(la|el|los|las|una|un)?\s*"#,
-            // 2. "Tengo (que|una?|un|el|la|los|las|mi)? X" → X.
-            #"^\s*tengo(\s+(que|una?|un|el|la|los|las|mi))?\s+"#,
+            // 2. "Tengo (que|q|una?|un|el|la|los|las|mi)? X" → X.
+            //    "q" es abreviación coloquial de "que" (chat): "tengo q
+            //    jugar counter" → "jugar counter". User report 2026-05-28.
+            #"^\s*tengo(\s+(que|q|una?|un|el|la|los|las|mi))?\s+"#,
+            // 2-bis. "q" / "que" SUELTO al inicio (sin "tengo"): "q comprar
+            //    pan" → "comprar pan". Abreviación de "que" coloquial.
+            #"^\s*(?:que|q)\s+"#,
             // 3. "Necesito (que)? X" → X.
             #"^\s*necesito(\s+que)?\s+(la|el|los|las|una|un)?\s*"#,
             // 4. "Quiero X" / "Voy a X" / "Me toca X" / "Me agendaron X" /
