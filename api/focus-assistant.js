@@ -24,6 +24,12 @@ const MODEL_ID = 'claude-haiku-4-5-20251001'
 // truncation por max_tokens). Más caro pero solo se usa en ~3-8% de requests.
 const FALLBACK_MODEL_ID = 'claude-sonnet-4-6'
 
+// Reply de último recurso cuando Sonnet-directo no devuelve JSON válido (ni
+// siquiera tras reintento). Lo declaramos una vez para (a) devolverlo y (b)
+// filtrarlo del historial entrante: reenviar este texto al modelo lo desvía
+// del formato JSON y genera más fallbacks en cadena (efecto bola de nieve).
+const CHAINED_FALLBACK_REPLY = 'Tu mensaje tiene varias cosas encadenadas. Envíalas por separado para que las agende bien.'
+
 // Necesario en Pro plan: por defecto Vercel mata la función a los 10s, lo
 // cual era menor que el timeout de 25s del SDK de Anthropic — el handler
 // moría sin responder y el cliente quedaba en "Focus está pensando…".
@@ -256,6 +262,9 @@ export default async function handler(req, res) {
     .slice(0, 200)
   const history = (Array.isArray(body.history) ? body.history : [])
     .filter(h => h && typeof h === 'object' && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string')
+    // No reenviar al modelo el fallback "envíalas por separado": acumulado en
+    // el historial desvía al modelo del formato y dispara más fallbacks.
+    .filter(h => !(h.role === 'assistant' && h.content.trim() === CHAINED_FALLBACK_REPLY))
     .slice(-20)
   const memories = (Array.isArray(body.memories) ? body.memories : [])
     .filter(m => m && typeof m === 'object' && typeof m.content === 'string')
@@ -580,16 +589,31 @@ export default async function handler(req, res) {
           const parsedDirect = safeParseAssistantJSON(rDirect)
           return finalize(parsedDirect, { escalated: true })
         } catch {
-          // Sonnet falló parseando — caso muy raro. NO devolvemos basura
-          // al cliente; le pedimos enviar separado.
-          console.error('[focus-assistant] Sonnet (direct) JSON parse failed for complex input')
-          recordUsage(admin, userId, ACTION_TYPES.NOVA_PREMIUM_MESSAGE).catch(() => {})
-          return res.status(200).json({
-            reply: 'Tu mensaje tiene varias cosas encadenadas. Envíalas por separado para que las agende bien.',
-            confidence: 0,
-            shouldAskUser: true,
-            actions: [],
-          })
+          // Sonnet devolvió JSON inválido. Suele pasar con historiales largos o
+          // repetitivos que lo desvían del formato. Antes nos rendíamos aquí
+          // con "envíalas por separado" (falso negativo molesto). Reintentamos
+          // UNA vez con un refuerzo de formato — el path con Haiku ya reintenta
+          // y escala; esta rama era la única sin red.
+          console.warn('[focus-assistant] Sonnet (direct) JSON inválido — reintentando con refuerzo de formato')
+          try {
+            const dRetry = await runClaude(
+              'Tu respuesta anterior NO fue JSON válido. Devuelve EXCLUSIVAMENTE el objeto JSON del schema (empieza con "{" y termina con "}"), sin texto fuera del objeto y con todas las llaves cerradas.',
+              2,
+              FALLBACK_MODEL_ID,
+            )
+            const rRetry = (dRetry.content?.[0]?.text ?? '').trim()
+            const parsedRetry = safeParseAssistantJSON(rRetry)
+            return finalize(parsedRetry, { escalated: true })
+          } catch {
+            console.error('[focus-assistant] Sonnet (direct) JSON inválido tras reintento')
+            recordUsage(admin, userId, ACTION_TYPES.NOVA_PREMIUM_MESSAGE).catch(() => {})
+            return res.status(200).json({
+              reply: CHAINED_FALLBACK_REPLY,
+              confidence: 0,
+              shouldAskUser: true,
+              actions: [],
+            })
+          }
         }
       } catch (err) {
         // Sonnet API falló — re-throw para que el catch general formatee.
