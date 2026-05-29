@@ -155,6 +155,23 @@ function detectComplexInput(text) {
   return false
 }
 
+// Detecta si el turno actual del usuario es la respuesta a una pregunta de
+// clarificación que Nova hizo en su turno anterior (ej. Nova preguntó "¿a qué
+// hora?" / "¿de la mañana o de la noche?" y el usuario respondió "a las 3" /
+// "de la noche"). En esos turnos el modelo debe reconstruir el contexto
+// acumulado del hilo (evento + hora recién resuelta + preparativos) y emitir
+// el add_event. Haiku lo hace de forma poco fiable —pierde el add_event o
+// manda la preparación a una tarea suelta— así que los enrutamos a Sonnet,
+// igual que los inputs multi-acción. El historial que llega aquí termina en el
+// turno anterior (el mensaje actual viaja en `message`, no en `history`).
+function isClarificationReply(history) {
+  if (!Array.isArray(history) || history.length === 0) return false
+  const last = history[history.length - 1]
+  return last?.role === 'assistant'
+    && typeof last.content === 'string'
+    && /\?\s*$/.test(last.content.trim())
+}
+
 export default async function handler(req, res) {
   setCorsHeaders(req, res, { methods: 'POST, OPTIONS' })
 
@@ -552,9 +569,10 @@ export default async function handler(req, res) {
     // necesitan razonamiento más fino. Haiku tropezaba con esos casos
     // (concatenaba títulos, perdía acciones). Para esos vamos directo
     // a Sonnet — ~10% más caro pero MUY mejor en estructura.
-    const isComplexInput = detectComplexInput(message)
+    const clarificationReply = isClarificationReply(history)
+    const isComplexInput = detectComplexInput(message) || clarificationReply
     if (isComplexInput) {
-      console.log('[focus-assistant] complex input → Sonnet directly')
+      console.log(`[focus-assistant] ${clarificationReply ? 'clarification reply' : 'complex input'} → Sonnet directly`)
       try {
         const dDirect = await runClaude('', 1, FALLBACK_MODEL_ID)
         const rDirect = (dDirect.content?.[0]?.text ?? '').trim()
