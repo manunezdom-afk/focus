@@ -443,9 +443,24 @@ const CONFIDENCE_NUMERIC = {
 export function convertOpenAIToBackendResponse({
   openaiPayload,
   userMessage,
+  history = [],
   reqId,
 }) {
-  const inputNorm = normForCompare(userMessage)
+  // La guardia anti-contaminación (más abajo) exige que el título/sourceText
+  // de cada acción aparezca en lo que el usuario dijo. En flujos de
+  // clarificación (Nova preguntó la hora; el usuario responde "de la noche"),
+  // el título legítimo proviene de un turno PREVIO del usuario, no del mensaje
+  // actual — sin incluir el historial, el create_event se dropeaba como
+  // "contaminación" y Nova confirmaba ("agendé…") sin crear nada. Incluimos
+  // solo los turnos del USUARIO (no los del assistant) para no validar contra
+  // títulos que el propio modelo propuso en su pregunta de clarificación.
+  const historyUserText = Array.isArray(history)
+    ? history
+        .filter(h => h && h.role === 'user' && typeof h.content === 'string')
+        .map(h => h.content)
+        .join(' \n ')
+    : ''
+  const inputNorm = normForCompare([historyUserText, userMessage].filter(Boolean).join(' \n '))
   const raw = openaiPayload
   const incomingActions = Array.isArray(raw?.actions) ? raw.actions : []
   const safeActions = []

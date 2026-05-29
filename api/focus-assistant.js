@@ -320,6 +320,7 @@ export default async function handler(req, res) {
       const mapped = convertOpenAIToBackendResponse({
         openaiPayload: parsed,
         userMessage: message,
+        history,
         reqId,
       })
       // Tracking de costo — OpenAI Responses API devuelve usage en `data.usage`.
