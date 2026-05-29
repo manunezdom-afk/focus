@@ -23,6 +23,11 @@ final class AuthStore: ObservableObject {
     /// Guard de reentrancia para que múltiples gatillos de refresh (init +
     /// scenePhase) no disparen llamadas concurrentes al endpoint de token.
     private var isRefreshing = false
+    /// Timer proactivo de refresh. `refreshIfNeeded()` solo corría en init +
+    /// scenePhase `.active`; una app mucho rato en primer plano (sin
+    /// transición de escena) dejaba expirar el access token → Nova caía al
+    /// parser local mid-sesión. Este timer renueva proactivamente.
+    private var refreshTimer: Timer?
 
     init() {
         if let session = loadPersistedSession() {
@@ -45,9 +50,21 @@ final class AuthStore: ObservableObject {
         } else {
             state = .loggedOut
         }
+        startRefreshTimer()
     }
 
     // MARK: - Refresh
+
+    /// Renueva proactivamente cada 60s aunque la app siga en primer plano (sin
+    /// transición de escena). Arregla el bug donde el access token expiraba
+    /// mid-sesión y Nova caía al parser local. `refreshIfNeeded()` es no-op
+    /// hasta 120s antes de expirar, así que el costo es nulo el resto del tiempo.
+    private func startRefreshTimer() {
+        refreshTimer?.invalidate()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshIfNeeded() }
+        }
+    }
 
     /// Intenta renovar la sesión con el refresh token persistido. Solo se
     /// llama desde `init()` cuando la sesión está expirada. Si falla, limpia

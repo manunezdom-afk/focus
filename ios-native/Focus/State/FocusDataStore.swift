@@ -6185,6 +6185,10 @@ final class FocusDataStore: ObservableObject {
         let trailingDetail = NovaActionNormalizer
             .extractEventDetail(from: userText).detail
         let (finalTitle, finalSubtitle): (String, String?) = {
+            // Subtítulo explícito del backend (Claude) gana sobre la extracción local.
+            if let s = payload.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+                return (cleanedTitle, s)
+            }
             if let detail = trailingDetail {
                 // Si el cleanedTitle es solo "Reunión" tras strip del detalle,
                 // mantenemos como tal. El detalle gana como subtítulo.

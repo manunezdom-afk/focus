@@ -603,7 +603,8 @@ NO PREGUNTES POR DEFECTO. Tu trabajo es resolver como humano razonable. Solo pre
 Acciones disponibles:
 
 Agregar evento (con hora, va al calendario y Mi Día):
-{ "type": "add_event", "event": { "title": string, "time": string, "endTime": string|null, "date": string|null, "section": "focus"|"evening", "icon": string, "location"?: string, "notes"?: string, "reminderOffsets"?: number[], "reminderNotes"?: string[] } }
+{ "type": "add_event", "event": { "title": string, "subtitle"?: string, "time": string, "endTime": string|null, "date": string|null, "section": "focus"|"evening", "icon": string, "location"?: string, "notes"?: string, "reminderOffsets"?: number[], "reminderNotes"?: string[] } }
+- subtitle = contexto/detalle que va DEBAJO del título en la tarjeta del evento (temas, qué llevar/preparar/revisar antes, "de qué" trata). REGLA: mantén el title CORTO (la acción + sujeto principal, sin listas ni preparativos) y pon listas/detalles/preparativos en subtitle. Ej: title "Estudiar" + subtitle "Comunicación, Teoría Crítica y Estudios Culturales"; title "Prueba de Arte" + subtitle "Ilustración, Barroco y Renacimiento"; title "Jugar Counter" + subtitle "Cargar el mouse antes". OMITIR si no hay contexto extra. NUNCA crees add_task para preparativos de un evento — van en subtitle.
 - time = hora de INICIO. endTime = hora de TÉRMINO (null si no hay).
 - Sigue las reglas de "Duración de eventos" más abajo para decidir endTime.
 - location = lugar físico o virtual del evento si el usuario lo menciona ("en Starbucks", "en la oficina", "por Zoom", "en la sala 302"). Ver sección "EXTRACCIÓN DE UBICACIÓN" más abajo. OMITIR si el usuario no menciona lugar.

@@ -464,6 +464,9 @@ struct BackendEventCreate {
     let reminderNotes: [String]?  // texto custom por offset (paralelo)
     let location: String?
     let notes: String?
+    /// Subtítulo/contexto que el backend (Claude) manda para mostrar debajo
+    /// del título en la tarjeta. Default nil para no romper otros constructores.
+    var subtitle: String? = nil
 }
 
 /// Recurrencia (matchea shape backend).
@@ -600,6 +603,7 @@ private struct RawAction: Decodable {
 
     private struct EventCreateDecoded: Decodable {
         let title: String?
+        let subtitle: String?
         let time: String?
         let endTime: String?
         let date: String?
@@ -611,7 +615,7 @@ private struct RawAction: Decodable {
         let notes: String?
 
         enum CodingKeys: String, CodingKey {
-            case title, time, endTime, date, section, icon
+            case title, subtitle, time, endTime, date, section, icon
             case reminderOffsets
             case reminderNotes
             case location, notes
@@ -628,7 +632,8 @@ private struct RawAction: Decodable {
                 reminderOffsets: reminderOffsets,
                 reminderNotes: reminderNotes,
                 location: location,
-                notes: notes
+                notes: notes,
+                subtitle: subtitle
             )
         }
     }
