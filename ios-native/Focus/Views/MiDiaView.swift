@@ -1319,13 +1319,18 @@ struct MiDiaView: View {
 
         if outcome.didMutate {
             // Hubo mutación: usamos el resumen del outcome como cabecera +
-            // los bullets generados (multi-action) o el reply textual del
-            // backend (single action) como detalle. Acción contextual según
-            // tipo. Para múltiples ítems creados, `outcome.details` trae los
-            // bullets compuestos por el store — el reply textual del backend
-            // queda redundante y lo omitimos.
+            // los bullets generados (multi-action) como detalle. Acción
+            // contextual según tipo.
+            //
+            // El reply textual del backend NO se usa como detalle: repetía lo
+            // mismo que `summary` pero en 12h ("4:00 PM") mientras el summary
+            // nativo va en 24h ("16:00") → doble confirmación + formato mixto.
+            // El subtítulo/preparativos ya se ven en la tarjeta del evento.
+            // Solo caemos al reply si el outcome no produjo un summary propio.
             let summary = outcome.summary ?? "Listo."
-            let baseDetails = outcome.details ?? (replyText.isEmpty ? nil : replyText)
+            let hasOwnSummary = !(outcome.summary ?? "").isEmpty
+            let baseDetails = outcome.details
+                ?? (hasOwnSummary ? nil : (replyText.isEmpty ? nil : replyText))
             var details: String? = baseDetails
             if let note = blockedNote {
                 details = [details, note].compactMap { $0 }.joined(separator: "\n\n")
