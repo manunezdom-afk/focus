@@ -300,6 +300,12 @@ struct RemoteFocusEvent: Codable, Hashable {
     var createdAt: Date?
     var updatedAt: Date?
     var deletedAt: Date?
+    // Campos que viven en el modelo iOS (`FocusEvent`) y antes se perdían en
+    // el round-trip a la nube por no tener columna: detalle bajo el título y
+    // avisos previos. Ver migración 019_focus_events_subtitle_reminders.
+    var subtitle: String?
+    var reminderOffsets: [Int]?
+    var reminderNotes: [String]?
 
     /// Construye desde `FocusEvent` local más `userId` de sesión.
     init(local event: FocusEvent, userId: UUID) {
@@ -321,6 +327,9 @@ struct RemoteFocusEvent: Codable, Hashable {
         self.createdAt = nil   // server default
         self.updatedAt = nil   // server-managed via trigger
         self.deletedAt = nil
+        self.subtitle = event.subtitle
+        self.reminderOffsets = event.reminderOffsets
+        self.reminderNotes = event.reminderNotes
     }
 
     /// Convierte el row remoto a `FocusEvent` local.
@@ -344,7 +353,10 @@ struct RemoteFocusEvent: Codable, Hashable {
             url: url,
             lastSyncedAt: lastSyncedAt,
             isReminder: isReminder ? true : nil,
-            inferredDuration: inferredDuration ? true : nil
+            inferredDuration: inferredDuration ? true : nil,
+            reminderOffsets: reminderOffsets,
+            reminderNotes: reminderNotes,
+            subtitle: subtitle
         )
     }
 }
