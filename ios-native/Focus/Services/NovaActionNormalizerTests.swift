@@ -3205,7 +3205,7 @@ enum NovaActionNormalizerTests {
         cases.append(Case(id: 3, input: "gimnasio a las 7 de la mañana", expectedKind: K.event, expectedTitleLower: "gimnasio", expectedSubtitlePrefix: "", expectedHour: 7, expectedDay: D.tomorrow, notes: "7am ya pasó hoy → mañana"))
         cases.append(Case(id: 4, input: "almuerzo a la 1", expectedKind: K.event, expectedTitleLower: "almuerzo", expectedSubtitlePrefix: "", expectedHour: 13, expectedDay: D.today))
         cases.append(Case(id: 5, input: "clase de historia a las 10", expectedKind: K.event, expectedTitleLower: "clase de historia", expectedSubtitlePrefix: "", expectedHour: 10, expectedDay: D.today))
-        cases.append(Case(id: 6, input: "cita médica el jueves a las 4 de la tarde", expectedKind: K.event, expectedTitleLower: "cita médica", expectedSubtitlePrefix: "", expectedHour: 16))
+        cases.append(Case(id: 6, input: "cita médica el jueves a las 9 de la mañana", expectedKind: K.event, expectedTitleLower: "cita médica", expectedSubtitlePrefix: "", expectedHour: 9, notes: "valida fix 'de la mañana' residual"))
         cases.append(Case(id: 7, input: "café con Sofía a las 6", expectedKind: K.event, expectedTitleLower: "café con sofía", expectedSubtitlePrefix: "", expectedHour: 18, expectedDay: D.today))
         cases.append(Case(id: 8, input: "partido el sábado a las 5", expectedKind: K.event, expectedTitleLower: "partido", expectedSubtitlePrefix: "", expectedHour: 17))
         // ── 9-16: PREP / SUBTÍTULO ───────────────────────────────────

@@ -244,6 +244,12 @@ enum NovaActionNormalizer {
             #"\ben\s+\d{1,2}(\s+m[aá]s)?\b"#,
             #"\b\d{1,2}\s*hrs?\b"#,
             #"\b\d{1,2}\s*hs\b"#,
+            // Franja horaria "de la mañana/tarde/noche" como UNIDAD — debe ir
+            // ANTES del strip del día "mañana" suelto. Si no, "a las 9 de la
+            // mañana" perdía solo "mañana" y dejaba "de la" huérfano en el
+            // título (ej. "Cita médica de la"). El AM/PM real se resuelve en
+            // parseAll sobre el texto original, no acá.
+            #"\bde\s+la\s+(mañana|manana|tarde|noche|madrugada)\b"#,
             // Días — orden: compuestos PRIMERO para que no queden residuos.
             // "hoy día" y "hoy en día" son expresiones coloquiales de "hoy";
             // si solo strippeamos "hoy", "día" queda suelto en el título.
@@ -262,7 +268,12 @@ enum NovaActionNormalizer {
             #"\bel (lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b"#,
             #"\bdespu(é|e)s de(l)? (almuerzo|almorzar|trabajo)\b"#,
             #"\bal final del d(í|i)a\b"#,
-            #"\bal amanecer\b"#
+            #"\bal amanecer\b"#,
+            // Limpieza: "de la/las/el/los" HUÉRFANO al final del título. Queda
+            // cuando parseAll ya consumió el sustantivo antes de cleanTitle
+            // (ej. "mañana" de "de la mañana" se fue como día → "Cita médica
+            // de la"). Solo aplica al final (nada que estropear en medio).
+            #"\s+de\s+(la|las|el|los)\s*$"#
         ]
         for pattern in temporalPatterns {
             result = result.replacingOccurrences(
