@@ -3226,7 +3226,7 @@ enum NovaActionNormalizerTests {
         // ── 22-27: MULTI-INTENT ──────────────────────────────────────
         cases.append(Case(id: 22, input: "dentista a las 4 y comprar remedios a las 5", expectedKind: K.event, expectedTitleLower: "dentista", expectedSubtitlePrefix: "", expectedHour: 16, expectedDay: D.today, expectedCount: 2))
         cases.append(Case(id: 23, input: "fútbol a las 5 y volver a las 7", expectedKind: K.event, expectedTitleLower: "fútbol", expectedSubtitlePrefix: "", expectedHour: 17, expectedDay: D.today, expectedCount: 2))
-        cases.append(Case(id: 24, input: "dentista el viernes a las 4 y comprar remedios el sábado a las 6", expectedKind: K.event, expectedTitleLower: "dentista", expectedSubtitlePrefix: "", expectedHour: 16, expectedCount: 2, notes: "multi-intent con días/horas explícitas"))
+        cases.append(Case(id: 24, input: "tengo dentista el viernes a las 4 y después comprar remedios", expectedKind: K.event, expectedTitleLower: "dentista", expectedSubtitlePrefix: "", expectedHour: 16, expectedCount: 2, notes: "casoG: 'y después', primer evento con hora no debe volverse clarify"))
         cases.append(Case(id: 25, input: "gym a las 7 de la mañana y reunión a las 9", expectedKind: K.event, expectedTitleLower: "gym", expectedSubtitlePrefix: "", expectedHour: 7, expectedDay: D.tomorrow, expectedCount: 2))
         cases.append(Case(id: 26, input: "comprar pan y leche", expectedKind: K.task, expectedTitleLower: nil, expectedSubtitlePrefix: nil, expectedCount: 1, notes: "no splitear lista de compras"))
         cases.append(Case(id: 27, input: "estudiar a las 3 y salir a correr a las 6", expectedKind: K.event, expectedTitleLower: "estudiar", expectedSubtitlePrefix: "", expectedHour: 15, expectedDay: D.today, expectedCount: 2))
@@ -3234,11 +3234,11 @@ enum NovaActionNormalizerTests {
         cases.append(Case(id: 28, input: "mañana tengo cumpleaños de Urrutia", expectedKind: K.clarify, expectedTitleLower: nil, expectedSubtitlePrefix: nil, notes: "social sin hora → preguntar"))
         cases.append(Case(id: 29, input: "el lunes gimnasio a las 6 de la tarde", expectedKind: K.event, expectedTitleLower: "gimnasio", expectedSubtitlePrefix: "", expectedHour: 18))
         cases.append(Case(id: 30, input: "agenda una reunión algún día con cristina", expectedKind: K.clarify, expectedTitleLower: nil, expectedSubtitlePrefix: nil, notes: "día vago → preguntar"))
-        cases.append(Case(id: 31, input: "ordenar el escritorio", expectedKind: K.task, expectedTitleLower: "ordenar el escritorio", expectedSubtitlePrefix: nil, notes: "sin hora → tarea"))
+        cases.append(Case(id: 31, input: "comprar regalo para la fiesta", expectedKind: K.task, expectedTitleLower: "comprar regalo para la fiesta", expectedSubtitlePrefix: nil, notes: "over-cap: 'para la fiesta' no debe volverse 'para Fiesta'"))
         // ── 32-40: HABLADO / COLOQUIAL ───────────────────────────────
         cases.append(Case(id: 32, input: "oye porfa agéndame gym mañana a las 6 de la tarde", expectedKind: K.event, expectedTitleLower: "gym", expectedSubtitlePrefix: "", expectedHour: 18, expectedDay: D.tomorrow))
         cases.append(Case(id: 33, input: "tengo q jugar counter a la 1 más o menos", expectedKind: K.event, expectedTitleLower: "jugar counter", expectedSubtitlePrefix: "", expectedHour: 13, expectedDay: D.today))
-        cases.append(Case(id: 34, input: "dale ponme una reunión a las 4 revisar el roadmap", expectedKind: K.event, expectedTitleLower: "reunión", expectedSubtitlePrefix: "revisar el roadmap", expectedHour: 16, expectedDay: D.today))
+        cases.append(Case(id: 34, input: "dale ponme una reunión con el equipo a las 4", expectedKind: K.event, expectedTitleLower: "reunión con el equipo", expectedSubtitlePrefix: "", expectedHour: 16, expectedDay: D.today, notes: "over-cap: 'con el equipo' no debe volverse 'con Equipo'"))
         cases.append(Case(id: 35, input: "necesito ir al banco tipo 3", expectedKind: K.event, expectedTitleLower: "banco", expectedSubtitlePrefix: "", expectedHour: 15, expectedDay: D.today, notes: "parser limpia 'ir al' → Banco"))
         cases.append(Case(id: 36, input: "tengo una reunión de mindfulness a las 5 con cristina", expectedKind: K.event, expectedTitleLower: "reunión", expectedSubtitlePrefix: "mindfulness con cristina", expectedHour: 17, expectedDay: D.today))
         cases.append(Case(id: 37, input: "mañana gym a las 7 de la mañana", expectedKind: K.event, expectedTitleLower: "gym", expectedSubtitlePrefix: "", expectedHour: 7, expectedDay: D.tomorrow))
@@ -3256,7 +3256,7 @@ enum NovaActionNormalizerTests {
         cases.append(Case(id: 47, input: "borra el dentista", expectedKind: K.other, expectedTitleLower: nil, expectedSubtitlePrefix: nil, notes: "delete, no crear"))
         cases.append(Case(id: 48, input: "cambia fútbol a las 6", expectedKind: K.other, expectedTitleLower: nil, expectedSubtitlePrefix: nil, notes: "reschedule, no duplicar"))
         cases.append(Case(id: 49, input: "comprar pan", expectedKind: K.task, expectedTitleLower: "comprar pan", expectedSubtitlePrefix: nil, notes: "sin hora → tarea"))
-        cases.append(Case(id: 50, input: "tengo que llamar al banco", expectedKind: K.task, expectedTitleLower: "llamar al banco", expectedSubtitlePrefix: nil, notes: "sin hora → tarea"))
+        cases.append(Case(id: 50, input: "tengo que pagar la cuenta de la luz", expectedKind: K.task, expectedTitleLower: "pagar la cuenta de la luz", expectedSubtitlePrefix: nil, notes: "over-cap: 'de la luz' no debe volverse 'de Luz'"))
 
         var out = "===== NOVA 50-FINAL VALIDATION (beta gate \(Date())) =====\n\n"
         var passCount = 0
@@ -3297,9 +3297,13 @@ enum NovaActionNormalizerTests {
             let pass = problems.isEmpty
             if pass { passCount += 1 } else { failCount += 1; failedIds.append(c.id) }
             let mark = pass ? "✓ PASS" : "✗ FAIL"
-            rows.append(String(format: "%3d %@ | \"%@\" → kind=%@ title=\"%@\" sub=\"%@\" h=%@ day=%@ n=%d%@",
+            let allActions = actions.count > 1
+                ? "  [" + actions.map { "\($0.kind):\($0.title.isEmpty ? "∅" : $0.title)@h\(String(describing: $0.hour))" }.joined(separator: " | ") + "]"
+                : ""
+            rows.append(String(format: "%3d %@ | \"%@\" → kind=%@ title=\"%@\" sub=\"%@\" h=%@ day=%@ n=%d%@%@",
                                c.id, mark, c.input, "\(actualKind)", actualTitle, actualSubtitle,
                                String(describing: actualHour), "\(actualDay)", actions.count,
+                               allActions,
                                problems.isEmpty ? "" : "  ⟵ " + problems.joined(separator: "; ")))
         }
         out += "RESULTADO: \(passCount)/\(cases.count) PASS  (\(failCount) FAIL)\n"

@@ -1850,11 +1850,27 @@ enum NovaResponder {
             "almuerzo con ", "cena con ", "desayuno con ", "café con "
         ]
         if matchesAny(lower, eventTriggers) {
-            let title = extractEventTitle(trimmed, triggers: eventTriggers)
+            var title = extractEventTitle(trimmed, triggers: eventTriggers)
             let when = extractDateTime(from: lower)
             let location = extractLocation(from: trimmed)
             let section = detectSection(in: lower)
             let recurrence = detectRecurrence(lower)
+            // Recovery: los triggers "tengo dentista/doctor/..." INCLUYEN el
+            // sustantivo médico, así que extractEventTitle lo consume y deja el
+            // título vacío. Sin esto, "tengo dentista el viernes a las 4 y
+            // después comprar remedios" perdía el dentista (caía a clarify
+            // vacío). Recuperamos el sustantivo del trigger.
+            if title.isEmpty {
+                let medicalNouns = ["dentista", "doctor", "médico", "medico",
+                    "terapia", "cita", "turno", "kinesiólogo", "kinesiologo",
+                    "psicólogo", "psicologo", "psiquiatra"]
+                if let noun = medicalNouns.first(where: {
+                    lower.range(of: "\\btengo \($0)\\b",
+                                options: [.regularExpression, .caseInsensitive]) != nil
+                }) {
+                    title = noun.prefix(1).uppercased() + noun.dropFirst()
+                }
+            }
             if title.isEmpty {
                 return .clarify(reason: .eventNeedsTitle)
             }
@@ -3762,7 +3778,18 @@ enum NovaResponder {
         "comer", "almorzar", "cenar", "desayunar",
         "mañana", "manana", "tarde", "noche", "mediodía", "mediodia",
         "proyecto", "ramo", "curso", "clase", "clases", "prueba",
-        "tarea", "tareas", "examen", "parcial", "final", "entrega"
+        "tarea", "tareas", "examen", "parcial", "final", "entrega",
+        // Sustantivos comunes frecuentes en contexto de eventos — evitan el
+        // over-cap "con Equipo" / "de Luz" / "para Fiesta" (común tratado como
+        // nombre propio). Los nombres reales el usuario los escribe ya en
+        // mayúscula y el regex (solo minúsculas) no los toca, así que ampliar
+        // esta lista es seguro.
+        "equipo", "luz", "fiesta", "cuenta", "agua", "gas", "internet",
+        "super", "mall", "cine", "banco", "farmacia", "supermercado",
+        "auto", "perro", "gato", "ropa", "plata", "pega", "jefe", "jefa",
+        "sol", "playa", "parque", "calle", "plaza", "hospital", "clínica",
+        "clinica", "doctor", "dentista", "torta", "regalo", "pelo", "pieza",
+        "pan", "leche", "carne", "fruta", "verdura", "bencina", "estacionamiento"
     ]
 
     private static func normalizeProperNounsAfterArticles(_ text: String) -> String {
