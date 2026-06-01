@@ -18,8 +18,9 @@ struct FocusApp: App {
         let argRunAll = CommandLine.arguments.contains("--run-nova-tests")
         let argRun50 = CommandLine.arguments.contains("--run-nova-50")
         let argRunSubtitle50 = CommandLine.arguments.contains("--run-subtitle-50")
+        let argRun50Final = CommandLine.arguments.contains("--run-50-final")
         let argRunMemory = CommandLine.arguments.contains("--run-memory")
-        if testFlag != nil || argRunAll || argRun50 || argRunSubtitle50 || argRunMemory {
+        if testFlag != nil || argRunAll || argRun50 || argRunSubtitle50 || argRun50Final || argRunMemory {
             if let docs = FileManager.default.urls(
                 for: .documentDirectory, in: .userDomainMask
             ).first {
@@ -36,12 +37,16 @@ struct FocusApp: App {
             // Flag "1" o default → runAll() legacy.
             let runMemory = (testFlag == "memory") || argRunMemory
             let runSubtitle50 = (testFlag == "subtitle50") || argRunSubtitle50
+            let run50Final = (testFlag == "final50") || argRun50Final
             let runFiftyOnly = (testFlag == "50") || argRun50
             let result: String
             let outName: String
             if runMemory {
                 result = NovaActionNormalizerTests.runValidationMemoryCases()
                 outName = "focus-validation-memory.log"
+            } else if run50Final {
+                result = NovaActionNormalizerTests.runValidation50FinalCases()
+                outName = "focus-validation-50final.log"
             } else if runSubtitle50 {
                 result = NovaActionNormalizerTests.runValidationSubtitle50Cases()
                 outName = "focus-validation-subtitle50.log"

@@ -6682,7 +6682,7 @@ final class FocusDataStore: ObservableObject {
                         var parts: [String] = []
                         var anyExecuted = false
                         for intent in intents {
-                            if let r = self.applyLocalNovaIntent(intent, userText: trimmed) {
+                            if let r = self.applyLocalNovaIntent(intent, userText: trimmed, isMultiIntent: intents.count > 1) {
                                 parts.append(r)
                                 anyExecuted = true
                             }
@@ -6707,7 +6707,7 @@ final class FocusDataStore: ObservableObject {
                         let intents = NovaResponder.parseAll(expanded, context: self.novaContext)
                         var parts: [String] = []
                         for intent in intents {
-                            if let r = self.applyLocalNovaIntent(intent, userText: trimmed) {
+                            if let r = self.applyLocalNovaIntent(intent, userText: trimmed, isMultiIntent: intents.count > 1) {
                                 parts.append(r)
                             }
                         }
@@ -6728,7 +6728,7 @@ final class FocusDataStore: ObservableObject {
                     let intents = NovaResponder.parseAll(trimmed, context: self.novaContext)
                     var parts: [String] = []
                     for intent in intents {
-                        if let r = self.applyLocalNovaIntent(intent, userText: trimmed) {
+                        if let r = self.applyLocalNovaIntent(intent, userText: trimmed, isMultiIntent: intents.count > 1) {
                             parts.append(r)
                         }
                     }
@@ -6952,7 +6952,7 @@ final class FocusDataStore: ObservableObject {
     /// Side effects: dispara `addEvent`/`updateEvent`/`deleteEvent`/`addTask`/
     /// `addSuggestion` etc. — todos los métodos que ya sincronizan Supabase.
     /// Devuelve nil si el intent no debería ejecutarse acá (caller fall-through).
-    func applyLocalNovaIntent(_ intent: NovaIntent, userText: String) -> String? {
+    func applyLocalNovaIntent(_ intent: NovaIntent, userText: String, isMultiIntent: Bool = false) -> String? {
         switch intent {
         case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder, let recurrence):
             guard let date = when else { return nil }
@@ -6975,7 +6975,12 @@ final class FocusDataStore: ObservableObject {
             let trailingDetail = NovaActionNormalizer
                 .extractEventDetail(from: userText).detail
             let (title, eventSubtitle): (String, String?) = {
-                if let detail = trailingDetail {
+                // En multi-intent NO usamos el detalle trailing del userText
+                // completo: pertenece a UN solo segmento y se filtraba a todos
+                // los eventos (ej. "dentista a las 4 y comprar remedios a las
+                // 5" ponía "comprar remedios a las 5" como subtítulo del
+                // dentista). Cada evento usa su propio split en su lugar.
+                if let detail = trailingDetail, !isMultiIntent {
                     return (cleanedTitle, detail)
                 }
                 if let split = NovaActionNormalizer.splitTitleSubtitle(cleanedTitle) {

@@ -678,16 +678,9 @@ enum NovaActionNormalizer {
             }
         }
 
-        // 8e. "con/a mi|tu|su Family" → "con/a Family". User spec:
-        //     "almuerzo con mi papá" → "Almuerzo con papá"
-        //     "llamar a mi mamá" → "Llamar a mamá"
-        //     El posesivo es redundante cuando el sustantivo familiar lo
-        //     implica. Whitelist conservadora para no tocar otros sustantivos.
-        result = result.replacingOccurrences(
-            of: #"\b(con|a)\s+(?:mi|tu|su|nuestro|nuestra)\s+(pap[aá]|mam[aá]|hermano|hermana|hijo|hija|padre|madre|abuelo|abuela|t[ií]o|t[ií]a|primo|prima|esposo|esposa|novio|novia|polola|pololo|amigo|amiga|jefe|jefa)\b"#,
-            with: "$1 $2",
-            options: [.regularExpression, .caseInsensitive]
-        )
+        // Los posesivos familiares ("a mi hermano", "con mi papá", "llamar a
+        // mi mamá") se CONSERVAN — leen más natural que "a hermano" / "con
+        // papá", que sonaban secos. (Decisión 2026-06-01.)
 
         // 8f. Capitalizar palabras tras "con " y "a " que parezcan nombres
         //     propios (lowercase + ≥3 letras), excluyendo sustantivos comunes
