@@ -604,6 +604,36 @@ enum NovaResponder {
         return ReminderAttachIntent(offsetMinutes: offset, activity: activity)
     }
 
+    /// Detecta un recordatorio relativo "N min/h antes" SIN evento nombrado
+    /// ni hora absoluta — el follow-up natural tras crear un evento
+    /// ("psicóloga mañana a las 4" → "acuérdame 25 min antes"). Devuelve solo
+    /// el offset; el caller lo ancla al evento en foco (`topicEvent`).
+    ///
+    /// Devuelve nil si:
+    ///  - no hay trigger de recordatorio + offset válido, o
+    ///  - hay un "antes de X" explícito → eso lo maneja
+    ///    `extractReminderAttachIntent` (que además extrae la nota).
+    /// El guard contra `extractReminderAttachIntent` lo hace robusto al orden
+    /// de llamada y fácil de testear en aislamiento.
+    static func extractBareReminderOffset(from text: String) -> Int? {
+        let lower = text.lowercased()
+        let hasTrigger = matchesAny(lower, [
+            "acuérdame", "acuerdame", "acordame",
+            "recuérdame", "recuerdame", "recordame",
+            "avísame", "avisame",
+            "ponle recordatorio", "ponme recordatorio",
+            "agrégale recordatorio", "agregale recordatorio",
+            "agrégame recordatorio", "agregame recordatorio",
+            "ponle aviso", "ponme aviso", "agrégale aviso", "agregale aviso",
+        ])
+        guard hasTrigger else { return nil }
+        guard let offset = NovaActionNormalizer.extractReminderOffset(from: lower),
+              offset > 0 else { return nil }
+        // Si hay un "antes de X", lo maneja extractReminderAttachIntent.
+        if extractReminderAttachIntent(from: text) != nil { return nil }
+        return offset
+    }
+
     /// Patrón "[evento] a las X, acuérdame a las Y" — el usuario describe
     /// UN bloque con su hora Y un aviso absoluto. Diferente de
     /// `extractReminderAttachIntent` que captura "N min antes de X".

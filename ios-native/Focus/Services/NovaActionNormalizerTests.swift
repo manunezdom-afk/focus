@@ -2200,6 +2200,33 @@ enum NovaActionNormalizerTests {
             failures.append("  ✗ topic-7: extractReminderAttachIntent devolvió nil")
         }
 
+        // 8. Recordatorio SIN evento nombrado → solo offset (se ancla al
+        //    topicEvent en el caller). Cubre el bug del path backend: el
+        //    follow-up "acuérdame 25 min antes" tras crear un evento se
+        //    resolvía mal (anclaba a un evento demo). Ahora es local +
+        //    determinista vía extractBareReminderOffset + topicEvent.
+        check(label: "topic-8: 'acuérdame 25 min antes' → offset 25",
+              actual: NovaResponder.extractBareReminderOffset(from: "acuérdame 25 min antes"),
+              expected: 25 as Int?, failures: &failures)
+        check(label: "topic-8: 'avísame media hora antes' → offset 30",
+              actual: NovaResponder.extractBareReminderOffset(from: "avísame media hora antes"),
+              expected: 30 as Int?, failures: &failures)
+        check(label: "topic-8: 'ponle aviso 15 min antes' → offset 15",
+              actual: NovaResponder.extractBareReminderOffset(from: "ponle aviso 15 min antes"),
+              expected: 15 as Int?, failures: &failures)
+        // Con "antes de X" lo maneja extractReminderAttachIntent → bare = nil.
+        check(label: "topic-8: con 'antes de X' → nil (lo toma attach-intent)",
+              actual: NovaResponder.extractBareReminderOffset(from: "acuérdame 20 min antes de echar las zapatillas"),
+              expected: nil as Int?, failures: &failures)
+        // Sin trigger de recordatorio → nil.
+        check(label: "topic-8: sin trigger → nil",
+              actual: NovaResponder.extractBareReminderOffset(from: "qué tengo hoy"),
+              expected: nil as Int?, failures: &failures)
+        // Trigger pero sin "antes" (relativo "en N") → nil (no es aviso previo).
+        check(label: "topic-8: 'acuérdame en 25 min' → nil (no 'antes')",
+              actual: NovaResponder.extractBareReminderOffset(from: "acuérdame en 25 min"),
+              expected: nil as Int?, failures: &failures)
+
         // ───── Validador post-IA ──────────────────────────────────────
         NovaActionValidatorTests.runAll(into: &failures)
 

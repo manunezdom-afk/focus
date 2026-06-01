@@ -531,6 +531,17 @@ struct MiDiaView: View {
             return response
         }
 
+        // Short-circuit RECORDATORIO SIN EVENTO NOMBRADO: "acuérdame 25 min
+        // antes" (sin "de X"). Es el follow-up natural tras crear un evento
+        // ("psicóloga mañana a las 4" → "acuérdame 25 min antes"). Lo
+        // anclamos al evento en foco (`novaContext.topicEvent`) y aplicamos
+        // local SIN tocar el backend. Antes, logueado, esto iba al backend y
+        // el modelo adivinaba mal el evento (anclaba a uno demo). Resolverlo
+        // acá lo hace determinista y testeable con la suite local.
+        if let response = tryAttachBareReminderToTopicEvent(userText: trimmed) {
+            return response
+        }
+
         let preIntent = NovaResponder.parse(trimmed, context: store.novaContext)
         // Frase con múltiples acciones encadenadas o referencias temporales
         // en palabras ("en una hora", "más o menos a las 12"). El parser
@@ -821,6 +832,66 @@ struct MiDiaView: View {
             userText: userText,
             summary: summary,
             details: "🔔 \(humanReminderLabel(intent.offsetMinutes)) · \(fireLabel)",
+            action: .openCalendar,
+            isError: false,
+            tone: .success
+        )
+    }
+
+    /// Short-circuit para "acuérdame N min antes" SIN nombrar el evento ni
+    /// dar hora absoluta — el clásico follow-up tras crear un evento. Se
+    /// ancla al evento en foco (`novaContext.topicEvent`: el último que el
+    /// usuario creó, editó o mencionó, vivo 30 min). Determinista: no
+    /// depende del backend ni de que el modelo siga las reglas de topic
+    /// focus. Si NO hay un evento en foco futuro, devolvemos nil y dejamos
+    /// que el flujo normal (parser local / backend) decida — no adivinamos.
+    private func tryAttachBareReminderToTopicEvent(userText: String) -> InlineNovaResponse? {
+        guard let offset = NovaResponder.extractBareReminderOffset(from: userText) else {
+            return nil
+        }
+        // Por si el user nombró el evento en este mismo mensaje de forma que
+        // el extractor de arriba no capturó: refresca el topic focus.
+        store.detectAndPromoteMentions(in: userText)
+        guard let topic = store.novaContext.topicEvent,
+              let event = store.events.first(where: { $0.id == topic.eventId }),
+              event.startTime > Date() else {
+            return nil
+        }
+
+        let existing = event.reminderOffsets ?? []
+        if existing.contains(offset) {
+            return InlineNovaResponse(
+                userText: userText,
+                summary: "Ese aviso ya estaba agregado.",
+                details: "«\(event.title)» · 🔔 \(humanReminderLabel(offset))",
+                action: .openCalendar,
+                isError: false,
+                tone: .clarify
+            )
+        }
+
+        // Añadir el offset sin tocar título/hora. El aviso nuevo no lleva
+        // nota (el user no dio detalle); reconstruimos `reminderNotes`
+        // alineadas al nuevo orden de offsets para no desfasar las existentes.
+        var updated = event
+        let newOffsets = (existing + [offset]).sorted()
+        updated.reminderOffsets = newOffsets
+        if event.reminderNotes?.isEmpty == false {
+            var notesByOffset: [Int: String] = [:]
+            for (i, off) in existing.enumerated() {
+                if let oldNote = event.reminderNote(at: i) { notesByOffset[off] = oldNote }
+            }
+            updated.reminderNotes = newOffsets.map { notesByOffset[$0] ?? "" }
+        }
+        store.updateEvent(updated)
+        HapticManager.shared.success()
+
+        let fireTime = event.startTime.addingTimeInterval(-Double(offset) * 60)
+        let fireLabel = DateFormatters.hourMinute.string(from: fireTime)
+        return InlineNovaResponse(
+            userText: userText,
+            summary: "Listo. Te aviso \(humanReminderLabel(offset)) antes de «\(event.title)».",
+            details: "🔔 \(humanReminderLabel(offset)) · \(fireLabel)",
             action: .openCalendar,
             isError: false,
             tone: .success
