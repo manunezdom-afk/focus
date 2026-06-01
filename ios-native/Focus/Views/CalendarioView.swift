@@ -502,6 +502,20 @@ private struct CalendarEventCard: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
 
+                // Subtítulo / detalle (ej. "Llevar la pelota") dentro de la
+                // misma card, debajo del título — paridad con TimelineEventRow
+                // en Mi Día. Antes el Calendario solo mostraba el título y el
+                // contexto del evento se perdía.
+                if let subtitle = event.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(Theme.Typography.footnote)
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                }
+
                 // Solo ubicación si hay. Notes/descripción quedan para detalle.
                 // Tap → ComingSoonSheet anticipando Maps/Waze.
                 if let loc = event.location, !loc.isEmpty {
