@@ -5534,8 +5534,24 @@ final class FocusDataStore: ObservableObject {
         tasks.filter { $0.category == category }
     }
 
+    /// Pendientes de hoy para que Nova las "revise": tareas de la categoría
+    /// Hoy + recordatorios sin hora (sin fecha o con fecha de hoy). Los
+    /// recordatorios viven en Mi Día, pero siguen siendo algo pendiente que
+    /// el usuario querría repasar al preguntar "¿qué tengo pendiente hoy?".
     var pendingTodayTasks: [FocusTask] {
-        tasks.filter { $0.category == .hoy && !$0.done }
+        let cal = Calendar.current
+        return tasks.filter { task in
+            guard !task.done else { return false }
+            switch task.category {
+            case .hoy:
+                return true
+            case .recordatorio:
+                guard let due = task.dueDate else { return true }
+                return cal.isDateInToday(due)
+            default:
+                return false
+            }
+        }
     }
 
     func toggleTask(_ id: UUID) {
@@ -5565,6 +5581,19 @@ final class FocusDataStore: ObservableObject {
         persistTasks()
         uploadTask(task)
         HapticManager.shared.success()
+    }
+
+    /// Recordatorios (tareas sin hora, `category == .recordatorio`) que deben
+    /// verse HOY en Mi Día: los sin fecha (válidos siempre hasta completarse)
+    /// y los con fecha de hoy. Excluye los completados. Ordena los pendientes
+    /// más recientes primero (igual que `tasks`, que inserta al frente).
+    func todayReminders() -> [FocusTask] {
+        let cal = Calendar.current
+        return tasks.filter { task in
+            guard task.isReminder, !task.done else { return false }
+            guard let due = task.dueDate else { return true }
+            return cal.isDateInToday(due)
+        }
     }
 
     func deleteTask(_ id: UUID) {
@@ -5791,7 +5820,9 @@ final class FocusDataStore: ObservableObject {
                     if let task = makeTaskFromTimelessEventPayload(payload) {
                         addTask(task)
                         outcome.didMutate = true
-                        outcome.summary = "Tarea «\(task.title)» agregada."
+                        outcome.summary = task.isReminder
+                        ? "Recordatorio «\(task.title)» agregado."
+                        : "Tarea «\(task.title)» agregada."
                         outcome.primaryTaskId = task.id
                         outcome.createdTasks.append(task)
                         updateNovaContext(
@@ -5930,7 +5961,9 @@ final class FocusDataStore: ObservableObject {
                 if let task = makeTask(from: payload) {
                     addTask(task)
                     outcome.didMutate = true
-                    outcome.summary = "Tarea «\(task.title)» agregada."
+                    outcome.summary = task.isReminder
+                        ? "Recordatorio «\(task.title)» agregado."
+                        : "Tarea «\(task.title)» agregada."
                     outcome.primaryTaskId = task.id
                     outcome.createdTasks.append(task)
                     updateNovaContext(
@@ -6295,11 +6328,8 @@ final class FocusDataStore: ObservableObject {
             // Forzar al inicio del día — no queremos arrastrar timestamp.
             return cal.startOfDay(for: parsed)
         }()
-        let category: TaskCategory = {
-            guard let due = dueDate else { return .algunDia }
-            if cal.isDateInToday(due) { return .hoy }
-            return .semana
-        }()
+        // Sin fecha → recordatorio (Mi Día, no Tareas); con fecha → su bucket.
+        let category = TaskCategory.forNovaDueDate(dueDate)
         return FocusTask(
             title: cleanedTitle,
             priority: .media,
@@ -6317,7 +6347,13 @@ final class FocusDataStore: ObservableObject {
         let cleanedTitle = NovaActionNormalizer.cleanTitle(rawLabel)
         guard !cleanedTitle.isEmpty else { return nil }
         let priority = TaskPriority.fromBackendLabel(payload.priority)
-        let category = TaskCategory.fromBackendLabel(payload.category)
+        // El backend manda add_task sin hora. Si lo clasifica como "hoy" (o sin
+        // categoría → default hoy), es justo la captura rápida sin hora que el
+        // usuario quiere ver como recordatorio en Mi Día, no enterrada en
+        // Tareas. Las categorías futuras explícitas (semana / algún día) siguen
+        // siendo tareas reales de la lista.
+        let rawCategory = TaskCategory.fromBackendLabel(payload.category)
+        let category: TaskCategory = rawCategory == .hoy ? .recordatorio : rawCategory
         let linkedEventId = payload.linkedEventId.flatMap(parseEventId(_:))
         let parentTaskId = payload.parentTaskId.flatMap(parseEventId(_:))
         return FocusTask(
@@ -7213,17 +7249,15 @@ final class FocusDataStore: ObservableObject {
             // Mismo pipeline de limpieza para tareas.
             let title = NovaActionNormalizer.cleanTitle(rawTitle)
             guard !title.isEmpty else { return nil }
-            let category: TaskCategory = {
-                guard let dueDate else { return .hoy }
-                let cal = Calendar.current
-                if cal.isDateInToday(dueDate) { return .hoy }
-                if let diff = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: dueDate)).day,
-                   diff >= 1 && diff <= 7 { return .semana }
-                return .algunDia
-            }()
+            // Sin fecha → recordatorio (se ve en Mi Día, no en Tareas). Con
+            // fecha → tarea en su bucket temporal. Regla centralizada.
+            let category = TaskCategory.forNovaDueDate(dueDate)
             let task = FocusTask(title: title, priority: .media, category: category, dueDate: dueDate)
             addTask(task)
             updateNovaContext(from: userText, title: title, date: dueDate, kind: .task, taskId: task.id)
+            if category == .recordatorio {
+                return "Anoto «\(title)» como recordatorio. Lo verás en Mi Día."
+            }
             let dueBit: String = {
                 guard let dueDate else { return "" }
                 let cal = Calendar.current
