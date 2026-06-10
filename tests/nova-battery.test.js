@@ -92,6 +92,38 @@ test('casos edit/delete referencian eventos seed existentes', () => {
   }
 })
 
+test('las 20 frases críticas de la orden de cierre están cubiertas', () => {
+  // Mapa frase crítica → id del caso que la cubre (literal o equivalente
+  // declarado). Si alguien borra/renombra un caso, este test lo detecta.
+  const critical = {
+    'fútbol a las 5': 'A1',
+    'gym pierna a las 7': 'X201',
+    'reunión mindfulness a las 8': 'B11',
+    'acuérdame comprar pan a las 6': 'C25',
+    'tengo que llamar al médico': null, // determinista: create_task (nova-qa-closure.test.js)
+    'doctor a las 11': 'X206',
+    'clase publicidad a las 12': 'X202',
+    'fútbol a las 5 acordarme de llevar la pelota': 'B12',
+    'ponme fútbol → a las 5': 'H72',
+    'acuérdame comprar pan → a las 6': 'X210',
+    'cámbialo a las 6': 'O144',
+    'cambialo a las 6': 'X211',
+    'muévelo a mañana': 'X207',
+    'ponlo una hora antes': 'O146',
+    'mejor mañana': 'O145',
+    'mejor no': 'O141',
+    'borra lo de fútbol': 'O147',
+    'elimina la reunión': 'X208',
+    'quita el recordatorio de comprar pan': 'X209',
+    'comprar pan a las 6 mantiene la hora': 'X205',
+  }
+  const ids = new Set(cases.map(c => c.id))
+  for (const [phrase, id] of Object.entries(critical)) {
+    if (id === null) continue
+    assert.ok(ids.has(id), `frase crítica sin caso en la batería: "${phrase}" (esperaba ${id})`)
+  }
+})
+
 test('fechas de expectativas usan tokens válidos', () => {
   const valid = v => v === null || ['today', 'tomorrow', '+2'].includes(v)
     || /^weekday:(lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)$/.test(v)

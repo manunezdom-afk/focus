@@ -690,7 +690,7 @@ Reglas de formato:
 - icon: fitness_center | groups | restaurant | menu_book | work | local_hospital | shopping_cart | cake | flight | account_balance | alarm | event
 
 Duración de eventos (CRÍTICO — leer completo):
-Un evento NUNCA debe ser "eterno". Siempre intenta dejar una hora de término coherente, salvo que el usuario haya pedido explícitamente "sin hora de término" o el compromiso realmente no tenga cierre claro.
+La hora de término SOLO existe cuando el usuario la dio (o pidió bloquear tiempo explícitamente). NO inventes términos: un evento sin duración explícita es un punto en el tiempo, no un bloque de 1 hora.
 
 Prioridad para decidir la duración:
 1. DURACIÓN EXPLÍCITA del usuario → úsala tal cual.
@@ -698,21 +698,16 @@ Prioridad para decidir la duración:
    RANGO "de X a Y" es un caso explícito también: "futbol de 8 a 9" → time "8:00 AM", endTime "9:00 AM". "reunión de 2 a 4 de la tarde" → time "2:00 PM", endTime "4:00 PM". Si el usuario da rango, NUNCA inventes otra hora intermedia ni uses duración inferida.
    Calcula endTime = time + duración, o usa directamente la hora de término mencionada.
 
-2. INFERENCIA POR TIPO de evento (usar si NO hubo duración explícita y el tipo es reconocible — tabla centralizada en durations.js, NO editarla aquí):
+2. SIN duración explícita → endTime: null SIEMPRE. Aplica también a tipos reconocibles: "fútbol a las 5" → 5:00 PM sin término. "doctor a las 11" → 11:00 AM sin término. NO preguntes la duración — si al usuario le importa, la dirá. JAMÁS uses 60 minutos por defecto.
+
+3. EXCEPCIÓN ÚNICA — el usuario pide RESERVAR/BLOQUEAR tiempo sin precisar cuánto ("bloquéame la tarde para estudiar", "resérvame un bloque para leer"): usa esta tabla de referencia (centralizada en durations.js, NO editarla aquí) y confirma el rango elegido en el reply:
 ${renderDurationTableForPrompt()}
 
-3. AMBIGUO → PIDE duración antes de guardar.
-   Si el tipo de evento no está en la lista anterior y el usuario no dio duración, NO inventes un número. En ese caso:
-   - NO emitas add_event en esta respuesta.
-   - En "reply" pregunta la duración con opciones concretas: "¿Cuánto dura? 15 min, 30 min, 45 min, 1 h, 2 h, o sin hora de término."
-   - Cuando el usuario responda, recién entonces emite add_event con la duración confirmada.
-   - CRÍTICO: JAMÁS uses lenguaje pasado/confirmatorio ("Listo, agendé", "Guardé", "Creé") si todavía no emitiste add_event. Mientras preguntas por duración, usa futuro o condicional: "Voy a agendar X. ¿Cuánto dura?" o "Te agendo X en cuanto me confirmes la duración."
-
-4. RECORDATORIOS NO TIENEN DURACIÓN. Los eventos cuyo título empieza por "Recordatorio:" o que son avisos previos a otro evento SIEMPRE van con endTime en null. No les apliques las reglas de duración por tipo.
+4. RECORDATORIOS NO TIENEN DURACIÓN. Los eventos cuyo título empieza por "Recordatorio:" o que son avisos previos a otro evento SIEMPRE van con endTime en null.
 
 5. Eventos sin hora de inicio (flexibles, "cuando pueda") tampoco llevan endTime.
 
-Confirmación al usuario: al crear el evento, menciona explícitamente el rango ("Agregué 'Reunión con Juan' hoy de 3:00 PM a 3:45 PM"). Si guardaste sin hora de término, díselo ("Agregué 'Trabajar en tesis' a las 3:00 PM, sin hora de término").
+Confirmación al usuario: si guardaste con rango explícito, menciónalo ("Agregué 'Reunión con Juan' hoy de 3:00 PM a 3:45 PM"). Si guardaste sin término, confirma solo la hora de inicio ("Listo, Fútbol hoy a las 5 PM."), sin disculparte ni explicar que "no tiene término".
 
 Fecha y hora actual del sistema:
 - HOY: ${todayStr}

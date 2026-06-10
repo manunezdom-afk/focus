@@ -295,6 +295,20 @@ test('prompt: incluye la tabla de duraciones centralizada y la regla anti-60', (
   assert.ok(/JAMÁS pongas 60/.test(FULL_PROMPT))
 })
 
+test('prompt: SIN duración explícita → 0 incluso para tipos obvios (orden de cierre)', () => {
+  // "fútbol a las 5" y "doctor a las 11" quedan SIN término — la tabla es
+  // solo para pedidos explícitos de bloquear/reservar tiempo.
+  assert.ok(FULL_PROMPT.includes('SIN duración explícita → durationMinutes: 0'))
+  assert.ok(FULL_PROMPT.includes('"doctor a las 11" → 0'))
+  assert.ok(FULL_PROMPT.includes('RESERVAR/BLOQUEAR'))
+  assert.ok(FULL_PROMPT.includes('NO preguntes la duración'))
+})
+
+test('prompt: casos canónicos nuevos de la orden (Médico+exámenes, Clase+Publicidad)', () => {
+  assert.ok(FULL_PROMPT.includes('"Médico", subtitle:"Llevar exámenes"'))
+  assert.ok(FULL_PROMPT.includes('"Clase", subtitle:"Publicidad"'))
+})
+
 test('prompt: casos canónicos de título+subtítulo del spec', () => {
   assert.ok(FULL_PROMPT.includes('"Reunión", subtitle:"Mindfulness"'))
   assert.ok(FULL_PROMPT.includes('"Fútbol", subtitle:"Llevar la pelota"'))
@@ -345,6 +359,10 @@ test('prompt Anthropic: usa la misma tabla central de duraciones', () => {
   assert.ok(p.includes(renderDurationTableForPrompt()))
   // La hora ambigua con actividad clara NO debe bloquearse en clarification.
   assert.ok(p.includes('No te bloquees preguntando lo obvio'))
+  // Orden de cierre: sin duración explícita → endTime null SIEMPRE, y la
+  // regla vieja de "pregunta la duración antes de guardar" debe estar MUERTA.
+  assert.ok(p.includes('SIN duración explícita → endTime: null SIEMPRE'))
+  assert.ok(!p.includes('PIDE duración antes de guardar'), 'la regla de preguntar duración debía eliminarse')
 })
 
 // ─── 7. Correcciones conversacionales (calendarIntent) ──────────────────────
@@ -354,9 +372,18 @@ test('hasExplicitEditIntent: correcciones post-creación cuentan como intención
     'mejor no',
     'no lo pongas',
     'cámbialo a las 6',
+    'cambialo a las 6',
+    'muévelo a mañana',
+    'muevelo a mañana',
+    'pásalo a las 4',
+    'pasalo a las 4',
     'mejor mañana',
     'ponlo una hora antes',
+    'déjalo una hora después',
+    'dejalo para el viernes',
     'borra lo de fútbol',
+    'elimina la reunión',
+    'quita el recordatorio de comprar pan',
     'cambia el subtítulo a pierna',
     'que sea recordatorio no evento',
     'olvida lo anterior',

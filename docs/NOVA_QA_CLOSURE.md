@@ -17,7 +17,7 @@ recortada del contrato Anthropic**:
 
 | Capacidad | Prompt Anthropic (fallback) | Path OpenAI (producción) ANTES | AHORA |
 |---|---|---|---|
-| Reglas de duración | Tabla completa | **NADA** (schema exige `durationMinutes` → el modelo ponía 60 a todo) | Tabla centralizada + regla "0 salvo explícito/tipo" |
+| Reglas de duración | Tabla completa | **NADA** (schema exige `durationMinutes` → el modelo ponía 60 a todo) | Regla "0 salvo duración explícita" (orden de cierre: ni siquiera tipos obvios llevan término; la tabla centralizada solo aplica si el usuario pide bloquear tiempo) |
 | Campo `subtitle` | Sí | **No existía** | Sí (schema + adapter + prompt con casos canónicos) |
 | Tareas (`add_task`) | Sí | **No existía** ("comprar pan" → evento o reminder) | Sí (`create_task` → `add_task`) |
 | Editar/borrar eventos | Sí (con id real) | **Imposible** ("cámbialo a las 6" no podía funcionar) | Sí (`edit_event`/`delete_event` con `targetEventId` validado) |
@@ -74,7 +74,7 @@ Separación de responsabilidades tras esta tanda:
 
 | # | Bug | Causa | Fix | Archivo |
 |---|---|---|---|---|
-| 1 | Todo evento dura 1 hora | Schema OpenAI exige `durationMinutes` sin ninguna regla en el prompt → modelo emitía 60 por defecto | Tabla centralizada en prompt + regla "0 = sin término, JAMÁS 60 porque sí" | `durations.js`, `openaiNova.js` |
+| 1 | Todo evento dura 1 hora | Schema OpenAI exige `durationMinutes` sin ninguna regla en el prompt → modelo emitía 60 por defecto | Regla "sin duración explícita → 0/null SIEMPRE" en ambos prompts ("fútbol a las 5" y "doctor a las 11" quedan sin término); tabla centralizada en `durations.js` SOLO para pedidos de bloquear/reservar tiempo; eliminada la regla Anthropic que preguntaba "¿cuánto dura?" | `durations.js`, `openaiNova.js`, `systemPrompt.js` |
 | 2 | Subtítulos no se separan del título | El contrato OpenAI no tenía campo `subtitle` | `subtitle` en schema + adapter + 5 casos canónicos del spec en el prompt | `openaiNova.js` |
 | 3 | "tengo que llamar al médico" creaba evento con hora inventada | Sin `create_task` en el contrato OpenAI | `create_task` → `add_task` | `openaiNova.js` |
 | 4 | "cámbialo a las 6" / "borra lo de fútbol" imposibles en producción | Sin edit/delete en el contrato OpenAI | `edit_event`/`delete_event` con `targetEventId` validado contra ids reales + red `filterCalendarEditActions` en el path OpenAI | `openaiNova.js`, `focus-assistant.js` |
@@ -155,15 +155,38 @@ Conclusión: con ≥1 mensaje en el chat no existía NINGÚN gesto para cerrar e
 teclado.
 
 **Fix aplicado (1 modificador, aditivo, sin tocar lógica):**
-`.scrollDismissesKeyboard(.interactively)` en el `ScrollView` del chat
+`.scrollDismissesKeyboard(.immediately)` en el `ScrollView` del chat
 (`NovaView.swift`, `chatScroll`) — arrastrar el chat hacia abajo cierra el
-teclado siguiendo el dedo, igual que iMessage.
+teclado.
+
+**Por qué `.immediately` y no `.interactively`:** el composer de Nova NO usa
+el keyboard avoidance nativo de SwiftUI — usa tracking MANUAL
+(`keyboardOverlap` vía `keyboardWillShow/Hide` + `.padding(.bottom,
+keyboardOverlap)` + `.ignoresSafeArea(.keyboard)` en el VStack root,
+`NovaView.swift:38-107`), workaround documentado de un bug de iOS 26.4 donde
+el avoidance nativo dejaba el composer detrás del teclado. Con un dismiss
+interactivo, el padding manual quedaría desincronizado del frame real del
+teclado durante el drag (hueco fantasma bajo el composer). `.immediately`
+dispara un `keyboardWillHide` discreto y el padding anima a 0 en sincronía.
+
+**Auditoría del resto del flujo de teclado (punto 7 de la orden):**
+- Listeners: UN solo par willShow/willHide en NovaView (el de MainTabView es
+  para ocultar el tab bar, no conflictúa). Sin listeners duplicados.
+- Padding fantasma: `keyboardWillHide` resetea `keyboardOverlap = 0` siempre
+  → no queda padding residual tras cerrar.
+- Doble-avoidance: `.ignoresSafeArea(.keyboard)` en el VStack root desactiva
+  el avoidance nativo para todo el subtree → el padding manual es la única
+  fuente de elevación, sin sumarse dos mecanismos.
+- Dictado/micrófono: `audioLevel` (≈14 fps) re-renderiza el input bar pero
+  `@FocusState` sobrevive recomputaciones de body; no es la causa del bug.
+  Si en simulador se observa jank DURANTE dictado, subir el throttling en
+  `NovaLiveService.swift:439` (`% 3` → `% 6`).
 
 **Verificación pendiente en simulador** (no hay Xcode en este entorno):
-abrir chat con mensajes → tocar input → arrastrar el scroll hacia abajo →
-el teclado debe bajar. Mejora opcional futura: tap en el área de mensajes
-también podría cerrar (hoy solo el drag), cuidando no interferir con
-interacciones de las burbujas.
+abrir chat con mensajes → tocar input → escribir/enviar → arrastrar el
+scroll hacia abajo (teclado debe bajar y el composer asentarse sin hueco) →
+reabrir/cerrar repetidas veces → activar micrófono y volver a escribir →
+cambiar de pestaña y volver.
 
 (El diagnóstico alternativo "audioLevel re-renderiza el input bar y resetea
 `@FocusState`" se investigó y se descartó como causa principal: `@FocusState`

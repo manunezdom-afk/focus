@@ -5,13 +5,20 @@
 // producción), cuyo schema exige `durationMinutes` como entero — el
 // modelo, sin guía, devolvía 60 para todo ("todo dura 1 hora").
 //
+// REGLA DE PRODUCTO (orden de cierre 2026-06-10): sin duración explícita
+// del usuario NO se inventa término — durationMinutes: 0 / endTime: null,
+// incluso para tipos "obvios" ("fútbol a las 5" y "doctor a las 11" son
+// puntos, no bloques). La tabla de abajo es REFERENCIA y solo se aplica
+// cuando el usuario pide explícitamente bloquear/reservar tiempo sin
+// precisar cuánto ("bloquéame la tarde para estudiar").
+//
 // Este módulo centraliza:
-//   1. La tabla tipo-de-evento → minutos por defecto.
+//   1. La tabla tipo-de-evento → minutos de referencia.
 //   2. El render de esa tabla para inyectar en CUALQUIER prompt.
 //   3. Detectores deterministas (testeables sin LLM) de duración
 //      explícita en el texto del usuario.
 //
-// Cambiar una duración por defecto = editar UNA línea acá.
+// Cambiar una duración de referencia = editar UNA línea acá.
 
 /**
  * Tabla canónica: patrón (regex case-insensitive sobre el título o el

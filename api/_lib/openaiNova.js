@@ -291,10 +291,15 @@ durationMinutes NO es un campo de relleno. Prioridad:
 1. DURACIÓN EXPLÍCITA del usuario → exacta: "por 30 minutos"=30, "media hora"=30,
    "por 2 horas"=120, "de 5 a 7"=120, "entre 5 y 7"=120, "hasta las 9"=fin−inicio,
    "de 9 a 11"=120.
-2. SIN duración explícita pero tipo reconocible → usa esta tabla:
+2. SIN duración explícita → durationMinutes: 0 (sin hora de término; la app lo
+   muestra como punto). Aplica TAMBIÉN a tipos "obvios": "fútbol a las 5" → 0,
+   "doctor a las 11" → 0, "gym a las 7" → 0. NO preguntes la duración — si al
+   usuario le importa, la dirá. JAMÁS pongas 60 "porque sí".
+3. EXCEPCIÓN ÚNICA — el usuario pide RESERVAR/BLOQUEAR tiempo sin precisar
+   cuánto ("bloquéame la tarde para estudiar", "déjame un bloque de lectura",
+   "resérvame tiempo para el gym"): usa esta tabla de referencia (fuente única:
+   durations.js) y confirma el rango elegido en la respuesta:
 ${renderDurationTableForPrompt()}
-3. Tipo NO reconocible y sin duración explícita → durationMinutes: 0 (sin hora de
-   término; la app lo muestra como punto). JAMÁS pongas 60 "porque sí".
 4. create_reminder y create_task → durationMinutes: 0 SIEMPRE.
 
 ═══════════════════════════════════════════════════════════════
@@ -308,6 +313,8 @@ TÍTULO + SUBTÍTULO (REGLA CRÍTICA — el título NUNCA es la frase entera)
   - "dentista mañana a las 11 llevar radiografía" → title:"Dentista", subtitle:"Llevar radiografía".
   - "estudiar publicidad a las 7 repasar el trabajo de ProFreeze" → title:"Estudiar publicidad", subtitle:"Repasar trabajo de ProFreeze".
   - "gym mañana pierna a las 6" → title:"Gym", subtitle:"Pierna".
+  - "médico a las 10 llevar exámenes" → title:"Médico", subtitle:"Llevar exámenes".
+  - "clase publicidad a las 12" → title:"Clase", subtitle:"Publicidad".
 - STRIP del title: prefijos coloquiales ("tengo que", "tengo una", "necesito",
   "voy a", "ponme", "agéndame"), horas, fechas, "hoy/mañana", triggers de
   recordatorio. "tengo doctor a las 5" → "Doctor". "mañana entregar trabajo a

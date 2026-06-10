@@ -562,9 +562,18 @@ struct NovaView: View {
             // los taps — el tap-para-cerrar del backdrop solo funcionaba en
             // el estado vacío, y el toolbar "Listo" se quitó a propósito.
             // Sin esto NO existía gesto alguno para cerrar el teclado.
-            // `.interactively` = arrastrar el scroll hacia abajo lo cierra
-            // siguiendo el dedo (mismo gesto que iMessage).
-            .scrollDismissesKeyboard(.interactively)
+            //
+            // `.immediately` (no `.interactively`) a propósito: el composer
+            // se eleva con el tracking MANUAL de keyboardOverlap (padding +
+            // ignoresSafeArea(.keyboard) en el VStack root, ver arriba), no
+            // con el avoidance nativo. Un dismiss interactivo dejaría el
+            // padding manual desincronizado del frame real del teclado
+            // durante el drag (hueco fantasma bajo el composer). Con
+            // `.immediately`, el gesto de scroll dispara un willHide
+            // discreto y el padding anima a 0 en sincronía. Si algún día
+            // se migra a keyboard avoidance nativo, cambiar a
+            // `.interactively`.
+            .scrollDismissesKeyboard(.immediately)
             .onChange(of: store.novaMessages.count) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true)
             }
