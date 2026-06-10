@@ -45,7 +45,16 @@ enum NovaActionNormalizer {
         "que no se me olvide",
         "no te olvides",
         "no olvides",
-        "no me dejes olvidar"
+        "no me dejes olvidar",
+        // "pon una alarma para estudiar a las 7" es un recordatorio, no un
+        // evento (QA-closure 2026-06-10, caso 46 de la suite 50).
+        "pon una alarma",
+        "ponme una alarma",
+        "pon alarma",
+        "ponme alarma",
+        "pon un recordatorio",
+        "ponme un recordatorio",
+        "pon recordatorio"
     ]
 
     /// True cuando `userText` contiene cualquier trigger explícito de
@@ -154,6 +163,10 @@ enum NovaActionNormalizer {
             #"\bav[ií]same\s+(?:de|que)\b"#,
             #"\bque\s+no\s+se\s+me\s+olvide\s+(?:de|que)?\b"#,
             #"\bno\s+(?:te\s+)?olvides\s+(?:de|que)?\b"#,
+            // "pon(me) una alarma para X" / "pon(me) un recordatorio de X"
+            // → el título es X, no la frase de la alarma.
+            #"\bpon(?:me)?\s+(?:una\s+)?alarma\s+(?:para|de|que)?\b"#,
+            #"\bpon(?:me)?\s+(?:un\s+)?recordatorio\s+(?:para|de|que)?\b"#,
         ]
         for pattern in extendedReminderPrefixes {
             result = result.replacingOccurrences(
@@ -717,7 +730,13 @@ enum NovaActionNormalizer {
             "hermana", "hijo", "hija", "padre", "madre", "abuelo", "abuela",
             "tío", "tía", "tio", "tia", "primo", "prima", "esposo", "esposa",
             "novio", "novia", "polola", "pololo", "amigo", "amiga", "jefe",
-            "jefa", "pelota", "botines", "agua", "audífonos", "audifonos",
+            "jefa", "amigos", "amigas", "compañeros", "companeros",
+            "compañeras", "companeras",
+            // Infinitivos comunes tras "a" ("salir a correr", "ir a jugar")
+            // — son acciones, no nombres propios (QA-closure 2026-06-10).
+            "jugar", "correr", "trotar", "caminar", "nadar", "entrenar",
+            "bailar", "cocinar", "descansar", "pasear", "buscar", "llevar",
+            "pelota", "botines", "agua", "audífonos", "audifonos",
             "regalo", "copete", "bebidas", "cartas", "computador", "pauta",
             "antes", "ortografía", "ortografia", "certificado", "radiografía",
             "radiografia", "exámenes", "examenes", "proyecto", "postre",

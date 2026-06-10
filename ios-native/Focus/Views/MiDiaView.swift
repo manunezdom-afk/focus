@@ -245,7 +245,13 @@ struct MiDiaView: View {
                 dictationService.cancel()
             }
         }
-        .alert("Sin permiso de voz", isPresented: .constant(dictationDeniedMessage != nil), actions: {
+        // Binding derivado REAL (no `.constant`): con `.constant` SwiftUI
+        // no puede escribir el cierre y el alert queda INMORTAL (bug
+        // QA-closure 2026-06-10 — mismo fix que NovaView).
+        .alert("Dictado no disponible", isPresented: Binding(
+            get: { dictationDeniedMessage != nil },
+            set: { if !$0 { dictationDeniedMessage = nil } }
+        ), actions: {
             Button("Abrir Ajustes") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
                     UIApplication.shared.open(url)

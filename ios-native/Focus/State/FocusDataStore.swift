@@ -6693,6 +6693,15 @@ final class FocusDataStore: ObservableObject {
             .filter { $0.startTime >= cal.startOfDay(for: now) && $0.startTime <= horizon }
             .sorted { $0.startTime < $1.startTime }
         let visibleTasks = tasks.filter { !$0.done }
+        // Topic focus → backend (fix QA-closure 2026-06-10): sin esto el
+        // backend recibía discussedEventIds: [] SIEMPRE (el parámetro tiene
+        // default vacío y nunca se pasaba) y Nova no podía resolver
+        // "cámbialo", "acuérdame de eso", "lo de fútbol" contra el evento
+        // recién creado/mencionado — el bug de memoria conversacional.
+        // Igual que el path inline de Mi Día: primero promover eventos
+        // mencionados por título en ESTE mensaje, luego snapshotear.
+        detectAndPromoteMentions(in: trimmed)
+        let discussedIds = novaContext.freshDiscussedEvents.map { $0.eventId }
 
         Task { [weak self] in
             guard let self else { return }
@@ -6717,6 +6726,7 @@ final class FocusDataStore: ObservableObject {
                         history: priorHistory,
                         accessToken: creds.accessToken,
                         surface: .novaChat,
+                        discussedEventIds: discussedIds,
                         userMemories: NovaMemoryStore.shared
                             .allActiveMemoriesHuman(maxEntries: 30)
                             .map { $0.text }

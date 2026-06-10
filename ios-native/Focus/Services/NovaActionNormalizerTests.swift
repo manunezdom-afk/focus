@@ -205,23 +205,25 @@ enum NovaActionNormalizerTests {
         // título de evento. Esta tanda valida que el normalizer extrae
         // un título humano y limpio en cada uno de los 8 inputs reales.
 
-        // Test 1: cumpleaños de Urrutia — sentence completa
+        // Test 1: cumpleaños de Urrutia — sentence completa.
+        // Expectativa alineada a la spec 2026-05-27 (step 8d): "cumpleaños
+        // de Person" → "Cumpleaños Person" (drop del conector "de").
         check(
-            label: "BETA-1: 'Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes' → 'Cumpleaños de Urrutia'",
+            label: "BETA-1: 'Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes' → 'Cumpleaños Urrutia'",
             actual: NovaActionNormalizer.cleanTitle("Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes"),
-            expected: "Cumpleaños de Urrutia",
+            expected: "Cumpleaños Urrutia",
             failures: &failures
         )
 
         // Test 1b: backend devolvió solo "Salir" — preferBetterTitle debe
         // reextraer del userText completo.
         check(
-            label: "BETA-1b: preferBetterTitle(backend='Salir', user='Tengo que salir al cumpleaños...') → 'Cumpleaños de Urrutia'",
+            label: "BETA-1b: preferBetterTitle(backend='Salir', user='Tengo que salir al cumpleaños...') → 'Cumpleaños Urrutia'",
             actual: NovaActionNormalizer.preferBetterTitle(
                 backendCleaned: "Salir",
                 userText: "Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes"
             ),
-            expected: "Cumpleaños de Urrutia",
+            expected: "Cumpleaños Urrutia",
             failures: &failures
         )
 
@@ -265,11 +267,12 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
-        // Test 7: ya viene limpio el sustantivo, solo strippear hora/recordatorio
+        // Test 7: ya viene limpio el sustantivo, solo strippear hora/recordatorio.
+        // Igual que BETA-1: "de Person" → "Person" (spec 2026-05-27).
         check(
-            label: "BETA-7: 'Cumpleaños de Urrutia tipo 9 acuérdame una hora antes' → 'Cumpleaños de Urrutia'",
+            label: "BETA-7: 'Cumpleaños de Urrutia tipo 9 acuérdame una hora antes' → 'Cumpleaños Urrutia'",
             actual: NovaActionNormalizer.cleanTitle("Cumpleaños de Urrutia tipo 9 acuérdame una hora antes"),
-            expected: "Cumpleaños de Urrutia",
+            expected: "Cumpleaños Urrutia",
             failures: &failures
         )
 
