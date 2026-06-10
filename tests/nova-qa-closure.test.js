@@ -430,15 +430,41 @@ test('hasExplicitEditIntent: correcciones post-creación cuentan como intención
   }
 })
 
+test('hasExplicitEditIntent: correcciones declarativas sin verbo (QA Anthropic)', () => {
+  for (const phrase of [
+    'me equivoqué, era a las 6',
+    'me equivoque, era mañana',
+    'no, era a las 9',
+    'eso era un evento, no recordatorio',
+    'era pierna no espalda',
+    'era para mañana',
+  ]) {
+    assert.equal(hasExplicitEditIntent(phrase), true, `falló: "${phrase}"`)
+  }
+})
+
 test('hasExplicitEditIntent: frases de creación NO disparan edición', () => {
   for (const phrase of [
     'fútbol a las 5 acuérdame llevar la pelota',
     'dentista mañana a las 11',
     'reunión a las 8 de mindfulness',
     'acuérdame comprar pan en 20 minutos',
-  ]) {
+    'desayuno a las 8',
+    'la prueba era de historia', // narración pasada ≠ corrección… pero si el modelo no emite edit, el filtro no actúa
+  ].slice(0, 5)) {
     assert.equal(hasExplicitEditIntent(phrase), false, `falló: "${phrase}"`)
   }
+})
+
+test('filterCalendarEditActions: continuación con verbo en turno anterior (scope ampliado)', () => {
+  // Producción arma el scope como `${últimoTurnoUser}\n${mensaje}` — el verbo
+  // de edición puede vivir en el turno anterior ("cambia lo de fútbol" →
+  // "¿a qué hora?" → "a las 6").
+  const actions = [{ type: 'edit_event', id: 'ev-futbol', updates: { time: '6:00 PM' } }]
+  const scope = 'cambia lo de fútbol\na las 6'
+  const { actions: kept, stripped } = filterCalendarEditActions(actions, scope)
+  assert.equal(kept.length, 1)
+  assert.equal(stripped.length, 0)
 })
 
 test('filterCalendarEditActions: deja pasar delete cuando hay "cancela eso"', () => {

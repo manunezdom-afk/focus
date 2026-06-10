@@ -1,240 +1,3342 @@
 {
   "_doc": "Batería QA de Nova — 200 frases reales (150 del spec + 50 extra). Cada caso declara el input del usuario, contexto opcional (historial, eventos existentes, tema en discusión) y expectativas. Ejecutar con: node scripts/run-nova-battery.mjs (requiere OPENAI_API_KEY). Semántica de expect: kind=event|reminder|task|chat|clarify|edit|delete (kindAnyOf acepta varios); titleIncludes/subtitleIncludes comparan normalizado (sin tildes, lowercase); timeAnyOf en formato 'H:MM AM/PM'; timeRelativeMinutes=N espera hora ≈ ahora+N (±3 min); date: today|tomorrow|+2|weekday:<dia>; endTimeNull exige evento sin término; durationMinutes exige término = inicio+N; minActions/maxActions acotan cantidad; allowClarify=true acepta clarification como pass.",
   "cases": [
-    { "id": "A1", "cat": "eventos_simples", "input": "fútbol a las 5", "expect": { "kind": "event", "titleIncludes": ["futbol"], "timeAnyOf": ["5:00 PM"], "date": "today", "endTimeNull": true } },
-    { "id": "A2", "cat": "eventos_simples", "input": "gym a las 6", "expect": { "kind": "event", "titleIncludes": ["gym"], "timeAnyOf": ["6:00 PM", "6:00 AM"], "date": "today" } },
-    { "id": "A3", "cat": "eventos_simples", "input": "dentista mañana a las 11", "expect": { "kind": "event", "titleIncludes": ["dentista"], "timeAnyOf": ["11:00 AM"], "date": "tomorrow" } },
-    { "id": "A4", "cat": "eventos_simples", "input": "reunión hoy a las 8", "expect": { "kind": "event", "titleIncludes": ["reunion"], "timeAnyOf": ["8:00 PM", "8:00 AM"], "date": "today", "allowClarify": true } },
-    { "id": "A5", "cat": "eventos_simples", "input": "clase el lunes a las 10", "expect": { "kind": "event", "titleIncludes": ["clase"], "timeAnyOf": ["10:00 AM"], "date": "weekday:lunes" } },
-    { "id": "A6", "cat": "eventos_simples", "input": "estudiar publicidad a las 7", "expect": { "kind": "event", "titleIncludes": ["estudiar publicidad"], "timeAnyOf": ["7:00 PM"], "date": "today" } },
-    { "id": "A7", "cat": "eventos_simples", "input": "almuerzo con mi papá a la 1", "expect": { "kind": "event", "titleIncludes": ["almuerzo"], "timeAnyOf": ["1:00 PM"], "date": "today" } },
-    { "id": "A8", "cat": "eventos_simples", "input": "médico el viernes a las 9", "expect": { "kind": "event", "titleIncludes": ["medico", "doctor"], "timeAnyOf": ["9:00 AM"], "date": "weekday:viernes" } },
-    { "id": "A9", "cat": "eventos_simples", "input": "entreno mañana a las 6", "expect": { "kind": "event", "titleIncludes": ["entren"], "timeAnyOf": ["6:00 PM", "6:00 AM"], "date": "tomorrow" } },
-    { "id": "A10", "cat": "eventos_simples", "input": "llamada con Juan a las 4", "expect": { "kind": "event", "titleIncludes": ["llamada", "llamar"], "timeAnyOf": ["4:00 PM"], "date": "today" } },
-
-    { "id": "B11", "cat": "subtitulos", "input": "reunión a las 8 de mindfulness", "expect": { "kind": "event", "titleIncludes": ["reunion"], "subtitleIncludes": ["mindfulness"], "timeAnyOf": ["8:00 PM", "8:00 AM"], "allowClarify": true } },
-    { "id": "B12", "cat": "subtitulos", "input": "fútbol a las 5 llevar la pelota", "expect": { "kind": "event", "titleIncludes": ["futbol"], "subtitleIncludes": ["pelota"], "timeAnyOf": ["5:00 PM"] } },
-    { "id": "B13", "cat": "subtitulos", "input": "dentista mañana a las 11 llevar radiografía", "expect": { "kind": "event", "titleIncludes": ["dentista"], "subtitleIncludes": ["radiografia"], "timeAnyOf": ["11:00 AM"], "date": "tomorrow" } },
-    { "id": "B14", "cat": "subtitulos", "input": "gym mañana pierna a las 6", "expect": { "kind": "event", "titleIncludes": ["gym"], "subtitleIncludes": ["pierna"], "date": "tomorrow" } },
-    { "id": "B15", "cat": "subtitulos", "input": "estudiar publicidad a las 7 repasar ProFreeze", "expect": { "kind": "event", "titleIncludes": ["estudiar"], "subtitleIncludes": ["profreeze"], "timeAnyOf": ["7:00 PM"] } },
-    { "id": "B16", "cat": "subtitulos", "input": "clase a las 10 sala B", "expect": { "kind": "event", "titleIncludes": ["clase"], "timeAnyOf": ["10:00 AM"], "subtitleOrLocationIncludes": ["sala b"] } },
-    { "id": "B17", "cat": "subtitulos", "input": "reunión con Juan revisar Focus", "expect": { "kindAnyOf": ["event", "clarify", "task"], "titleIncludes": ["juan"], "allowClarify": true } },
-    { "id": "B18", "cat": "subtitulos", "input": "trabajo de universidad mañana a las 4 presentación", "expect": { "kind": "event", "timeAnyOf": ["4:00 PM"], "date": "tomorrow" } },
-    { "id": "B19", "cat": "subtitulos", "input": "partido a las 9 cancha 3", "expect": { "kind": "event", "titleIncludes": ["partido"], "subtitleOrLocationIncludes": ["cancha 3"] } },
-    { "id": "B20", "cat": "subtitulos", "input": "psicólogo mañana a las 12 online", "expect": { "kind": "event", "titleIncludes": ["psicolog"], "timeAnyOf": ["12:00 PM"], "date": "tomorrow" } },
-
-    { "id": "C21", "cat": "recordatorios", "input": "acuérdame llevar la pelota", "expect": { "kindAnyOf": ["reminder", "task", "clarify"], "titleIncludes": ["pelota"], "allowClarify": true } },
-    { "id": "C22", "cat": "recordatorios", "input": "recuérdame llamar a mi mamá mañana", "expect": { "kind": "reminder", "titleIncludes": ["mama"], "date": "tomorrow", "endTimeNull": true, "allowClarify": true } },
-    { "id": "C23", "cat": "recordatorios", "input": "no olvidar la radiografía", "expect": { "kindAnyOf": ["reminder", "task"], "titleIncludes": ["radiografia"] } },
-    { "id": "C24", "cat": "recordatorios", "input": "avisarme en 20 minutos tomar agua", "expect": { "kind": "reminder", "titleIncludes": ["agua"], "timeRelativeMinutes": 20, "endTimeNull": true } },
-    { "id": "C25", "cat": "recordatorios", "input": "acuérdame comprar pan a las 6", "expect": { "kind": "reminder", "titleIncludes": ["pan"], "timeAnyOf": ["6:00 PM"], "endTimeNull": true } },
-    { "id": "C26", "cat": "recordatorios", "input": "recuérdame estudiar en la noche", "expect": { "kind": "reminder", "titleIncludes": ["estudiar"], "date": "today", "endTimeNull": true } },
-    { "id": "C27", "cat": "recordatorios", "input": "mañana recuérdame mandar el correo", "expect": { "kind": "reminder", "titleIncludes": ["correo", "mail"], "date": "tomorrow" } },
-    { "id": "C28", "cat": "recordatorios", "input": "acuérdame pagar la cuenta el viernes", "expect": { "kind": "reminder", "titleIncludes": ["cuenta", "pagar"], "date": "weekday:viernes" } },
-    { "id": "C29", "cat": "recordatorios", "input": "no se me puede olvidar el certificado", "expect": { "kindAnyOf": ["reminder", "task"], "titleIncludes": ["certificado"] } },
-    { "id": "C30", "cat": "recordatorios", "input": "ponme un recordatorio para sacar la ropa de la lavadora en media hora", "expect": { "kind": "reminder", "titleIncludes": ["ropa", "lavadora"], "timeRelativeMinutes": 30 } },
-
-    { "id": "D31", "cat": "duraciones", "input": "estudiar publicidad a las 7 por 30 minutos", "expect": { "kind": "event", "timeAnyOf": ["7:00 PM"], "durationMinutes": 30 } },
-    { "id": "D32", "cat": "duraciones", "input": "gym mañana a las 6 por 1 hora", "expect": { "kind": "event", "durationMinutes": 60, "date": "tomorrow" } },
-    { "id": "D33", "cat": "duraciones", "input": "reunión de 8 a 9", "expect": { "kind": "event", "durationMinutes": 60, "allowClarify": true } },
-    { "id": "D34", "cat": "duraciones", "input": "fútbol de 5 a 7", "expect": { "kind": "event", "timeAnyOf": ["5:00 PM"], "durationMinutes": 120 } },
-    { "id": "D35", "cat": "duraciones", "input": "llamada con Juan a las 4 por 15 minutos", "expect": { "kind": "event", "timeAnyOf": ["4:00 PM"], "durationMinutes": 15 } },
-    { "id": "D36", "cat": "duraciones", "input": "dentista mañana a las 11 por media hora", "expect": { "kind": "event", "timeAnyOf": ["11:00 AM"], "durationMinutes": 30, "date": "tomorrow" } },
-    { "id": "D37", "cat": "duraciones", "input": "trabajar en Focus de 3 a 6", "expect": { "kind": "event", "timeAnyOf": ["3:00 PM"], "durationMinutes": 180 } },
-    { "id": "D38", "cat": "duraciones", "input": "clase de 10 a 12", "expect": { "kind": "event", "timeAnyOf": ["10:00 AM"], "durationMinutes": 120 } },
-    { "id": "D39", "cat": "duraciones", "input": "leer por 45 minutos a las 8", "expect": { "kind": "event", "titleIncludes": ["leer"], "durationMinutes": 45, "allowClarify": true } },
-    { "id": "D40", "cat": "duraciones", "input": "bloque de estudio de 9 a 11", "expect": { "kind": "event", "durationMinutes": 120 } },
-
-    { "id": "E41", "cat": "fechas", "input": "mañana tengo fútbol a las 5", "expect": { "kind": "event", "titleIncludes": ["futbol"], "timeAnyOf": ["5:00 PM"], "date": "tomorrow" } },
-    { "id": "E42", "cat": "fechas", "input": "pasado mañana dentista a las 11", "expect": { "kind": "event", "titleIncludes": ["dentista"], "date": "+2" } },
-    { "id": "E43", "cat": "fechas", "input": "el lunes reunión a las 8", "expect": { "kind": "event", "titleIncludes": ["reunion"], "date": "weekday:lunes", "allowClarify": true } },
-    { "id": "E44", "cat": "fechas", "input": "el próximo viernes médico a las 9", "expect": { "kind": "event", "date": "weekday:viernes", "timeAnyOf": ["9:00 AM"] } },
-    { "id": "E45", "cat": "fechas", "input": "este sábado partido a las 10", "expect": { "kind": "event", "titleIncludes": ["partido"], "date": "weekday:sabado" } },
-    { "id": "E46", "cat": "fechas", "input": "el finde estudiar", "expect": { "kindAnyOf": ["task", "event", "clarify"], "titleIncludes": ["estudiar"], "allowClarify": true } },
-    { "id": "E47", "cat": "fechas", "input": "la próxima semana revisar Focus", "expect": { "kindAnyOf": ["task", "event", "reminder"], "titleIncludes": ["focus", "revisar"], "allowClarify": true } },
-    { "id": "E48", "cat": "fechas", "input": "en 3 días llamar a Juan", "expect": { "kindAnyOf": ["reminder", "task", "event"], "titleIncludes": ["juan"] } },
-    { "id": "E49", "cat": "fechas", "input": "en 2 horas recuérdame salir", "expect": { "kind": "reminder", "titleIncludes": ["salir"], "timeRelativeMinutes": 120 } },
-    { "id": "E50", "cat": "fechas", "input": "en 10 minutos tomar remedio", "expect": { "kindAnyOf": ["reminder", "event"], "titleIncludes": ["remedio"], "timeRelativeMinutes": 10 } },
-
-    { "id": "F51", "cat": "horas_ambiguas", "input": "fútbol a las cinco", "expect": { "kind": "event", "titleIncludes": ["futbol"], "timeAnyOf": ["5:00 PM"] } },
-    { "id": "F52", "cat": "horas_ambiguas", "input": "reunión a las ocho", "expect": { "kindAnyOf": ["event", "clarify"], "titleIncludes": ["reunion"], "timeAnyOf": ["8:00 AM", "8:00 PM"], "allowClarify": true } },
-    { "id": "F53", "cat": "horas_ambiguas", "input": "clase a las diez", "expect": { "kind": "event", "titleIncludes": ["clase"], "timeAnyOf": ["10:00 AM"], "allowClarify": true } },
-    { "id": "F54", "cat": "horas_ambiguas", "input": "gym a las seis de la mañana", "expect": { "kind": "event", "titleIncludes": ["gym"], "timeAnyOf": ["6:00 AM"] } },
-    { "id": "F55", "cat": "horas_ambiguas", "input": "fútbol a las seis de la tarde", "expect": { "kind": "event", "titleIncludes": ["futbol"], "timeAnyOf": ["6:00 PM"] } },
-    { "id": "F56", "cat": "horas_ambiguas", "input": "llamada a las 12", "expect": { "kindAnyOf": ["event", "clarify"], "timeAnyOf": ["12:00 PM"], "allowClarify": true } },
-    { "id": "F57", "cat": "horas_ambiguas", "input": "almuerzo a las 12", "expect": { "kind": "event", "titleIncludes": ["almuerzo"], "timeAnyOf": ["12:00 PM"] } },
-    { "id": "F58", "cat": "horas_ambiguas", "input": "estudiar en la noche", "expect": { "kindAnyOf": ["task", "event", "reminder", "clarify"], "titleIncludes": ["estudiar"], "allowClarify": true } },
-    { "id": "F59", "cat": "horas_ambiguas", "input": "recuérdame mañana en la mañana", "expect": { "kindAnyOf": ["clarify", "reminder"], "allowClarify": true } },
-    { "id": "F60", "cat": "horas_ambiguas", "input": "lo veo en la tarde", "expect": { "kind": "chat", "allowClarify": true } },
-
-    { "id": "G61", "cat": "multi", "input": "mañana dentista a las 11 y acuérdame llevar radiografía", "expect": { "kindAnyOf": ["event", "multi"], "titleIncludes": ["dentista"], "date": "tomorrow", "subtitleOrSecondActionIncludes": ["radiografia"] } },
-    { "id": "G62", "cat": "multi", "input": "hoy fútbol a las 5 y estudiar publicidad a las 8", "expect": { "minActions": 2, "titlesInclude": [["futbol"], ["estudiar"]], "timesAnyOf": [["5:00 PM"], ["8:00 PM"]] } },
-    { "id": "G63", "cat": "multi", "input": "el lunes reunión a las 9 y gym a las 7", "expect": { "minActions": 2, "titlesInclude": [["reunion"], ["gym"]] } },
-    { "id": "G64", "cat": "multi", "input": "mañana clase a las 10, trabajo a las 3 y llamar a mi mamá en la noche", "expect": { "minActions": 3 } },
-    { "id": "G65", "cat": "multi", "input": "hoy a las 5 fútbol, llevar pelota y después estudiar", "expect": { "kindAnyOf": ["event", "multi"], "titleIncludes": ["futbol"], "subtitleOrSecondActionIncludes": ["pelota"], "allowClarify": true } },
-    { "id": "G66", "cat": "multi", "input": "recuérdame comprar pan y mañana tengo médico a las 9", "expect": { "minActions": 2 } },
-    { "id": "G67", "cat": "multi", "input": "agenda reunión con Juan y acuérdame revisar el documento", "expect": { "minActions": 1, "allowClarify": true } },
-    { "id": "G68", "cat": "multi", "input": "pon gym mañana a las 6 y dentista el viernes a las 11", "expect": { "minActions": 2, "titlesInclude": [["gym"], ["dentista"]] } },
-    { "id": "G69", "cat": "multi", "input": "hoy estudiar Focus y acuérdame dormir temprano", "expect": { "minActions": 1, "allowClarify": true } },
-    { "id": "G70", "cat": "multi", "input": "mañana universidad a las 10 y después psicólogo online a las 12", "expect": { "minActions": 2, "timesAnyOf": [["10:00 AM"], ["12:00 PM"]] } },
-
-    { "id": "H71", "cat": "contexto", "history": [{ "role": "user", "content": "tengo dentista mañana" }, { "role": "assistant", "content": "¿A qué hora es el dentista?" }], "input": "a las 11", "expect": { "kind": "event", "titleIncludes": ["dentista"], "timeAnyOf": ["11:00 AM"], "date": "tomorrow" } },
-    { "id": "H72", "cat": "contexto", "history": [{ "role": "user", "content": "ponme fútbol hoy" }, { "role": "assistant", "content": "¿A qué hora?" }], "input": "a las 5", "expect": { "kind": "event", "titleIncludes": ["futbol"], "timeAnyOf": ["5:00 PM"], "date": "today" } },
-    { "id": "H73", "cat": "contexto", "history": [{ "role": "user", "content": "reunión mañana" }, { "role": "assistant", "content": "¿A qué hora es la reunión?" }], "input": "a las 8 de mindfulness", "expect": { "kind": "event", "titleIncludes": ["reunion"], "subtitleIncludes": ["mindfulness"], "date": "tomorrow", "allowClarify": true } },
-    { "id": "H74", "cat": "contexto", "history": [{ "role": "user", "content": "acuérdame llamar a Juan" }, { "role": "assistant", "content": "¿Cuándo quieres que te lo recuerde?" }], "input": "mañana en la mañana", "expect": { "kind": "reminder", "titleIncludes": ["juan"], "date": "tomorrow" } },
-    { "id": "H75", "cat": "contexto", "history": [{ "role": "user", "content": "tengo gym" }, { "role": "assistant", "content": "¿Cuándo y a qué hora?" }], "input": "mañana a las 6 pierna", "expect": { "kind": "event", "titleIncludes": ["gym"], "subtitleIncludes": ["pierna"], "date": "tomorrow" } },
-    { "id": "H76", "cat": "contexto", "history": [{ "role": "user", "content": "estudiar publicidad" }, { "role": "assistant", "content": "¿Para cuándo lo agendo?" }], "input": "hoy a las 7 por media hora", "expect": { "kind": "event", "titleIncludes": ["estudiar"], "timeAnyOf": ["7:00 PM"], "durationMinutes": 30 } },
-    { "id": "H77", "cat": "contexto", "history": [{ "role": "user", "content": "clase el lunes" }, { "role": "assistant", "content": "¿A qué hora es la clase?" }], "input": "a las 10 sala B", "expect": { "kind": "event", "titleIncludes": ["clase"], "timeAnyOf": ["10:00 AM"], "date": "weekday:lunes" } },
-    { "id": "H78", "cat": "contexto", "history": [{ "role": "user", "content": "tengo partido" }, { "role": "assistant", "content": "¿Cuándo es el partido?" }], "input": "el sábado a las 9 cancha 3", "expect": { "kind": "event", "titleIncludes": ["partido"], "date": "weekday:sabado" } },
-    { "id": "H79", "cat": "contexto", "history": [{ "role": "user", "content": "recuérdame llevar algo" }, { "role": "assistant", "content": "¿Qué quieres que te recuerde llevar?" }], "input": "la pelota para fútbol", "expect": { "kindAnyOf": ["reminder", "task", "edit"], "titleOrSubtitleIncludes": ["pelota"] } },
-    { "id": "H80", "cat": "contexto", "history": [{ "role": "user", "content": "mañana tengo reunión con Juan" }, { "role": "assistant", "content": "¿A qué hora es la reunión con Juan?" }], "input": "revisar Focus a las 9", "expect": { "kind": "event", "titleIncludes": ["juan", "reunion"], "timeAnyOf": ["9:00 AM"], "date": "tomorrow", "allowClarify": true } },
-
-    { "id": "I81", "cat": "conversacion", "input": "qué hago si estoy cansado", "expect": { "kind": "chat" } },
-    { "id": "I82", "cat": "conversacion", "input": "ayúdame a ordenar mi día", "expect": { "kind": "chat" } },
-    { "id": "I83", "cat": "conversacion", "input": "no sé por dónde empezar", "expect": { "kind": "chat" } },
-    { "id": "I84", "cat": "conversacion", "input": "qué es mejor estudiar primero", "expect": { "kind": "chat" } },
-    { "id": "I85", "cat": "conversacion", "input": "me siento colapsado", "expect": { "kind": "chat" } },
-    { "id": "I86", "cat": "conversacion", "input": "cómo organizo Focus", "expect": { "kind": "chat" } },
-    { "id": "I87", "cat": "conversacion", "input": "dame una rutina para mañana", "expect": { "kindAnyOf": ["chat", "clarify"], "allowClarify": true } },
-    { "id": "I88", "cat": "conversacion", "input": "qué opinas de entrenar en la noche", "expect": { "kind": "chat" } },
-    { "id": "I89", "cat": "conversacion", "input": "necesito motivación", "expect": { "kind": "chat" } },
-    { "id": "I90", "cat": "conversacion", "input": "ayúdame a priorizar", "expect": { "kind": "chat" } },
-
-    { "id": "J91", "cat": "no_crear", "input": "quizás mañana vaya al gym", "expect": { "kind": "chat" } },
-    { "id": "J92", "cat": "no_crear", "input": "estaba pensando en estudiar a las 7", "expect": { "kindAnyOf": ["chat", "clarify"], "allowClarify": true } },
-    { "id": "J93", "cat": "no_crear", "input": "qué pasa si tengo reunión a las 8", "expect": { "kind": "chat" } },
-    { "id": "J94", "cat": "no_crear", "input": "me conviene poner fútbol a las 5?", "expect": { "kindAnyOf": ["chat", "clarify"], "allowClarify": true } },
-    { "id": "J95", "cat": "no_crear", "input": "puedes organizarme si mañana tengo médico?", "expect": { "kindAnyOf": ["chat", "clarify"], "allowClarify": true } },
-    { "id": "J96", "cat": "no_crear", "input": "no estoy seguro si iré al dentista", "expect": { "kind": "chat" } },
-    { "id": "J97", "cat": "no_crear", "input": "crees que debería llamar a Juan?", "expect": { "kind": "chat" } },
-    { "id": "J98", "cat": "no_crear", "input": "qué hago con la reunión de mindfulness?", "expect": { "kindAnyOf": ["chat", "clarify"], "allowClarify": true } },
-    { "id": "J99", "cat": "no_crear", "input": "cómo sería un buen horario para estudiar?", "expect": { "kind": "chat" } },
-    { "id": "J100", "cat": "no_crear", "input": "ayúdame a decidir si pongo gym mañana", "expect": { "kindAnyOf": ["chat", "clarify"], "allowClarify": true } },
-
-    { "id": "K101", "cat": "informal", "input": "ponme futbol a las 5 porfa", "expect": { "kind": "event", "titleIncludes": ["futbol"], "timeAnyOf": ["5:00 PM"] } },
-    { "id": "K102", "cat": "informal", "input": "mañana tengo doc a las 11", "expect": { "kind": "event", "titleIncludes": ["doc", "medico"], "timeAnyOf": ["11:00 AM"], "date": "tomorrow" } },
-    { "id": "K103", "cat": "informal", "input": "acuérdame la pelota pal partido", "expect": { "kindAnyOf": ["reminder", "task"], "titleOrSubtitleIncludes": ["pelota"] } },
-    { "id": "K104", "cat": "informal", "input": "tengo que mandar una wea de la u", "expect": { "kindAnyOf": ["task", "clarify"], "allowClarify": true } },
-    { "id": "K105", "cat": "informal", "input": "mañana en la tarde tengo que estudiar", "expect": { "kindAnyOf": ["task", "event", "clarify"], "titleIncludes": ["estudiar"], "date": "tomorrow", "allowClarify": true } },
-    { "id": "K106", "cat": "informal", "input": "tipo 7 hago gym", "expect": { "kind": "event", "titleIncludes": ["gym"], "timeAnyOf": ["7:00 PM", "7:00 AM"] } },
-    { "id": "K107", "cat": "informal", "input": "como a las 8 reunión", "expect": { "kindAnyOf": ["event", "clarify"], "titleIncludes": ["reunion"], "allowClarify": true } },
-    { "id": "K108", "cat": "informal", "history": [{ "role": "user", "content": "tengo que mandar el certificado" }, { "role": "assistant", "content": "¿Cuándo te lo recuerdo?" }], "input": "en la noche acuérdame eso", "expect": { "kindAnyOf": ["reminder", "task"], "titleIncludes": ["certificado"] } },
-    { "id": "K109", "cat": "informal", "input": "mañana tempranito estudiar", "expect": { "kindAnyOf": ["task", "event", "reminder", "clarify"], "titleIncludes": ["estudiar"], "date": "tomorrow", "allowClarify": true } },
-    { "id": "K110", "cat": "informal", "input": "hoy día a las 5 partido", "expect": { "kind": "event", "titleIncludes": ["partido"], "timeAnyOf": ["5:00 PM"], "date": "today" } },
-
-    { "id": "L111", "cat": "typos", "input": "reunion manana alas 8", "expect": { "kindAnyOf": ["event", "clarify"], "titleIncludes": ["reunion"], "date": "tomorrow", "allowClarify": true } },
-    { "id": "L112", "cat": "typos", "input": "futbol alas 5 llevar pelota", "expect": { "kind": "event", "titleIncludes": ["futbol"], "timeAnyOf": ["5:00 PM"], "subtitleIncludes": ["pelota"] } },
-    { "id": "L113", "cat": "typos", "input": "dentista manaña 11", "expect": { "kind": "event", "titleIncludes": ["dentista"], "timeAnyOf": ["11:00 AM"], "date": "tomorrow" } },
-    { "id": "L114", "cat": "typos", "input": "gim a la 6", "expect": { "kindAnyOf": ["event", "clarify"], "titleIncludes": ["gym", "gim"], "allowClarify": true } },
-    { "id": "L115", "cat": "typos", "input": "estudiar publciidad 7", "expect": { "kindAnyOf": ["event", "task", "clarify"], "titleIncludes": ["publicidad", "publciidad", "estudiar"], "allowClarify": true } },
-    { "id": "L116", "cat": "typos", "input": "acuérdame comprr pan", "expect": { "kindAnyOf": ["reminder", "task"], "titleIncludes": ["pan"] } },
-    { "id": "L117", "cat": "typos", "input": "no olvidar radiografia mañana", "expect": { "kindAnyOf": ["reminder", "task"], "titleIncludes": ["radiografia"], "date": "tomorrow" } },
-    { "id": "L118", "cat": "typos", "input": "llamar juan 5", "expect": { "kindAnyOf": ["event", "reminder", "task", "clarify"], "titleIncludes": ["juan"], "allowClarify": true } },
-    { "id": "L119", "cat": "typos", "input": "clse lunes 10", "expect": { "kindAnyOf": ["event", "clarify"], "allowClarify": true } },
-    { "id": "L120", "cat": "typos", "input": "psicologo online manana 12", "expect": { "kind": "event", "titleIncludes": ["psicolog"], "date": "tomorrow", "timeAnyOf": ["12:00 PM"] } },
-
-    { "id": "M121", "cat": "complejos", "input": "organízame mañana: gym temprano, universidad a las 10, psicólogo a las 12 y estudiar en la tarde", "expect": { "minActions": 2, "allowClarify": true } },
-    { "id": "M122", "cat": "complejos", "input": "mañana tengo muchas cosas, parte por poner dentista a las 11", "expect": { "kind": "event", "titleIncludes": ["dentista"], "timeAnyOf": ["11:00 AM"], "date": "tomorrow" } },
-    { "id": "M123", "cat": "complejos", "input": "hoy quiero estudiar Focus 2 horas y después descansar", "expect": { "kindAnyOf": ["event", "clarify", "task"], "allowClarify": true } },
-    { "id": "M124", "cat": "complejos", "input": "pon un bloque para arreglar Nova mañana en la mañana", "expect": { "kindAnyOf": ["event", "clarify", "task"], "titleIncludes": ["nova"], "date": "tomorrow", "allowClarify": true } },
-    { "id": "M125", "cat": "complejos", "input": "deja el viernes para avanzar en la app", "expect": { "kindAnyOf": ["task", "event", "clarify"], "allowClarify": true } },
-    { "id": "M126", "cat": "complejos", "input": "agenda 30 minutos para revisar bugs antes de dormir", "expect": { "kindAnyOf": ["event", "clarify"], "titleIncludes": ["bugs", "revisar"], "allowClarify": true } },
-    { "id": "M127", "cat": "complejos", "input": "mañana después de almuerzo acuérdame mandar el certificado", "expect": { "kind": "reminder", "titleIncludes": ["certificado"], "date": "tomorrow" } },
-    { "id": "M128", "cat": "complejos", "input": "el lunes en la noche revisar los subtítulos de eventos", "expect": { "kindAnyOf": ["task", "event", "reminder"], "date": "weekday:lunes", "allowClarify": true } },
-    { "id": "M129", "cat": "complejos", "input": "hoy a las 8 reunión, pero acuérdame 30 minutos antes preparar todo", "expect": { "kind": "event", "titleIncludes": ["reunion"], "reminderOffsetsInclude": 30, "allowClarify": true } },
-    { "id": "M130", "cat": "complejos", "input": "mañana a las 9 llama a Juan y pon nota preguntar por la universidad", "expect": { "kindAnyOf": ["event", "multi"], "titleIncludes": ["juan"], "subtitleOrSecondActionIncludes": ["universidad"], "date": "tomorrow" } },
-
-    { "id": "N131", "cat": "confirmaciones", "history": [{ "role": "user", "content": "ponme dentista mañana a las 11" }, { "role": "assistant", "content": "¿Lo dejo como evento con aviso 30 minutos antes?" }], "input": "sí", "expect": { "kindAnyOf": ["event", "edit", "chat"], "noWrongCreate": true } },
-    { "id": "N132", "cat": "confirmaciones", "history": [{ "role": "user", "content": "quiero estudiar hoy" }, { "role": "assistant", "content": "¿Te lo agendo a las 7 PM?" }], "input": "dale", "expect": { "kindAnyOf": ["event", "chat"], "titleIncludes": ["estudiar"], "allowClarify": true } },
-    { "id": "N133", "cat": "confirmaciones", "history": [{ "role": "user", "content": "ponme gym mañana a las 6" }, { "role": "assistant", "content": "Listo, Gym mañana a las 6 PM. ¿Algo más?" }], "input": "ok", "expect": { "kind": "chat" } },
-    { "id": "N134", "cat": "confirmaciones", "history": [{ "role": "user", "content": "ponme fútbol hoy a las 5" }, { "role": "assistant", "content": "¿Hoy a las 5 PM?" }], "input": "mejor mañana", "expect": { "kindAnyOf": ["event", "edit"], "date": "tomorrow" } },
-    { "id": "N135", "cat": "confirmaciones", "history": [{ "role": "user", "content": "tengo dentista mañana" }, { "role": "assistant", "content": "¿A qué hora?" }], "input": "a las 5", "expect": { "kind": "event", "titleIncludes": ["dentista"], "timeAnyOf": ["5:00 PM"], "date": "tomorrow" } },
-    { "id": "N136", "cat": "confirmaciones", "history": [{ "role": "user", "content": "recuérdame llamar a mi mamá mañana" }, { "role": "assistant", "content": "¿En qué momento del día?" }], "input": "en la tarde", "expect": { "kind": "reminder", "titleIncludes": ["mama"], "date": "tomorrow" } },
-    { "id": "N137", "cat": "confirmaciones", "history": [{ "role": "user", "content": "reunión mañana a las 8" }, { "role": "assistant", "content": "¿Sobre qué es la reunión?" }], "input": "con mindfulness", "expect": { "kind": "event", "titleIncludes": ["reunion"], "subtitleIncludes": ["mindfulness"], "date": "tomorrow", "allowClarify": true } },
-    { "id": "N138", "cat": "confirmaciones", "history": [{ "role": "user", "content": "fútbol hoy a las 5" }, { "role": "assistant", "content": "Listo, Fútbol hoy a las 5 PM. ¿Quieres que te recuerde algo?" }], "input": "llevar la pelota", "expect": { "kindAnyOf": ["edit", "reminder", "event", "task"], "titleOrSubtitleIncludes": ["pelota"] } },
-    { "id": "N139", "cat": "confirmaciones", "history": [{ "role": "user", "content": "estudiar publicidad hoy a las 7" }, { "role": "assistant", "content": "¿Cuánto tiempo le dedicas?" }], "input": "por media hora", "expect": { "kindAnyOf": ["event", "edit"], "durationMinutes": 30, "allowClarify": true } },
-    { "id": "N140", "cat": "confirmaciones", "history": [{ "role": "user", "content": "tengo que mandar el informe mañana" }, { "role": "assistant", "content": "¿Lo agendo con hora o te lo dejo como pendiente?" }], "input": "déjalo como recordatorio", "expect": { "kindAnyOf": ["reminder", "task"], "titleIncludes": ["informe"] } },
-
-    { "id": "O141", "cat": "cancelacion", "history": [{ "role": "user", "content": "ponme fútbol hoy a las 5" }, { "role": "assistant", "content": "Listo, Fútbol hoy a las 5 PM." }], "events": [{ "id": "ev-futbol", "title": "Fútbol", "time": "5:00 PM", "date": "today" }], "discussed": ["ev-futbol"], "input": "mejor no", "expect": { "kindAnyOf": ["delete", "chat"], "noWrongCreate": true } },
-    { "id": "O142", "cat": "cancelacion", "history": [{ "role": "user", "content": "ponme fútbol hoy a las 5" }, { "role": "assistant", "content": "Listo, Fútbol hoy a las 5 PM." }], "events": [{ "id": "ev-futbol", "title": "Fútbol", "time": "5:00 PM", "date": "today" }], "discussed": ["ev-futbol"], "input": "cancela eso", "expect": { "kind": "delete", "targetId": "ev-futbol" } },
-    { "id": "O143", "cat": "cancelacion", "history": [{ "role": "user", "content": "agéndame reunión mañana a las 9" }, { "role": "assistant", "content": "Listo, Reunión mañana a las 9 AM." }], "events": [{ "id": "ev-reunion", "title": "Reunión", "time": "9:00 AM", "date": "tomorrow" }], "discussed": ["ev-reunion"], "input": "no lo pongas", "expect": { "kindAnyOf": ["delete", "chat"], "noWrongCreate": true } },
-    { "id": "O144", "cat": "cancelacion", "events": [{ "id": "ev-futbol", "title": "Fútbol", "time": "5:00 PM", "date": "today" }], "discussed": ["ev-futbol"], "input": "cámbialo a las 6", "expect": { "kind": "edit", "targetId": "ev-futbol", "updateTime": "6:00 PM" } },
-    { "id": "O145", "cat": "cancelacion", "history": [{ "role": "user", "content": "dentista hoy a las 4" }, { "role": "assistant", "content": "Listo, Dentista hoy a las 4 PM." }], "events": [{ "id": "ev-dentista", "title": "Dentista", "time": "4:00 PM", "date": "today" }], "discussed": ["ev-dentista"], "input": "mejor mañana", "expect": { "kind": "edit", "targetId": "ev-dentista", "updateDate": "tomorrow" } },
-    { "id": "O146", "cat": "cancelacion", "events": [{ "id": "ev-reunion", "title": "Reunión", "time": "8:00 PM", "date": "today" }], "discussed": ["ev-reunion"], "input": "ponlo una hora antes", "expect": { "kind": "edit", "targetId": "ev-reunion", "updateTime": "7:00 PM" } },
-    { "id": "O147", "cat": "cancelacion", "events": [{ "id": "ev-futbol", "title": "Fútbol", "time": "5:00 PM", "date": "today" }], "input": "borra lo de fútbol", "expect": { "kind": "delete", "targetId": "ev-futbol" } },
-    { "id": "O148", "cat": "cancelacion", "events": [{ "id": "ev-gym", "title": "Gym", "time": "6:00 PM", "date": "tomorrow" }], "discussed": ["ev-gym"], "input": "cambia el subtítulo a pierna", "expect": { "kindAnyOf": ["edit", "chat", "clarify"], "allowClarify": true, "noWrongCreate": true } },
-    { "id": "O149", "cat": "cancelacion", "history": [{ "role": "user", "content": "ponme estudiar hoy a las 7" }, { "role": "assistant", "content": "Listo, Estudiar hoy a las 7 PM." }], "events": [{ "id": "ev-estudiar", "title": "Estudiar", "time": "7:00 PM", "date": "today" }], "discussed": ["ev-estudiar"], "input": "que sea recordatorio no evento", "expect": { "kindAnyOf": ["edit", "delete", "reminder", "chat"], "noWrongCreate": true } },
-    { "id": "O150", "cat": "cancelacion", "history": [{ "role": "user", "content": "ponme algo mañana" }, { "role": "assistant", "content": "¿Qué quieres que agende mañana?" }], "input": "olvida lo anterior", "expect": { "kind": "chat", "noWrongCreate": true } },
-
-    { "id": "X151", "cat": "extra_eventos", "input": "ponme estudiar a las 8", "expect": { "kind": "event", "titleIncludes": ["estudiar"], "timeAnyOf": ["8:00 PM"], "allowClarify": true } },
-    { "id": "X152", "cat": "extra_eventos", "input": "agéndame médico el viernes a las 9", "expect": { "kind": "event", "date": "weekday:viernes", "timeAnyOf": ["9:00 AM"] } },
-    { "id": "X153", "cat": "extra_eventos", "input": "junta con el equipo el lunes a las 9 y media", "expect": { "kind": "event", "timeAnyOf": ["9:30 AM"], "date": "weekday:lunes" } },
-    { "id": "X154", "cat": "extra_eventos", "input": "cita con el doc en 2 horas", "expect": { "kindAnyOf": ["event", "reminder"], "timeRelativeMinutes": 120 } },
-    { "id": "X155", "cat": "extra_eventos", "input": "asado el sábado", "expect": { "kind": "clarify" } },
-    { "id": "X156", "cat": "extra_eventos", "input": "cena con la familia mañana a las 9", "expect": { "kind": "event", "titleIncludes": ["cena"], "timeAnyOf": ["9:00 PM"], "date": "tomorrow" } },
-    { "id": "X157", "cat": "extra_eventos", "input": "despertarme a las 7", "expect": { "kindAnyOf": ["reminder", "event"], "timeAnyOf": ["7:00 AM"] } },
-    { "id": "X158", "cat": "extra_eventos", "input": "counter con los cabros tipo 10", "expect": { "kindAnyOf": ["event", "clarify"], "timeAnyOf": ["10:00 PM"], "allowClarify": true } },
-    { "id": "X159", "cat": "extra_eventos", "input": "ir a dejar a mi hermana al aeropuerto mañana a las 6 de la mañana", "expect": { "kind": "event", "timeAnyOf": ["6:00 AM"], "date": "tomorrow" } },
-    { "id": "X160", "cat": "extra_eventos", "input": "feria el domingo en la mañana", "expect": { "kindAnyOf": ["event", "clarify", "task"], "allowClarify": true } },
-
-    { "id": "X161", "cat": "extra_subtitulos", "input": "reunión con cristina a las 4 revisar el portafolio", "expect": { "kind": "event", "titleIncludes": ["cristina"], "subtitleIncludes": ["portafolio"], "timeAnyOf": ["4:00 PM"] } },
-    { "id": "X162", "cat": "extra_subtitulos", "input": "prueba de arte el jueves a las 10, repasar barroco y renacimiento", "expect": { "kind": "event", "titleIncludes": ["prueba"], "subtitleIncludes": ["barroco"], "date": "weekday:jueves" } },
-    { "id": "X163", "cat": "extra_subtitulos", "input": "partido mañana a las 3, echar las zapatillas a la mochila", "expect": { "kind": "event", "titleIncludes": ["partido"], "subtitleOrSecondActionIncludes": ["zapatillas"], "date": "tomorrow" } },
-    { "id": "X164", "cat": "extra_subtitulos", "input": "supermercado a las 6 comprar leche y pan", "expect": { "kind": "event", "titleIncludes": ["supermercado"], "subtitleIncludes": ["leche"] } },
-    { "id": "X165", "cat": "extra_subtitulos", "input": "clase de redacción a las 10 llevar computador", "expect": { "kind": "event", "titleIncludes": ["redaccion", "clase"], "subtitleIncludes": ["computador"] } },
-
-    { "id": "X166", "cat": "extra_duraciones", "input": "siesta de 20 minutos a las 3", "expect": { "kind": "event", "durationMinutes": 20, "timeAnyOf": ["3:00 PM"], "allowClarify": true } },
-    { "id": "X167", "cat": "extra_duraciones", "input": "reunión con Juan de 2 a 4 de la tarde", "expect": { "kind": "event", "timeAnyOf": ["2:00 PM"], "durationMinutes": 120 } },
-    { "id": "X168", "cat": "extra_duraciones", "input": "estudiar hasta las 9 empezando a las 7", "expect": { "kind": "event", "durationMinutes": 120, "allowClarify": true } },
-    { "id": "X169", "cat": "extra_duraciones", "input": "gimnasio hora y media mañana a las 7", "expect": { "kind": "event", "durationMinutes": 90, "date": "tomorrow", "allowClarify": true } },
-    { "id": "X170", "cat": "extra_duraciones", "input": "llamada rápida con el jefe a las 11", "expect": { "kind": "event", "timeAnyOf": ["11:00 AM"], "maxDurationMinutes": 30, "allowClarify": true } },
-
-    { "id": "X171", "cat": "extra_franjas", "input": "mañana en la mañana ir al banco", "expect": { "kindAnyOf": ["task", "event", "reminder", "clarify"], "titleIncludes": ["banco"], "date": "tomorrow", "allowClarify": true } },
-    { "id": "X172", "cat": "extra_franjas", "input": "esta noche ver la serie con la polola", "expect": { "kindAnyOf": ["event", "task", "clarify"], "date": "today", "allowClarify": true } },
-    { "id": "X173", "cat": "extra_franjas", "input": "al mediodía almuerzo con mi abuela", "expect": { "kind": "event", "timeAnyOf": ["12:00 PM"], "titleIncludes": ["almuerzo"] } },
-    { "id": "X174", "cat": "extra_franjas", "input": "a medianoche tomar el remedio", "expect": { "kindAnyOf": ["reminder", "event"], "timeAnyOf": ["12:00 AM"] } },
-    { "id": "X175", "cat": "extra_franjas", "input": "el domingo en la tarde planificar la semana", "expect": { "kindAnyOf": ["task", "event", "clarify"], "date": "weekday:domingo", "allowClarify": true } },
-
-    { "id": "X176", "cat": "extra_multi", "input": "mañana gym a las 7 y después desayuno con mi papá a las 9", "expect": { "minActions": 2, "titlesInclude": [["gym"], ["desayuno"]] } },
-    { "id": "X177", "cat": "extra_multi", "input": "el martes prueba a las 10 y acuérdame estudiar el lunes", "expect": { "minActions": 2 } },
-    { "id": "X178", "cat": "extra_multi", "input": "hoy: llamar a Juan a las 3, mandar el correo a las 4 y gym a las 6", "expect": { "minActions": 3 } },
-    { "id": "X179", "cat": "extra_multi", "input": "ponme counter a la 1 y avísame 10 minutos antes", "expect": { "kind": "event", "reminderOffsetsInclude": 10, "allowClarify": true } },
-    { "id": "X180", "cat": "extra_multi", "input": "comprar pan y leche", "expect": { "kind": "task", "maxActions": 1, "titleIncludes": ["pan"] } },
-
-    { "id": "X181", "cat": "extra_no_crear", "input": "puta que estoy cansado hoy", "expect": { "kind": "chat" } },
-    { "id": "X182", "cat": "extra_no_crear", "input": "al final no fui al gym ayer", "expect": { "kind": "chat" } },
-    { "id": "X183", "cat": "extra_no_crear", "input": "qué tengo mañana?", "expect": { "kind": "chat" } },
-    { "id": "X184", "cat": "extra_no_crear", "events": [{ "id": "ev-dentista", "title": "Dentista", "time": "11:00 AM", "date": "tomorrow" }], "input": "tengo algo mañana en la mañana?", "expect": { "kind": "chat", "replyIncludes": ["dentista"] } },
-    { "id": "X185", "cat": "extra_no_crear", "input": "gracias nova", "expect": { "kind": "chat" } },
-
-    { "id": "X186", "cat": "extra_recordatorios", "input": "avísame 30 minutos antes del dentista", "events": [{ "id": "ev-dentista", "title": "Dentista", "time": "11:00 AM", "date": "tomorrow" }], "discussed": ["ev-dentista"], "expect": { "kind": "edit", "targetId": "ev-dentista", "reminderOffsetsInclude": 30 } },
-    { "id": "X187", "cat": "extra_recordatorios", "input": "recuérdame en una hora estirar las piernas", "expect": { "kind": "reminder", "timeRelativeMinutes": 60, "titleIncludes": ["estirar", "piernas"] } },
-    { "id": "X188", "cat": "extra_recordatorios", "input": "que no se me olvide regar las plantas el domingo", "expect": { "kindAnyOf": ["reminder", "task"], "titleIncludes": ["plantas", "regar"], "date": "weekday:domingo" } },
-    { "id": "X189", "cat": "extra_recordatorios", "input": "acuérdame mañana tempranito sacar la basura", "expect": { "kind": "reminder", "titleIncludes": ["basura"], "date": "tomorrow" } },
-    { "id": "X190", "cat": "extra_recordatorios", "input": "ponme recordatorio pa pagar el arriendo el 1", "expect": { "kindAnyOf": ["reminder", "task"], "titleIncludes": ["arriendo"] } },
-
-    { "id": "X191", "cat": "extra_typos", "input": "reumion con juan manan a las 9", "expect": { "kindAnyOf": ["event", "clarify"], "titleIncludes": ["juan"], "date": "tomorrow", "allowClarify": true } },
-    { "id": "X192", "cat": "extra_typos", "input": "futbo hoy alas 17", "expect": { "kind": "event", "titleIncludes": ["futbo"], "timeAnyOf": ["5:00 PM"], "date": "today" } },
-    { "id": "X193", "cat": "extra_typos", "input": "acuerdame yamar al medico", "expect": { "kindAnyOf": ["reminder", "task"], "titleIncludes": ["medico"] } },
-    { "id": "X194", "cat": "extra_typos", "input": "estudiar mate maana 4pm", "expect": { "kind": "event", "titleIncludes": ["mate", "estudiar"], "timeAnyOf": ["4:00 PM"], "date": "tomorrow" } },
-    { "id": "X195", "cat": "extra_typos", "input": "denstista juebes 15:30", "expect": { "kindAnyOf": ["event", "clarify"], "timeAnyOf": ["3:30 PM"], "allowClarify": true } },
-
-    { "id": "X196", "cat": "extra_contexto", "history": [{ "role": "user", "content": "mañana tengo prueba de teorías" }, { "role": "assistant", "content": "¿A qué hora es la prueba?" }], "input": "a las 8 y media", "expect": { "kind": "event", "titleIncludes": ["prueba"], "timeAnyOf": ["8:30 AM"], "date": "tomorrow" } },
-    { "id": "X197", "cat": "extra_contexto", "history": [{ "role": "user", "content": "ponme cita con la nutricionista" }, { "role": "assistant", "content": "¿Para cuándo es la cita?" }], "input": "el miércoles a las 4", "expect": { "kind": "event", "titleIncludes": ["nutricionista", "cita"], "timeAnyOf": ["4:00 PM"], "date": "weekday:miercoles" } },
-    { "id": "X198", "cat": "extra_contexto", "history": [{ "role": "user", "content": "el viernes carrete en la casa del pelao" }, { "role": "assistant", "content": "¿A qué hora parte el carrete?" }], "input": "tipo 9", "expect": { "kind": "event", "titleIncludes": ["carrete"], "timeAnyOf": ["9:00 PM"], "date": "weekday:viernes" } },
-    { "id": "X199", "cat": "extra_contexto", "history": [{ "role": "user", "content": "agéndame hora con el oftalmólogo mañana a las 10" }, { "role": "assistant", "content": "Listo, Oftalmólogo mañana a las 10 AM." }], "events": [{ "id": "ev-oftal", "title": "Oftalmólogo", "time": "10:00 AM", "date": "tomorrow" }], "discussed": ["ev-oftal"], "input": "y acuérdame llevar los lentes", "expect": { "kindAnyOf": ["edit", "reminder", "task"], "titleOrSubtitleIncludes": ["lentes"], "noWrongCreate": true } },
-    { "id": "X200", "cat": "extra_contexto", "history": [{ "role": "user", "content": "no sé si estudiar hoy o mañana" }, { "role": "assistant", "content": "¿Cómo viene tu día hoy? Si estás cansado, mañana temprano rinde más." }], "input": "tienes razón, déjalo para mañana a las 9", "expect": { "kind": "event", "titleIncludes": ["estudiar"], "timeAnyOf": ["9:00 AM"], "date": "tomorrow" } },
-
-    { "id": "X201", "cat": "extra_criticos", "input": "gym pierna a las 7", "expect": { "kind": "event", "titleIncludes": ["gym"], "subtitleIncludes": ["pierna"], "timeAnyOf": ["7:00 PM", "7:00 AM"] } },
-    { "id": "X202", "cat": "extra_criticos", "input": "clase publicidad a las 12", "expect": { "kind": "event", "titleIncludes": ["clase"], "titleOrSubtitleIncludes": ["publicidad"], "timeAnyOf": ["12:00 PM"] } },
-    { "id": "X203", "cat": "extra_criticos", "input": "médico a las 10 llevar exámenes", "expect": { "kind": "event", "titleIncludes": ["medico"], "subtitleIncludes": ["examenes"], "timeAnyOf": ["10:00 AM"] } },
-    { "id": "X204", "cat": "extra_criticos", "input": "llamar al médico a las 6", "expect": { "kindAnyOf": ["reminder", "event"], "titleIncludes": ["medico", "llamar"], "timeAnyOf": ["6:00 PM"] } },
-    { "id": "X205", "cat": "extra_criticos", "input": "comprar pan a las 6", "expect": { "kindAnyOf": ["reminder", "event", "task"], "titleIncludes": ["pan"], "timeAnyOf": ["6:00 PM"] } },
-    { "id": "X206", "cat": "extra_criticos", "input": "doctor a las 11", "expect": { "kind": "event", "titleIncludes": ["doctor"], "timeAnyOf": ["11:00 AM"], "endTimeNull": true } },
-    { "id": "X207", "cat": "extra_criticos", "history": [{ "role": "user", "content": "ponme fútbol hoy a las 5" }, { "role": "assistant", "content": "Listo, Fútbol hoy a las 5 PM." }], "events": [{ "id": "ev-futbol", "title": "Fútbol", "time": "5:00 PM", "date": "today" }], "discussed": ["ev-futbol"], "input": "muévelo a mañana", "expect": { "kind": "edit", "targetId": "ev-futbol", "updateDate": "tomorrow" } },
-    { "id": "X208", "cat": "extra_criticos", "events": [{ "id": "ev-reunion", "title": "Reunión con Juan", "time": "9:00 AM", "date": "tomorrow" }], "input": "elimina la reunión", "expect": { "kind": "delete", "targetId": "ev-reunion" } },
-    { "id": "X209", "cat": "extra_criticos", "events": [{ "id": "ev-rec-pan", "title": "Recordatorio: Comprar pan", "time": "6:00 PM", "date": "today" }], "input": "quita el recordatorio de comprar pan", "expect": { "kind": "delete", "targetId": "ev-rec-pan" } },
-    { "id": "X210", "cat": "extra_criticos", "history": [{ "role": "user", "content": "acuérdame comprar pan" }, { "role": "assistant", "content": "¿A qué hora quieres que te lo recuerde?" }], "input": "a las 6", "expect": { "kind": "reminder", "titleIncludes": ["pan"], "timeAnyOf": ["6:00 PM"] } },
-    { "id": "X211", "cat": "extra_criticos", "history": [{ "role": "user", "content": "ponme dentista hoy a las 4" }, { "role": "assistant", "content": "Listo, Dentista hoy a las 4 PM." }], "events": [{ "id": "ev-dentista", "title": "Dentista", "time": "4:00 PM", "date": "today" }], "discussed": ["ev-dentista"], "input": "cambialo a las 6", "expect": { "kind": "edit", "targetId": "ev-dentista", "updateTime": "6:00 PM" } }
+    {
+      "id": "A1",
+      "cat": "eventos_simples",
+      "input": "fútbol a las 5",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "futbol"
+        ],
+        "timeAnyOf": [
+          "5:00 PM"
+        ],
+        "date": "today",
+        "endTimeNull": true
+      }
+    },
+    {
+      "id": "A2",
+      "cat": "eventos_simples",
+      "input": "gym a las 6",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "gym"
+        ],
+        "timeAnyOf": [
+          "6:00 PM",
+          "6:00 AM"
+        ],
+        "date": "today"
+      }
+    },
+    {
+      "id": "A3",
+      "cat": "eventos_simples",
+      "input": "dentista mañana a las 11",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "dentista"
+        ],
+        "timeAnyOf": [
+          "11:00 AM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "A4",
+      "cat": "eventos_simples",
+      "input": "reunión hoy a las 8",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "reunion"
+        ],
+        "timeAnyOf": [
+          "8:00 PM",
+          "8:00 AM"
+        ],
+        "date": "today",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "A5",
+      "cat": "eventos_simples",
+      "input": "clase el lunes a las 10",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "clase"
+        ],
+        "timeAnyOf": [
+          "10:00 AM"
+        ],
+        "date": "weekday:lunes"
+      }
+    },
+    {
+      "id": "A6",
+      "cat": "eventos_simples",
+      "input": "estudiar publicidad a las 7",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "timeAnyOf": [
+          "7:00 PM"
+        ],
+        "date": "today",
+        "titleOrSubtitleIncludes": [
+          "publicidad"
+        ]
+      }
+    },
+    {
+      "id": "A7",
+      "cat": "eventos_simples",
+      "input": "almuerzo con mi papá a la 1",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "almuerzo"
+        ],
+        "timeAnyOf": [
+          "1:00 PM"
+        ],
+        "date": "today"
+      }
+    },
+    {
+      "id": "A8",
+      "cat": "eventos_simples",
+      "input": "médico el viernes a las 9",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "medico",
+          "doctor"
+        ],
+        "timeAnyOf": [
+          "9:00 AM"
+        ],
+        "date": "weekday:viernes"
+      }
+    },
+    {
+      "id": "A9",
+      "cat": "eventos_simples",
+      "input": "entreno mañana a las 6",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "entren"
+        ],
+        "timeAnyOf": [
+          "6:00 PM",
+          "6:00 AM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "A10",
+      "cat": "eventos_simples",
+      "input": "llamada con Juan a las 4",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "llamada",
+          "llamar"
+        ],
+        "timeAnyOf": [
+          "4:00 PM"
+        ],
+        "date": "today"
+      }
+    },
+    {
+      "id": "B11",
+      "cat": "subtitulos",
+      "input": "reunión a las 8 de mindfulness",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "reunion"
+        ],
+        "subtitleIncludes": [
+          "mindfulness"
+        ],
+        "timeAnyOf": [
+          "8:00 PM",
+          "8:00 AM"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "B12",
+      "cat": "subtitulos",
+      "input": "fútbol a las 5 llevar la pelota",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "futbol"
+        ],
+        "subtitleIncludes": [
+          "pelota"
+        ],
+        "timeAnyOf": [
+          "5:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "B13",
+      "cat": "subtitulos",
+      "input": "dentista mañana a las 11 llevar radiografía",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "dentista"
+        ],
+        "subtitleIncludes": [
+          "radiografia"
+        ],
+        "timeAnyOf": [
+          "11:00 AM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "B14",
+      "cat": "subtitulos",
+      "input": "gym mañana pierna a las 6",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "gym"
+        ],
+        "subtitleIncludes": [
+          "pierna"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "B15",
+      "cat": "subtitulos",
+      "input": "estudiar publicidad a las 7 repasar ProFreeze",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "subtitleIncludes": [
+          "profreeze"
+        ],
+        "timeAnyOf": [
+          "7:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "B16",
+      "cat": "subtitulos",
+      "input": "clase a las 10 sala B",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "clase"
+        ],
+        "timeAnyOf": [
+          "10:00 AM"
+        ],
+        "subtitleOrLocationIncludes": [
+          "sala b"
+        ]
+      }
+    },
+    {
+      "id": "B17",
+      "cat": "subtitulos",
+      "input": "reunión con Juan revisar Focus",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify",
+          "task"
+        ],
+        "titleIncludes": [
+          "juan"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "B18",
+      "cat": "subtitulos",
+      "input": "trabajo de universidad mañana a las 4 presentación",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "4:00 PM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "B19",
+      "cat": "subtitulos",
+      "input": "partido a las 9 cancha 3",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "partido"
+        ],
+        "subtitleOrLocationIncludes": [
+          "cancha 3"
+        ]
+      }
+    },
+    {
+      "id": "B20",
+      "cat": "subtitulos",
+      "input": "psicólogo mañana a las 12 online",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "psicolog"
+        ],
+        "timeAnyOf": [
+          "12:00 PM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "C21",
+      "cat": "recordatorios",
+      "input": "acuérdame llevar la pelota",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "pelota"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "C22",
+      "cat": "recordatorios",
+      "input": "recuérdame llamar a mi mamá mañana",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "mama"
+        ],
+        "date": "tomorrow",
+        "endTimeNull": true,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "C23",
+      "cat": "recordatorios",
+      "input": "no olvidar la radiografía",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task"
+        ],
+        "titleIncludes": [
+          "radiografia"
+        ]
+      }
+    },
+    {
+      "id": "C24",
+      "cat": "recordatorios",
+      "input": "avisarme en 20 minutos tomar agua",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "agua"
+        ],
+        "timeRelativeMinutes": 20,
+        "endTimeNull": true
+      }
+    },
+    {
+      "id": "C25",
+      "cat": "recordatorios",
+      "input": "acuérdame comprar pan a las 6",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "pan"
+        ],
+        "timeAnyOf": [
+          "6:00 PM"
+        ],
+        "endTimeNull": true
+      }
+    },
+    {
+      "id": "C26",
+      "cat": "recordatorios",
+      "input": "recuérdame estudiar en la noche",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "date": "today",
+        "endTimeNull": true
+      }
+    },
+    {
+      "id": "C27",
+      "cat": "recordatorios",
+      "input": "mañana recuérdame mandar el correo",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "correo",
+          "mail"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "C28",
+      "cat": "recordatorios",
+      "input": "acuérdame pagar la cuenta el viernes",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "cuenta",
+          "pagar"
+        ],
+        "date": "weekday:viernes"
+      }
+    },
+    {
+      "id": "C29",
+      "cat": "recordatorios",
+      "input": "no se me puede olvidar el certificado",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task"
+        ],
+        "titleIncludes": [
+          "certificado"
+        ]
+      }
+    },
+    {
+      "id": "C30",
+      "cat": "recordatorios",
+      "input": "ponme un recordatorio para sacar la ropa de la lavadora en media hora",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "ropa",
+          "lavadora"
+        ],
+        "timeRelativeMinutes": 30
+      }
+    },
+    {
+      "id": "D31",
+      "cat": "duraciones",
+      "input": "estudiar publicidad a las 7 por 30 minutos",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "7:00 PM"
+        ],
+        "durationMinutes": 30
+      }
+    },
+    {
+      "id": "D32",
+      "cat": "duraciones",
+      "input": "gym mañana a las 6 por 1 hora",
+      "expect": {
+        "kind": "event",
+        "durationMinutes": 60,
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "D33",
+      "cat": "duraciones",
+      "input": "reunión de 8 a 9",
+      "expect": {
+        "kind": "event",
+        "durationMinutes": 60,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "D34",
+      "cat": "duraciones",
+      "input": "fútbol de 5 a 7",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "5:00 PM"
+        ],
+        "durationMinutes": 120
+      }
+    },
+    {
+      "id": "D35",
+      "cat": "duraciones",
+      "input": "llamada con Juan a las 4 por 15 minutos",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "4:00 PM"
+        ],
+        "durationMinutes": 15
+      }
+    },
+    {
+      "id": "D36",
+      "cat": "duraciones",
+      "input": "dentista mañana a las 11 por media hora",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "11:00 AM"
+        ],
+        "durationMinutes": 30,
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "D37",
+      "cat": "duraciones",
+      "input": "trabajar en Focus de 3 a 6",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "3:00 PM"
+        ],
+        "durationMinutes": 180
+      }
+    },
+    {
+      "id": "D38",
+      "cat": "duraciones",
+      "input": "clase de 10 a 12",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "10:00 AM"
+        ],
+        "durationMinutes": 120
+      }
+    },
+    {
+      "id": "D39",
+      "cat": "duraciones",
+      "input": "leer por 45 minutos a las 8",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "leer"
+        ],
+        "durationMinutes": 45,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "D40",
+      "cat": "duraciones",
+      "input": "bloque de estudio de 9 a 11",
+      "expect": {
+        "kind": "event",
+        "durationMinutes": 120
+      }
+    },
+    {
+      "id": "E41",
+      "cat": "fechas",
+      "input": "mañana tengo fútbol a las 5",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "futbol"
+        ],
+        "timeAnyOf": [
+          "5:00 PM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "E42",
+      "cat": "fechas",
+      "input": "pasado mañana dentista a las 11",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "dentista"
+        ],
+        "date": "+2"
+      }
+    },
+    {
+      "id": "E43",
+      "cat": "fechas",
+      "input": "el lunes reunión a las 8",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "reunion"
+        ],
+        "date": "weekday:lunes",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "E44",
+      "cat": "fechas",
+      "input": "el próximo viernes médico a las 9",
+      "expect": {
+        "kind": "event",
+        "date": "weekday:viernes",
+        "timeAnyOf": [
+          "9:00 AM"
+        ]
+      }
+    },
+    {
+      "id": "E45",
+      "cat": "fechas",
+      "input": "este sábado partido a las 10",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "partido"
+        ],
+        "date": "weekday:sabado"
+      }
+    },
+    {
+      "id": "E46",
+      "cat": "fechas",
+      "input": "el finde estudiar",
+      "expect": {
+        "kindAnyOf": [
+          "task",
+          "event",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "E47",
+      "cat": "fechas",
+      "input": "la próxima semana revisar Focus",
+      "expect": {
+        "kindAnyOf": [
+          "task",
+          "event",
+          "reminder"
+        ],
+        "titleIncludes": [
+          "focus",
+          "revisar"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "E48",
+      "cat": "fechas",
+      "input": "en 3 días llamar a Juan",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task",
+          "event"
+        ],
+        "titleIncludes": [
+          "juan"
+        ]
+      }
+    },
+    {
+      "id": "E49",
+      "cat": "fechas",
+      "input": "en 2 horas recuérdame salir",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "salir"
+        ],
+        "timeRelativeMinutes": 120
+      }
+    },
+    {
+      "id": "E50",
+      "cat": "fechas",
+      "input": "en 10 minutos tomar remedio",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "event"
+        ],
+        "titleIncludes": [
+          "remedio"
+        ],
+        "timeRelativeMinutes": 10
+      }
+    },
+    {
+      "id": "F51",
+      "cat": "horas_ambiguas",
+      "input": "fútbol a las cinco",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "futbol"
+        ],
+        "timeAnyOf": [
+          "5:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "F52",
+      "cat": "horas_ambiguas",
+      "input": "reunión a las ocho",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "reunion"
+        ],
+        "timeAnyOf": [
+          "8:00 AM",
+          "8:00 PM"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "F53",
+      "cat": "horas_ambiguas",
+      "input": "clase a las diez",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "clase"
+        ],
+        "timeAnyOf": [
+          "10:00 AM"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "F54",
+      "cat": "horas_ambiguas",
+      "input": "gym a las seis de la mañana",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "gym"
+        ],
+        "timeAnyOf": [
+          "6:00 AM"
+        ]
+      }
+    },
+    {
+      "id": "F55",
+      "cat": "horas_ambiguas",
+      "input": "fútbol a las seis de la tarde",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "futbol"
+        ],
+        "timeAnyOf": [
+          "6:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "F56",
+      "cat": "horas_ambiguas",
+      "input": "llamada a las 12",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify"
+        ],
+        "timeAnyOf": [
+          "12:00 PM"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "F57",
+      "cat": "horas_ambiguas",
+      "input": "almuerzo a las 12",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "almuerzo"
+        ],
+        "timeAnyOf": [
+          "12:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "F58",
+      "cat": "horas_ambiguas",
+      "input": "estudiar en la noche",
+      "expect": {
+        "kindAnyOf": [
+          "task",
+          "event",
+          "reminder",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "F59",
+      "cat": "horas_ambiguas",
+      "input": "recuérdame mañana en la mañana",
+      "expect": {
+        "kindAnyOf": [
+          "clarify",
+          "reminder"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "F60",
+      "cat": "horas_ambiguas",
+      "input": "lo veo en la tarde",
+      "expect": {
+        "kind": "chat",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "G61",
+      "cat": "multi",
+      "input": "mañana dentista a las 11 y acuérdame llevar radiografía",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "multi"
+        ],
+        "titleIncludes": [
+          "dentista"
+        ],
+        "date": "tomorrow",
+        "subtitleOrSecondActionIncludes": [
+          "radiografia"
+        ]
+      }
+    },
+    {
+      "id": "G62",
+      "cat": "multi",
+      "input": "hoy fútbol a las 5 y estudiar publicidad a las 8",
+      "expect": {
+        "minActions": 2,
+        "titlesInclude": [
+          [
+            "futbol"
+          ],
+          [
+            "estudiar"
+          ]
+        ],
+        "timesAnyOf": [
+          [
+            "5:00 PM"
+          ],
+          [
+            "8:00 PM"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "G63",
+      "cat": "multi",
+      "input": "el lunes reunión a las 9 y gym a las 7",
+      "expect": {
+        "minActions": 2,
+        "titlesInclude": [
+          [
+            "reunion"
+          ],
+          [
+            "gym"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "G64",
+      "cat": "multi",
+      "input": "mañana clase a las 10, trabajo a las 3 y llamar a mi mamá en la noche",
+      "expect": {
+        "minActions": 3
+      }
+    },
+    {
+      "id": "G65",
+      "cat": "multi",
+      "input": "hoy a las 5 fútbol, llevar pelota y después estudiar",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "multi"
+        ],
+        "titleIncludes": [
+          "futbol"
+        ],
+        "subtitleOrSecondActionIncludes": [
+          "pelota"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "G66",
+      "cat": "multi",
+      "input": "recuérdame comprar pan y mañana tengo médico a las 9",
+      "expect": {
+        "minActions": 2
+      }
+    },
+    {
+      "id": "G67",
+      "cat": "multi",
+      "input": "agenda reunión con Juan y acuérdame revisar el documento",
+      "expect": {
+        "minActions": 1,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "G68",
+      "cat": "multi",
+      "input": "pon gym mañana a las 6 y dentista el viernes a las 11",
+      "expect": {
+        "minActions": 2,
+        "titlesInclude": [
+          [
+            "gym"
+          ],
+          [
+            "dentista"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "G69",
+      "cat": "multi",
+      "input": "hoy estudiar Focus y acuérdame dormir temprano",
+      "expect": {
+        "minActions": 1,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "G70",
+      "cat": "multi",
+      "input": "mañana universidad a las 10 y después psicólogo online a las 12",
+      "expect": {
+        "minActions": 2,
+        "timesAnyOf": [
+          [
+            "10:00 AM"
+          ],
+          [
+            "12:00 PM"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "H71",
+      "cat": "contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "tengo dentista mañana"
+        },
+        {
+          "role": "assistant",
+          "content": "¿A qué hora es el dentista?"
+        }
+      ],
+      "input": "a las 11",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "dentista"
+        ],
+        "timeAnyOf": [
+          "11:00 AM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "H72",
+      "cat": "contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme fútbol hoy"
+        },
+        {
+          "role": "assistant",
+          "content": "¿A qué hora?"
+        }
+      ],
+      "input": "a las 5",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "futbol"
+        ],
+        "timeAnyOf": [
+          "5:00 PM"
+        ],
+        "date": "today"
+      }
+    },
+    {
+      "id": "H73",
+      "cat": "contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "reunión mañana"
+        },
+        {
+          "role": "assistant",
+          "content": "¿A qué hora es la reunión?"
+        }
+      ],
+      "input": "a las 8 de mindfulness",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "reunion"
+        ],
+        "subtitleIncludes": [
+          "mindfulness"
+        ],
+        "date": "tomorrow",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "H74",
+      "cat": "contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "acuérdame llamar a Juan"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Cuándo quieres que te lo recuerde?"
+        }
+      ],
+      "input": "mañana en la mañana",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "juan"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "H75",
+      "cat": "contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "tengo gym"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Cuándo y a qué hora?"
+        }
+      ],
+      "input": "mañana a las 6 pierna",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "gym"
+        ],
+        "subtitleIncludes": [
+          "pierna"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "H76",
+      "cat": "contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "estudiar publicidad"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Para cuándo lo agendo?"
+        }
+      ],
+      "input": "hoy a las 7 por media hora",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "timeAnyOf": [
+          "7:00 PM"
+        ],
+        "durationMinutes": 30
+      }
+    },
+    {
+      "id": "H77",
+      "cat": "contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "clase el lunes"
+        },
+        {
+          "role": "assistant",
+          "content": "¿A qué hora es la clase?"
+        }
+      ],
+      "input": "a las 10 sala B",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "clase"
+        ],
+        "timeAnyOf": [
+          "10:00 AM"
+        ],
+        "date": "weekday:lunes"
+      }
+    },
+    {
+      "id": "H78",
+      "cat": "contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "tengo partido"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Cuándo es el partido?"
+        }
+      ],
+      "input": "el sábado a las 9 cancha 3",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "partido"
+        ],
+        "date": "weekday:sabado"
+      }
+    },
+    {
+      "id": "H79",
+      "cat": "contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "recuérdame llevar algo"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Qué quieres que te recuerde llevar?"
+        }
+      ],
+      "input": "la pelota para fútbol",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task",
+          "edit"
+        ],
+        "titleOrSubtitleIncludes": [
+          "pelota"
+        ]
+      }
+    },
+    {
+      "id": "H80",
+      "cat": "contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "mañana tengo reunión con Juan"
+        },
+        {
+          "role": "assistant",
+          "content": "¿A qué hora es la reunión con Juan?"
+        }
+      ],
+      "input": "revisar Focus a las 9",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "juan",
+          "reunion"
+        ],
+        "timeAnyOf": [
+          "9:00 AM"
+        ],
+        "date": "tomorrow",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "I81",
+      "cat": "conversacion",
+      "input": "qué hago si estoy cansado",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "I82",
+      "cat": "conversacion",
+      "input": "ayúdame a ordenar mi día",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "I83",
+      "cat": "conversacion",
+      "input": "no sé por dónde empezar",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "I84",
+      "cat": "conversacion",
+      "input": "qué es mejor estudiar primero",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "I85",
+      "cat": "conversacion",
+      "input": "me siento colapsado",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "I86",
+      "cat": "conversacion",
+      "input": "cómo organizo Focus",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "I87",
+      "cat": "conversacion",
+      "input": "dame una rutina para mañana",
+      "expect": {
+        "kindAnyOf": [
+          "chat",
+          "clarify"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "I88",
+      "cat": "conversacion",
+      "input": "qué opinas de entrenar en la noche",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "I89",
+      "cat": "conversacion",
+      "input": "necesito motivación",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "I90",
+      "cat": "conversacion",
+      "input": "ayúdame a priorizar",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "J91",
+      "cat": "no_crear",
+      "input": "quizás mañana vaya al gym",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "J92",
+      "cat": "no_crear",
+      "input": "estaba pensando en estudiar a las 7",
+      "expect": {
+        "kindAnyOf": [
+          "chat",
+          "clarify"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "J93",
+      "cat": "no_crear",
+      "input": "qué pasa si tengo reunión a las 8",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "J94",
+      "cat": "no_crear",
+      "input": "me conviene poner fútbol a las 5?",
+      "expect": {
+        "kindAnyOf": [
+          "chat",
+          "clarify"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "J95",
+      "cat": "no_crear",
+      "input": "puedes organizarme si mañana tengo médico?",
+      "expect": {
+        "kindAnyOf": [
+          "chat",
+          "clarify"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "J96",
+      "cat": "no_crear",
+      "input": "no estoy seguro si iré al dentista",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "J97",
+      "cat": "no_crear",
+      "input": "crees que debería llamar a Juan?",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "J98",
+      "cat": "no_crear",
+      "input": "qué hago con la reunión de mindfulness?",
+      "expect": {
+        "kindAnyOf": [
+          "chat",
+          "clarify"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "J99",
+      "cat": "no_crear",
+      "input": "cómo sería un buen horario para estudiar?",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "J100",
+      "cat": "no_crear",
+      "input": "ayúdame a decidir si pongo gym mañana",
+      "expect": {
+        "kindAnyOf": [
+          "chat",
+          "clarify"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "K101",
+      "cat": "informal",
+      "input": "ponme futbol a las 5 porfa",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "futbol"
+        ],
+        "timeAnyOf": [
+          "5:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "K102",
+      "cat": "informal",
+      "input": "mañana tengo doc a las 11",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "doc",
+          "medico"
+        ],
+        "timeAnyOf": [
+          "11:00 AM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "K103",
+      "cat": "informal",
+      "input": "acuérdame la pelota pal partido",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task"
+        ],
+        "titleOrSubtitleIncludes": [
+          "pelota"
+        ]
+      }
+    },
+    {
+      "id": "K104",
+      "cat": "informal",
+      "input": "tengo que mandar una wea de la u",
+      "expect": {
+        "kindAnyOf": [
+          "task",
+          "clarify"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "K105",
+      "cat": "informal",
+      "input": "mañana en la tarde tengo que estudiar",
+      "expect": {
+        "kindAnyOf": [
+          "task",
+          "event",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "date": "tomorrow",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "K106",
+      "cat": "informal",
+      "input": "tipo 7 hago gym",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "gym"
+        ],
+        "timeAnyOf": [
+          "7:00 PM",
+          "7:00 AM"
+        ]
+      }
+    },
+    {
+      "id": "K107",
+      "cat": "informal",
+      "input": "como a las 8 reunión",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "reunion"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "K108",
+      "cat": "informal",
+      "history": [
+        {
+          "role": "user",
+          "content": "tengo que mandar el certificado"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Cuándo te lo recuerdo?"
+        }
+      ],
+      "input": "en la noche acuérdame eso",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task"
+        ],
+        "titleIncludes": [
+          "certificado"
+        ]
+      }
+    },
+    {
+      "id": "K109",
+      "cat": "informal",
+      "input": "mañana tempranito estudiar",
+      "expect": {
+        "kindAnyOf": [
+          "task",
+          "event",
+          "reminder",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "date": "tomorrow",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "K110",
+      "cat": "informal",
+      "input": "hoy día a las 5 partido",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "partido"
+        ],
+        "timeAnyOf": [
+          "5:00 PM"
+        ],
+        "date": "today"
+      }
+    },
+    {
+      "id": "L111",
+      "cat": "typos",
+      "input": "reunion manana alas 8",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "reunion"
+        ],
+        "date": "tomorrow",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "L112",
+      "cat": "typos",
+      "input": "futbol alas 5 llevar pelota",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "futbol"
+        ],
+        "timeAnyOf": [
+          "5:00 PM"
+        ],
+        "subtitleIncludes": [
+          "pelota"
+        ]
+      }
+    },
+    {
+      "id": "L113",
+      "cat": "typos",
+      "input": "dentista manaña 11",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "dentista"
+        ],
+        "timeAnyOf": [
+          "11:00 AM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "L114",
+      "cat": "typos",
+      "input": "gim a la 6",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "gym",
+          "gim"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "L115",
+      "cat": "typos",
+      "input": "estudiar publciidad 7",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "task",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "publicidad",
+          "publciidad",
+          "estudiar"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "L116",
+      "cat": "typos",
+      "input": "acuérdame comprr pan",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task"
+        ],
+        "titleIncludes": [
+          "pan"
+        ]
+      }
+    },
+    {
+      "id": "L117",
+      "cat": "typos",
+      "input": "no olvidar radiografia mañana",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task"
+        ],
+        "titleIncludes": [
+          "radiografia"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "L118",
+      "cat": "typos",
+      "input": "llamar juan 5",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "reminder",
+          "task",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "juan"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "L119",
+      "cat": "typos",
+      "input": "clse lunes 10",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "L120",
+      "cat": "typos",
+      "input": "psicologo online manana 12",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "psicolog"
+        ],
+        "date": "tomorrow",
+        "timeAnyOf": [
+          "12:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "M121",
+      "cat": "complejos",
+      "input": "organízame mañana: gym temprano, universidad a las 10, psicólogo a las 12 y estudiar en la tarde",
+      "expect": {
+        "minActions": 2,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "M122",
+      "cat": "complejos",
+      "input": "mañana tengo muchas cosas, parte por poner dentista a las 11",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "dentista"
+        ],
+        "timeAnyOf": [
+          "11:00 AM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "M123",
+      "cat": "complejos",
+      "input": "hoy quiero estudiar Focus 2 horas y después descansar",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify",
+          "task"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "M124",
+      "cat": "complejos",
+      "input": "pon un bloque para arreglar Nova mañana en la mañana",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify",
+          "task"
+        ],
+        "titleIncludes": [
+          "nova"
+        ],
+        "date": "tomorrow",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "M125",
+      "cat": "complejos",
+      "input": "deja el viernes para avanzar en la app",
+      "expect": {
+        "kindAnyOf": [
+          "task",
+          "event",
+          "clarify"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "M126",
+      "cat": "complejos",
+      "input": "agenda 30 minutos para revisar bugs antes de dormir",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "bugs",
+          "revisar"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "M127",
+      "cat": "complejos",
+      "input": "mañana después de almuerzo acuérdame mandar el certificado",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "certificado"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "M128",
+      "cat": "complejos",
+      "input": "el lunes en la noche revisar los subtítulos de eventos",
+      "expect": {
+        "kindAnyOf": [
+          "task",
+          "event",
+          "reminder"
+        ],
+        "date": "weekday:lunes",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "M129",
+      "cat": "complejos",
+      "input": "hoy a las 8 reunión, pero acuérdame 30 minutos antes preparar todo",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "reunion"
+        ],
+        "reminderOffsetsInclude": 30,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "M130",
+      "cat": "complejos",
+      "input": "mañana a las 9 llama a Juan y pon nota preguntar por la universidad",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "multi"
+        ],
+        "titleIncludes": [
+          "juan"
+        ],
+        "subtitleOrSecondActionIncludes": [
+          "universidad"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "N131",
+      "cat": "confirmaciones",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme dentista mañana a las 11"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Lo dejo como evento con aviso 30 minutos antes?"
+        }
+      ],
+      "input": "sí",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "edit",
+          "chat"
+        ],
+        "noWrongCreate": true
+      }
+    },
+    {
+      "id": "N132",
+      "cat": "confirmaciones",
+      "history": [
+        {
+          "role": "user",
+          "content": "quiero estudiar hoy"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Te lo agendo a las 7 PM?"
+        }
+      ],
+      "input": "dale",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "chat"
+        ],
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "N133",
+      "cat": "confirmaciones",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme gym mañana a las 6"
+        },
+        {
+          "role": "assistant",
+          "content": "Listo, Gym mañana a las 6 PM. ¿Algo más?"
+        }
+      ],
+      "input": "ok",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "N134",
+      "cat": "confirmaciones",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme fútbol hoy a las 5"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Hoy a las 5 PM?"
+        }
+      ],
+      "input": "mejor mañana",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "edit"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "N135",
+      "cat": "confirmaciones",
+      "history": [
+        {
+          "role": "user",
+          "content": "tengo dentista mañana"
+        },
+        {
+          "role": "assistant",
+          "content": "¿A qué hora?"
+        }
+      ],
+      "input": "a las 5",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "dentista"
+        ],
+        "timeAnyOf": [
+          "5:00 PM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "N136",
+      "cat": "confirmaciones",
+      "history": [
+        {
+          "role": "user",
+          "content": "recuérdame llamar a mi mamá mañana"
+        },
+        {
+          "role": "assistant",
+          "content": "¿En qué momento del día?"
+        }
+      ],
+      "input": "en la tarde",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "mama"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "N137",
+      "cat": "confirmaciones",
+      "history": [
+        {
+          "role": "user",
+          "content": "reunión mañana a las 8"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Sobre qué es la reunión?"
+        }
+      ],
+      "input": "con mindfulness",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "reunion"
+        ],
+        "subtitleIncludes": [
+          "mindfulness"
+        ],
+        "date": "tomorrow",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "N138",
+      "cat": "confirmaciones",
+      "history": [
+        {
+          "role": "user",
+          "content": "fútbol hoy a las 5"
+        },
+        {
+          "role": "assistant",
+          "content": "Listo, Fútbol hoy a las 5 PM. ¿Quieres que te recuerde algo?"
+        }
+      ],
+      "input": "llevar la pelota",
+      "expect": {
+        "kindAnyOf": [
+          "edit",
+          "reminder",
+          "event",
+          "task"
+        ],
+        "titleOrSubtitleIncludes": [
+          "pelota"
+        ]
+      }
+    },
+    {
+      "id": "N139",
+      "cat": "confirmaciones",
+      "history": [
+        {
+          "role": "user",
+          "content": "estudiar publicidad hoy a las 7"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Cuánto tiempo le dedicas?"
+        }
+      ],
+      "input": "por media hora",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "edit"
+        ],
+        "durationMinutes": 30,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "N140",
+      "cat": "confirmaciones",
+      "history": [
+        {
+          "role": "user",
+          "content": "tengo que mandar el informe mañana"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Lo agendo con hora o te lo dejo como pendiente?"
+        }
+      ],
+      "input": "déjalo como recordatorio",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task"
+        ],
+        "titleIncludes": [
+          "informe"
+        ]
+      }
+    },
+    {
+      "id": "O141",
+      "cat": "cancelacion",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme fútbol hoy a las 5"
+        },
+        {
+          "role": "assistant",
+          "content": "Listo, Fútbol hoy a las 5 PM."
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-futbol",
+          "title": "Fútbol",
+          "time": "5:00 PM",
+          "date": "today"
+        }
+      ],
+      "discussed": [
+        "ev-futbol"
+      ],
+      "input": "mejor no",
+      "expect": {
+        "kindAnyOf": [
+          "delete",
+          "chat"
+        ],
+        "noWrongCreate": true
+      }
+    },
+    {
+      "id": "O142",
+      "cat": "cancelacion",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme fútbol hoy a las 5"
+        },
+        {
+          "role": "assistant",
+          "content": "Listo, Fútbol hoy a las 5 PM."
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-futbol",
+          "title": "Fútbol",
+          "time": "5:00 PM",
+          "date": "today"
+        }
+      ],
+      "discussed": [
+        "ev-futbol"
+      ],
+      "input": "cancela eso",
+      "expect": {
+        "kind": "delete",
+        "targetId": "ev-futbol"
+      }
+    },
+    {
+      "id": "O143",
+      "cat": "cancelacion",
+      "history": [
+        {
+          "role": "user",
+          "content": "agéndame reunión mañana a las 9"
+        },
+        {
+          "role": "assistant",
+          "content": "Listo, Reunión mañana a las 9 AM."
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-reunion",
+          "title": "Reunión",
+          "time": "9:00 AM",
+          "date": "tomorrow"
+        }
+      ],
+      "discussed": [
+        "ev-reunion"
+      ],
+      "input": "no lo pongas",
+      "expect": {
+        "kindAnyOf": [
+          "delete",
+          "chat"
+        ],
+        "noWrongCreate": true
+      }
+    },
+    {
+      "id": "O144",
+      "cat": "cancelacion",
+      "events": [
+        {
+          "id": "ev-futbol",
+          "title": "Fútbol",
+          "time": "5:00 PM",
+          "date": "today"
+        }
+      ],
+      "discussed": [
+        "ev-futbol"
+      ],
+      "input": "cámbialo a las 6",
+      "expect": {
+        "kind": "edit",
+        "targetId": "ev-futbol",
+        "updateTime": "6:00 PM"
+      }
+    },
+    {
+      "id": "O145",
+      "cat": "cancelacion",
+      "history": [
+        {
+          "role": "user",
+          "content": "dentista hoy a las 4"
+        },
+        {
+          "role": "assistant",
+          "content": "Listo, Dentista hoy a las 4 PM."
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-dentista",
+          "title": "Dentista",
+          "time": "4:00 PM",
+          "date": "today"
+        }
+      ],
+      "discussed": [
+        "ev-dentista"
+      ],
+      "input": "mejor mañana",
+      "expect": {
+        "kind": "edit",
+        "targetId": "ev-dentista",
+        "updateDate": "tomorrow"
+      }
+    },
+    {
+      "id": "O146",
+      "cat": "cancelacion",
+      "events": [
+        {
+          "id": "ev-reunion",
+          "title": "Reunión",
+          "time": "8:00 PM",
+          "date": "today"
+        }
+      ],
+      "discussed": [
+        "ev-reunion"
+      ],
+      "input": "ponlo una hora antes",
+      "expect": {
+        "kind": "edit",
+        "targetId": "ev-reunion",
+        "updateTime": "7:00 PM"
+      }
+    },
+    {
+      "id": "O147",
+      "cat": "cancelacion",
+      "events": [
+        {
+          "id": "ev-futbol",
+          "title": "Fútbol",
+          "time": "5:00 PM",
+          "date": "today"
+        }
+      ],
+      "input": "borra lo de fútbol",
+      "expect": {
+        "kind": "delete",
+        "targetId": "ev-futbol"
+      }
+    },
+    {
+      "id": "O148",
+      "cat": "cancelacion",
+      "events": [
+        {
+          "id": "ev-gym",
+          "title": "Gym",
+          "time": "6:00 PM",
+          "date": "tomorrow"
+        }
+      ],
+      "discussed": [
+        "ev-gym"
+      ],
+      "input": "cambia el subtítulo a pierna",
+      "expect": {
+        "kindAnyOf": [
+          "edit",
+          "chat",
+          "clarify"
+        ],
+        "allowClarify": true,
+        "noWrongCreate": true
+      }
+    },
+    {
+      "id": "O149",
+      "cat": "cancelacion",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme estudiar hoy a las 7"
+        },
+        {
+          "role": "assistant",
+          "content": "Listo, Estudiar hoy a las 7 PM."
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-estudiar",
+          "title": "Estudiar",
+          "time": "7:00 PM",
+          "date": "today"
+        }
+      ],
+      "discussed": [
+        "ev-estudiar"
+      ],
+      "input": "que sea recordatorio no evento",
+      "expect": {
+        "kindAnyOf": [
+          "edit",
+          "delete",
+          "reminder",
+          "chat"
+        ],
+        "noWrongCreate": true
+      }
+    },
+    {
+      "id": "O150",
+      "cat": "cancelacion",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme algo mañana"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Qué quieres que agende mañana?"
+        }
+      ],
+      "input": "olvida lo anterior",
+      "expect": {
+        "kind": "chat",
+        "noWrongCreate": true
+      }
+    },
+    {
+      "id": "X151",
+      "cat": "extra_eventos",
+      "input": "ponme estudiar a las 8",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "timeAnyOf": [
+          "8:00 PM"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X152",
+      "cat": "extra_eventos",
+      "input": "agéndame médico el viernes a las 9",
+      "expect": {
+        "kind": "event",
+        "date": "weekday:viernes",
+        "timeAnyOf": [
+          "9:00 AM"
+        ]
+      }
+    },
+    {
+      "id": "X153",
+      "cat": "extra_eventos",
+      "input": "junta con el equipo el lunes a las 9 y media",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "9:30 AM"
+        ],
+        "date": "weekday:lunes"
+      }
+    },
+    {
+      "id": "X154",
+      "cat": "extra_eventos",
+      "input": "cita con el doc en 2 horas",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "reminder"
+        ],
+        "timeRelativeMinutes": 120
+      }
+    },
+    {
+      "id": "X155",
+      "cat": "extra_eventos",
+      "input": "asado el sábado",
+      "expect": {
+        "kind": "clarify"
+      }
+    },
+    {
+      "id": "X156",
+      "cat": "extra_eventos",
+      "input": "cena con la familia mañana a las 9",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "cena"
+        ],
+        "timeAnyOf": [
+          "9:00 PM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "X157",
+      "cat": "extra_eventos",
+      "input": "despertarme a las 7",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "event"
+        ],
+        "timeAnyOf": [
+          "7:00 AM"
+        ]
+      }
+    },
+    {
+      "id": "X158",
+      "cat": "extra_eventos",
+      "input": "counter con los cabros tipo 10",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify"
+        ],
+        "timeAnyOf": [
+          "10:00 PM"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X159",
+      "cat": "extra_eventos",
+      "input": "ir a dejar a mi hermana al aeropuerto mañana a las 6 de la mañana",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "6:00 AM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "X160",
+      "cat": "extra_eventos",
+      "input": "feria el domingo en la mañana",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify",
+          "task"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X161",
+      "cat": "extra_subtitulos",
+      "input": "reunión con cristina a las 4 revisar el portafolio",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "cristina"
+        ],
+        "subtitleIncludes": [
+          "portafolio"
+        ],
+        "timeAnyOf": [
+          "4:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "X162",
+      "cat": "extra_subtitulos",
+      "input": "prueba de arte el jueves a las 10, repasar barroco y renacimiento",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "prueba"
+        ],
+        "subtitleIncludes": [
+          "barroco"
+        ],
+        "date": "weekday:jueves"
+      }
+    },
+    {
+      "id": "X163",
+      "cat": "extra_subtitulos",
+      "input": "partido mañana a las 3, echar las zapatillas a la mochila",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "partido"
+        ],
+        "subtitleOrSecondActionIncludes": [
+          "zapatillas"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "X164",
+      "cat": "extra_subtitulos",
+      "input": "supermercado a las 6 comprar leche y pan",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "supermercado"
+        ],
+        "subtitleIncludes": [
+          "leche"
+        ]
+      }
+    },
+    {
+      "id": "X165",
+      "cat": "extra_subtitulos",
+      "input": "clase de redacción a las 10 llevar computador",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "redaccion",
+          "clase"
+        ],
+        "subtitleIncludes": [
+          "computador"
+        ]
+      }
+    },
+    {
+      "id": "X166",
+      "cat": "extra_duraciones",
+      "input": "siesta de 20 minutos a las 3",
+      "expect": {
+        "kind": "event",
+        "durationMinutes": 20,
+        "timeAnyOf": [
+          "3:00 PM"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X167",
+      "cat": "extra_duraciones",
+      "input": "reunión con Juan de 2 a 4 de la tarde",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "2:00 PM"
+        ],
+        "durationMinutes": 120
+      }
+    },
+    {
+      "id": "X168",
+      "cat": "extra_duraciones",
+      "input": "estudiar hasta las 9 empezando a las 7",
+      "expect": {
+        "kind": "event",
+        "durationMinutes": 120,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X169",
+      "cat": "extra_duraciones",
+      "input": "gimnasio hora y media mañana a las 7",
+      "expect": {
+        "kind": "event",
+        "durationMinutes": 90,
+        "date": "tomorrow",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X170",
+      "cat": "extra_duraciones",
+      "input": "llamada rápida con el jefe a las 11",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "11:00 AM"
+        ],
+        "maxDurationMinutes": 30,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X171",
+      "cat": "extra_franjas",
+      "input": "mañana en la mañana ir al banco",
+      "expect": {
+        "kindAnyOf": [
+          "task",
+          "event",
+          "reminder",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "banco"
+        ],
+        "date": "tomorrow",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X172",
+      "cat": "extra_franjas",
+      "input": "esta noche ver la serie con la polola",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "task",
+          "clarify"
+        ],
+        "date": "today",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X173",
+      "cat": "extra_franjas",
+      "input": "al mediodía almuerzo con mi abuela",
+      "expect": {
+        "kind": "event",
+        "timeAnyOf": [
+          "12:00 PM"
+        ],
+        "titleIncludes": [
+          "almuerzo"
+        ]
+      }
+    },
+    {
+      "id": "X174",
+      "cat": "extra_franjas",
+      "input": "a medianoche tomar el remedio",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "event"
+        ],
+        "timeAnyOf": [
+          "12:00 AM"
+        ]
+      }
+    },
+    {
+      "id": "X175",
+      "cat": "extra_franjas",
+      "input": "el domingo en la tarde planificar la semana",
+      "expect": {
+        "kindAnyOf": [
+          "task",
+          "event",
+          "clarify"
+        ],
+        "date": "weekday:domingo",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X176",
+      "cat": "extra_multi",
+      "input": "mañana gym a las 7 y después desayuno con mi papá a las 9",
+      "expect": {
+        "minActions": 2,
+        "titlesInclude": [
+          [
+            "gym"
+          ],
+          [
+            "desayuno"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "X177",
+      "cat": "extra_multi",
+      "input": "el martes prueba a las 10 y acuérdame estudiar el lunes",
+      "expect": {
+        "minActions": 2
+      }
+    },
+    {
+      "id": "X178",
+      "cat": "extra_multi",
+      "input": "hoy: llamar a Juan a las 3, mandar el correo a las 4 y gym a las 6",
+      "expect": {
+        "minActions": 3
+      }
+    },
+    {
+      "id": "X179",
+      "cat": "extra_multi",
+      "input": "ponme counter a la 1 y avísame 10 minutos antes",
+      "expect": {
+        "kind": "event",
+        "reminderOffsetsInclude": 10,
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X180",
+      "cat": "extra_multi",
+      "input": "comprar pan y leche",
+      "expect": {
+        "kind": "task",
+        "maxActions": 1,
+        "titleIncludes": [
+          "pan"
+        ]
+      }
+    },
+    {
+      "id": "X181",
+      "cat": "extra_no_crear",
+      "input": "puta que estoy cansado hoy",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "X182",
+      "cat": "extra_no_crear",
+      "input": "al final no fui al gym ayer",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "X183",
+      "cat": "extra_no_crear",
+      "input": "qué tengo mañana?",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "X184",
+      "cat": "extra_no_crear",
+      "events": [
+        {
+          "id": "ev-dentista",
+          "title": "Dentista",
+          "time": "11:00 AM",
+          "date": "tomorrow"
+        }
+      ],
+      "input": "tengo algo mañana en la mañana?",
+      "expect": {
+        "kind": "chat",
+        "replyIncludes": [
+          "dentista"
+        ]
+      }
+    },
+    {
+      "id": "X185",
+      "cat": "extra_no_crear",
+      "input": "gracias nova",
+      "expect": {
+        "kind": "chat"
+      }
+    },
+    {
+      "id": "X186",
+      "cat": "extra_recordatorios",
+      "input": "avísame 30 minutos antes del dentista",
+      "events": [
+        {
+          "id": "ev-dentista",
+          "title": "Dentista",
+          "time": "11:00 AM",
+          "date": "tomorrow"
+        }
+      ],
+      "discussed": [
+        "ev-dentista"
+      ],
+      "expect": {
+        "kind": "edit",
+        "targetId": "ev-dentista",
+        "reminderOffsetsInclude": 30
+      }
+    },
+    {
+      "id": "X187",
+      "cat": "extra_recordatorios",
+      "input": "recuérdame en una hora estirar las piernas",
+      "expect": {
+        "kind": "reminder",
+        "timeRelativeMinutes": 60,
+        "titleIncludes": [
+          "estirar",
+          "piernas"
+        ]
+      }
+    },
+    {
+      "id": "X188",
+      "cat": "extra_recordatorios",
+      "input": "que no se me olvide regar las plantas el domingo",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task"
+        ],
+        "titleIncludes": [
+          "plantas",
+          "regar"
+        ],
+        "date": "weekday:domingo"
+      }
+    },
+    {
+      "id": "X189",
+      "cat": "extra_recordatorios",
+      "input": "acuérdame mañana tempranito sacar la basura",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "basura"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "X190",
+      "cat": "extra_recordatorios",
+      "input": "ponme recordatorio pa pagar el arriendo el 1",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task"
+        ],
+        "titleIncludes": [
+          "arriendo"
+        ]
+      }
+    },
+    {
+      "id": "X191",
+      "cat": "extra_typos",
+      "input": "reumion con juan manan a las 9",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify"
+        ],
+        "titleIncludes": [
+          "juan"
+        ],
+        "date": "tomorrow",
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X192",
+      "cat": "extra_typos",
+      "input": "futbo hoy alas 17",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "futbo"
+        ],
+        "timeAnyOf": [
+          "5:00 PM"
+        ],
+        "date": "today"
+      }
+    },
+    {
+      "id": "X193",
+      "cat": "extra_typos",
+      "input": "acuerdame yamar al medico",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "task"
+        ],
+        "titleIncludes": [
+          "medico"
+        ]
+      }
+    },
+    {
+      "id": "X194",
+      "cat": "extra_typos",
+      "input": "estudiar mate maana 4pm",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "mate",
+          "estudiar"
+        ],
+        "timeAnyOf": [
+          "4:00 PM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "X195",
+      "cat": "extra_typos",
+      "input": "denstista juebes 15:30",
+      "expect": {
+        "kindAnyOf": [
+          "event",
+          "clarify"
+        ],
+        "timeAnyOf": [
+          "3:30 PM"
+        ],
+        "allowClarify": true
+      }
+    },
+    {
+      "id": "X196",
+      "cat": "extra_contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "mañana tengo prueba de teorías"
+        },
+        {
+          "role": "assistant",
+          "content": "¿A qué hora es la prueba?"
+        }
+      ],
+      "input": "a las 8 y media",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "prueba"
+        ],
+        "timeAnyOf": [
+          "8:30 AM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "X197",
+      "cat": "extra_contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme cita con la nutricionista"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Para cuándo es la cita?"
+        }
+      ],
+      "input": "el miércoles a las 4",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "nutricionista",
+          "cita"
+        ],
+        "timeAnyOf": [
+          "4:00 PM"
+        ],
+        "date": "weekday:miercoles"
+      }
+    },
+    {
+      "id": "X198",
+      "cat": "extra_contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "el viernes carrete en la casa del pelao"
+        },
+        {
+          "role": "assistant",
+          "content": "¿A qué hora parte el carrete?"
+        }
+      ],
+      "input": "tipo 9",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "carrete"
+        ],
+        "timeAnyOf": [
+          "9:00 PM"
+        ],
+        "date": "weekday:viernes"
+      }
+    },
+    {
+      "id": "X199",
+      "cat": "extra_contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "agéndame hora con el oftalmólogo mañana a las 10"
+        },
+        {
+          "role": "assistant",
+          "content": "Listo, Oftalmólogo mañana a las 10 AM."
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-oftal",
+          "title": "Oftalmólogo",
+          "time": "10:00 AM",
+          "date": "tomorrow"
+        }
+      ],
+      "discussed": [
+        "ev-oftal"
+      ],
+      "input": "y acuérdame llevar los lentes",
+      "expect": {
+        "kindAnyOf": [
+          "edit",
+          "reminder",
+          "task"
+        ],
+        "titleOrSubtitleIncludes": [
+          "lentes"
+        ],
+        "noWrongCreate": true
+      }
+    },
+    {
+      "id": "X200",
+      "cat": "extra_contexto",
+      "history": [
+        {
+          "role": "user",
+          "content": "no sé si estudiar hoy o mañana"
+        },
+        {
+          "role": "assistant",
+          "content": "¿Cómo viene tu día hoy? Si estás cansado, mañana temprano rinde más."
+        }
+      ],
+      "input": "tienes razón, déjalo para mañana a las 9",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "estudiar"
+        ],
+        "timeAnyOf": [
+          "9:00 AM"
+        ],
+        "date": "tomorrow"
+      }
+    },
+    {
+      "id": "X201",
+      "cat": "extra_criticos",
+      "input": "gym pierna a las 7",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "gym"
+        ],
+        "subtitleIncludes": [
+          "pierna"
+        ],
+        "timeAnyOf": [
+          "7:00 PM",
+          "7:00 AM"
+        ]
+      }
+    },
+    {
+      "id": "X202",
+      "cat": "extra_criticos",
+      "input": "clase publicidad a las 12",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "clase"
+        ],
+        "titleOrSubtitleIncludes": [
+          "publicidad"
+        ],
+        "timeAnyOf": [
+          "12:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "X203",
+      "cat": "extra_criticos",
+      "input": "médico a las 10 llevar exámenes",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "medico"
+        ],
+        "subtitleIncludes": [
+          "examenes"
+        ],
+        "timeAnyOf": [
+          "10:00 AM"
+        ]
+      }
+    },
+    {
+      "id": "X204",
+      "cat": "extra_criticos",
+      "input": "llamar al médico a las 6",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "event"
+        ],
+        "titleIncludes": [
+          "medico",
+          "llamar"
+        ],
+        "timeAnyOf": [
+          "6:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "X205",
+      "cat": "extra_criticos",
+      "input": "comprar pan a las 6",
+      "expect": {
+        "kindAnyOf": [
+          "reminder",
+          "event",
+          "task"
+        ],
+        "titleIncludes": [
+          "pan"
+        ],
+        "timeAnyOf": [
+          "6:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "X206",
+      "cat": "extra_criticos",
+      "input": "doctor a las 11",
+      "expect": {
+        "kind": "event",
+        "titleIncludes": [
+          "doctor"
+        ],
+        "timeAnyOf": [
+          "11:00 AM"
+        ],
+        "endTimeNull": true
+      }
+    },
+    {
+      "id": "X207",
+      "cat": "extra_criticos",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme fútbol hoy a las 5"
+        },
+        {
+          "role": "assistant",
+          "content": "Listo, Fútbol hoy a las 5 PM."
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-futbol",
+          "title": "Fútbol",
+          "time": "5:00 PM",
+          "date": "today"
+        }
+      ],
+      "discussed": [
+        "ev-futbol"
+      ],
+      "input": "muévelo a mañana",
+      "expect": {
+        "kind": "edit",
+        "targetId": "ev-futbol",
+        "updateDate": "tomorrow"
+      }
+    },
+    {
+      "id": "X208",
+      "cat": "extra_criticos",
+      "events": [
+        {
+          "id": "ev-reunion",
+          "title": "Reunión con Juan",
+          "time": "9:00 AM",
+          "date": "tomorrow"
+        }
+      ],
+      "input": "elimina la reunión",
+      "expect": {
+        "kind": "delete",
+        "targetId": "ev-reunion"
+      }
+    },
+    {
+      "id": "X209",
+      "cat": "extra_criticos",
+      "events": [
+        {
+          "id": "ev-rec-pan",
+          "title": "Recordatorio: Comprar pan",
+          "time": "6:00 PM",
+          "date": "today"
+        }
+      ],
+      "input": "quita el recordatorio de comprar pan",
+      "expect": {
+        "kind": "delete",
+        "targetId": "ev-rec-pan"
+      }
+    },
+    {
+      "id": "X210",
+      "cat": "extra_criticos",
+      "history": [
+        {
+          "role": "user",
+          "content": "acuérdame comprar pan"
+        },
+        {
+          "role": "assistant",
+          "content": "¿A qué hora quieres que te lo recuerde?"
+        }
+      ],
+      "input": "a las 6",
+      "expect": {
+        "kind": "reminder",
+        "titleIncludes": [
+          "pan"
+        ],
+        "timeAnyOf": [
+          "6:00 PM"
+        ]
+      }
+    },
+    {
+      "id": "X211",
+      "cat": "extra_criticos",
+      "history": [
+        {
+          "role": "user",
+          "content": "ponme dentista hoy a las 4"
+        },
+        {
+          "role": "assistant",
+          "content": "Listo, Dentista hoy a las 4 PM."
+        }
+      ],
+      "events": [
+        {
+          "id": "ev-dentista",
+          "title": "Dentista",
+          "time": "4:00 PM",
+          "date": "today"
+        }
+      ],
+      "discussed": [
+        "ev-dentista"
+      ],
+      "input": "cambialo a las 6",
+      "expect": {
+        "kind": "edit",
+        "targetId": "ev-dentista",
+        "updateTime": "6:00 PM"
+      }
+    }
   ]
 }

@@ -46,6 +46,15 @@ const EDIT_VERB_PATTERNS = [
   /\bque sea\s+(recordatorio|evento|tarea)\b/i,
   /\bolvida\s+(eso|lo anterior|lo [uú]ltimo)\b/i,
   /\buna hora (antes|despu[eé]s)\b/i,
+  // Correcciones declarativas sin verbo de edición (QA-closure 2026-06-10,
+  // pasada Anthropic): "me equivoqué, era a las 6", "no, era mañana",
+  // "eso era un evento", "era pierna no espalda". El modelo emite el
+  // edit_event correcto pero el filtro lo mataba por falta de verbo.
+  /\bme equivoqu[eé]\b/i,
+  /\beso (era|es)\b/i,
+  /\bno,?\s+era\b/i,
+  /\bera\s+(a las?\s|mañana|manana|hoy|el\s|para\s)/i,
+  /\bera\s+\S+\s+no\s+\S+/i, // "era pierna no espalda"
 ];
 
 const EDIT_ACTION_TYPES = new Set(['edit_event', 'update_event', 'delete_event']);

@@ -444,6 +444,14 @@ export default async function handler(req, res) {
   // estaba en 25s pero competía con el corte default de Vercel a los 10s,
   // lo que dejaba al cliente colgado en "Focus está pensando…" sin error.
   const anthropic = new Anthropic({ apiKey, timeout: 45_000, maxRetries: 1 })
+
+  // Scope para detectar intención de edición: mensaje actual + último turno
+  // del usuario. En continuaciones ("cambia lo de fútbol" → "¿a qué hora?" →
+  // "a las 6") el verbo de edición vive en el turno anterior; con solo
+  // `message` el filtro strippeaba la edición legítima y Nova respondía la
+  // nota técnica "No moví ni edité…". El path OpenAI ya usaba este scope.
+  const lastUserTurnText = [...history].reverse().find(h => h.role === 'user')?.content || ''
+  const editIntentScope = `${lastUserTurnText}\n${message}`
   const messages = [
     ...history.map(h => ({ role: h.role, content: h.content })),
     { role: 'user', content: message },
@@ -542,8 +550,9 @@ export default async function handler(req, res) {
     // Si el usuario NO usó verbos explícitos de edición ("mueve", "cambia",
     // "edita", "borra", etc), strippeamos cualquier edit_event /
     // update_event / delete_event que el modelo haya emitido — el system
-    // prompt ya tiene la regla, esto es la red.
-    const editFilter = filterCalendarEditActions(actions, message)
+    // prompt ya tiene la regla, esto es la red. El scope incluye el último
+    // turno del usuario (continuaciones post-clarificación).
+    const editFilter = filterCalendarEditActions(actions, editIntentScope)
     if (editFilter.stripped.length > 0) {
       console.warn(
         '[focus-assistant] stripped edit actions without explicit intent:',
@@ -672,7 +681,7 @@ export default async function handler(req, res) {
     // Detectamos signals de "esto va a salir mal" (ediciones strippeadas,
     // truncation, confidence baja) y escalamos a Sonnet con prompt refinado.
     const haikuActions = Array.isArray(parsed?.actions) ? parsed.actions : []
-    const preFilter = filterCalendarEditActions(haikuActions, message)
+    const preFilter = filterCalendarEditActions(haikuActions, editIntentScope)
     const haikuConfidence = typeof parsed?.confidence === 'number' ? parsed.confidence : 1.0
     const escalateNeeded =
       shouldEscalateToSonnet(d1, preFilter.stripped.length) ||
@@ -876,7 +885,9 @@ function buildTodaySummary({ todayEvents, analysis, hour }) {
   return 'Día programado. Vamos paso a paso.'
 }
 
-// Exportado solo para tests unitarios. El runtime usa la versión local
-// dentro del handler; este export no afecta el bundle de Vercel.
+// Exportado solo para tests unitarios y la batería QA (run-nova-battery.mjs
+// replica el ruteo Haiku/Sonnet de producción). El runtime usa la versión
+// local dentro del handler; estos exports no afectan el bundle de Vercel.
 export { detectComplexInput as __detectComplexInput }
+export { isClarificationReply as __isClarificationReply }
 
