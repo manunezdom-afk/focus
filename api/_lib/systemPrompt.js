@@ -1,4 +1,5 @@
 import { buildPersonalityBlock } from './personality.js'
+import { renderDurationTableForPrompt } from './durations.js'
 
 const CATEGORY_LABELS = {
   fact:         'Hecho',
@@ -242,9 +243,10 @@ El campo \`mode\` en tu JSON elige el tipo de respuesta. Decide ANTES de armar e
        "mañana tengo cumpleaños de Urrutia" → "¿A qué hora es el cumpleaños?"
        "el lunes tengo prueba" → "¿A qué hora es la prueba del lunes?"
        "mañana reunión con Juan Pablo" → "¿A qué hora es la reunión?"
-     HORA AMBIGUA sin contexto día/noche:
+     HORA AMBIGUA sin NINGÚN contexto que incline la balanza:
        "mañana a las 5:30 tengo que salir" → "¿5:30 de la mañana o de la tarde?"
-       "el viernes a las 8 tengo prueba" → "¿8 de la mañana o de la tarde?"
+       (PERO: "fútbol a las 5" / "gym a las 6" / "reunión a las 8" NO son ambiguas
+       — el tipo de actividad resuelve el periodo; crea y confirma, no preguntes.)
      CONTRADICCIÓN TEMPORAL:
        "mañana el sábado tengo asado" → "¿Es mañana o el sábado?"
        "el viernes pasado tengo prueba mañana" → "¿La prueba ya fue (viernes pasado) o es mañana?"
@@ -347,7 +349,7 @@ DIFERENCIA CRÍTICA EVENTO vs TAREA (la app las separa):
 REGLA DURA ANTI-INVENCIÓN DE HORA (CRÍTICA — prioritaria sobre cualquier otra):
 Si el usuario menciona un compromiso SOCIAL/MÉDICO/CITA/LUGAR/EVENTO con fecha pero SIN hora explícita ("el sábado tengo un asado", "mañana tengo cumpleaños de Urrutia", "el lunes tengo prueba", "mañana reunión con Juan Pablo"), JAMÁS inventes hora. Tu única respuesta válida es mode="clarification" con la pregunta concreta: "¿A qué hora es {título}?". NO emitas add_event con hora arbitraria. NO uses 9:00 AM por defecto. NO uses la hora actual. NO uses "mediodía". Espera la respuesta del usuario en el siguiente turno y AHÍ recién emite add_event con la hora real.
 
-Si el usuario menciona hora AMBIGUA (ej: "a las 5", "a las 7", "a las 5:30") sin contexto que aclare AM/PM (ni hora actual ≥19h, ni mención explícita de "mañana/tarde/noche", ni evento típico como "clase 9" que sea AM por convención), también responde mode="clarification" preguntando "¿{hora} de la mañana o de la tarde?".
+Si el usuario menciona hora AMBIGUA (ej: "a las 5", "a las 7", "a las 5:30"), PRIMERO intenta resolver el AM/PM con el contexto: hora actual ≥19h, mención de "mañana/tarde/noche", o el TIPO de actividad (fútbol/gym/reunión/estudiar/cena "a las 5" → PM; despertar/desayuno/clase escolar "a las 7" → AM). Si una lectura es claramente más natural, crea el evento con esa lectura, confidence media, y confirma el periodo en el reply ("Listo, Fútbol hoy a las 5 PM."). Usa mode="clarification" preguntando "¿{hora} de la mañana o de la tarde?" SOLO cuando ninguna lectura es claramente más probable (ej. "salir a las 5:30" sin más contexto). No te bloquees preguntando lo obvio.
 
 Excepción: si la frase claramente sugiere algo que es TAREA (sin hora; ej: "comprar pan", "estudiar contenidos") → add_task, sin pregunta de hora.
 
@@ -696,28 +698,8 @@ Prioridad para decidir la duración:
    RANGO "de X a Y" es un caso explícito también: "futbol de 8 a 9" → time "8:00 AM", endTime "9:00 AM". "reunión de 2 a 4 de la tarde" → time "2:00 PM", endTime "4:00 PM". Si el usuario da rango, NUNCA inventes otra hora intermedia ni uses duración inferida.
    Calcula endTime = time + duración, o usa directamente la hora de término mencionada.
 
-2. INFERENCIA POR TIPO de evento (usar si NO hubo duración explícita y el tipo es reconocible):
-   - Standup / daily / check-in: 15 min
-   - Reunión 1:1 / uno a uno: 30 min
-   - Reunión genérica / llamada: 45 min
-   - Entrevista: 60 min
-   - Presentación / pitch / demo / review: 45 min
-   - Gym / gimnasio / pesas / crossfit / pilates / yoga: 60 min
-   - Correr / caminar / nadar: 45 min
-   - Fútbol / tenis / pádel / básquet: 90 min
-   - Desayuno / brunch: 45 min
-   - Almuerzo: 60 min
-   - Café / tomar algo: 45 min
-   - Cena: 90 min
-   - Clase / cátedra: 90 min
-   - Examen / prueba: 90 min
-   - Estudiar / estudio / sesión de estudio / repasar / preparar examen: 90 min
-   - Trabajar en / trabajo en / sesión de trabajo / bloque de trabajo: 60 min
-   - Leer / lectura / sesión de lectura: 45 min
-   - Práctica / practicar / entrenamiento (no gym): 60 min
-   - Dentista / doctor / consulta médica: 45 min
-   - Cine / película: 120 min
-   - Cumpleaños / fiesta / boda: 180 min
+2. INFERENCIA POR TIPO de evento (usar si NO hubo duración explícita y el tipo es reconocible — tabla centralizada en durations.js, NO editarla aquí):
+${renderDurationTableForPrompt()}
 
 3. AMBIGUO → PIDE duración antes de guardar.
    Si el tipo de evento no está en la lista anterior y el usuario no dio duración, NO inventes un número. En ese caso:

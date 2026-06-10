@@ -557,6 +557,14 @@ struct NovaView: View {
                 .animation(Theme.Spring.entrance, value: store.novaMessages.count)
                 .animation(Theme.Spring.entrance, value: store.isNovaTyping)
             }
+            // FIX teclado pegado (QA-closure 2026-06-10): con mensajes en
+            // el chat, este ScrollView cubre al NovaChatBackdrop y se traga
+            // los taps — el tap-para-cerrar del backdrop solo funcionaba en
+            // el estado vacío, y el toolbar "Listo" se quitó a propósito.
+            // Sin esto NO existía gesto alguno para cerrar el teclado.
+            // `.interactively` = arrastrar el scroll hacia abajo lo cierra
+            // siguiendo el dedo (mismo gesto que iMessage).
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: store.novaMessages.count) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true)
             }

@@ -318,9 +318,16 @@ export default async function handler(req, res) {
       tz: dateContext.tz,
       todayISO: dateContext.todayISO,
       tomorrow: dateContext.tomorrow,
+      dayAfter: dateContext.dayAfter,
       currentTime24: dateContext.currentTime24,
       weekDates: dateContext.weekDates,
       memories: userMemories,
+      // Contexto de agenda (QA-closure 2026-06-10): sin esto el path
+      // OpenAI no podía responder "qué tengo hoy", evitar duplicados,
+      // anclar recordatorios al tema en discusión ni editar/borrar por id.
+      events,
+      tasks,
+      discussedEventIds,
     })
     try {
       const start = Date.now()
@@ -348,7 +355,24 @@ export default async function handler(req, res) {
         userMessage: message,
         history,
         reqId,
+        events,
       })
+      // Misma red server-side que el path Anthropic: ediciones/borrados
+      // solo con verbo explícito del usuario ("mueve", "cambia", "borra"…).
+      // El scope incluye el último turno del usuario: en continuaciones
+      // ("cambia lo de fútbol" → "¿a qué hora?" → "a las 6") el verbo de
+      // edición vive en el turno anterior, no en el mensaje actual.
+      const lastUserTurn = [...history].reverse().find(h => h.role === 'user')?.content || ''
+      const openaiEditFilter = filterCalendarEditActions(mapped.actions, `${lastUserTurn}\n${message}`)
+      if (openaiEditFilter.stripped.length > 0) {
+        console.warn(
+          `[focus-assistant][${reqId}] OpenAI stripped edit actions without explicit intent:`,
+          openaiEditFilter.stripped.map(a => a.type).join(','),
+        )
+        mapped.actions = openaiEditFilter.actions
+        const note = strippedEditMessage(openaiEditFilter.stripped)
+        mapped.reply = `${mapped.reply || ''}${mapped.reply ? '\n\n' : ''}${note}`
+      }
       // Tracking de costo — OpenAI Responses API devuelve usage en `data.usage`.
       trackAIUsageEvent({
         admin,

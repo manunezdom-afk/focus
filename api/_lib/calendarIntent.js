@@ -13,9 +13,11 @@
 // También cuentan formas conjugadas comunes ("muevelo", "cambiame", etc).
 
 const EDIT_VERB_PATTERNS = [
-  /\bmuev[a-záéíóú]*\b/i,
+  // [uú]/[aá] en la raíz: las formas imperativas con clítico llevan tilde
+  // ("muévelo", "cámbialo") y antes NO matcheaban (bug pre-QA-closure).
+  /\bmu[eé]v[a-záéíóú]*\b/i,
   /\bmov[eé]r[a-záéíóú]*\b/i,
-  /\bcambi[a-záéíóú]*\b/i,
+  /\bc[aá]mbi[a-záéíóú]*\b/i,
   /\bedit[a-záéíóú]*\b/i,
   /\bmodific[a-záéíóú]*\b/i,
   /\breagend[a-záéíóú]*\b/i,
@@ -30,6 +32,20 @@ const EDIT_VERB_PATTERNS = [
   /\breagrup[a-záéíóú]*\b/i,
   /\bdesplaz[a-záéíóú]*\b/i,
   /\bdesagend[a-záéíóú]*\b/i,
+  // Correcciones conversacionales post-creación (QA-closure 2026-06-10).
+  // El usuario corrige lo que Nova acaba de crear sin usar un verbo de
+  // edición clásico: "mejor no", "no lo pongas", "mejor mañana", "ponlo
+  // una hora antes", "déjalo para el viernes", "que sea recordatorio",
+  // "olvida lo anterior / olvida eso". Sin estos patrones, el filtro
+  // strippeaba la edición legítima y Nova respondía con la nota técnica
+  // "No moví ni edité…".
+  /\bmejor no\b/i,
+  /\bno l[oa] (pongas|agendes|crees|guardes|anotes)\b/i,
+  /\bmejor\s+(mañana|manana|hoy|m[aá]s tarde|m[aá]s temprano|otro d[ií]a|a las?\b|el\s)/i,
+  /\b(p[oó]nl[oa]|d[eé]jal[oa]|c[oó]rrel[oa])\s/i,
+  /\bque sea\s+(recordatorio|evento|tarea)\b/i,
+  /\bolvida\s+(eso|lo anterior|lo [uú]ltimo)\b/i,
+  /\buna hora (antes|despu[eé]s)\b/i,
 ];
 
 const EDIT_ACTION_TYPES = new Set(['edit_event', 'update_event', 'delete_event']);
