@@ -14,7 +14,11 @@
 // `{reply, actions:[{type:"add_event", event:{...}}]}` que recibe de
 // Anthropic. La normalización vive entera acá.
 
-import { renderDurationTableForPrompt } from './durations.js'
+import {
+  renderDurationTableForPrompt,
+  userMentionedExplicitDuration,
+  userAskedToBlockTime,
+} from './durations.js'
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
 // gpt-5-mini — reasoning + costo razonable. Override con
@@ -141,8 +145,11 @@ export function buildOpenAISystemPrompt({
   // Eventos/tareas del usuario — sin esto Nova no puede responder "qué
   // tengo hoy", evitar duplicados, ni editar/borrar por id real.
   const safeEvents = (Array.isArray(events) ? events : []).slice(0, 80)
+  // Render defensivo: un evento sin id (shape incompleto del cliente) se
+  // muestra SIN el segmento "id:" — imprimir "id:undefined" confundiría al
+  // modelo al elegir targetEventId. El evento sigue sirviendo de contexto.
   const eventsBlock = safeEvents.length > 0
-    ? safeEvents.map(e => `- id:${e.id} | ${e.title} | ${e.time || 'sin hora'} | ${e.date || 'hoy'}`).join('\n')
+    ? safeEvents.map(e => `- ${typeof e.id === 'string' && e.id ? `id:${e.id} | ` : ''}${e.title} | ${e.time || 'sin hora'} | ${e.date || 'hoy'}`).join('\n')
     : '(sin eventos)'
   const safeTasks = (Array.isArray(tasks) ? tasks : []).slice(0, 50)
   const tasksBlock = safeTasks.length > 0
@@ -637,6 +644,15 @@ export function convertOpenAIToBackendResponse({
         .join(' \n ')
     : ''
   const inputNorm = normForCompare([historyUserText, userMessage].filter(Boolean).join(' \n '))
+  // GUARD DETERMINISTA anti "todo dura 1 hora": durationMinutes del modelo
+  // solo se respeta si el usuario expresó duración explícita o pidió
+  // bloquear tiempo (en este turno o en sus turnos previos — flujos de
+  // clarificación). Si no, se fuerza 0 → endTime null. Espejo del gate
+  // `userMentionedExplicitEndTime` de iOS, aplicado server-side para que
+  // la web quede igual de protegida.
+  const durationScopeText = [historyUserText, userMessage].filter(Boolean).join(' \n ')
+  const durationAllowed = userMentionedExplicitDuration(durationScopeText)
+    || userAskedToBlockTime(durationScopeText)
   const raw = openaiPayload
   const incomingActions = Array.isArray(raw?.actions) ? raw.actions : []
   const safeActions = []
@@ -726,7 +742,7 @@ export function convertOpenAIToBackendResponse({
       if (typeof a.dateISO === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.dateISO)) {
         updates.date = a.dateISO
       }
-      const editDuration = typeof a.durationMinutes === 'number'
+      const editDuration = (typeof a.durationMinutes === 'number' && durationAllowed)
         ? Math.max(0, Math.min(1440, a.durationMinutes))
         : 0
       if (newTime12 && editDuration > 0) {
@@ -836,7 +852,10 @@ export function convertOpenAIToBackendResponse({
     // Y duración > 0; el cliente puede usarlo. Para reminders, null.
     // Clamp 0..1440 acá (el schema ya no lo restringe — OpenAI strict no
     // soporta minimum/maximum).
-    const durationMin = typeof a.durationMinutes === 'number'
+    //
+    // durationAllowed (guard determinista, calculado arriba): sin duración
+    // explícita ni pedido de bloqueo, lo que el modelo haya puesto se anula.
+    const durationMin = (typeof a.durationMinutes === 'number' && durationAllowed)
       ? Math.max(0, Math.min(1440, a.durationMinutes))
       : 0
     let endTime = null

@@ -245,6 +245,42 @@ la primera sesión en Mac — los 20 del spec:
 6. Los tests Swift existentes (`NovaActionNormalizerTests.runAll()`, ~400
    checks) siguen siendo LLDB-only; mover a un target XCTest real es deuda.
 
+## 8-bis. Última pasada — revisión de código del PR completo (2026-06-10)
+
+Se corrió una revisión de bugs en 4 ángulos (línea por línea, comportamiento
+eliminado, trazado entre archivos/contratos iOS-web, y limpieza) sobre todo el
+diff del PR. Resultado:
+
+**Fixes aplicados a partir de la revisión:**
+1. `calendarIntent.js`: "ponlo/déjalo/córrelo" al final del mensaje no
+   matcheaban (el patrón exigía espacio posterior) → `\b`.
+2. **Guard determinista anti-1h en el adapter** (el hallazgo más valioso):
+   `userMentionedExplicitDuration()` + `userAskedToBlockTime()` ahora se
+   aplican en runtime — si el usuario no dio duración ni pidió bloquear
+   tiempo, cualquier `durationMinutes > 0` que el modelo invente se anula
+   server-side (eventos Y ediciones). La regla "jamás 1h fantasma" deja de
+   depender de que el LLM obedezca el prompt; la web queda tan protegida
+   como iOS. Con tests de ambas caras (explícita se respeta / inventada se
+   anula / bloqueo permite tabla / duración dicha en turno previo sobrevive).
+3. Detector de duración explícita ampliado: "siesta de 20 minutos",
+   "hora y media", "2 horas" sueltas — en este guard un falso-negativo
+   BORRA una duración legítima, así que es generoso a propósito.
+4. Prompt: eventos sin `id` ya no se renderizan como "id:undefined".
+
+**Hallazgos verificados y descartados (con motivo):** reminders con hora NO
+rompen la agrupación web (`reminderHasParent` exige título casi idéntico +
+evento ≤60 min después, y el path Anthropic siempre emitió reminders con
+hora — el shape no es nuevo); `\s` de JS sí matchea `\n` (la concatenación
+lastUserTurn+mensaje no rompe los regex); subtitle whitespace-only nunca se
+emite; editar hora sin endTime es el contrato correcto (iOS preserva la
+duración).
+
+**Tradeoff aceptado y documentado:** la defensa de títulos genéricos ("Reunión"
+pelado) permite el título si la palabra aparece en CUALQUIER turno previo del
+usuario — necesario para continuaciones ("reunión mañana" → "¿hora?" → "a las
+8"), con el costo teórico de que una alucinación genérica pase si la palabra
+estaba en el historial. El anti-duplicados de iOS es la segunda red.
+
 ## 9. ¿Listo para TestFlight?
 
 **Todavía no — faltan 3 verificaciones, todas mecánicas:**

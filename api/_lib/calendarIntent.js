@@ -42,7 +42,7 @@ const EDIT_VERB_PATTERNS = [
   /\bmejor no\b/i,
   /\bno l[oa] (pongas|agendes|crees|guardes|anotes)\b/i,
   /\bmejor\s+(mañana|manana|hoy|m[aá]s tarde|m[aá]s temprano|otro d[ií]a|a las?\b|el\s)/i,
-  /\b(p[oó]nl[oa]|d[eé]jal[oa]|c[oó]rrel[oa])\s/i,
+  /\b(p[oó]nl[oa]|d[eé]jal[oa]|c[oó]rrel[oa])\b/i,
   /\bque sea\s+(recordatorio|evento|tarea)\b/i,
   /\bolvida\s+(eso|lo anterior|lo [uú]ltimo)\b/i,
   /\buna hora (antes|despu[eé]s)\b/i,

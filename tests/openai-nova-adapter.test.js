@@ -403,16 +403,31 @@ test('endpoint shape: respuesta mapeada tiene los campos que NovaService decodif
 
 // ─── Defensa duration → endTime ────────────────────────────────────────────
 
-test('duration: con time + durationMinutes calcula endTime correcto (5:00 PM + 60 → 6:00 PM)', () => {
+test('duration: con duración EXPLÍCITA del usuario calcula endTime (5:00 PM + 60 → 6:00 PM)', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({ title: 'Gimnasio', time: '17:00', durationMinutes: 60, sourceText: 'gimnasio' })],
+    }),
+    userMessage: 'gimnasio a las 5 por 1 hora',
+    reqId: 'rdur',
+  })
+  assert.equal(out.actions[0].event.time, '5:00 PM')
+  assert.equal(out.actions[0].event.endTime, '6:00 PM')
+})
+
+test('duration: SIN duración explícita el guard anula durationMinutes del modelo (anti 1h fantasma)', () => {
+  // QA-closure 2026-06-10: aunque el modelo mande durationMinutes=60, si el
+  // usuario no dijo duración ("gimnasio a las 5") ni pidió bloquear tiempo,
+  // el adapter fuerza endTime null. Espejo server-side del gate iOS.
   const out = convertOpenAIToBackendResponse({
     openaiPayload: fakeOpenAIPayload({
       actions: [event({ title: 'Gimnasio', time: '17:00', durationMinutes: 60, sourceText: 'gimnasio' })],
     }),
     userMessage: 'gimnasio a las 5',
-    reqId: 'rdur',
+    reqId: 'rdur-guard',
   })
   assert.equal(out.actions[0].event.time, '5:00 PM')
-  assert.equal(out.actions[0].event.endTime, '6:00 PM')
+  assert.equal(out.actions[0].event.endTime, null)
 })
 
 test('duration: reminder no calcula endTime (siempre null)', () => {

@@ -84,8 +84,37 @@ export function userMentionedExplicitDuration(text) {
     /\b(?:por|durante)\s+(?:un|una|dos|tres|cuatro|cinco|seis|media|medio)\s+(?:hora|horas|min|minutos?)\b/,
     // "media hora" suelto como complemento de evento ("almuerzo media hora")
     /\bmedia\s+hora\b/,
-    // "1h" / "2 hrs" / "90 min" como sufijo
+    // "hora y media" / "una hora y media" ("gimnasio hora y media")
+    /\b(?:una\s+)?hora\s+y\s+media\b/,
+    // "siesta de 20 minutos" / "clase de 2 horas" — duración con "de"
+    /\bde\s+\d{1,3}\s*(?:min|minutos?|h|hs|hrs?|horas?)\b/,
+    // "1h" / "2 hrs" / "90 min" / "2 horas" como sufijo suelto.
+    // Generoso a propósito: este detector se usa como GUARD que borra
+    // duraciones no explícitas — un falso-allow es inocuo (el modelo ya
+    // está instruido a mandar 0), un falso-deny destruye una duración
+    // legítima del usuario.
     /\b\d{1,3}\s*(?:h|hs|hrs)\b/,
+    /\b\d{1,3}\s+(?:min|minutos?|horas?)\b/,
+    /\b(?:un|una|dos|tres|cuatro|cinco|seis|media)\s+(?:hora|horas|min|minutos?)\b/,
+  ]
+  return patterns.some(re => re.test(lower))
+}
+
+/**
+ * True si el usuario pidió explícitamente RESERVAR/BLOQUEAR tiempo sin
+ * precisar cuánto ("bloquéame la tarde para estudiar", "resérvame un
+ * bloque para leer", "deja un bloque de gym"). Es la única situación en
+ * que se permite aplicar la tabla de referencia como duración real.
+ */
+export function userAskedToBlockTime(text) {
+  if (typeof text !== 'string' || !text.trim()) return false
+  const lower = text.toLowerCase()
+  const patterns = [
+    /\bbloqu[eé][a-z]*\b/,            // bloquea, bloquéame, bloquear
+    /\breserv[a-z]*\b/,               // reserva, resérvame, reservar
+    /\b(un|el)\s+bloque\b/,           // "deja un bloque", "agenda el bloque"
+    /\bagenda(me)?\s+\d{1,3}\s*(min|minutos?|h|horas?)\b/, // "agenda 30 min para X"
+    /\bd[eé]ja(me)?\s+(la\s+)?(mañana|manana|tarde|noche)\s+para\b/, // "deja la tarde para X"
   ]
   return patterns.some(re => re.test(lower))
 }

@@ -116,6 +116,12 @@ test('duración explícita: "por 30 minutos", "media hora", "de 5 a 7", "hasta l
   assert.equal(userMentionedExplicitDuration('trabajar hasta las 9'), true)
   assert.equal(userMentionedExplicitDuration('leer por 45 minutos a las 8'), true)
   assert.equal(userMentionedExplicitDuration('gym mañana a las 6 por 1 hora'), true)
+  // Formas sin "por/durante" — también son explícitas y el guard NO debe
+  // borrarlas: "de N minutos", "hora y media", "N horas" sueltas.
+  assert.equal(userMentionedExplicitDuration('siesta de 20 minutos a las 3'), true)
+  assert.equal(userMentionedExplicitDuration('gimnasio hora y media mañana a las 7'), true)
+  assert.equal(userMentionedExplicitDuration('estudiar Focus 2 horas'), true)
+  assert.equal(userMentionedExplicitDuration('una hora de lectura a las 8'), true)
 })
 
 test('duración explícita: frases SIN duración → false', () => {
@@ -238,12 +244,43 @@ test('adapter: durationMinutes 0 → endTime null (evento punto, sin 1h fantasma
   assert.equal(out.actions[0].event.endTime, null)
 })
 
-test('adapter: durationMinutes 90 + 5 PM → endTime 6:30 PM', () => {
+test('adapter: durationMinutes 90 + 5 PM → endTime 6:30 PM (duración explícita)', () => {
+  const out = convert(
+    [action({ title: 'Fútbol con amigos', time: '17:00', durationMinutes: 90, sourceText: 'fútbol' })],
+    { userMessage: 'fútbol a las 5 por una hora y media... de 5 a 6:30', events: [] },
+  )
+  assert.equal(out.actions[0].event.endTime, '6:30 PM')
+})
+
+test('adapter: guard anti-1h — sin duración explícita, durationMinutes del modelo se anula', () => {
   const out = convert(
     [action({ title: 'Fútbol con amigos', time: '17:00', durationMinutes: 90, sourceText: 'fútbol' })],
     { userMessage: 'fútbol a las 5', events: [] },
   )
-  assert.equal(out.actions[0].event.endTime, '6:30 PM')
+  assert.equal(out.actions[0].event.endTime, null)
+})
+
+test('adapter: pedido de BLOQUEAR tiempo permite duración de la tabla', () => {
+  const out = convert(
+    [action({ title: 'Estudiar', time: '16:00', durationMinutes: 60, sourceText: 'bloquéame la tarde para estudiar' })],
+    { userMessage: 'bloquéame la tarde para estudiar a las 4', events: [] },
+  )
+  assert.equal(out.actions[0].event.endTime, '5:00 PM')
+})
+
+test('adapter: duración explícita en turno PREVIO sobrevive en continuación', () => {
+  const out = convert(
+    [action({ title: 'Estudiar', time: '09:00', durationMinutes: 120, sourceText: 'estudiar de 9 a 11' })],
+    {
+      userMessage: 'sí, mañana',
+      history: [
+        { role: 'user', content: 'quiero estudiar de 9 a 11' },
+        { role: 'assistant', content: '¿Lo agendo para mañana?' },
+      ],
+      events: [],
+    },
+  )
+  assert.equal(out.actions[0].event.endTime, '11:00 AM')
 })
 
 test('adapter: reminder con hora CONSERVA time y endTime null', () => {
