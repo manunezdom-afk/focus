@@ -295,3 +295,66 @@ estaba en el historial. El anti-duplicados de iOS es la segunda red.
 El backend puede deployarse antes que el build iOS: los cambios son
 retrocompatibles (el cliente actual ya decodifica todos los action types y el
 campo `subtitle`; los campos nuevos del schema son aditivos).
+
+## 10. Pasada Anthropic — QA real en simulador (2026-06-10, tarde)
+
+**Cambio de contexto clave: Nova corre ahora con Anthropic (Haiku 4.5 +
+Sonnet 4.6), no OpenAI.** Esta pasada re-alineó el QA a ese pipeline y probó
+la app DE VERDAD en el simulador (iPhone 17 Pro, iOS 26.4, teclado de
+software nativo, clicks reales vía CGEvent).
+
+### Tests ejecutados
+
+| Suite | Resultado |
+|---|---|
+| Unit backend (`npm run test:unit`) | 183/183 PASS |
+| In-app legacy (`--run-nova-tests`) | ALL PASS (antes 8 fails) |
+| In-app 50 / subtitle50 / final50 / memory | 59/59 · 53/53 · 50/50 · 18/18 |
+| Batería en vivo Anthropic (ruteo de producción) | **53/58 PASS (91.4%) en lo ejecutado** — 153 casos bloqueados por créditos Anthropic agotados; los 5 fails reales (A6, C25, C26, C29, D38) corregidos en `cd1e5ba` |
+
+### Bugs reproducidos visualmente y corregidos (`0a254a7`)
+
+1. **Composer atrapado detrás del teclado** en el flujo natural. El
+   workaround anterior no funcionaba: las notificaciones de teclado no
+   llegaban a los `onReceive` montados dentro del pager horizontal, y el
+   pager AGRANDA la página con el content-inset del teclado (el borde del
+   VStack queda ~350 pt bajo la pantalla), de modo que ni el avoidance
+   nativo, ni `safeAreaInset`, ni un offset fijo funcionan. Fix:
+   `KeyboardObserver` (objeto Combine) + anchor invisible que mide la Y
+   real del borde + composer como overlay con lift auto-corregible.
+2. **Alert de dictado inmortal**: `isPresented: .constant(...)` en
+   NovaView y MiDiaView — Cerrar no hacía nada, app bloqueada hasta
+   matarla. Fix: Binding derivado real.
+3. **Memoria conversacional**: el chat de Nova nunca enviaba
+   `discussedEventIds` (Mi Día inline sí lo hacía). Fix en
+   `sendNovaMessage` + `detectAndPromoteMentions`.
+4. **Path Anthropic strippeaba ediciones legítimas en continuaciones**
+   (el verbo vivía en el turno anterior). Scope ampliado como en OpenAI.
+5. **Prompt Anthropic**: título/subtítulo canónico, recordatorios siempre
+   `icon: alarm` conservando hora, "no se me puede olvidar" como trigger,
+   anti-sobre-clarificación con hora dada.
+
+### Ritual de teclado (checklist §7 — ejecutado)
+
+- Abrir teclado: PASS (composer pegado al borde superior del teclado)
+- Escribir + enviar: PASS (fallback local respondió "Listo. Te dejé
+  «Fútbol» hoy a las 17:00"; evento visible en Mi Día SIN término)
+- Cerrar con drag (`.immediately`): PASS, sin padding fantasma
+- Cambiar de tab y volver: PASS (estado del chat intacto)
+- Scroll al último mensaje: PASS
+- Tocar fuera para cerrar: FAIL conocido (el ScrollView se traga el tap
+  cuando hay mensajes) — mitigado por drag-dismiss; riesgo bajo
+- Micrófono: botón + permisos (copy correcta) + manejo de error OK;
+  dictado E2E pendiente en device real (el sim no entrega audio)
+
+### Arranque
+
+Cold launch frame a frame: LaunchScreen cobalto → BootView radial con
+wordmark → fade a Mi Día. Sin flash blanco, sin salto de color. PASS.
+
+### Bloqueado (no por código)
+
+- **Créditos de la cuenta Anthropic agotados**: re-correr la batería
+  (`ANTHROPIC_API_KEY=… node scripts/run-nova-battery.mjs`) para los ~153
+  casos restantes, y la batería manual de 40 casos con IA real en el
+  simulador (infra lista: `scripts/qa-local-server.mjs` + sesión activa).
