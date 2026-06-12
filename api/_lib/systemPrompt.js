@@ -120,6 +120,7 @@ week_dates: ${JSON.stringify(weekDates)}
     ? JSON.stringify(events.map(e => ({
         id: e.id,
         title: e.title,
+        subtitle: e.subtitle || null,
         time: e.time || '',
         date: e.date || null,
         section: e.section,
@@ -309,6 +310,7 @@ REGLAS DE ESTILO (LEER PRIMERO, SON CRÍTICAS):
    - "reunión con Cristina a las 4 revisar el portafolio" → title:"Reunión con Cristina", subtitle:"Revisar portafolio".
    - "clase de redacción a las 10 llevar computador" → title:"Clase de redacción", subtitle:"Llevar computador" (si hay PREPARATIVO, el preparativo gana el subtitle y el tema con "de" natural puede quedarse en el título).
    Si hay dos eventos del mismo tipo (dos clases, dos reuniones), el subtitle es lo que los distingue — JAMÁS omitas el tema cuando el usuario lo dio: o va en subtitle (default) o en el título con "de" natural, nunca desaparece.
+   SUBTITLE = DE UN SOLO EVENTO (REGLA DURA): cada subtitle pertenece a UN único evento. Si el mensaje crea VARIOS eventos y el detalle/preparativo es de UNO solo ("gym a las 7 y clase a las 10, al gym ponle pierna"), el subtitle va SOLO en el add_event de ESE evento — los demás llevan subtitle null u omitido. JAMÁS repitas el mismo subtitle en dos acciones del mismo turno. Si el usuario pide ponerle subtítulo/detalle a UN evento EXISTENTE ("ponle pierna al gym"), emite UN solo edit_event con el id de ESE evento y updates.subtitle — NUNCA toques los demás eventos ni crees eventos nuevos.
    EXTRACCIÓN LIMPIA — REGLA CRÍTICA: el título es UNA acción o sustantivo concreto, NO la frase completa del usuario. Strippea SIEMPRE estos prefijos coloquiales del título:
    - "Tengo (una|un|el|la)? X" → solo X. Ej: "Tengo una comida a las 3:30" → title:"Comer" o "Comida" (NO "Tengo una comida"); "Tengo reunión con Juan" → "Reunión con Juan" (NO "Tengo reunión con Juan").
    - "Tengo que X" → solo X. Ej: "Tengo que estudiar cálculo" → "Estudiar cálculo".
@@ -322,7 +324,7 @@ REGLAS DE ESTILO (LEER PRIMERO, SON CRÍTICAS):
    - Si el título existente del DÍA RELEVANTE es malo (sin verbo de acción), usa edit_event con el id real para mejorar el título — solo si es claramente la misma instancia de hoy.
    - JAMÁS emitas add_event si el match es evidente por hora + tema EN EL MISMO DÍA.
 10. EDICIÓN SOLO CON INTENCIÓN EXPLÍCITA (REGLA DURA): NO uses edit_event/update_event ni delete_event a menos que el usuario use uno de estos verbos explícitos:
-    mueve, cambia, edita, modifica, reagenda, pásalo, corre (de tiempo), adelanta, atrasa, borra, elimina, cancela, quita.
+    mueve, cambia, edita, modifica, reagenda, pásalo, corre (de tiempo), adelanta, atrasa, borra, elimina, cancela, quita, ponle, agrégale, añádele ("ponle subtítulo X", "agrégale pierna al gym", "añádele llevar la pelota").
     - "a las 3 ir a buscar a mi hermano" SIN ninguno de esos verbos → SIEMPRE add_event nuevo (hoy a las 3:00 PM, NO mover otro evento).
     - "mueve lo de mi hermano a las 3" → edit_event con id real (sí hay verbo "mueve").
     - "cambia la reunión a las 5" → edit_event con id real (sí hay verbo "cambia").
@@ -637,6 +639,7 @@ Agregar evento recurrente (repetido varios días — ver sección "EVENTOS RECUR
 Editar/mover evento:
 { "type": "edit_event", "id": "id-del-evento", "updates": { campos } }
 - Para cambiar recordatorios, usa updates.reminderOffsets. Ej: { "reminderOffsets": [5] }.
+- Para poner/cambiar el subtítulo de un evento existente, usa updates.subtitle. Ej: "ponle pierna al gym" → { "type": "edit_event", "id": "<id del Gym>", "updates": { "subtitle": "Pierna" } }. Para QUITAR un subtítulo, manda updates.subtitle = "" (string vacío). El subtitle de un edit_event va a UN solo evento — el que el usuario nombró — JAMÁS emitas el mismo subtitle en más de una acción del turno.
 
 REGLA CRÍTICA — INCLUIR SOLO LOS CAMPOS QUE SE PIDIERON CAMBIAR:
 Cuando el usuario pide AGREGAR/CAMBIAR SOLO un recordatorio a un evento

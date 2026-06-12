@@ -296,7 +296,8 @@ enum NovaActionValidator {
             reminderOffsets: evt.reminderOffsets,
             reminderNotes: evt.reminderNotes,
             location: evt.location,
-            notes: evt.notes
+            notes: evt.notes,
+            subtitle: evt.subtitle
         )
     }
 
@@ -479,6 +480,24 @@ enum NovaActionValidatorTests {
                   actual: evt.icon, expected: "groups" as String?, failures: &failures)
         }
 
+        // 5b. sanitized() PRESERVA el subtitle del backend (bug 2026-06-11:
+        // el init reconstruido lo omitía y todo add_event perdía su
+        // subtitle por-evento — el cliente luego untaba el detalle global
+        // del userText en TODOS los eventos del batch).
+        let subtitled = mockEvent(
+            title: "Comer con papá", icon: "groups", subtitle: "Pierna"
+        )
+        let r5b = NovaActionValidator.validate(
+            actions: [.addEvent(subtitled)],
+            userText: "comer con papá a las 7"
+        )
+        if case .addEvent(let evt) = r5b.safeActions.first {
+            check(label: "validator: subtitle sobrevive a sanitized()",
+                  actual: evt.subtitle, expected: "Pierna" as String?, failures: &failures)
+        } else {
+            failures.append("validator: evento con subtitle no pasó validación")
+        }
+
         // 6. Título demasiado largo se rechaza.
         let longTitle = String(repeating: "x", count: 65)
         let huge = mockEvent(title: longTitle, icon: "event")
@@ -574,7 +593,8 @@ enum NovaActionValidatorTests {
     // MARK: - Helpers locales del test
 
     private static func mockEvent(
-        title: String, icon: String?, time: String? = "3:00 PM"
+        title: String, icon: String?, time: String? = "3:00 PM",
+        subtitle: String? = nil
     ) -> BackendEventCreate {
         BackendEventCreate(
             title: title,
@@ -586,7 +606,8 @@ enum NovaActionValidatorTests {
             reminderOffsets: nil,
             reminderNotes: nil,
             location: nil,
-            notes: nil
+            notes: nil,
+            subtitle: subtitle
         )
     }
 

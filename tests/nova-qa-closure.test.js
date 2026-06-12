@@ -30,7 +30,7 @@ import {
   NOVA_OPENAI_SCHEMA,
 } from '../api/_lib/openaiNova.js'
 import { buildSystemPrompt } from '../api/_lib/systemPrompt.js'
-import { hasExplicitEditIntent, filterCalendarEditActions } from '../api/_lib/calendarIntent.js'
+import { hasExplicitEditIntent, hasExplicitDeleteIntent, filterCalendarEditActions } from '../api/_lib/calendarIntent.js'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -479,4 +479,127 @@ test('filterCalendarEditActions: strippea edit sin ninguna intención', () => {
   const { actions: kept, stripped } = filterCalendarEditActions(actions, 'gym mañana a las 6')
   assert.equal(kept.length, 0)
   assert.equal(stripped.length, 1)
+})
+
+// ─── 8. Subtitle con targeting por evento (fix 2026-06-11) ──────────────────
+// Bug del usuario: "si pongo dos eventos y solo a 1 le quiero poner subtítulo
+// le pone a los dos". Capas corregidas: cliente iOS (validator/makeEvent),
+// prompt (regla de subtitle por-evento + updates.subtitle), calendarIntent
+// (verbos "ponle/agrégale/añádele"), adapter OpenAI (updates.subtitle).
+
+test('hasExplicitEditIntent: "ponle/agrégale/añádele/quítale subtítulo" cuentan como edición', () => {
+  for (const phrase of [
+    'ponle pierna al gym',
+    'ponle subtítulo pierna al gym',
+    'agrégale llevar la pelota al fútbol',
+    'agregale llevar la pelota al fútbol',
+    'añádele álgebra a la clase de las 9',
+    'añadele álgebra a la clase de las 9',
+    'quítale el subtítulo al gym',
+    'el subtítulo va en el otro evento',
+  ]) {
+    assert.equal(hasExplicitEditIntent(phrase), true, `falló: "${phrase}"`)
+  }
+})
+
+test('hasExplicitEditIntent: "agrega/añade/agéndame" (crear) siguen SIN ser edición', () => {
+  for (const phrase of [
+    'agrega gym a las 5',
+    'añade reunión mañana a las 10',
+    'agéndame dentista a las 11',
+  ]) {
+    assert.equal(hasExplicitEditIntent(phrase), false, `falló: "${phrase}"`)
+  }
+})
+
+test('adapter: edit_event SOLO con subtitle ya no se descarta → updates.subtitle', () => {
+  const out = convert(
+    [action({ type: 'edit_event', title: 'Gym', targetEventId: 'ev-futbol', time: null, dateISO: null, subtitle: 'Pierna', sourceText: 'ponle pierna al gym' })],
+    { userMessage: 'ponle pierna al gym' },
+  )
+  assert.equal(out.actions.length, 1)
+  assert.equal(out.actions[0].type, 'edit_event')
+  assert.equal(out.actions[0].updates.subtitle, 'Pierna')
+  assert.equal(out.actions[0].updates.time, undefined, 'no debe inventar time')
+})
+
+test('prompt Anthropic: agenda incluye subtitle + updates.subtitle documentado + regla de un solo evento', () => {
+  const p = buildSystemPrompt({
+    dateContext: {
+      tz: 'America/Santiago', todayISO: '2026-06-10', tomorrow: '2026-06-11',
+      dayAfter: '2026-06-12', currentTime24: '15:30', currentTime12: '3:30 PM',
+      todayStr: 'miércoles, 10 de junio de 2026', weekDates: {},
+    },
+    weatherContext: '', contacts: [], profile: null, behavior: null,
+    memories: [],
+    events: [{ id: 'ev-gym', title: 'Gym', subtitle: 'Pierna', time: '7:00 AM', date: '2026-06-10', section: 'focus' }],
+    tasks: [],
+  })
+  assert.ok(p.includes('"subtitle": "Pierna"'), 'el modelo debe VER los subtítulos existentes')
+  assert.ok(p.includes('updates.subtitle'), 'edit_event debe documentar updates.subtitle')
+  assert.ok(p.includes('SUBTITLE = DE UN SOLO EVENTO'), 'falta la regla dura de targeting')
+  assert.ok(p.includes('ponle, agrégale, añádele'), 'faltan los verbos de edición nuevos en la regla 10')
+})
+
+test('prompt OpenAI: agenda muestra subtitle + regla de un solo evento', () => {
+  const p = buildOpenAISystemPrompt({
+    tz: 'America/Santiago', todayISO: '2026-06-10', tomorrow: '2026-06-11',
+    currentTime24: '09:00', weekDates: {},
+    events: [{ id: 'ev-gym', title: 'Gym', subtitle: 'Pierna', time: '7:00 AM', date: '2026-06-10' }],
+  })
+  assert.ok(p.includes('sub:"Pierna"'), 'la agenda OpenAI debe mostrar subtítulos existentes')
+  assert.ok(p.includes('subtitle DE UN SOLO EVENTO'), 'falta la regla de targeting en el prompt OpenAI')
+})
+
+// ─── 9. Endurecimiento del gate tras la revisión adversarial (2026-06-11) ───
+
+test('gate: "subtítulo" en frase de CREACIÓN no abre el gate de edición', () => {
+  // "crea gym con subtítulo pierna" emite add_event, NO un edit; abrir el
+  // gate ahí dejaba pasar deletes/edits alucinados.
+  for (const phrase of [
+    'crea gym mañana con subtítulo pierna',
+    'agéndame una reunión con subtítulo importante',
+  ]) {
+    assert.equal(hasExplicitEditIntent(phrase), false, `falló: "${phrase}"`)
+  }
+})
+
+test('gate: delete_event exige intención de BORRAR explícita, no solo edición', () => {
+  // hasExplicitDeleteIntent: positivos.
+  for (const phrase of ['borra el gym', 'elimina la reunión', 'cancela eso', 'quítalo', 'quita el evento de las 3', 'mejor no lo pongas']) {
+    assert.equal(hasExplicitDeleteIntent(phrase), true, `delete debió ser true: "${phrase}"`)
+  }
+  // "quítale el subtítulo" es edición de un campo, NO borrado del evento.
+  assert.equal(hasExplicitDeleteIntent('quítale el subtítulo al gym'), false)
+  assert.equal(hasExplicitDeleteIntent('ponle pierna al gym'), false)
+})
+
+test('filtro: un delete alucinado NO pasa por la puerta que abrió una edición de subtítulo', () => {
+  // "ponle pierna al gym" habilita edits pero el modelo alucina un delete.
+  const actions = [
+    { type: 'edit_event', id: 'ev-gym', updates: { subtitle: 'Pierna' } },
+    { type: 'delete_event', id: 'ev-futbol' },
+  ]
+  const { actions: kept, stripped } = filterCalendarEditActions(actions, 'ponle pierna al gym')
+  assert.equal(kept.length, 1)
+  assert.equal(kept[0].type, 'edit_event')
+  assert.equal(stripped.length, 1)
+  assert.equal(stripped[0].type, 'delete_event')
+})
+
+test('filtro: con intención de borrar explícita, el delete sí pasa', () => {
+  const actions = [{ type: 'delete_event', id: 'ev-gym' }]
+  const { actions: kept, stripped } = filterCalendarEditActions(actions, 'borra el gym')
+  assert.equal(kept.length, 1)
+  assert.equal(stripped.length, 0)
+})
+
+test('adapter: edit_event con subtitle "" → updates.subtitle vacío (quitar subtítulo)', () => {
+  const out = convert(
+    [action({ type: 'edit_event', title: 'Gym', targetEventId: 'ev-futbol', time: null, dateISO: null, subtitle: '', sourceText: 'quítale el subtítulo al gym' })],
+    { userMessage: 'quítale el subtítulo al gym' },
+  )
+  assert.equal(out.actions.length, 1, 'el edit de quitar subtítulo NO debe descartarse')
+  assert.equal(out.actions[0].type, 'edit_event')
+  assert.equal(out.actions[0].updates.subtitle, '')
 })

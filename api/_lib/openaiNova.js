@@ -149,7 +149,7 @@ export function buildOpenAISystemPrompt({
   // muestra SIN el segmento "id:" — imprimir "id:undefined" confundiría al
   // modelo al elegir targetEventId. El evento sigue sirviendo de contexto.
   const eventsBlock = safeEvents.length > 0
-    ? safeEvents.map(e => `- ${typeof e.id === 'string' && e.id ? `id:${e.id} | ` : ''}${e.title} | ${e.time || 'sin hora'} | ${e.date || 'hoy'}`).join('\n')
+    ? safeEvents.map(e => `- ${typeof e.id === 'string' && e.id ? `id:${e.id} | ` : ''}${e.title}${typeof e.subtitle === 'string' && e.subtitle ? ` | sub:"${e.subtitle}"` : ''} | ${e.time || 'sin hora'} | ${e.date || 'hoy'}`).join('\n')
     : '(sin eventos)'
   const safeTasks = (Array.isArray(tasks) ? tasks : []).slice(0, 50)
   const tasksBlock = safeTasks.length > 0
@@ -224,11 +224,14 @@ REGLA 0 — TIPOS DE ACCIÓN (escogerlos bien es lo más importante)
 
 **edit_event** — SOLO si el usuario usa un verbo explícito de edición
 (mueve, cambia, cámbialo, edita, modifica, reagenda, pásalo, adelanta,
-atrasa, "ponlo una hora antes", "mejor mañana" refiriéndose a algo recién
-creado) Y el evento existe en EVENTOS ACTUALES o EN DISCUSIÓN:
+atrasa, ponle, agrégale, añádele, "ponlo una hora antes", "mejor mañana"
+refiriéndose a algo recién creado) Y el evento existe en EVENTOS ACTUALES
+o EN DISCUSIÓN:
 - targetEventId = id EXACTO de la lista. JAMÁS inventes un id.
 - Pon en time/dateISO/durationMinutes SOLO lo que pidió cambiar; el resto null/0.
 - "cámbialo a las 6" tras crear algo → edit_event del evento en discusión, time:"18:00".
+- "ponle pierna al gym" / "agrégale subtítulo X" → edit_event de ESE evento con subtitle:"Pierna" (los demás campos null/0). El subtitle de una edición va a UN solo evento — JAMÁS emitas el mismo subtitle en más de una acción del mismo turno.
+- subtitle en edit_event: null = no tocar; "X" = fijar; "" (string vacío) = QUITAR ("quítale el subtítulo al gym" → subtitle:""). NUNCA mandes "" en una edición de hora/fecha: borraría el subtítulo sin que lo pidan.
 
 **delete_event** — SOLO con verbo explícito (borra, elimina, cancela, quita,
 "mejor no", "no lo pongas" referido a lo recién creado) + targetEventId real.
@@ -328,6 +331,10 @@ TÍTULO + SUBTÍTULO (REGLA CRÍTICA — el título NUNCA es la frase entera)
   las ocho 30 del Master" → "Entregar trabajo del Master" (el 30 son minutos,
   jamás parte del título).
 - subtitle: corto (≤6 palabras), reformulado, UNA línea. null si no hay detalle.
+- subtitle DE UN SOLO EVENTO: si el mensaje crea VARIOS eventos y el detalle es
+  de UNO ("gym a las 7 y clase a las 10, al gym ponle pierna"), el subtitle va
+  SOLO en la acción de ESE evento; las demás llevan subtitle null. JAMÁS
+  repitas el mismo subtitle en dos acciones del mismo turno.
 - Si la MEMORIA dice "Cata = mi polola" y dice "café con la Cata" → "Café con Cata".
 - PROHIBIDO: títulos genéricos ("Horas", "Evento", "Reunión" pelado), títulos con
   hora/fecha adentro, copiar la frase cruda.
@@ -750,6 +757,13 @@ export function convertOpenAIToBackendResponse({
       }
       if (typeof a.reminderOffsetMinutes === 'number' && a.reminderOffsetMinutes >= 0) {
         updates.reminderOffsets = [a.reminderOffsetMinutes]
+      }
+      // Subtítulo editable ("ponle pierna al gym"). Convención: null = no
+      // tocar; string (incluido "") = fijar. "" explícito quita el subtítulo
+      // ("quítale el subtítulo"), por eso aceptamos length 0 y NO lo
+      // confundimos con "sin updates concretos" (review 2026-06-11).
+      if (typeof a.subtitle === 'string') {
+        updates.subtitle = a.subtitle.trim()
       }
       if (Object.keys(updates).length === 0) {
         droppedReasons.push('edit_event sin updates concretos')

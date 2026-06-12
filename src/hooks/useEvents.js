@@ -224,10 +224,18 @@ export function useEvents() {
     dataService.setCachedEvents(events, user.id)
   }, [events, user?.id])
 
-  function addEvent({ title, time, endTime = null, description = '', section = 'focus', icon = 'event', dotColor = 'bg-secondary-container', date = null, reminderOffsets = null, timezone = null }) {
+  function addEvent({ title, time, endTime = null, description = '', subtitle = null, section = 'focus', icon = 'event', dotColor = 'bg-secondary-container', date = null, reminderOffsets = null, timezone = null }) {
     let tz = timezone
     if (!tz) {
       try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null } catch { tz = null }
+    }
+
+    // Nova (backend compartido con iOS) emite el detalle del evento en el
+    // campo `subtitle`; en web ese campo se renderiza y persiste como
+    // `description`. Sin este mapeo, el subtítulo de Nova se perdía en silencio
+    // (la tabla `events` no tiene columna subtitle) — review 2026-06-11.
+    if ((!description || !description.trim()) && typeof subtitle === 'string' && subtitle.trim()) {
+      description = subtitle.trim()
     }
 
     // Normalización del campo time:
@@ -341,6 +349,14 @@ export function useEvents() {
       const next = prev.map(e => {
         if (e.id !== id) return e
         const merged = { ...e, ...updates }
+        // Nova edita el detalle del evento vía `updates.subtitle`; en web eso
+        // es la `description`. Convención compartida con iOS: ""  = quitar,
+        // "X" = fijar (review 2026-06-11). Sin esto, "ponle pierna al gym"
+        // confirmaba en el chat pero no cambiaba nada visible en web.
+        if (typeof updates.subtitle === 'string') {
+          merged.description = updates.subtitle.trim()
+          delete merged.subtitle
+        }
         // Si el update trae endTime separado o cambia el time, renormalizamos
         // a la forma canónica del string (rango o solo inicio). Así evitamos
         // guardar un endTime suelto en el campo del evento — el resto de la

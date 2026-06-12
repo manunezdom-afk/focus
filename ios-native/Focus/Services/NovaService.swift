@@ -335,6 +335,7 @@ private struct BackendHistoryEntry: Encodable {
 private struct BackendEventDTO: Encodable {
     let id: String
     let title: String
+    let subtitle: String?
     let time: String
     let date: String?
     let section: String
@@ -342,6 +343,7 @@ private struct BackendEventDTO: Encodable {
     init(local event: FocusEvent) {
         self.id = event.id.uuidString
         self.title = event.title
+        self.subtitle = event.subtitle
         self.time = NovaTimeFormatter.formatHourMinute(from: event.startTime)
         self.date = NovaTimeFormatter.formatISODate(from: event.startTime)
         let hour = Calendar.current.component(.hour, from: event.startTime)
@@ -465,8 +467,11 @@ struct BackendEventCreate {
     let location: String?
     let notes: String?
     /// Subtítulo/contexto que el backend (Claude) manda para mostrar debajo
-    /// del título en la tarjeta. Default nil para no romper otros constructores.
-    var subtitle: String? = nil
+    /// del título en la tarjeta. SIN default a propósito: dos constructores
+    /// lo omitían en silencio (validator.sanitized y expandRecurringEvent) y
+    /// el subtitle por-evento del backend se perdía — el compilador ahora
+    /// obliga a propagarlo en toda copia del payload.
+    let subtitle: String?
 }
 
 /// Recurrencia (matchea shape backend).
@@ -486,6 +491,8 @@ struct BackendEventUpdates {
     let location: String?
     let reminderOffsets: [Int]?
     let reminderNotes: [String]?
+    /// Subtítulo nuevo. nil = no tocar; string vacío "" = quitar el actual.
+    var subtitle: String? = nil
 }
 
 /// Datos para crear una tarea.
@@ -646,10 +653,12 @@ private struct RawAction: Decodable {
         let location: String?
         let reminderOffsets: [Int]?
         let reminderNotes: [String]?
+        let subtitle: String?
 
         init() {
             title = nil; time = nil; endTime = nil; date = nil
             location = nil; reminderOffsets = nil; reminderNotes = nil
+            subtitle = nil
         }
 
         init(from decoder: Decoder) throws {
@@ -661,10 +670,11 @@ private struct RawAction: Decodable {
             self.location = try c.decodeIfPresent(String.self, forKey: .location)
             self.reminderOffsets = try c.decodeIfPresent([Int].self, forKey: .reminderOffsets)
             self.reminderNotes = try c.decodeIfPresent([String].self, forKey: .reminderNotes)
+            self.subtitle = try c.decodeIfPresent(String.self, forKey: .subtitle)
         }
 
         enum CodingKeys: String, CodingKey {
-            case title, time, endTime, date, location, reminderOffsets, reminderNotes
+            case title, time, endTime, date, location, reminderOffsets, reminderNotes, subtitle
         }
 
         func toModel() -> BackendEventUpdates {
@@ -675,7 +685,8 @@ private struct RawAction: Decodable {
                 dateString: date,
                 location: location,
                 reminderOffsets: reminderOffsets,
-                reminderNotes: reminderNotes
+                reminderNotes: reminderNotes,
+                subtitle: subtitle
             )
         }
     }

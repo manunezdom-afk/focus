@@ -1780,7 +1780,7 @@ enum NovaActionNormalizerTests {
                 title: "Saturación", timeString: "3:00 PM", endTimeString: nil,
                 dateString: nil, section: nil, icon: nil,
                 reminderOffsets: nil, reminderNotes: nil,
-                location: nil, notes: nil
+                location: nil, notes: nil, subtitle: nil
             ))
             let decision = NovaActionValidator.applyAntiBasura(
                 userText: "estoy colapsado, no sé qué hacer",
@@ -1925,7 +1925,7 @@ enum NovaActionNormalizerTests {
             let addAction: BackendAction = .addEvent(BackendEventCreate(
                 title: "Test", timeString: nil, endTimeString: nil, dateString: nil,
                 section: nil, icon: nil, reminderOffsets: nil, reminderNotes: nil,
-                location: nil, notes: nil
+                location: nil, notes: nil, subtitle: nil
             ))
             let m3 = NovaService.Mode.fallback(actions: [addAction], shouldAskUser: false)
             check(label: "mode-fallback-3: con actions → chatWithAction",
@@ -2232,6 +2232,19 @@ enum NovaActionNormalizerTests {
 
         // ───── Validador post-IA ──────────────────────────────────────
         NovaActionValidatorTests.runAll(into: &failures)
+
+        // ───── Regresión 2026-06-11: subtitle con targeting por evento ─
+        // Bug del usuario: "si pongo dos eventos y solo a 1 le quiero
+        // poner subtítulo le pone a los dos". Ejecuta el pipeline REAL
+        // (applyBackendActions → makeEvent / applyUpdates) con el batch
+        // exacto del escenario.
+        if Thread.isMainThread {
+            failures += MainActor.assumeIsolated {
+                subtitleTargetingRegressionFailures()
+            }
+        } else {
+            failures.append("  ✗ subtitle-targeting: runAll no corrió en main thread")
+        }
 
         // ───── Attach-reminder: detectar "acuérdame N antes de X" ─────
         //
@@ -3981,6 +3994,103 @@ enum NovaActionNormalizerTests {
         out += rows.joined(separator: "\n")
         out += "\n===== END =====\n"
         return out
+    }
+
+    // MARK: - Regresión: subtitle con targeting por evento (2026-06-11)
+
+    /// Reproduce el escenario exacto del bug reportado contra el pipeline
+    /// real del store: dos `add_event` en un batch (subtitle solo en uno)
+    /// + un `edit_event` posterior con `updates.subtitle`. Antes del fix:
+    /// el detalle trailing del userText ("llevar las zapatillas...") se
+    /// untaba como subtítulo de AMBOS eventos, y el edit de subtitle se
+    /// descartaba en silencio. Limpia los eventos creados al terminar.
+    @MainActor
+    private static func subtitleTargetingRegressionFailures() -> [String] {
+        var fails: [String] = []
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+            if ok {
+                print("  ✓ \(label)")
+            } else {
+                let msg = "  ✗ \(label)\(detail.isEmpty ? "" : " — \(detail)")"
+                print(msg)
+                fails.append(msg)
+            }
+        }
+
+        let store = FocusDataStore()
+        let userText = "mañana gym a las 7 y clase a las 10, acuérdame de llevar las zapatillas al gym"
+        let cal = Calendar.current
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let tomorrowISO = fmt.string(from: tomorrow)
+
+        func create(_ title: String, time: String, subtitle: String?) -> BackendEventCreate {
+            BackendEventCreate(
+                title: title, timeString: time, endTimeString: nil,
+                dateString: tomorrowISO, section: "focus", icon: "event",
+                reminderOffsets: nil, reminderNotes: nil,
+                location: nil, notes: nil, subtitle: subtitle
+            )
+        }
+
+        // 1. Batch de creación: el backend manda subtitle SOLO para Gym.
+        let outcome = store.applyBackendActions(
+            [
+                .addEvent(create("Gym", time: "7:00 AM", subtitle: "Llevar zapatillas")),
+                .addEvent(create("Clase", time: "10:00 AM", subtitle: nil)),
+            ],
+            userText: userText
+        )
+        let gym = outcome.createdEvents.first { $0.title.lowercased().contains("gym") }
+        let clase = outcome.createdEvents.first { $0.title.lowercased().contains("clase") }
+        check("subtitle-targeting: batch creó 2 eventos",
+              outcome.createdEvents.count == 2,
+              "creó \(outcome.createdEvents.count): \(outcome.createdEvents.map(\.title)) ignored=\(outcome.ignored)")
+        check("subtitle-targeting: Gym conserva el subtitle del backend",
+              gym?.subtitle == "Llevar zapatillas",
+              "subtitle=\(gym?.subtitle ?? "nil")")
+        check("subtitle-targeting: Clase NO hereda el detalle del userText",
+              clase != nil && clase?.subtitle == nil,
+              "subtitle=\(clase?.subtitle ?? "nil")")
+        // El "acuérdame …" mid-sentence pertenece a UN segmento: NINGÚN
+        // evento del batch debe quedar marcado como recordatorio (finding 3).
+        check("subtitle-targeting: Gym NO es recordatorio",
+              gym != nil && gym?.isReminder != true,
+              "isReminder=\(String(describing: gym?.isReminder))")
+        check("subtitle-targeting: Clase NO es recordatorio",
+              clase != nil && clase?.isReminder != true,
+              "isReminder=\(String(describing: clase?.isReminder))")
+
+        // 2. Edit posterior: "ponle subtítulo matemáticas a la clase".
+        if let clase {
+            let updates = BackendEventUpdates(
+                title: nil, timeString: nil, endTimeString: nil,
+                dateString: nil, location: nil,
+                reminderOffsets: nil, reminderNotes: nil,
+                subtitle: "Matemáticas"
+            )
+            _ = store.applyBackendActions(
+                [.editEvent(id: clase.id.uuidString, updates: updates)],
+                userText: "ponle subtítulo matemáticas a la clase"
+            )
+            let claseAfter = store.events.first { $0.id == clase.id }
+            check("subtitle-targeting: edit_event aplica updates.subtitle",
+                  claseAfter?.subtitle == "Matemáticas",
+                  "subtitle=\(claseAfter?.subtitle ?? "nil")")
+            if let gymId = gym?.id {
+                let gymAfter = store.events.first { $0.id == gymId }
+                check("subtitle-targeting: el edit NO toca el otro evento",
+                      gymAfter?.subtitle == "Llevar zapatillas",
+                      "subtitle=\(gymAfter?.subtitle ?? "nil")")
+            }
+        }
+
+        // 3. Limpieza: no dejar los eventos de prueba en el estado real.
+        for ev in outcome.createdEvents {
+            store.deleteEvent(ev.id)
+        }
+        return fails
     }
 }
 

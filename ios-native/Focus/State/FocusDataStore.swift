@@ -5778,6 +5778,19 @@ final class FocusDataStore: ObservableObject {
     ) -> NovaApplyOutcome {
         var outcome = NovaApplyOutcome()
 
+        // Cuántas CREACIONES trae el batch. Con 2+ eventos en un mismo
+        // mensaje, el detalle trailing extraído del userText completo
+        // pertenece a UN solo segmento — sin este flag se filtraba como
+        // subtitle/aviso de TODOS los eventos del lote (mismo bug que el
+        // path local ya guarda con isMultiIntent).
+        let creationCount = actions.reduce(0) { count, action in
+            switch action {
+            case .addEvent, .addRecurringEvent: return count + 1
+            default: return count
+            }
+        }
+        let isMultiEventBatch = creationCount > 1
+
         for action in actions {
             switch action {
             case .addEvent(let payload):
@@ -5819,7 +5832,8 @@ final class FocusDataStore: ObservableObject {
                     let created = expandRecurringEvent(
                         payload: payload,
                         recurrence: backendRecur,
-                        userText: userText
+                        userText: userText,
+                        isMultiEventBatch: isMultiEventBatch
                     )
                     if !created.isEmpty {
                         outcome.didMutate = true
@@ -5841,7 +5855,7 @@ final class FocusDataStore: ObservableObject {
                     } else {
                         outcome.ignored.append("add_event(recurrence_expand_failed)")
                     }
-                } else if let event = makeEvent(from: payload, userText: userText) {
+                } else if let event = makeEvent(from: payload, userText: userText, isMultiEventBatch: isMultiEventBatch) {
                     // Anti-duplicado en el path del backend. El local path
                     // ya tenía esta defensa; ahora la centralizamos también
                     // acá para casos donde el backend genere la acción
@@ -5876,7 +5890,7 @@ final class FocusDataStore: ObservableObject {
                 }
 
             case .addRecurringEvent(let payload, let recurrence):
-                let created = expandRecurringEvent(payload: payload, recurrence: recurrence, userText: userText)
+                let created = expandRecurringEvent(payload: payload, recurrence: recurrence, userText: userText, isMultiEventBatch: isMultiEventBatch)
                 if !created.isEmpty {
                     outcome.didMutate = true
                     outcome.summary = "Agendé \(created.count) instancia\(created.count == 1 ? "" : "s") de «\(payload.title)»."
@@ -6098,7 +6112,11 @@ final class FocusDataStore: ObservableObject {
     /// Crea un `FocusEvent` desde el payload del backend. Resuelve fecha/hora,
     /// section, isReminder, inferredDuration. Devuelve nil si no se puede
     /// armar una hora válida.
-    private func makeEvent(from payload: BackendEventCreate, userText: String) -> FocusEvent? {
+    private func makeEvent(
+        from payload: BackendEventCreate,
+        userText: String,
+        isMultiEventBatch: Bool = false
+    ) -> FocusEvent? {
         // PASO 1: Limpiar título via normalizer (centralizado).
         // El backend puede devolver "Acuérdame buscar a Juan" sin limpiar
         // — el normalizer quita reminder triggers, fillers, marcadores
@@ -6124,16 +6142,36 @@ final class FocusDataStore: ObservableObject {
             timeString: payload.timeString
         ) else { return nil }
 
-        // PASO 2: Decidir isReminder via normalizer. Si el `userText`
-        // contiene cualquier trigger de recordatorio explícito ("acuérdame",
-        // "recuérdame", "avísame", etc.), forzar isReminder=true sin
-        // importar lo que dijo el backend. También aceptamos icon=alarm
-        // o título original con prefijo "Recordatorio:" como señales.
+        // Detalle trailing del userText ("fútbol a las 5 acuérdame de llevar
+        // la pelota" → "Llevar la pelota"). Se computa UNA vez y se reusa en
+        // PASO 2 (supresión de recordatorio) y en la resolución de subtítulo.
+        let trailingDetail = NovaActionNormalizer
+            .extractEventDetail(from: userText).detail
+
+        // PASO 2: Decidir isReminder via normalizer. Señales POR-PAYLOAD
+        // (prefijo "Recordatorio:" del título, icon=alarm del backend) o el
+        // trigger al INICIO ("recuérdame …") fuerzan recordatorio. Pero un
+        // trigger mid-sentence ("gym a las 7 … acuérdame de llevar las
+        // zapatillas al gym") pertenece a UN segmento: si fue consumido como
+        // subtítulo (trailingDetail != nil) o el mensaje crea varios eventos
+        // (isMultiEventBatch), NO marcamos el evento como recordatorio — antes
+        // se "untaba" a TODOS los eventos del lote (mismo guard que el path
+        // local en applyLocalNovaIntent; review 2026-06-11).
         let backendIcon = payload.icon ?? ""
-        let isReminderHint = NovaActionNormalizer.isReminderTrigger(in: userText)
-            || NovaActionNormalizer.impliesPunctualReminder(in: userText)
-            || rawTitle.lowercased().hasPrefix("recordatorio")
-            || backendIcon.lowercased() == "alarm"
+        let isReminderHint: Bool = {
+            if rawTitle.lowercased().hasPrefix("recordatorio")
+                || backendIcon.lowercased() == "alarm" {
+                return true
+            }
+            if NovaActionNormalizer.startsWithReminderTrigger(in: userText) {
+                return true
+            }
+            if isMultiEventBatch || trailingDetail != nil {
+                return false
+            }
+            return NovaActionNormalizer.isReminderTrigger(in: userText)
+                || NovaActionNormalizer.impliesPunctualReminder(in: userText)
+        }()
 
         // PASO 3: Resolver endTime explícito si el backend lo dio
         // **Y SOLO SI** el usuario realmente mencionó una hora-fin en su
@@ -6215,7 +6253,8 @@ final class FocusDataStore: ObservableObject {
         if let fromBackend = payload.reminderOffsets, !fromBackend.isEmpty {
             resolvedOffsets = fromBackend
             resolvedNotes = payload.reminderNotes
-        } else if let extracted = NovaActionNormalizer.extractReminderOffsetAndNote(from: userText) {
+        } else if !isMultiEventBatch,
+                  let extracted = NovaActionNormalizer.extractReminderOffsetAndNote(from: userText) {
             resolvedOffsets = [extracted.offsetMinutes]
             if let note = extracted.note, !note.isEmpty {
                 resolvedNotes = [note]
@@ -6239,14 +6278,18 @@ final class FocusDataStore: ObservableObject {
         //   Si ambos aplican (raro pero posible), gana el detalle
         //   trailing y se descarta el split (porque el detalle es
         //   más específico — viene del propio texto del usuario).
-        let trailingDetail = NovaActionNormalizer
-            .extractEventDetail(from: userText).detail
+        //   `trailingDetail` ya se computó arriba (antes de PASO 2).
         let (finalTitle, finalSubtitle): (String, String?) = {
             // Subtítulo explícito del backend (Claude) gana sobre la extracción local.
             if let s = payload.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
                 return (cleanedTitle, s)
             }
-            if let detail = trailingDetail {
+            // En batch multi-evento NO usamos el detalle trailing del
+            // userText completo: pertenece a UN solo segmento y se filtraba
+            // como subtítulo de TODOS los eventos del lote (mismo guard que
+            // isMultiIntent en el path local). El backend es responsable de
+            // mandar el subtitle por-evento en ese caso.
+            if let detail = trailingDetail, !isMultiEventBatch {
                 // Si el cleanedTitle es solo "Reunión" tras strip del detalle,
                 // mantenemos como tal. El detalle gana como subtítulo.
                 return (cleanedTitle, detail)
@@ -6381,6 +6424,11 @@ final class FocusDataStore: ObservableObject {
                 event.reminderNotes = newNotes
             }
         }
+        // Subtitle editable: nil = no tocar; "" explícito = quitar el actual
+        // ("quítale el subtítulo al gym").
+        if let newSubtitle = updates.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            event.subtitle = newSubtitle.isEmpty ? nil : newSubtitle
+        }
     }
 
     /// Expande un `add_recurring_event` a N `addEvent` locales. Conservador:
@@ -6449,7 +6497,8 @@ final class FocusDataStore: ObservableObject {
     private func expandRecurringEvent(
         payload: BackendEventCreate,
         recurrence: BackendRecurrence,
-        userText: String
+        userText: String,
+        isMultiEventBatch: Bool = false
     ) -> [FocusEvent] {
         let cal = Calendar.current
         guard let firstStart = NovaTimeFormatter.resolveDate(
@@ -6510,9 +6559,10 @@ final class FocusDataStore: ObservableObject {
                     reminderOffsets: payload.reminderOffsets,
                     reminderNotes: payload.reminderNotes,
                     location: payload.location,
-                    notes: payload.notes
+                    notes: payload.notes,
+                    subtitle: payload.subtitle
                 )
-                if let event = makeEvent(from: single, userText: userText) {
+                if let event = makeEvent(from: single, userText: userText, isMultiEventBatch: isMultiEventBatch) {
                     addEvent(event)
                     created.append(event)
                     added += 1
