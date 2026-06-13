@@ -572,7 +572,15 @@ struct MiDiaView: View {
         // 1. Short-circuit: intents que requieren contexto local que el
         //    backend no tiene (corrige/borra último ítem, follow-up
         //    pending resuelto, comandos meta del cliente).
-        if shouldShortCircuit(preIntent) {
+        //    EXCEPCIÓN (2026-06-13, "Nova más humana"): si el intent es un
+        //    resumen/meta (reviewToday/reviewPending/organizeDay) pero el
+        //    mensaje es claramente conversacional/de consejo/emocional, NO
+        //    cortamos local — lo manda la IA. Bug: "lo que tengo mañana me
+        //    siento abrumado, cómo me recomiendas organizar" matcheaba la
+        //    subcadena "que tengo mañana" → resumen robótico "0 eventos hoy"
+        //    sin empatía ni el día correcto. La IA da una respuesta humana.
+        if shouldShortCircuit(preIntent),
+           !shouldDeferToBackendForHumanAnswer(preIntent, text: trimmed) {
             return executeIntent(preIntent, userText: trimmed)
         }
 
@@ -1184,6 +1192,35 @@ struct MiDiaView: View {
     /// True cuando el intent local SIEMPRE es mejor que el backend porque
     /// requiere contexto cliente o porque el backend lo entendería peor.
     /// Conservador: solo cubre casos donde tenemos alta confianza.
+    /// Cuando hay sesión, deja que la IA conteste (en vez del resumen local)
+    /// los pedidos conversacionales/de consejo/emocionales que el parser
+    /// local clasificó como resumen/meta por una subcadena suelta. Nova es
+    /// un ASISTENTE, no solo un calendario: "me siento abrumado, ¿cómo
+    /// organizo el día?" merece una respuesta humana de la IA, no
+    /// "0 eventos hoy". Las consultas PURAS y cortas ("¿qué tengo hoy?")
+    /// siguen resolviéndose local (rápido, sin gastar el backend).
+    private func shouldDeferToBackendForHumanAnswer(_ intent: NovaIntent, text: String) -> Bool {
+        // Sin sesión no hay IA real → conviene el resumen local.
+        guard store.syncCredentials != nil else { return false }
+        switch intent {
+        case .reviewToday, .reviewPending, .organizeDay:
+            break
+        default:
+            return false
+        }
+        let lower = text.lowercased()
+        let humanMarkers: [String] = [
+            "me siento", "abrumad", "estresad", "agobiad", "ansios",
+            "no sé", "no se ", "no doy abasto", "ayúdame", "ayudame",
+            "recomiend", "sugier", "qué hago", "que hago", "qué hacer",
+            "cómo organiz", "como organiz", "cómo lo hago", "como lo hago",
+            "qué opinas", "que opinas", "qué me dices", "que me dices",
+            "consejo", "por dónde empiezo", "por donde empiezo", "abruma",
+            "priorizar", "prioriza", "ayuda con"
+        ]
+        return humanMarkers.contains { lower.contains($0) }
+    }
+
     private func shouldShortCircuit(_ intent: NovaIntent) -> Bool {
         switch intent {
         case .correctLastEvent, .deleteLastItem, .convertLastToTask:
