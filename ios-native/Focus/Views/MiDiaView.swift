@@ -475,6 +475,19 @@ struct MiDiaView: View {
             withAnimation(.easeInOut(duration: 0.20)) {
                 inlineResponse = response
             }
+            // Registrar el turno en el historial compartido (`novaMessages`)
+            // para que el SIGUIENTE mensaje le mande el contexto al backend.
+            // Sin esto, Mi Día solo leía el historial y nunca escribía → el
+            // backend no podía resolver "muévela", "ponle…", "esa llamada".
+            // (Bug de memoria multi-turno reportado 2026-06-13.) No registramos
+            // estados de carga; sí registramos respuestas finales (incluido
+            // fallback/clarify) porque son lo que el usuario "habló" con Nova.
+            if !response.isLoading {
+                let reply = [response.summary, response.details]
+                    .compactMap { $0 }
+                    .joined(separator: " ")
+                store.recordInlineNovaTurn(userText: trimmed, assistantReply: reply)
+            }
         }
     }
 

@@ -5421,6 +5421,27 @@ final class FocusDataStore: ObservableObject {
         }
     }
 
+    // MARK: - Historial conversacional (compartido chat ↔ Mi Día)
+
+    /// Registra un turno de la conversación INLINE de Mi Día en el mismo
+    /// historial (`novaMessages`) que usa el chat dedicado. Antes el composer
+    /// de Mi Día solo LEÍA `novaMessages` (vía `recentNovaHistory()`) pero
+    /// nunca escribía → el backend recibía `history: []` para los turnos de
+    /// Mi Día y no podía resolver referencias entre turnos ("muévela",
+    /// "ponle…", "esa llamada"). Bug de memoria reportado 2026-06-13.
+    /// Al unificar el historial, la memoria multi-turno funciona igual en
+    /// el chat y en Mi Día, y el contexto es continuo entre ambas superficies.
+    func recordInlineNovaTurn(userText: String, assistantReply: String) {
+        let u = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !u.isEmpty else { return }
+        novaMessages.append(NovaMessage(role: .user, content: u))
+        let a = assistantReply.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !a.isEmpty {
+            novaMessages.append(NovaMessage(role: .nova, content: a))
+        }
+        persistNovaMessages()
+    }
+
     // MARK: - Persistencia (privado)
 
     private func persistEvents()       { FocusLocalStore.save(events, forKey: .events) }
