@@ -1245,6 +1245,35 @@ enum NovaActionNormalizer {
         let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let lower = trimmed.lowercased()
+
+        // ── Regla general: CABEZA DE ACTIVIDAD + calificador. El título es el
+        // TIPO de actividad y lo que sigue (con o sin "de") es el tema/parte,
+        // que va al subtítulo. Cubre el spec canónico: "gym pierna" → Gym +
+        // Pierna, "clase de álgebra" → Clase + Álgebra, "terapia ansiedad" →
+        // Terapia + Ansiedad, "entrenamiento de espalda" → Entrenamiento +
+        // Espalda. NO parte si el conector es "con" (persona) — "Reunión con
+        // Juan" se queda íntegra. Las cabezas son una whitelist conservadora.
+        let activityHeads = ["gym", "gimnasio", "clase", "clases", "terapia",
+                             "entrenamiento", "entreno", "prueba", "examen",
+                             "estudiar", "estudio", "taller", "curso", "ensayo",
+                             "llamada", "entrega", "yoga", "pilates", "partido"]
+        for head in activityHeads where lower.hasPrefix(head + " ") {
+            let afterHead = String(trimmed.dropFirst(head.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            var rest = afterHead
+            // Conector "de " opcional al inicio del calificador.
+            if rest.lowercased().hasPrefix("de ") {
+                rest = String(rest.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let restLower = rest.lowercased()
+            // No partir si el calificador es persona ("con X") o vacío/artículo.
+            if restLower.hasPrefix("con ") || rest.isEmpty { break }
+            if ["la", "el", "los", "las", "un", "una", "mi", "tu", "su"].contains(restLower) { break }
+            let titleCap = head.prefix(1).uppercased() + head.dropFirst()
+            let subCap = rest.prefix(1).uppercased() + rest.dropFirst()
+            return (String(titleCap), String(subCap))
+        }
+
         // Solo "reunión"/"reunion" — con o sin artículo opcional. Otras
         // actividades quedan intactas (ver doc).
         let triggers = ["reunión", "reunion", "la reunión", "la reunion",

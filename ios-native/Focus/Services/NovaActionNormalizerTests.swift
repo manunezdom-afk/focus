@@ -1496,8 +1496,12 @@ enum NovaActionNormalizerTests {
         check(label: "casoB: 2 intents",
               actual: casoB.count, expected: 2, failures: &failures)
         if casoB.count == 2 {
-            check(label: "casoB[0] title contiene 'historia'",
-                  actual: casoB[0].title.lowercased().contains("historia"),
+            // "clases de historia" → "Clases" + subtítulo "Historia" (2026-06-13:
+            // ahora separa el tema). La info debe estar preservada en título O
+            // subtítulo.
+            let casoBInfo = (casoB[0].title + " " + (casoB[0].subtitle ?? "")).lowercased()
+            check(label: "casoB[0] preserva 'historia' (título o subtítulo)",
+                  actual: casoBInfo.contains("historia"),
                   expected: true, failures: &failures)
             check(label: "casoB[0] hour 17",
                   actual: casoB[0].hour, expected: 17, failures: &failures)
@@ -2750,7 +2754,7 @@ enum NovaActionNormalizerTests {
         let isMulti = intents.count > 1
         return intents.compactMap { intent -> ParsedAction? in
             switch intent {
-            case let .createEvent(rawTitle, when, explicitEnd, _, section, wantsReminder, _):
+            case let .createEvent(rawTitle, when, explicitEnd, _, section, wantsReminder, _, segReminderOffset, _):
                 let cleanedTitle = NovaActionNormalizer.cleanTitle(rawTitle)
                 // Subtítulo: detalle trailing > split "Reunión de X" > nil.
                 let (resolvedTitle, resolvedSubtitle): (String, String?) = {
@@ -2784,7 +2788,9 @@ enum NovaActionNormalizerTests {
                         || NovaActionNormalizer.isReminderTrigger(in: text)
                         || NovaActionNormalizer.impliesPunctualReminder(in: text)
                 }()
-                let offset = NovaActionNormalizer.extractReminderOffset(from: text)
+                // Offset PRE-EXTRAÍDO del segmento (multi-evento) gana sobre la
+                // extracción del texto completo — espejo de applyLocalNovaIntent.
+                let offset = segReminderOffset ?? NovaActionNormalizer.extractReminderOffset(from: text)
                 return ParsedAction(
                     kind: reminder ? .reminder : .event,
                     title: resolvedTitle, hour: hour, minute: minute, endHour: endHour, day: day,
@@ -3280,7 +3286,9 @@ enum NovaActionNormalizerTests {
         cases.append(Case(id: 2, input: "reunión con Juan a las 3", expectedKind: K.event, expectedTitleLower: "reunión con juan", expectedSubtitlePrefix: "", expectedHour: 15, expectedDay: D.today))
         cases.append(Case(id: 3, input: "gimnasio a las 7 de la mañana", expectedKind: K.event, expectedTitleLower: "gimnasio", expectedSubtitlePrefix: "", expectedHour: 7, expectedDay: D.tomorrow, notes: "7am ya pasó hoy → mañana"))
         cases.append(Case(id: 4, input: "almuerzo a la 1", expectedKind: K.event, expectedTitleLower: "almuerzo", expectedSubtitlePrefix: "", expectedHour: 13, expectedDay: D.today))
-        cases.append(Case(id: 5, input: "clase de historia a las 10", expectedKind: K.event, expectedTitleLower: "clase de historia", expectedSubtitlePrefix: "", expectedHour: 10, expectedDay: D.today))
+        // 2026-06-13: "clase de X" ahora separa tema → "Clase" + sub "Historia"
+        // (canónico del spec; antes quedaba "Clase de Historia" en el título).
+        cases.append(Case(id: 5, input: "clase de historia a las 10", expectedKind: K.event, expectedTitleLower: "clase", expectedSubtitlePrefix: "Historia", expectedHour: 10, expectedDay: D.today))
         cases.append(Case(id: 6, input: "cita médica el jueves a las 9 de la mañana", expectedKind: K.event, expectedTitleLower: "cita médica", expectedSubtitlePrefix: "", expectedHour: 9, notes: "valida fix 'de la mañana' residual"))
         cases.append(Case(id: 7, input: "café con Sofía a las 6", expectedKind: K.event, expectedTitleLower: "café con sofía", expectedSubtitlePrefix: "", expectedHour: 18, expectedDay: D.today))
         cases.append(Case(id: 8, input: "partido el sábado a las 5", expectedKind: K.event, expectedTitleLower: "partido", expectedSubtitlePrefix: "", expectedHour: 17))
@@ -4128,6 +4136,235 @@ enum NovaActionNormalizerTests {
             store.deleteEvent(ev.id)
         }
         return fails
+    }
+
+    // MARK: - Batería integral: eventos + subtítulos + recordatorios (2026-06-13)
+
+    /// Expectativa de UN ítem creado por un caso de la batería.
+    /// `key` = substring (lowercased) que debe contener el título. Los demás
+    /// campos se chequean SOLO si están seteados (sentinelas explícitos).
+    private struct BatExp {
+        let key: String
+        var hour: Int? = nil          // chequea hora si != nil
+        var subHas: String? = nil     // título-subtítulo debe CONTENER esto
+        var noSub: Bool = false       // subtítulo debe ser nil/vacío
+        var offset: Int? = nil        // reminderOffsets.first == esto
+        var noOffset: Bool = false    // sin reminderOffsets
+        var isTask: Bool = false      // es tarea (sin hora), no evento
+    }
+
+    private struct BatCase {
+        let input: String
+        let expect: [BatExp]
+        init(_ input: String, _ expect: [BatExp]) { self.input = input; self.expect = expect }
+    }
+
+    /// Batería integral del user spec 2026-06-13: 35 peticiones complejas
+    /// (multi-evento, recordatorios distintos por evento, subtítulos,
+    /// subtítulos en multi-evento, notas de recordatorio, recurrencia) + 15
+    /// simples cotidianas. Corre el PIPELINE LOCAL REAL (parseAll →
+    /// applyLocalNovaIntent) sobre un store efímero y verifica por evento:
+    /// título limpio (sin coma/trigger residual), hora, subtítulo (presencia/
+    /// anclaje) y offset de recordatorio (por-evento, no el primero del texto).
+    @discardableResult
+    static func runEventReminderBattery() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
+        guard Thread.isMainThread else { return "BATERÍA: requiere main thread\n" }
+
+        return MainActor.assumeIsolated { () -> String in
+            let cases = batteryCases()
+            var pass = 0, fail = 0
+            var rows: [String] = []
+
+            for (i, c) in cases.enumerated() {
+                let n = i + 1
+                let store = FocusDataStore()
+                for ev in store.events { store.deleteEvent(ev.id) }
+                for t in store.tasks { store.deleteTask(t.id) }
+                let before = Set(store.events.map(\.id))
+                let beforeTasks = Set(store.tasks.map(\.id))
+                let intents = NovaResponder.parseAll(c.input)
+                for it in intents {
+                    _ = store.applyLocalNovaIntent(it, userText: c.input, isMultiIntent: intents.count > 1)
+                }
+                let createdEvents = store.events.filter { !before.contains($0.id) }
+                let createdTasks = store.tasks.filter { !beforeTasks.contains($0.id) }
+
+                var problems: [String] = []
+
+                // 1. Conteo de ítems creados == esperado.
+                let totalCreated = createdEvents.count + createdTasks.count
+                if totalCreated != c.expect.count {
+                    problems.append("conteo \(totalCreated)≠\(c.expect.count)")
+                }
+
+                // 2. Ningún título con basura (coma colgante / trigger residual).
+                for ev in createdEvents {
+                    let tl = ev.title.lowercased()
+                    if ev.title.contains(" ,") || tl.contains("acuérdame") || tl.contains("acuerdame") || tl.contains("recuérdame") || tl.contains("recuerdame") {
+                        problems.append("título sucio '\(ev.title)'")
+                    }
+                }
+
+                // 3. Cada expectativa debe matchear un ítem creado.
+                for exp in c.expect {
+                    if exp.isTask {
+                        guard let t = createdTasks.first(where: { $0.title.lowercased().contains(exp.key) }) else {
+                            problems.append("falta tarea '\(exp.key)'"); continue
+                        }
+                        _ = t
+                        continue
+                    }
+                    guard let ev = createdEvents.first(where: {
+                        $0.title.lowercased().contains(exp.key) || ($0.subtitle ?? "").lowercased().contains(exp.key)
+                    }) else {
+                        problems.append("falta evento '\(exp.key)'"); continue
+                    }
+                    if let h = exp.hour {
+                        let gotH = Calendar.current.component(.hour, from: ev.startTime)
+                        if gotH != h { problems.append("'\(exp.key)' hora \(gotH)≠\(h)") }
+                    }
+                    if let sh = exp.subHas {
+                        // La info debe estar PRESERVADA (en título o subtítulo) —
+                        // el parser local a veces deja "X de Y" en el título y eso
+                        // es aceptable; lo que NO se permite es perder la info.
+                        let hay = (ev.title + " " + (ev.subtitle ?? "")).lowercased()
+                        if !hay.contains(sh.lowercased()) { problems.append("'\(exp.key)' info '\(sh)' perdida (título='\(ev.title)' sub='\(ev.subtitle ?? "nil")')") }
+                    }
+                    if exp.noSub {
+                        if let s = ev.subtitle, !s.isEmpty { problems.append("'\(exp.key)' subtítulo inesperado '\(s)'") }
+                    }
+                    if let off = exp.offset {
+                        let got = ev.reminderOffsets?.first
+                        if got != off { problems.append("'\(exp.key)' offset \(String(describing: got))≠\(off)") }
+                    }
+                    if exp.noOffset {
+                        if let offs = ev.reminderOffsets, !offs.isEmpty { problems.append("'\(exp.key)' offset inesperado \(offs)") }
+                    }
+                }
+
+                if problems.isEmpty {
+                    pass += 1
+                    rows.append("  \(n) ✓ | \(c.input.prefix(60))")
+                } else {
+                    fail += 1
+                    let got = createdEvents.sorted { $0.startTime < $1.startTime }.map { "\($0.title)·h\(Calendar.current.component(.hour, from: $0.startTime))·off\($0.reminderOffsets?.first.map(String.init) ?? "-")·sub[\($0.subtitle ?? "-")]" }.joined(separator: " ")
+                        + createdTasks.map { " TASK[\($0.title)]" }.joined()
+                    rows.append("  \(n) ✗ FAIL | \(c.input.prefix(55)) → \(got) ⟵ \(problems.joined(separator: "; "))")
+                }
+
+                for ev in createdEvents { store.deleteEvent(ev.id) }
+                for t in createdTasks { store.deleteTask(t.id) }
+            }
+
+            var out = "===== BATERÍA EVENTOS+SUBTÍTULOS+RECORDATORIOS =====\n"
+            out += "RESULTADO: \(pass)/\(pass + fail) PASS  (\(fail) FAIL)\n"
+            out += fail == 0 ? "✅ TODOS PASS\n" : "⚠️  Hay fallos\n"
+            out += "\n--- DETALLE ---\n" + rows.joined(separator: "\n") + "\n===== END =====\n"
+            return out
+        }
+    }
+
+    /// Los 50 casos (35 complejos + 15 simples). Horas con marcador explícito
+    /// (de la mañana/tarde/noche) cuando importa, para que la expectativa sea
+    /// determinista e independiente de la regla coloquial.
+    private static func batteryCases() -> [BatCase] {
+        return [
+            // ───────── 35 COMPLEJAS ─────────
+            // Multi-evento con recordatorios DISTINTOS por evento (el bug).
+            BatCase("gym a las 7 de la mañana acuérdame 30 min antes y reunión a las 9 de la mañana acuérdame una hora antes",
+                    [BatExp(key: "gym", hour: 7, offset: 30), BatExp(key: "reunión", hour: 9, offset: 60)]),
+            BatCase("dentista a las 8 de la mañana acuérdame 30 min antes y almuerzo a la 1 de la tarde acuérdame 15 min antes",
+                    [BatExp(key: "dentista", hour: 8, offset: 30), BatExp(key: "almuerzo", hour: 13, offset: 15)]),
+            BatCase("clase a las 10 de la mañana acuérdame 15 min antes y gym a las 6 de la tarde acuérdame 10 min antes",
+                    [BatExp(key: "clase", hour: 10, offset: 15), BatExp(key: "gym", hour: 18, offset: 10)]),
+            BatCase("partido a las 3 de la tarde acuérdame una hora antes y cena a las 9 de la noche acuérdame dos horas antes",
+                    [BatExp(key: "partido", hour: 15, offset: 60), BatExp(key: "cena", hour: 21, offset: 120)]),
+            BatCase("reunión a las 11 de la mañana acuérdame 5 min antes y terapia a las 5 de la tarde acuérdame media hora antes",
+                    [BatExp(key: "reunión", hour: 11, offset: 5), BatExp(key: "terapia", hour: 17, offset: 30)]),
+            // Subtítulos en evento único.
+            BatCase("gym pierna a las 7 de la mañana", [BatExp(key: "gym", hour: 7, subHas: "pierna")]),
+            BatCase("reunión de mindfulness a las 8 de la noche", [BatExp(key: "reunión", hour: 20, subHas: "mindfulness")]),
+            BatCase("clase de álgebra a las 10 de la mañana", [BatExp(key: "clase", hour: 10, subHas: "álgebra")]),
+            BatCase("terapia de ansiedad a las 4 de la tarde", [BatExp(key: "terapia", hour: 16, subHas: "ansiedad")]),
+            BatCase("entrenamiento de espalda a las 8 de la mañana", [BatExp(key: "entrenamiento", hour: 8, subHas: "espalda")]),
+            // Subtítulos en MULTI-evento (targeting por evento).
+            BatCase("clase de álgebra a las 10 de la mañana y clase de historia a las 12 de la tarde",
+                    [BatExp(key: "álgebra", hour: 10), BatExp(key: "historia", hour: 12)]),
+            BatCase("gym pierna a las 7 de la mañana y gym brazo a las 6 de la tarde",
+                    [BatExp(key: "pierna", hour: 7), BatExp(key: "brazo", hour: 18)]),
+            // Detalle/recordatorio anclado al evento que nombra.
+            BatCase("dentista a las 4 de la tarde y comprar remedios a las 5 de la tarde, acuérdame de llevar la receta al dentista",
+                    [BatExp(key: "dentista", hour: 16, subHas: "receta"), BatExp(key: "remedios", hour: 17, noSub: true)]),
+            BatCase("fútbol a las 5 de la tarde acuérdame de llevar la pelota",
+                    [BatExp(key: "fútbol", hour: 17, subHas: "pelota")]),
+            BatCase("reunión con Cristina a las 4 de la tarde revisar el portafolio",
+                    [BatExp(key: "cristina", hour: 16, subHas: "portafolio")]),
+            // Recordatorio con nota custom ("N antes de X") → offset + nota.
+            BatCase("partido a las 3 de la tarde acuérdame 20 min antes de echar las zapatillas",
+                    [BatExp(key: "partido", hour: 15, offset: 20)]),
+            // Recordatorio compartido "de cada uno" / "de ambos".
+            BatCase("partido a las 3 de la tarde y cena a las 9 de la noche, acuérdame 30 min antes de cada uno",
+                    [BatExp(key: "partido", hour: 15, offset: 30), BatExp(key: "cena", hour: 21, offset: 30)]),
+            BatCase("clase a las 10 de la mañana y reunión a las 4 de la tarde, avísame 15 min antes de ambas",
+                    [BatExp(key: "clase", hour: 10, offset: 15), BatExp(key: "reunión", hour: 16, offset: 15)]),
+            // Triple multi-evento.
+            BatCase("gym a las 7 de la mañana, desayuno a las 8 de la mañana y reunión a las 10 de la mañana",
+                    [BatExp(key: "gym", hour: 7), BatExp(key: "desayuno", hour: 8), BatExp(key: "reunión", hour: 10)]),
+            // Multi-evento, solo UNO con recordatorio.
+            BatCase("dentista a las 9 de la mañana y gym a las 6 de la tarde acuérdame 30 min antes",
+                    [BatExp(key: "dentista", hour: 9, noOffset: true), BatExp(key: "gym", hour: 18, offset: 30)]),
+            BatCase("reunión a las 2 de la tarde acuérdame 10 min antes y café con Ana a las 5 de la tarde",
+                    [BatExp(key: "reunión", hour: 14, offset: 10), BatExp(key: "café", hour: 17, noOffset: true)]),
+            // Offsets en palabras.
+            BatCase("reunión a las 5 de la tarde acuérdame media hora antes", [BatExp(key: "reunión", hour: 17, offset: 30)]),
+            BatCase("clase a las 11 de la mañana acuérdame una hora antes", [BatExp(key: "clase", hour: 11, offset: 60)]),
+            BatCase("examen a las 9 de la mañana acuérdame dos horas antes", [BatExp(key: "examen", hour: 9, offset: 120)]),
+            BatCase("vuelo a las 6 de la mañana acuérdame tres horas antes", [BatExp(key: "vuelo", hour: 6, offset: 180)]),
+            // Evento + tarea en un mensaje.
+            BatCase("reunión a las 3 de la tarde y comprar pan",
+                    [BatExp(key: "reunión", hour: 15), BatExp(key: "pan", isTask: true)]),
+            BatCase("gym a las 7 de la mañana y llamar al banco",
+                    [BatExp(key: "gym", hour: 7), BatExp(key: "llamar", isTask: true)]),
+            // Subtítulo + recordatorio juntos.
+            BatCase("clase de cálculo a las 10 de la mañana acuérdame 15 min antes",
+                    [BatExp(key: "clase", hour: 10, subHas: "cálculo", offset: 15)]),
+            BatCase("reunión de proyecto a las 4 de la tarde acuérdame 20 min antes",
+                    [BatExp(key: "reunión", hour: 16, subHas: "proyecto", offset: 20)]),
+            // Multi-evento con subtítulo en uno y recordatorio en el otro.
+            BatCase("gym pierna a las 7 de la mañana y reunión a las 9 de la mañana acuérdame 30 min antes",
+                    [BatExp(key: "gym", hour: 7, subHas: "pierna"), BatExp(key: "reunión", hour: 9, offset: 30)]),
+            // Hora explícita 24h.
+            BatCase("reunión a las 14:30", [BatExp(key: "reunión", hour: 14)]),
+            BatCase("gym a las 19:00 acuérdame 30 min antes", [BatExp(key: "gym", hour: 19, offset: 30)]),
+            // Recurrencia con recordatorio.
+            BatCase("todos los lunes clase a las 10 de la mañana acuérdame 15 min antes",
+                    [BatExp(key: "clase", hour: 10, offset: 15)]),
+            // Dos eventos mismo tipo, distinto subtítulo y hora.
+            BatCase("reunión de marketing a las 9 de la mañana y reunión de ventas a las 3 de la tarde",
+                    [BatExp(key: "marketing", hour: 9), BatExp(key: "ventas", hour: 15)]),
+            // Evento de noche con recordatorio largo.
+            BatCase("cena con Pedro a las 9 de la noche acuérdame una hora antes",
+                    [BatExp(key: "cena", hour: 21, subHas: "pedro", offset: 60)]),
+
+            // ───────── 15 SIMPLES (cotidianas) ─────────
+            BatCase("dentista mañana a las 4 de la tarde", [BatExp(key: "dentista", hour: 16)]),
+            BatCase("gym a las 6 de la tarde", [BatExp(key: "gym", hour: 18)]),
+            BatCase("reunión a las 3 de la tarde", [BatExp(key: "reunión", hour: 15)]),
+            BatCase("almuerzo a la 1 de la tarde", [BatExp(key: "almuerzo", hour: 13)]),
+            BatCase("cena a las 8 de la noche", [BatExp(key: "cena", hour: 20)]),
+            BatCase("comprar pan", [BatExp(key: "pan", isTask: true)]),
+            BatCase("llamar a Juan", [BatExp(key: "llamar", isTask: true)]),
+            BatCase("clase a las 10 de la mañana", [BatExp(key: "clase", hour: 10)]),
+            BatCase("estudiar a las 9 de la noche", [BatExp(key: "estudiar", hour: 21)]),
+            BatCase("café con Pedro a las 5 de la tarde", [BatExp(key: "café", hour: 17)]),
+            BatCase("médico a las 11 de la mañana", [BatExp(key: "médico", hour: 11)]),
+            BatCase("yoga a las 7 de la mañana", [BatExp(key: "yoga", hour: 7)]),
+            BatCase("reunión con Ana a las 2 de la tarde", [BatExp(key: "ana", hour: 14)]),
+            BatCase("desayuno a las 8 de la mañana", [BatExp(key: "desayuno", hour: 8)]),
+            BatCase("comprar leche", [BatExp(key: "leche", isTask: true)]),
+        ]
     }
 
     // MARK: - Regresión: fallback logueado visible (2026-06-13)

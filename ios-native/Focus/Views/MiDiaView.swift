@@ -1553,13 +1553,17 @@ struct MiDiaView: View {
 
         init?(intent: NovaIntent, userText: String) {
             switch intent {
-            case let .createEvent(rawTitle, when, _, _, _, _, _):
+            case let .createEvent(rawTitle, when, _, _, _, _, _, segReminderOffset, _):
                 let cleaned = NovaActionNormalizer.cleanTitle(rawTitle)
                 guard !cleaned.isEmpty else { return nil }
                 self.kind = .block
                 self.title = cleaned
                 self.date = when
-                self.reminderOffsetMinutes = NovaActionNormalizer.extractReminderOffset(from: userText)
+                // Offset PRE-EXTRAÍDO del segmento (multi-evento) gana sobre
+                // la extracción del userText completo (que daba el primer
+                // offset a todos los eventos).
+                self.reminderOffsetMinutes = segReminderOffset
+                    ?? NovaActionNormalizer.extractReminderOffset(from: userText)
             case let .createTask(rawTitle, dueDate, _, _):
                 let cleaned = NovaActionNormalizer.cleanTitle(rawTitle)
                 guard !cleaned.isEmpty else { return nil }
@@ -1811,7 +1815,7 @@ struct MiDiaView: View {
                 action: .openTasksList
             )
 
-        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder, let recurrence):
+        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder, let recurrence, let segReminderOffset, let segReminderNote):
             // BUG-USER 2026-05-18: este path guardaba el título RAW del intent
             // parser sin pasarlo por cleanTitle, mientras que
             // FocusDataStore.applyLocalNovaIntent SÍ lo limpia. Resultado: el
@@ -1912,16 +1916,21 @@ struct MiDiaView: View {
                     ?? NovaResponder.guessSection(for: title)
                     ?? .personal
             }
-            // Reminder offset SIEMPRE se extrae si está en userText, sin
-            // importar si es recordatorio puntual o evento con duración.
-            // Antes solo se pasaba en el path remote → el chip 🔔 nunca
-            // aparecía en eventos creados localmente.
+            // Reminder offset: PRIORIDAD al offset PRE-EXTRAÍDO del segmento
+            // de este evento (parseAll lo inyecta por-segmento), si no, del
+            // userText completo. Antes el offset del userText completo (el
+            // primero que aparecía) se aplicaba a TODOS los eventos del lote.
             let extractedOffsets: [Int]?
-            if let mins = NovaActionNormalizer.extractReminderOffset(from: userText) {
+            if let segOffset = segReminderOffset {
+                extractedOffsets = [segOffset]
+            } else if !isMultiIntent, let mins = NovaActionNormalizer.extractReminderOffset(from: userText) {
                 extractedOffsets = [mins]
             } else {
                 extractedOffsets = nil
             }
+            // Nota custom del recordatorio (segmento) → se persiste en el
+            // evento si vino del segmento.
+            let segReminderNotes: [String]? = (segReminderNote?.isEmpty == false) ? [segReminderNote!] : nil
             // Si hay recurrencia, expandir las próximas N ocurrencias.
             let occurrences: [Date]
             if let recurrence {
@@ -1942,6 +1951,7 @@ struct MiDiaView: View {
                     isReminder: isReminderFlag,
                     inferredDuration: inferredFlag,
                     reminderOffsets: extractedOffsets,
+                    reminderNotes: segReminderNotes,
                     subtitle: eventSubtitle
                 )
                 store.addEvent(event)

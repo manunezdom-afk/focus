@@ -133,7 +133,14 @@ enum NovaIntent: Hashable {
         location: String?,
         section: EventSection?,
         wantsReminder: Bool,
-        recurrence: RecurrenceHint? = nil
+        recurrence: RecurrenceHint? = nil,
+        // Offset/nota de aviso PRE-EXTRAÍDOS del SEGMENTO de este evento
+        // (no del userText completo). Clave para multi-evento: "gym a las 7
+        // acuérdame 30 antes y reunión a las 9 acuérdame 1 hora antes" debe
+        // dar 30 al gym y 60 a la reunión. `parseAll` los inyecta por
+        // segmento; nil → el caller extrae del userText (single-intent).
+        reminderOffset: Int? = nil,
+        reminderNote: String? = nil
     )
     /// Corregir el último ítem creado (evento o tarea). Resuelto desde
     /// `NovaContext.lastEventId` / `lastTaskId`.
@@ -1018,16 +1025,78 @@ enum NovaResponder {
     ///   "mañana despertarme a las 7:10 y luego tipo 8 salir de mi casa"
     /// segmento 1: "mañana despertarme a las 7:10" → Despertarme mañana 07:10
     /// segmento 2: "mañana tipo 8 salir de mi casa" → Salir de mi casa mañana 08:00
+    /// Inyecta en un intent `.createEvent` el offset/nota de recordatorio
+    /// extraído de SU PROPIO segmento. Sin esto, cada evento de un mensaje
+    /// multi-evento heredaba el PRIMER offset del texto completo ("gym 30 antes
+    /// y reunión 1 hora antes" → ambos 30). `groupOffset` es el aviso GRUPAL
+    /// ("...antes de cada uno/ambos") que se aplica a los eventos sin offset
+    /// propio. No-op para intents no-createEvent.
+    private static func injectSegmentReminder(_ intent: NovaIntent, segment: String, groupOffset: Int? = nil) -> NovaIntent {
+        guard case .createEvent(let t, let w, let e, let l, let s, let wr, let rec, _, _) = intent else {
+            return intent
+        }
+        let rem = NovaActionNormalizer.extractReminderOffsetAndNote(from: segment)
+        return .createEvent(
+            title: t, when: w, endTime: e, location: l, section: s,
+            wantsReminder: wr, recurrence: rec,
+            reminderOffset: rem?.offsetMinutes ?? groupOffset, reminderNote: rem?.note
+        )
+    }
+
+    /// Detecta un recordatorio GRUPAL ("...acuérdame 30 min antes de cada
+    /// uno / de ambos / de los dos / de cada clase") y devuelve (offset,
+    /// textoSinLaClausula). El offset se aplica a TODOS los eventos del
+    /// mensaje; la cláusula se remueve para que no contamine el último evento
+    /// ni se pierda su segmento. nil si no hay directiva grupal.
+    private static func extractAndStripGroupReminder(_ text: String) -> (offset: Int, cleaned: String)? {
+        let lower = text.lowercased()
+        // Debe mencionar un destinatario grupal explícito.
+        let groupTargets = ["de cada uno", "de cada una", "de ambos", "de ambas",
+                            "de los dos", "de las dos",
+                            "de cada clase", "de cada evento", "de cada reunión",
+                            "de cada reunion", "de cada partido", "de cada sesión",
+                            "de cada sesion", "para ambos", "para ambas",
+                            "para cada uno", "para los dos"]
+        guard groupTargets.contains(where: { lower.contains($0) }) else { return nil }
+        guard let off = NovaActionNormalizer.extractReminderOffset(from: text) else { return nil }
+        // Remover la cláusula completa: "(y)? (acuérdame/avísame/recuérdame)?
+        // N (min|hora)s antes (de|para) <grupo>" — y la coma previa si quedó.
+        let unit = "(?:min|minutos?|h|hs|hrs?|horas?)"
+        let num = "(?:\\d{1,3}|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|media|medio)"
+        let verb = "(?:ac[uú]erdame|acuerdame|recu[eé]rdame|recuerdame|av[ií]same|avisame)"
+        let target = "(?:de|para)\\s+(?:cada\\s+\\w+|ambos|ambas|los\\s+dos|las\\s+dos)"
+        let clause = "\\s*,?\\s*(?:y\\s+)?(?:\(verb)\\s+)?\(num)\\s+\(unit)\\s+antes\\s+\(target)\\b"
+        var cleaned = text
+        if let regex = try? NSRegularExpression(pattern: clause, options: [.caseInsensitive]) {
+            let ns = cleaned as NSString
+            cleaned = regex.stringByReplacingMatches(
+                in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: ""
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return (off, cleaned)
+    }
+
     static func parseAll(_ text: String, context: NovaContext = NovaContext()) -> [NovaIntent] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        var segments = splitOnStrongConnectors(trimmed)
 
-        // Detección de reminder compartido: "...y recuérdame N min antes de cada
-        // clase/evento". Si el último segmento es esa directiva, lo extraemos y
-        // appendamos "acuérdame N min antes" a cada segmento de evento. Sin esto,
-        // el reminder se parsearía como una intent independiente o se perdería.
+        // Recordatorio GRUPAL ("...acuérdame 30 min antes de cada uno/ambos/
+        // los dos"): lo extraemos del texto COMPLETO y removemos su cláusula
+        // ANTES de segmentar — así no contamina ni descarta el último evento.
+        // El offset se aplica a todos los eventos sin offset propio.
+        var groupOffset: Int? = nil
+        var workingText = trimmed
+        if let g = extractAndStripGroupReminder(trimmed) {
+            groupOffset = g.offset
+            workingText = g.cleaned
+        }
+
+        var segments = splitOnStrongConnectors(workingText)
+
+        // Detección de reminder compartido LEGACY (último segmento ES la
+        // directiva): "...y recuérdame N min antes de cada clase". Solo aplica
+        // si extractAndStripGroupReminder no lo cubrió ya.
         var sharedReminderSuffix: String? = nil
-        if let last = segments.last,
+        if groupOffset == nil, let last = segments.last,
            let suffix = extractGroupReminderSuffix(from: last) {
             sharedReminderSuffix = suffix
             segments = Array(segments.dropLast())
@@ -1035,9 +1104,11 @@ enum NovaResponder {
         guard segments.count > 1 else {
             // Si solo queda 1 segmento + shared reminder, appendamos y parseamos.
             if let suffix = sharedReminderSuffix, let only = segments.first {
-                return [parse("\(only) \(suffix)", context: context)]
+                let seg = "\(only) \(suffix)"
+                return [injectSegmentReminder(parse(seg, context: context), segment: seg, groupOffset: groupOffset)]
             }
-            return [parse(trimmed, context: context)]
+            let only = segments.first ?? workingText
+            return [injectSegmentReminder(parse(only, context: context), segment: only, groupOffset: groupOffset)]
         }
 
         // Detectar marcador temporal global del texto completo.
@@ -1122,7 +1193,10 @@ enum NovaResponder {
             if let suffix = sharedReminderSuffix {
                 workingSeg = "\(workingSeg) \(suffix)"
             }
-            intents.append(parse(workingSeg, context: context))
+            // Inyectamos el offset/nota de recordatorio de ESTE segmento para
+            // que cada evento del lote use su propio aviso (no el primero).
+            // groupOffset cubre los eventos sin offset propio en avisos grupales.
+            intents.append(injectSegmentReminder(parse(workingSeg, context: context), segment: workingSeg, groupOffset: groupOffset))
         }
         return intents
     }
@@ -1236,10 +1310,69 @@ enum NovaResponder {
         working = applyReminderTriggerSplit(working, marker: marker)
         // Pasada 2: " y " con heurística de hora-en-ambos-lados.
         working = applySmartYSplit(working, marker: marker)
+        // Pasada 2b: comas entre eventos con hora ("gym a las 7, desayuno a
+        // las 8 y reunión a las 10") — separa la lista en eventos.
+        working = applySmartCommaSplit(working, marker: marker)
+        // Pasada 2c: " y <verbo-tarea>" tras un evento con hora ("reunión a
+        // las 3 y comprar pan") — separa el evento de la tarea.
+        working = applyEventTaskYSplit(working, marker: marker)
         return working
             .components(separatedBy: marker)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    /// Split en comas cuando AMBOS lados tienen su propia hora (lista de
+    /// eventos). No toca listas sin horas ("pan, leche, huevos") ni cláusulas
+    /// trailing sin hora ("reunión a las 3, importante").
+    private static func applySmartCommaSplit(_ text: String, marker: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: ",\\s+") else { return text }
+        let hourRegex = try? NSRegularExpression(pattern: hourMarkerPattern, options: [.caseInsensitive])
+        let lower = text.lowercased()
+        let lowerNS = lower as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length))
+        guard !matches.isEmpty else { return text }
+        var result = text
+        func hasHour(_ s: String) -> Bool {
+            hourRegex?.firstMatch(in: s, range: NSRange(location: 0, length: (s as NSString).length)) != nil
+        }
+        for match in matches.reversed() {
+            let left = lowerNS.substring(to: match.range.location)
+            let right = lowerNS.substring(from: match.range.location + match.range.length)
+            if hasHour(left) && hasHour(right) {
+                result = (result as NSString).replacingCharacters(in: match.range, with: marker)
+            }
+        }
+        return result
+    }
+
+    /// Split " y <verbo-tarea>" cuando el lado izquierdo tiene hora (un
+    /// evento) y el derecho empieza con un verbo de tarea SIN hora propia.
+    /// Separa "reunión a las 3 y comprar pan" → evento + tarea. NO rompe
+    /// "comprar pan y leche" (izq sin hora) ni "Juan y Pedro a las 5".
+    private static func applyEventTaskYSplit(_ text: String, marker: String) -> String {
+        let taskVerbs = "comprar|llamar|pagar|mandar|enviar|recoger|sacar|devolver|imprimir|firmar|reservar|responder|contestar|cancelar|cotizar|depositar|retirar|avisarle|escribirle"
+        guard let regex = try? NSRegularExpression(
+            pattern: "\\s+y\\s+(?=(?:\(taskVerbs))\\b)", options: [.caseInsensitive]
+        ) else { return text }
+        let hourRegex = try? NSRegularExpression(pattern: hourMarkerPattern, options: [.caseInsensitive])
+        let lower = text.lowercased()
+        let lowerNS = lower as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length))
+        guard !matches.isEmpty else { return text }
+        var result = text
+        func hasHour(_ s: String) -> Bool {
+            hourRegex?.firstMatch(in: s, range: NSRange(location: 0, length: (s as NSString).length)) != nil
+        }
+        for match in matches.reversed() {
+            let left = lowerNS.substring(to: match.range.location)
+            let right = lowerNS.substring(from: match.range.location + match.range.length)
+            // Izquierda con hora (evento), derecha SIN hora (tarea pura).
+            if hasHour(left) && !hasHour(right) {
+                result = (result as NSString).replacingCharacters(in: match.range, with: marker)
+            }
+        }
+        return result
     }
 
     /// Splittea cuando aparece un trigger de recordatorio mid-sentence,
@@ -2113,13 +2246,20 @@ enum NovaResponder {
                 lower.range(of: "\\b\(noun)\\b", options: [.regularExpression]) != nil
             })
             let nounTitle = foundNoun.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "Actividad"
+            // Título COMPLETO (cabeza + calificador): "gym pierna" → "Gym
+            // pierna" para que el subtítulo NO se pierda (downstream lo separa
+            // con splitTitleSubtitle → Gym + Pierna). Si la limpieza deja solo
+            // la cabeza ("gym a las 6"), cae al nounTitle. No tocamos el path
+            // de tarea (sin hora) para no alterar "fútbol hoy".
+            let fullTitle = NovaActionNormalizer.cleanTitle(trimmed)
+            let eventTitle = fullTitle.lowercased().hasPrefix(foundNoun ?? "∅") ? fullTitle : nounTitle
             if hasExplicitTime, let date = when {
                 // Hora explícita → evento puntual.
                 let location = extractLocation(from: trimmed)
                 let section = detectSection(in: lower)
                 let explicitEnd = extractExplicitEndTime(from: lower, startTime: date)
                 return .createEvent(
-                    title: nounTitle, when: date, endTime: explicitEnd,
+                    title: eventTitle, when: date, endTime: explicitEnd,
                     location: location, section: section,
                     wantsReminder: wantsReminder, recurrence: nil
                 )
@@ -2321,7 +2461,7 @@ enum NovaResponder {
                 "Listo, agrego «\(title)»\(dueBit) a tus pendientes\(recBit).\(remBit)",
                 "La meto como tarea\(dueBit)\(recBit). Si quieres cambiar la prioridad, dime.\(remBit)"
             ])
-        case .createEvent(let title, let when, _, let location, let section, _, _):
+        case .createEvent(let title, let when, _, let location, let section, _, _, _, _):
             let timeBit = when.map { "el \(DateFormatters.weekdayDay.string(from: $0).lowercased()) a las \(DateFormatters.hourMinute.string(from: $0))" } ?? "cuando me digas"
             let placeBit = location.map { " en \($0)" } ?? ""
             let sectionBit = section.map { " (\($0.displayName.lowercased()))" } ?? ""
@@ -7102,7 +7242,7 @@ final class FocusDataStore: ObservableObject {
     /// Devuelve nil si el intent no debería ejecutarse acá (caller fall-through).
     func applyLocalNovaIntent(_ intent: NovaIntent, userText: String, isMultiIntent: Bool = false) -> String? {
         switch intent {
-        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder, let recurrence):
+        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder, let recurrence, let segReminderOffset, let segReminderNote):
             guard let date = when else { return nil }
             // PASO 1: Limpiar título via normalizer (mismo pipeline que
             // backend path → consistencia 100%).
@@ -7218,13 +7358,21 @@ final class FocusDataStore: ObservableObject {
                 return "Ya tenía «\(title)» agendado a esa hora — no lo duplico."
             }
 
-            // PASO 5: Offsets + notas custom desde userText.
+            // PASO 5: Offsets + notas custom.
             //   "X min antes" → offset.
             //   "X min antes de Y" → offset + note "Y" (acción concreta que
             //   el user quiere recordar; va anclada al evento padre).
+            // PRIORIDAD: el offset/nota PRE-EXTRAÍDO del SEGMENTO de este
+            // evento (parseAll lo inyecta por-segmento). Solo si no vino
+            // (single-intent o caller que no pasó por parseAll) extraemos del
+            // userText completo. Esto arregla el bug multi-evento donde el
+            // primer offset del texto se aplicaba a TODOS los eventos.
             let extractedOffsets: [Int]?
             let extractedNotes: [String]?
-            if let detail = NovaActionNormalizer.extractReminderOffsetAndNote(from: userText) {
+            if let segOffset = segReminderOffset {
+                extractedOffsets = [segOffset]
+                extractedNotes = (segReminderNote?.isEmpty == false) ? [segReminderNote!] : nil
+            } else if !isMultiIntent, let detail = NovaActionNormalizer.extractReminderOffsetAndNote(from: userText) {
                 extractedOffsets = [detail.offsetMinutes]
                 if let note = detail.note, !note.isEmpty {
                     extractedNotes = [note]

@@ -20,7 +20,8 @@ struct FocusApp: App {
         let argRunSubtitle50 = CommandLine.arguments.contains("--run-subtitle-50")
         let argRun50Final = CommandLine.arguments.contains("--run-50-final")
         let argRunMemory = CommandLine.arguments.contains("--run-memory")
-        if testFlag != nil || argRunAll || argRun50 || argRunSubtitle50 || argRun50Final || argRunMemory {
+        let argRunBattery = CommandLine.arguments.contains("--run-battery")
+        if testFlag != nil || argRunAll || argRun50 || argRunSubtitle50 || argRun50Final || argRunMemory || argRunBattery {
             if let docs = FileManager.default.urls(
                 for: .documentDirectory, in: .userDomainMask
             ).first {
@@ -39,9 +40,15 @@ struct FocusApp: App {
             let runSubtitle50 = (testFlag == "subtitle50") || argRunSubtitle50
             let run50Final = (testFlag == "final50") || argRun50Final
             let runFiftyOnly = (testFlag == "50") || argRun50
+            let runBattery = (testFlag == "battery") || argRunBattery
             let result: String
             let outName: String
-            if runMemory {
+            if runBattery {
+                // Batería integral eventos + subtítulos + recordatorios
+                // (35 complejas + 15 simples). User spec 2026-06-13.
+                result = NovaActionNormalizerTests.runEventReminderBattery()
+                outName = "focus-validation-battery.log"
+            } else if runMemory {
                 result = NovaActionNormalizerTests.runValidationMemoryCases()
                 outName = "focus-validation-memory.log"
             } else if run50Final {
