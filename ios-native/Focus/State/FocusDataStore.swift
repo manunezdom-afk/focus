@@ -7092,13 +7092,23 @@ final class FocusDataStore: ObservableObject {
             let trailingDetail = NovaActionNormalizer
                 .extractEventDetail(from: userText).detail
             let (title, eventSubtitle): (String, String?) = {
-                // En multi-intent NO usamos el detalle trailing del userText
-                // completo: pertenece a UN solo segmento y se filtraba a todos
-                // los eventos (ej. "dentista a las 4 y comprar remedios a las
-                // 5" ponía "comprar remedios a las 5" como subtítulo del
-                // dentista). Cada evento usa su propio split en su lugar.
-                if let detail = trailingDetail, !isMultiIntent {
-                    return (cleanedTitle, detail)
+                if let detail = trailingDetail {
+                    // Single-intent: el detalle es de ESTE (único) evento.
+                    if !isMultiIntent {
+                        return (cleanedTitle, detail)
+                    }
+                    // Multi-intent: el detalle trailing del userText completo
+                    // pertenece a UN solo segmento. Antes se suprimía para
+                    // TODOS (sin esto "dentista a las 4 y comprar remedios a
+                    // las 5" ponía "comprar remedios" como subtítulo del
+                    // dentista). Ahora lo anclamos SOLO al evento que el
+                    // detalle nombra explícitamente ("...al dentista" →
+                    // "Dentista"); para el resto se sigue suprimiendo. Sin
+                    // referencia explícita ("comprar remedios") nadie lo
+                    // recibe — el guard original se mantiene (fix 2026-06-12).
+                    if NovaActionNormalizer.detailTargetsTitle(detail: detail, title: cleanedTitle) {
+                        return (cleanedTitle, detail)
+                    }
                 }
                 if let split = NovaActionNormalizer.splitTitleSubtitle(cleanedTitle) {
                     return (split.title, split.subtitle)

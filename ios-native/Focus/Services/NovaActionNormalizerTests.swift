@@ -22,6 +22,17 @@ enum NovaActionNormalizerTests {
     static func runAll() -> String {
         var failures: [String] = []
 
+        // ───── Regresión 2026-06-12: parser LOCAL multi-intent ─────────
+        // Título sucio + recordatorio perdido al segmentar mensajes con
+        // varios eventos (path demo / sin sesión).
+        if Thread.isMainThread {
+            failures += MainActor.assumeIsolated {
+                localMultiIntentRegressionFailures()
+            }
+        } else {
+            failures.append("  ✗ local-multi-intent: runAll no corrió en main thread")
+        }
+
         // ───── cleanTitle ──────────────────────────────────────────────
 
         check(
@@ -4090,6 +4101,100 @@ enum NovaActionNormalizerTests {
         for ev in outcome.createdEvents {
             store.deleteEvent(ev.id)
         }
+        return fails
+    }
+
+    // MARK: - Regresión: parser LOCAL multi-intent (2026-06-12)
+
+    /// Reproduce el bug del parser local (modo demo / sin sesión): al
+    /// segmentar un mensaje con varios eventos, el segundo título salía
+    /// sucio (coma colgante + residuo del trigger de recordatorio) para la
+    /// clase de inputs "X a las N, acuérdame de Y", y el "acuérdame de … al
+    /// dentista" se perdía sin anclarse al evento que nombra. Corre el path
+    /// REAL (NovaResponder.parseAll → applyLocalNovaIntent) y limpia al final.
+    @MainActor
+    private static func localMultiIntentRegressionFailures() -> [String] {
+        var fails: [String] = []
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+            if ok {
+                print("  ✓ \(label)")
+            } else {
+                let msg = "  ✗ \(label)\(detail.isEmpty ? "" : " — \(detail)")"
+                print(msg)
+                fails.append(msg)
+            }
+        }
+
+        // Helper: corre el path local real y devuelve los eventos creados.
+        // Sanea fixtures preexistentes (de corridas previas persistidas en
+        // UserDefaults) para que el guard anti-duplicado no bloquee la
+        // creación.
+        func runLocal(_ text: String) -> (store: FocusDataStore, events: [FocusEvent], replies: [String], intentCount: Int) {
+            let store = FocusDataStore()
+            let fixtureNeedles = ["dentista", "comprar remedios", "remedios"]
+            for ev in store.events where fixtureNeedles.contains(where: { ev.title.lowercased().contains($0) }) {
+                store.deleteEvent(ev.id)
+            }
+            let before = Set(store.events.map(\.id))
+            let intents = NovaResponder.parseAll(text)
+            var replies: [String] = []
+            for intent in intents {
+                if let r = store.applyLocalNovaIntent(
+                    intent, userText: text, isMultiIntent: intents.count > 1
+                ) { replies.append(r) }
+            }
+            let created = store.events
+                .filter { !before.contains($0.id) }
+                .sorted { $0.startTime < $1.startTime }
+            return (store, created, replies, intents.count)
+        }
+
+        // ── Caso 1: el input exacto del bug reportado.
+        let (store1, evs1, replies1, ic1) = runLocal(
+            "dentista a las 4 y comprar remedios a las 5, acuérdame de llevar la receta al dentista"
+        )
+        let dentista = evs1.first { $0.title.lowercased().contains("dentista") }
+        let remedios = evs1.first { $0.title.lowercased().contains("remedios") }
+        check("local-multi: crea 2 eventos", evs1.count == 2,
+              "creó \(evs1.count) (intents=\(ic1)) titles=\(evs1.map(\.title)) replies=\(replies1)")
+        check("local-multi: título 2 LIMPIO ('Comprar remedios')",
+              remedios?.title == "Comprar remedios",
+              "title='\(remedios?.title ?? "nil")'")
+        check("local-multi: sin coma/trigger colgante en ningún título",
+              evs1.allSatisfy { !$0.title.contains(",") && !$0.title.lowercased().contains("acuérdame") && !$0.title.lowercased().contains("acuerdame") },
+              "titles=\(evs1.map(\.title))")
+        // El recordatorio "…al dentista" se ancla al Dentista, no a Remedios.
+        check("local-multi: detalle anclado al Dentista",
+              dentista?.subtitle?.lowercased().contains("receta") == true,
+              "dentista.sub='\(dentista?.subtitle ?? "nil")'")
+        check("local-multi: el detalle NO contamina Comprar remedios",
+              remedios?.subtitle == nil,
+              "remedios.sub='\(remedios?.subtitle ?? "nil")'")
+        for ev in evs1 { store1.deleteEvent(ev.id) }
+
+        // ── Caso 2: el bug ORIGINAL no debe reaparecer — un detalle SIN
+        // referencia explícita no se filtra a ningún evento.
+        let (store2, evs2, _, _) = runLocal("dentista a las 4 y comprar remedios a las 5")
+        let dent2 = evs2.first { $0.title.lowercased().contains("dentista") }
+        let rem2 = evs2.first { $0.title.lowercased().contains("remedios") }
+        check("local-multi: bug original sigue arreglado (Dentista sin subtítulo ajeno)",
+              dent2?.subtitle == nil,
+              "dentista.sub='\(dent2?.subtitle ?? "nil")'")
+        check("local-multi: Comprar remedios sin subtítulo auto-referencial",
+              rem2?.subtitle == nil,
+              "remedios.sub='\(rem2?.subtitle ?? "nil")'")
+        for ev in evs2 { store2.deleteEvent(ev.id) }
+
+        // ── Caso 3 (unidad): cleanTitle limpia la clase coma+trigger aunque
+        // lo que siga NO sea un verbo de detalle reconocido.
+        check("cleanTitle: 'comprar remedios a las 5, acuérdame de algo' → 'Comprar remedios'",
+              NovaActionNormalizer.cleanTitle("comprar remedios a las 5, acuérdame de algo") == "Comprar remedios",
+              "='\(NovaActionNormalizer.cleanTitle("comprar remedios a las 5, acuérdame de algo"))'")
+        // ── Caso 4 (unidad): trigger SIN coma al inicio NO se trunca de más.
+        check("cleanTitle: 'hoy recuérdame llamar a Juan' → 'Llamar a Juan'",
+              NovaActionNormalizer.cleanTitle("hoy recuérdame llamar a Juan") == "Llamar a Juan",
+              "='\(NovaActionNormalizer.cleanTitle("hoy recuérdame llamar a Juan"))'")
+
         return fails
     }
 }

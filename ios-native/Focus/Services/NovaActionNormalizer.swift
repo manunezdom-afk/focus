@@ -82,6 +82,37 @@ enum NovaActionNormalizer {
         }
     }
 
+    /// True si `detail` termina con una referencia explícita a un destino
+    /// ("...al dentista", "...a la reunión", "...del banco") cuya palabra
+    /// objetivo aproxima el `title` del evento. Sirve para anclar, en un
+    /// mensaje multi-evento, el detalle a EXACTAMENTE el evento que nombra:
+    ///   "dentista a las 4 y comprar remedios a las 5, acuérdame de llevar
+    ///    la receta al dentista" → el detalle "Llevar la receta al dentista"
+    ///    se ancla a "Dentista", NO a "Comprar remedios".
+    ///
+    /// Gateado en la referencia trailing "al/a la/… X": un detalle SIN esa
+    /// referencia ("comprar remedios") nunca matchea, así que el guard
+    /// multi-intent lo sigue suprimiendo (no reintroduce el bug original ni
+    /// se auto-referencia).
+    static func detailTargetsTitle(detail: String, title: String) -> Bool {
+        let dl = detail.lowercased()
+        let tl = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tl.isEmpty else { return false }
+        // Palabra objetivo tras la última preposición de destino, al final.
+        guard let range = dl.range(
+            of: #"\b(?:al|a la|a los|a las|del|de la|de los|de las)\s+([a-záéíóúñ]{3,})\s*$"#,
+            options: .regularExpression
+        ) else {
+            return false
+        }
+        let targetWord = String(dl[range])
+            .components(separatedBy: .whitespaces)
+            .last ?? ""
+        guard targetWord.count >= 3 else { return false }
+        let titleWords = Set(tl.split(separator: " ").map(String.init))
+        return titleWords.contains(targetWord) || tl == targetWord
+    }
+
     /// Verbos que implican una **acción puntual** y se tratan como
     /// recordatorio (sin duración + notificación si toggle activo)
     /// aunque el usuario no haya dicho "acuérdame".
@@ -142,6 +173,31 @@ enum NovaActionNormalizer {
         // 1. Strip prefix "Recordatorio: " (case-insensitive)
         if let range = result.range(of: #"^\s*recordatorio[:\s-]+"#,
                                      options: [.regularExpression, .caseInsensitive]) {
+            result.removeSubrange(range)
+        }
+
+        // 1.5. Truncar metadata de recordatorio mid-título tras una COMA.
+        //      Caso del parser local multi-intent (2026-06-12): el segmento
+        //      "comprar remedios a las 5, acuérdame de llevar la receta al
+        //      dentista" dejaba el título "Comprar remedios , acuérdame de"
+        //      (coma huérfana + residuo del trigger) cuando lo que seguía al
+        //      trigger no era un verbo de detalle reconocido. La COMA seguida
+        //      de un trigger de recordatorio marca una cláusula separada:
+        //      todo desde ahí es la acción a recordar (se extrae aparte vía
+        //      extractEventDetail), NO parte del título. Cortamos en la coma.
+        //
+        //      La coma es la señal — gateando en ella evitamos falsos
+        //      positivos tipo "hoy recuérdame llamar a Juan" (sin coma, el
+        //      trigger lidera la acción; el step 2 lo strippea y deja
+        //      "Llamar a Juan").
+        let triggerAlternation = reminderTriggers
+            .map { NSRegularExpression.escapedPattern(for: $0) }
+            .joined(separator: "|")
+        let reminderClausePattern = "\\s*,\\s*(?:" + triggerAlternation + ")\\b[\\s\\S]*$"
+        if let range = result.range(
+            of: reminderClausePattern,
+            options: [.regularExpression, .caseInsensitive]
+        ) {
             result.removeSubrange(range)
         }
 
@@ -649,7 +705,16 @@ enum NovaActionNormalizer {
             }
         }
 
-        // 8. Collapse whitespace + trim puntuación.
+        // 8. Limpieza de coma/;/: HUÉRFANA interior — una puntuación
+        //    flanqueada por espacio (no pegada a la palabra previa) es
+        //    residuo de un strip temporal/trigger, no puntuación legítima de
+        //    lista ("Pan, leche" no tiene espacio antes de la coma → intacto).
+        //    "remedios , algo" → "remedios algo"; "remedios ," → "remedios".
+        result = result.replacingOccurrences(
+            of: #"\s+[,;:](\s|$)"#, with: "$1", options: .regularExpression
+        )
+
+        // 8-bis. Collapse whitespace + trim puntuación de bordes.
         result = result
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }

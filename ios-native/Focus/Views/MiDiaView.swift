@@ -1492,7 +1492,7 @@ struct MiDiaView: View {
         var lastAction: InlineNovaAction? = nil
 
         for intent in intents {
-            let resp = executeIntent(intent, userText: trimmed)
+            let resp = executeIntent(intent, userText: trimmed, isMultiIntent: true)
             guard !resp.isError else { continue }
             if lastAction == nil { lastAction = resp.action }
             if let item = CreatedItem(intent: intent, userText: trimmed) {
@@ -1763,7 +1763,7 @@ struct MiDiaView: View {
         return (normalized, nil)
     }
 
-    private func executeIntent(_ intent: NovaIntent, userText: String) -> InlineNovaResponse {
+    private func executeIntent(_ intent: NovaIntent, userText: String, isMultiIntent: Bool = false) -> InlineNovaResponse {
         switch intent {
         case .createTask(let title, let dueDate, let recurrence, let wantsReminder):
             // Si hay fecha y es hoy/mañana/esta semana, usamos esa categoría;
@@ -1824,8 +1824,8 @@ struct MiDiaView: View {
             // mismo input creaba bloques con título tipo "Más tarde viene la
             // agustina 20 min antes" en vez de "Viene la agustina". Unificamos
             // el pipeline llamando cleanTitle acá también.
-            let title = NovaActionNormalizer.cleanTitle(rawTitle)
-            guard !title.isEmpty else {
+            let cleanedTitle = NovaActionNormalizer.cleanTitle(rawTitle)
+            guard !cleanedTitle.isEmpty else {
                 return InlineNovaResponse(
                     userText: userText,
                     summary: "Me falta el nombre del evento para agendarlo.",
@@ -1833,6 +1833,25 @@ struct MiDiaView: View {
                     tone: .clarify
                 )
             }
+            // Subtítulo/detalle, espejo de FocusDataStore.applyLocalNovaIntent:
+            // detalle trailing del userText ("…acuérdame de llevar la receta") →
+            // subtítulo del evento. En multi-intent solo se ancla al evento que
+            // el detalle nombra explícitamente ("…al dentista" → "Dentista");
+            // sin referencia (o auto-referencia) se suprime para no filtrarlo
+            // a todos. Antes este path inline JAMÁS seteaba subtítulo (2026-06-12).
+            let trailingDetail = NovaActionNormalizer.extractEventDetail(from: userText).detail
+            let (title, eventSubtitle): (String, String?) = {
+                if let detail = trailingDetail {
+                    if !isMultiIntent { return (cleanedTitle, detail) }
+                    if NovaActionNormalizer.detailTargetsTitle(detail: detail, title: cleanedTitle) {
+                        return (cleanedTitle, detail)
+                    }
+                }
+                if let split = NovaActionNormalizer.splitTitleSubtitle(cleanedTitle) {
+                    return (split.title, split.subtitle)
+                }
+                return (cleanedTitle, nil)
+            }()
             guard let date = when else {
                 return InlineNovaResponse(
                     userText: userText,
@@ -1928,7 +1947,8 @@ struct MiDiaView: View {
                     location: location,
                     isReminder: isReminderFlag,
                     inferredDuration: inferredFlag,
-                    reminderOffsets: extractedOffsets
+                    reminderOffsets: extractedOffsets,
+                    subtitle: eventSubtitle
                 )
                 store.addEvent(event)
                 if idx == 0 { firstEventId = event.id }
