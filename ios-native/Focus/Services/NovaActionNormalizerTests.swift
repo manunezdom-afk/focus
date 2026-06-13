@@ -18,8 +18,20 @@ import Foundation
 /// dice que deben funcionar.
 enum NovaActionNormalizerTests {
 
+    /// Reloj fijo para tests: HOY a las 06:00. Mantiene la fecha real (los
+    /// labels today/mañana/weekday siguen correctos) pero fija la hora de la
+    /// mañana, de modo que la resolución AM/PM es DETERMINISTA: a las 6 AM no
+    /// dispara el night-context (≥19h) ni el future-first "hoy", así que las
+    /// horas ambiguas se resuelven por la regla coloquial estable (8-12→AM,
+    /// 1-7→PM). Esto elimina la flakiness de correr las suites en la tarde.
+    private static var fixedTestNow: Date {
+        Calendar.current.date(bySettingHour: 6, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+
     @discardableResult
     static func runAll() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
         var failures: [String] = []
 
         // ───── Regresión 2026-06-12: parser LOCAL multi-intent ─────────
@@ -2883,6 +2895,8 @@ enum NovaActionNormalizerTests {
     /// los casos {1, 2, 3, 6, 7, 11, 12, 21, 44}.
     @discardableResult
     static func runValidation50Cases() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
         typealias K = ParsedKind
         typealias D = DayLabel
         struct Case {
@@ -3236,6 +3250,8 @@ enum NovaActionNormalizerTests {
     /// Flag: `--run-50-final` o `FOCUS_RUN_TESTS=final50`.
     @discardableResult
     static func runValidation50FinalCases() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
         typealias K = ParsedKind
         typealias D = DayLabel
         struct Case {
@@ -3374,6 +3390,8 @@ enum NovaActionNormalizerTests {
 
     @discardableResult
     static func runValidationSubtitle50Cases() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
         typealias K = ParsedKind
         typealias D = DayLabel
         struct Case {
@@ -3853,6 +3871,8 @@ enum NovaActionNormalizerTests {
     /// Idempotente: limpia el store al final.
     @discardableResult
     static func runValidationMemoryCases() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
         var out = "===== NOVA MEMORY VALIDATION =====\n"
         out += "Fecha: \(Date())\n\n"
         var passCount = 0

@@ -425,6 +425,29 @@ struct PendingClarification: Equatable {
 ///   los del último intent.
 enum NovaResponder {
 
+    // MARK: - Reloj de referencia (test seam)
+
+    #if DEBUG
+    /// Reloj inyectable SOLO para tests. nil = usa `Date()` real. La
+    /// resolución AM/PM de horas ambiguas (1..12 sin am/pm) mira la hora
+    /// ACTUAL (night-context ≥19h, future-first "hoy"), así que correr las
+    /// suites en la tarde flipaba horas a PM y las volvía flaky. Fijar este
+    /// reloj a una hora de mañana las hace deterministas. Resetear tras usar.
+    nonisolated(unsafe) static var testReferenceDate: Date?
+    #endif
+
+    /// Hora "ahora" para toda resolución de fecha/hora del parser. En
+    /// producción es `Date()`; en tests DEBUG puede fijarse vía
+    /// `testReferenceDate` para eliminar la dependencia del reloj del
+    /// simulador. Producción RELEASE nunca ve el override.
+    static var referenceNow: Date {
+        #if DEBUG
+        return testReferenceDate ?? Date()
+        #else
+        return Date()
+        #endif
+    }
+
     // MARK: Public API
 
     /// Detecta si una frase parece tener MÚLTIPLES acciones que el parser
@@ -3869,7 +3892,7 @@ enum NovaResponder {
     /// sin hora, asume 9:00 (lo usamos como flag de "necesita hora").
     private static func extractDateTime(from lower: String) -> Date? {
         let cal = Calendar.current
-        let now = Date()
+        let now = referenceNow  // test seam: Date() en producción
 
         // Offset relativo a "ahora". Tres patrones, en orden:
         //   "en N minutos" / "en N min"  → +N minutos (explícito)
@@ -4326,7 +4349,7 @@ enum NovaResponder {
         adjustAmPm(
             hour: hour,
             in: text,
-            currentHour: Calendar.current.component(.hour, from: Date())
+            currentHour: Calendar.current.component(.hour, from: referenceNow)
         )
     }
 
