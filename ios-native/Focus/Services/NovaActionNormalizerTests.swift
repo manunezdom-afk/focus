@@ -33,6 +33,12 @@ enum NovaActionNormalizerTests {
             failures.append("  ✗ local-multi-intent: runAll no corrió en main thread")
         }
 
+        // ───── Regresión 2026-06-13: fallback logueado VISIBLE ──────────
+        // El fallback al parser local estando logueado NUNCA debe ser
+        // silencioso: cada error que hace fallback debe producir una nota
+        // honesta no-vacía (antes los errores de servidor devolvían nil).
+        fallbackVisibilityFailures(into: &failures)
+
         // ───── cleanTitle ──────────────────────────────────────────────
 
         check(
@@ -4102,6 +4108,49 @@ enum NovaActionNormalizerTests {
             store.deleteEvent(ev.id)
         }
         return fails
+    }
+
+    // MARK: - Regresión: fallback logueado visible (2026-06-13)
+
+    /// Verifica que NINGÚN error que dispara fallback al parser local deje al
+    /// usuario sin aviso (loggedInFallbackNote no-vacía). Antes los errores de
+    /// servidor (timeout/serviceUnavailable/server/...) caían en silencio.
+    private static func fallbackVisibilityFailures(into failures: inout [String]) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+            if ok { print("  ✓ \(label)") }
+            else {
+                let msg = "  ✗ \(label)\(detail.isEmpty ? "" : " — \(detail)")"
+                print(msg); failures.append(msg)
+            }
+        }
+        // Errores que SÍ hacen fallback → nota visible obligatoria.
+        let recoverable: [(String, NovaServiceError)] = [
+            ("unauthorized", .unauthorized),
+            ("quotaExceeded", .quotaExceeded(message: nil)),
+            ("offline", .offline),
+            ("timeout", .timeout),
+            ("serviceUnavailable", .serviceUnavailable),
+            ("badLLMOutput", .badLLMOutput),
+            ("invalidResponse", .invalidResponse),
+            ("server", .server(status: 500)),
+        ]
+        for (name, err) in recoverable {
+            check("fallback-visible: \(name) tiene nota honesta no-vacía",
+                  !err.loggedInFallbackNote.isEmpty && err.canFallbackToLocal,
+                  "note='\(err.loggedInFallbackNote)' canFallback=\(err.canFallbackToLocal)")
+            // La nota debe dejar claro que NO es la IA real (menciona respaldo
+            // local / sesión / conexión), no un "Listo" que parezca normal.
+            let n = err.loggedInFallbackNote.lowercased()
+            check("fallback-visible: \(name) deja claro que es respaldo/local",
+                  n.contains("local") || n.contains("sesión") || n.contains("conexión") || n.contains("límite"),
+                  "note='\(err.loggedInFallbackNote)'")
+        }
+        // Errores client-side que NO hacen fallback → sin nota.
+        for (name, err) in [("emptyMessage", NovaServiceError.emptyMessage), ("messageTooLong", .messageTooLong)] {
+            check("fallback-visible: \(name) no hace fallback",
+                  !err.canFallbackToLocal && err.loggedInFallbackNote.isEmpty,
+                  "canFallback=\(err.canFallbackToLocal)")
+        }
     }
 
     // MARK: - Regresión: parser LOCAL multi-intent (2026-06-12)

@@ -6789,6 +6789,11 @@ final class FocusDataStore: ObservableObject {
                     smartActionsMessage = result.smartActionsMessage
                     usedFallback = false
                 } catch let err as NovaServiceError where err.canFallbackToLocal {
+                    // LOG CLARO del error REAL (user spec 2026-06-13): estando
+                    // logueado, si el backend falla, queremos verlo en consola,
+                    // no que pase desapercibido. La nota humana visible se arma
+                    // abajo con fallbackNoteForChat.
+                    print("[Nova] ⚠️ FALLBACK LOGUEADO (chat): backend falló → \(err.debugLabel). Usando parser local de respaldo.")
                     // Fallback local CON ejecución: parsea + aplica intents.
                     // Antes solo generaba texto y no creaba eventos — por eso
                     // un 500 + "acuérdame X mañana" no creaba nada.
@@ -6818,6 +6823,9 @@ final class FocusDataStore: ObservableObject {
                     usedFallback = true
                     _ = executed
                 } catch {
+                    // Error inesperado (no NovaServiceError). También se loguea
+                    // y se muestra nota honesta — el fallback NO es silencioso.
+                    print("[Nova] ⚠️ FALLBACK LOGUEADO (chat): error inesperado → \(error). Usando parser local de respaldo.")
                     let replyJoined = await MainActor.run {
                         () -> String in
                         let expanded = NovaMemoryStore.shared.expandAliases(in: trimmed)
@@ -6835,7 +6843,7 @@ final class FocusDataStore: ObservableObject {
                     replyText = replyJoined
                     actions = []
                     smartActionsBlocked = false
-                    smartActionsMessage = nil
+                    smartActionsMessage = "(No pude contactar a Nova (IA) — usé el modo local de respaldo. Vuelve a intentarlo en un momento.)"
                     usedFallback = true
                 }
             } else {
@@ -7752,24 +7760,15 @@ final class FocusDataStore: ObservableObject {
 
     @MainActor
     private func fallbackNoteForChat(error: NovaServiceError) -> String? {
-        switch error {
-        case .unauthorized:
-            return "(Tu sesión expiró. Vuelve a iniciar sesión.)"
-        case .quotaExceeded(let m):
-            return m.map { "(\($0))" }
-        case .offline:
-            return "(Sin conexión — guardado local hasta volver a tener internet.)"
-        case .timeout, .serviceUnavailable, .badLLMOutput, .network,
-             .server, .invalidResponse, .encoding, .decoding:
-            // Antes mostrábamos "(Nova avanzada no respondió bien …)" en
-            // el chat. Eso preocupaba al usuario aunque la acción se
-            // hubiera ejecutado bien por fallback local. Devolver nil
-            // suprime la nota — el reply (que ya incluye el resumen de
-            // lo que Nova hizo) habla por sí solo.
-            return nil
-        default:
-            return nil
-        }
+        // Política 2026-06-13 (user spec): el fallback local estando LOGUEADO
+        // NUNCA debe ser silencioso. Antes los errores de servidor
+        // (timeout/serviceUnavailable/server/...) devolvían nil → parecía que
+        // Nova funcionó cuando en realidad cayó al parser local. Ahora SIEMPRE
+        // mostramos una nota honesta que deja claro que se usó el respaldo
+        // local, no la IA real. El texto vive en NovaServiceError.
+        // emptyMessage/messageTooLong no llegan acá (no hacen fallback).
+        let note = error.loggedInFallbackNote
+        return note.isEmpty ? nil : "(\(note))"
     }
 
     func runQuickAction(_ action: NovaQuickAction) {

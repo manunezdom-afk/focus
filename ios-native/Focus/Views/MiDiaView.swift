@@ -659,9 +659,12 @@ struct MiDiaView: View {
             // ni eso logra, devuelve un mensaje útil mostrando lo que SÍ
             // entendió en vez del genérico "no pude separar".
             if error.canFallbackToLocal {
+                // LOG CLARO del error REAL (user spec 2026-06-13): el fallback
+                // logueado debe verse en consola, no pasar desapercibido.
+                print("[Nova] ⚠️ FALLBACK LOGUEADO (Mi Día): backend falló → \(error.debugLabel). Usando parser local de respaldo.")
                 await MainActor.run {
                     NovaDevLog.shared.recordModelSelection(id: logId, model: .localFallback,
-                                                          reason: "backend error: \(error)")
+                                                          reason: "backend error: \(error.debugLabel)")
                     NovaDevLog.shared.finishRequest(id: logId, outcome: .actionApplied,
                                                     error: nil)
                 }
@@ -680,16 +683,18 @@ struct MiDiaView: View {
                 tone: .clarify
             )
         } catch {
-            // Caer al parser local sin nota — el usuario no necesita saber
-            // que hubo un error técnico si la acción se ejecutó. Si el
-            // local tampoco entiende, `runLocalFallback` ya devuelve un
-            // mensaje humano pidiendo aclaración.
+            // Error inesperado (no NovaServiceError): también visible + logueado.
+            // El fallback logueado NUNCA es silencioso (user spec 2026-06-13).
+            print("[Nova] ⚠️ FALLBACK LOGUEADO (Mi Día): error inesperado → \(error). Usando parser local de respaldo.")
             await MainActor.run {
                 NovaDevLog.shared.recordModelSelection(id: logId, model: .localFallback,
                                                       reason: "unknown error fallback")
                 NovaDevLog.shared.finishRequest(id: logId, outcome: .actionApplied)
             }
-            return runLocalFallback(for: trimmed, withNote: nil)
+            return runLocalFallback(
+                for: trimmed,
+                withNote: "No pude contactar a Nova (IA) — usé el modo local de respaldo. Vuelve a intentarlo en un momento."
+            )
         }
     }
 
@@ -1685,23 +1690,12 @@ struct MiDiaView: View {
     /// usuario no debe leer "modo local", "Nova avanzada", "Error 500",
     /// "status code", etc. — es ruido de implementación.
     private func humanFallbackNote(for error: NovaServiceError) -> String? {
-        switch error {
-        case .unauthorized:
-            return "Tu sesión expiró. Vuelve a iniciar sesión cuando puedas."
-        case .quotaExceeded(let message):
-            return message
-        case .offline:
-            return "Sin conexión. Tus cambios se guardan en este iPhone hasta que vuelvas a tener internet."
-        case .timeout, .serviceUnavailable, .badLLMOutput, .network,
-             .server, .invalidResponse, .encoding, .decoding:
-            // Si el fallback local ejecutó las acciones, el `summary` ya
-            // dice qué se hizo — no agregamos nota. Para los casos donde
-            // el local tampoco entendió, el caller muestra una pregunta
-            // humana por separado.
-            return nil
-        default:
-            return nil
-        }
+        // Política 2026-06-13 (user spec): estando LOGUEADO, el fallback local
+        // NUNCA es silencioso. Antes los errores de servidor devolvían nil y
+        // el `summary` del local hacía parecer que Nova funcionó normal. Ahora
+        // SIEMPRE mostramos la nota honesta (vive en NovaServiceError).
+        let note = error.loggedInFallbackNote
+        return note.isEmpty ? nil : note
     }
 
     /// Split del reply del backend en (summary, details). El backend ya
