@@ -4258,6 +4258,20 @@ enum NovaActionNormalizerTests {
                 for t in createdTasks { store.deleteTask(t.id) }
             }
 
+            // Guard del short-circuit absoluto (bug "10/11 h antes" 2026-06-13):
+            // en multi-evento con offset RELATIVO, extractReminderAbsoluteIntent
+            // NO debe matchear (si no, malinterpreta "a las 9" como aviso
+            // absoluto, calcula ~10 h y pierde la reunión). Un recordatorio
+            // absoluto PURO ("acuérdame a las 6:30") SÍ debe seguir detectándose.
+            let gAbs1 = NovaResponder.extractReminderAbsoluteIntent(
+                from: "gym a las 7 acuerdame 30 min antes y reunion a las 9 acuerdame una hora antes") == nil
+            let gAbs2 = NovaResponder.extractReminderAbsoluteIntent(
+                from: "futbol a las 7 acuerdame a las 6:30") != nil
+            if gAbs1 { pass += 1; rows.append("  G1 ✓ | multi-evento+relativo NO dispara aviso absoluto") }
+            else { fail += 1; rows.append("  G1 ✗ FAIL | absoluteIntent disparó en multi-evento (bug 10h)") }
+            if gAbs2 { pass += 1; rows.append("  G2 ✓ | aviso absoluto puro SÍ se detecta") }
+            else { fail += 1; rows.append("  G2 ✗ FAIL | aviso absoluto puro dejó de detectarse") }
+
             var out = "===== BATERÍA EVENTOS+SUBTÍTULOS+RECORDATORIOS =====\n"
             out += "RESULTADO: \(pass)/\(pass + fail) PASS  (\(fail) FAIL)\n"
             out += fail == 0 ? "✅ TODOS PASS\n" : "⚠️  Hay fallos\n"

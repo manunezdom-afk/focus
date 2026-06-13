@@ -706,6 +706,22 @@ enum NovaResponder {
         }
         guard let trigger = foundTrigger else { return nil }
 
+        // GUARD (bug real 2026-06-13): si el usuario dio un offset RELATIVO
+        // ("30 min antes", "una hora antes", "media hora antes"), el aviso NO
+        // es absoluto — lo maneja el flujo normal (relativo y, en multi-evento,
+        // por-segmento). Sin esto, "gym a las 7 acuérdame 30 min antes y
+        // reunión a las 9 acuérdame una hora antes" se malinterpretaba como
+        // UN evento@7 con aviso absoluto@9 (= ~10-11 h antes) y se perdía la
+        // reunión. extractReminderOffset detecta el patrón relativo.
+        if NovaActionNormalizer.extractReminderOffset(from: text) != nil { return nil }
+
+        // GUARD: dos triggers de recordatorio (uno por evento) ⇒ multi-evento,
+        // no un evento+aviso absoluto. Dejar al flujo multi-intent.
+        let triggerHits = triggers.reduce(0) { acc, t in
+            acc + (lower.components(separatedBy: t).count - 1)
+        }
+        if triggerHits >= 2 { return nil }
+
         // 2. Encontrar TODAS las menciones de hora en formato "a la(s) H(:M)".
         //    Solo dígitos por simplicidad — palabras se pueden agregar después
         //    si los testers lo piden.
