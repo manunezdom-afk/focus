@@ -243,16 +243,30 @@ test('caso 6: reunión con JP + dentista → 2 actions, "Reunión" conserva qui�
   assert.equal(out.actions[1].event.title, 'Dentista')
 })
 
-test('caso 6-defensa: "Reunión" pelado sin persona/asunto se descarta', () => {
-  const out = convertOpenAIToBackendResponse({
+test('caso 6-defensa: "Reunión" pelado se descarta SOLO si el usuario no lo dijo', () => {
+  // Alucinación: el usuario nunca dijo "reunión" → se descarta.
+  const hallucinated = convertOpenAIToBackendResponse({
     openaiPayload: fakeOpenAIPayload({
       actions: [event({ title: 'Reunión', time: '10:00', sourceText: 'reunión' })],
     }),
-    userMessage: 'mañana reunión a las 10',
+    userMessage: 'mañana tengo dentista a las 10',
     reqId: 'r6b',
   })
-  assert.equal(out.actions.length, 0)
-  assert.ok(out._dropped[0].includes('genérico sin contexto'))
+  assert.equal(hallucinated.actions.length, 0)
+  assert.ok(hallucinated._dropped[0].includes('genérico sin contexto'))
+
+  // FIX QA-closure 2026-06-10: si el usuario SÍ dijo "reunión" literalmente
+  // ("mañana reunión a las 10"), el evento se crea — antes se descartaba y
+  // Nova confirmaba algo que nunca pasó.
+  const literal = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({ title: 'Reunión', time: '10:00', sourceText: 'reunión a las 10' })],
+    }),
+    userMessage: 'mañana reunión a las 10',
+    reqId: 'r6c',
+  })
+  assert.equal(literal.actions.length, 1)
+  assert.equal(literal.actions[0].event.title, 'Reunión')
 })
 
 // ─── QA case 7: "recuérdame llamar a mi mamá a las 6 y comprar cuaderno mañana"
@@ -271,13 +285,12 @@ test('caso 7: reminder con hora + tarea mañana → 2 actions', () => {
   assert.equal(out.actions.length, 2)
   assert.equal(out.actions[0].event.title, 'Llamar a mi mamá')
   assert.equal(out.actions[0].event.icon, 'alarm')
-  // reminder con hora: lo respetamos pero como reminder (time=null fuerza
-  // que se muestre en sección reminder, no como bloque con duración).
-  // En este caso el modelo dijo 18:00 → time se traduce, pero icon=alarm
-  // (siempre que type sea create_reminder).
-  // El adapter pone time=null para reminders. Esto es intencional: si el
-  // usuario quiere hora del reminder, usa reminderOffsets del evento padre.
-  assert.equal(out.actions[0].event.time, null)
+  // FIX QA-closure 2026-06-10: el reminder CONSERVA su hora. Antes el
+  // adapter forzaba time=null para create_reminder, lo que rompía
+  // "acuérdame X a las 6" — iOS no podía programar la notificación ni
+  // ubicarlo en el día. endTime sigue null (punto, sin duración).
+  assert.equal(out.actions[0].event.time, '6:00 PM')
+  assert.equal(out.actions[0].event.endTime, null)
   assert.equal(out.actions[1].event.title, 'Comprar cuaderno')
   assert.equal(out.actions[1].event.date, '2026-05-20')
 })
@@ -390,16 +403,31 @@ test('endpoint shape: respuesta mapeada tiene los campos que NovaService decodif
 
 // ─── Defensa duration → endTime ────────────────────────────────────────────
 
-test('duration: con time + durationMinutes calcula endTime correcto (5:00 PM + 60 → 6:00 PM)', () => {
+test('duration: con duración EXPLÍCITA del usuario calcula endTime (5:00 PM + 60 → 6:00 PM)', () => {
+  const out = convertOpenAIToBackendResponse({
+    openaiPayload: fakeOpenAIPayload({
+      actions: [event({ title: 'Gimnasio', time: '17:00', durationMinutes: 60, sourceText: 'gimnasio' })],
+    }),
+    userMessage: 'gimnasio a las 5 por 1 hora',
+    reqId: 'rdur',
+  })
+  assert.equal(out.actions[0].event.time, '5:00 PM')
+  assert.equal(out.actions[0].event.endTime, '6:00 PM')
+})
+
+test('duration: SIN duración explícita el guard anula durationMinutes del modelo (anti 1h fantasma)', () => {
+  // QA-closure 2026-06-10: aunque el modelo mande durationMinutes=60, si el
+  // usuario no dijo duración ("gimnasio a las 5") ni pidió bloquear tiempo,
+  // el adapter fuerza endTime null. Espejo server-side del gate iOS.
   const out = convertOpenAIToBackendResponse({
     openaiPayload: fakeOpenAIPayload({
       actions: [event({ title: 'Gimnasio', time: '17:00', durationMinutes: 60, sourceText: 'gimnasio' })],
     }),
     userMessage: 'gimnasio a las 5',
-    reqId: 'rdur',
+    reqId: 'rdur-guard',
   })
   assert.equal(out.actions[0].event.time, '5:00 PM')
-  assert.equal(out.actions[0].event.endTime, '6:00 PM')
+  assert.equal(out.actions[0].event.endTime, null)
 })
 
 test('duration: reminder no calcula endTime (siempre null)', () => {

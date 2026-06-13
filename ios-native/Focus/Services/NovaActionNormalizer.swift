@@ -45,7 +45,16 @@ enum NovaActionNormalizer {
         "que no se me olvide",
         "no te olvides",
         "no olvides",
-        "no me dejes olvidar"
+        "no me dejes olvidar",
+        // "pon una alarma para estudiar a las 7" es un recordatorio, no un
+        // evento (QA-closure 2026-06-10, caso 46 de la suite 50).
+        "pon una alarma",
+        "ponme una alarma",
+        "pon alarma",
+        "ponme alarma",
+        "pon un recordatorio",
+        "ponme un recordatorio",
+        "pon recordatorio"
     ]
 
     /// True cuando `userText` contiene cualquier trigger explícito de
@@ -71,6 +80,37 @@ enum NovaActionNormalizer {
             return after.isEmpty || after.first?.isWhitespace == true
                 || after.first?.isPunctuation == true
         }
+    }
+
+    /// True si `detail` termina con una referencia explícita a un destino
+    /// ("...al dentista", "...a la reunión", "...del banco") cuya palabra
+    /// objetivo aproxima el `title` del evento. Sirve para anclar, en un
+    /// mensaje multi-evento, el detalle a EXACTAMENTE el evento que nombra:
+    ///   "dentista a las 4 y comprar remedios a las 5, acuérdame de llevar
+    ///    la receta al dentista" → el detalle "Llevar la receta al dentista"
+    ///    se ancla a "Dentista", NO a "Comprar remedios".
+    ///
+    /// Gateado en la referencia trailing "al/a la/… X": un detalle SIN esa
+    /// referencia ("comprar remedios") nunca matchea, así que el guard
+    /// multi-intent lo sigue suprimiendo (no reintroduce el bug original ni
+    /// se auto-referencia).
+    static func detailTargetsTitle(detail: String, title: String) -> Bool {
+        let dl = detail.lowercased()
+        let tl = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tl.isEmpty else { return false }
+        // Palabra objetivo tras la última preposición de destino, al final.
+        guard let range = dl.range(
+            of: #"\b(?:al|a la|a los|a las|del|de la|de los|de las)\s+([a-záéíóúñ]{3,})\s*$"#,
+            options: .regularExpression
+        ) else {
+            return false
+        }
+        let targetWord = String(dl[range])
+            .components(separatedBy: .whitespaces)
+            .last ?? ""
+        guard targetWord.count >= 3 else { return false }
+        let titleWords = Set(tl.split(separator: " ").map(String.init))
+        return titleWords.contains(targetWord) || tl == targetWord
     }
 
     /// Verbos que implican una **acción puntual** y se tratan como
@@ -136,6 +176,31 @@ enum NovaActionNormalizer {
             result.removeSubrange(range)
         }
 
+        // 1.5. Truncar metadata de recordatorio mid-título tras una COMA.
+        //      Caso del parser local multi-intent (2026-06-12): el segmento
+        //      "comprar remedios a las 5, acuérdame de llevar la receta al
+        //      dentista" dejaba el título "Comprar remedios , acuérdame de"
+        //      (coma huérfana + residuo del trigger) cuando lo que seguía al
+        //      trigger no era un verbo de detalle reconocido. La COMA seguida
+        //      de un trigger de recordatorio marca una cláusula separada:
+        //      todo desde ahí es la acción a recordar (se extrae aparte vía
+        //      extractEventDetail), NO parte del título. Cortamos en la coma.
+        //
+        //      La coma es la señal — gateando en ella evitamos falsos
+        //      positivos tipo "hoy recuérdame llamar a Juan" (sin coma, el
+        //      trigger lidera la acción; el step 2 lo strippea y deja
+        //      "Llamar a Juan").
+        let triggerAlternation = reminderTriggers
+            .map { NSRegularExpression.escapedPattern(for: $0) }
+            .joined(separator: "|")
+        let reminderClausePattern = "\\s*,\\s*(?:" + triggerAlternation + ")\\b[\\s\\S]*$"
+        if let range = result.range(
+            of: reminderClausePattern,
+            options: [.regularExpression, .caseInsensitive]
+        ) {
+            result.removeSubrange(range)
+        }
+
         // 2. Strip reminder triggers embebidos.
         //    a) Primero las versiones LARGAS con "de" / "que" trailing
         //    ("acuérdame de salir" → " salir"), para no dejar "de" huérfano
@@ -154,6 +219,10 @@ enum NovaActionNormalizer {
             #"\bav[ií]same\s+(?:de|que)\b"#,
             #"\bque\s+no\s+se\s+me\s+olvide\s+(?:de|que)?\b"#,
             #"\bno\s+(?:te\s+)?olvides\s+(?:de|que)?\b"#,
+            // "pon(me) una alarma para X" / "pon(me) un recordatorio de X"
+            // → el título es X, no la frase de la alarma.
+            #"\bpon(?:me)?\s+(?:una\s+)?alarma\s+(?:para|de|que)?\b"#,
+            #"\bpon(?:me)?\s+(?:un\s+)?recordatorio\s+(?:para|de|que)?\b"#,
         ]
         for pattern in extendedReminderPrefixes {
             result = result.replacingOccurrences(
@@ -636,7 +705,16 @@ enum NovaActionNormalizer {
             }
         }
 
-        // 8. Collapse whitespace + trim puntuación.
+        // 8. Limpieza de coma/;/: HUÉRFANA interior — una puntuación
+        //    flanqueada por espacio (no pegada a la palabra previa) es
+        //    residuo de un strip temporal/trigger, no puntuación legítima de
+        //    lista ("Pan, leche" no tiene espacio antes de la coma → intacto).
+        //    "remedios , algo" → "remedios algo"; "remedios ," → "remedios".
+        result = result.replacingOccurrences(
+            of: #"\s+[,;:](\s|$)"#, with: "$1", options: .regularExpression
+        )
+
+        // 8-bis. Collapse whitespace + trim puntuación de bordes.
         result = result
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
@@ -717,7 +795,13 @@ enum NovaActionNormalizer {
             "hermana", "hijo", "hija", "padre", "madre", "abuelo", "abuela",
             "tío", "tía", "tio", "tia", "primo", "prima", "esposo", "esposa",
             "novio", "novia", "polola", "pololo", "amigo", "amiga", "jefe",
-            "jefa", "pelota", "botines", "agua", "audífonos", "audifonos",
+            "jefa", "amigos", "amigas", "compañeros", "companeros",
+            "compañeras", "companeras",
+            // Infinitivos comunes tras "a" ("salir a correr", "ir a jugar")
+            // — son acciones, no nombres propios (QA-closure 2026-06-10).
+            "jugar", "correr", "trotar", "caminar", "nadar", "entrenar",
+            "bailar", "cocinar", "descansar", "pasear", "buscar", "llevar",
+            "pelota", "botines", "agua", "audífonos", "audifonos",
             "regalo", "copete", "bebidas", "cartas", "computador", "pauta",
             "antes", "ortografía", "ortografia", "certificado", "radiografía",
             "radiografia", "exámenes", "examenes", "proyecto", "postre",
@@ -1161,6 +1245,35 @@ enum NovaActionNormalizer {
         let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let lower = trimmed.lowercased()
+
+        // ── Regla general: CABEZA DE ACTIVIDAD + calificador. El título es el
+        // TIPO de actividad y lo que sigue (con o sin "de") es el tema/parte,
+        // que va al subtítulo. Cubre el spec canónico: "gym pierna" → Gym +
+        // Pierna, "clase de álgebra" → Clase + Álgebra, "terapia ansiedad" →
+        // Terapia + Ansiedad, "entrenamiento de espalda" → Entrenamiento +
+        // Espalda. NO parte si el conector es "con" (persona) — "Reunión con
+        // Juan" se queda íntegra. Las cabezas son una whitelist conservadora.
+        let activityHeads = ["gym", "gimnasio", "clase", "clases", "terapia",
+                             "entrenamiento", "entreno", "prueba", "examen",
+                             "estudiar", "estudio", "taller", "curso", "ensayo",
+                             "llamada", "entrega", "yoga", "pilates", "partido"]
+        for head in activityHeads where lower.hasPrefix(head + " ") {
+            let afterHead = String(trimmed.dropFirst(head.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            var rest = afterHead
+            // Conector "de " opcional al inicio del calificador.
+            if rest.lowercased().hasPrefix("de ") {
+                rest = String(rest.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let restLower = rest.lowercased()
+            // No partir si el calificador es persona ("con X") o vacío/artículo.
+            if restLower.hasPrefix("con ") || rest.isEmpty { break }
+            if ["la", "el", "los", "las", "un", "una", "mi", "tu", "su"].contains(restLower) { break }
+            let titleCap = head.prefix(1).uppercased() + head.dropFirst()
+            let subCap = rest.prefix(1).uppercased() + rest.dropFirst()
+            return (String(titleCap), String(subCap))
+        }
+
         // Solo "reunión"/"reunion" — con o sin artículo opcional. Otras
         // actividades quedan intactas (ver doc).
         let triggers = ["reunión", "reunion", "la reunión", "la reunion",

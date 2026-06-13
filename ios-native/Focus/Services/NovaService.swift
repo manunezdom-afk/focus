@@ -285,6 +285,52 @@ enum NovaServiceError: Error, LocalizedError {
         case .server:              return "Algo no salió como esperaba. Vuelve a intentarlo en un momento."
         }
     }
+
+    /// Nota HONESTA para mostrar al usuario cuando, estando LOGUEADO, el
+    /// backend (Nova IA) falló y caímos al parser local de respaldo. Deja
+    /// CLARO que lo resuelto NO vino de la IA real — el fallback NUNCA debe
+    /// parecer que Nova funcionó normal (user spec 2026-06-13). Antes estos
+    /// casos de servidor devolvían `nil` → fallback silencioso.
+    var loggedInFallbackNote: String {
+        switch self {
+        case .unauthorized:
+            return "Tu sesión expiró — esto quedó solo en este iPhone. Vuelve a iniciar sesión para sincronizarlo con Nova."
+        case .quotaExceeded(let m):
+            return m ?? "Llegaste al límite de Nova — usé el modo local de respaldo."
+        case .offline:
+            return "Sin conexión — lo resolví en este iPhone con el modo local. Se sincronizará con Nova cuando vuelvas a tener internet."
+        case .timeout:
+            return "Nova (IA) tardó demasiado — usé el modo local de respaldo. Vuelve a intentarlo en un momento."
+        case .serviceUnavailable:
+            return "Nova (IA) está caída o saturada — usé el modo local de respaldo. Vuelve a intentarlo en un rato."
+        case .network:
+            return "Falló la conexión con Nova — usé el modo local de respaldo. Revisa tu internet y vuelve a intentarlo."
+        case .badLLMOutput, .server, .invalidResponse, .encoding, .decoding:
+            return "No pude contactar a Nova (IA) — usé el modo local de respaldo. Vuelve a intentarlo en un momento."
+        case .emptyMessage, .messageTooLong:
+            return ""  // No aplica: estos no hacen fallback.
+        }
+    }
+
+    /// Etiqueta corta y técnica para LOGS (consola / NovaDevLog). Permite
+    /// ver el error REAL del backend cuando ocurre un fallback logueado.
+    var debugLabel: String {
+        switch self {
+        case .emptyMessage:        return "emptyMessage"
+        case .messageTooLong:      return "messageTooLong"
+        case .unauthorized:        return "unauthorized(401/403)"
+        case .quotaExceeded:       return "quotaExceeded(429)"
+        case .badLLMOutput:        return "badLLMOutput(502)"
+        case .serviceUnavailable:  return "serviceUnavailable(503/504)"
+        case .offline:             return "offline"
+        case .timeout:             return "timeout"
+        case .network(let e):      return "network(\(e))"
+        case .invalidResponse:     return "invalidResponse"
+        case .encoding(let e):     return "encoding(\(e))"
+        case .decoding(let e):     return "decoding(\(e))"
+        case .server(let s):       return "server(status=\(s))"
+        }
+    }
 }
 
 // MARK: - DTOs request
@@ -335,6 +381,7 @@ private struct BackendHistoryEntry: Encodable {
 private struct BackendEventDTO: Encodable {
     let id: String
     let title: String
+    let subtitle: String?
     let time: String
     let date: String?
     let section: String
@@ -342,6 +389,7 @@ private struct BackendEventDTO: Encodable {
     init(local event: FocusEvent) {
         self.id = event.id.uuidString
         self.title = event.title
+        self.subtitle = event.subtitle
         self.time = NovaTimeFormatter.formatHourMinute(from: event.startTime)
         self.date = NovaTimeFormatter.formatISODate(from: event.startTime)
         let hour = Calendar.current.component(.hour, from: event.startTime)
@@ -465,8 +513,11 @@ struct BackendEventCreate {
     let location: String?
     let notes: String?
     /// Subtítulo/contexto que el backend (Claude) manda para mostrar debajo
-    /// del título en la tarjeta. Default nil para no romper otros constructores.
-    var subtitle: String? = nil
+    /// del título en la tarjeta. SIN default a propósito: dos constructores
+    /// lo omitían en silencio (validator.sanitized y expandRecurringEvent) y
+    /// el subtitle por-evento del backend se perdía — el compilador ahora
+    /// obliga a propagarlo en toda copia del payload.
+    let subtitle: String?
 }
 
 /// Recurrencia (matchea shape backend).
@@ -486,6 +537,8 @@ struct BackendEventUpdates {
     let location: String?
     let reminderOffsets: [Int]?
     let reminderNotes: [String]?
+    /// Subtítulo nuevo. nil = no tocar; string vacío "" = quitar el actual.
+    var subtitle: String? = nil
 }
 
 /// Datos para crear una tarea.
@@ -646,10 +699,12 @@ private struct RawAction: Decodable {
         let location: String?
         let reminderOffsets: [Int]?
         let reminderNotes: [String]?
+        let subtitle: String?
 
         init() {
             title = nil; time = nil; endTime = nil; date = nil
             location = nil; reminderOffsets = nil; reminderNotes = nil
+            subtitle = nil
         }
 
         init(from decoder: Decoder) throws {
@@ -661,10 +716,11 @@ private struct RawAction: Decodable {
             self.location = try c.decodeIfPresent(String.self, forKey: .location)
             self.reminderOffsets = try c.decodeIfPresent([Int].self, forKey: .reminderOffsets)
             self.reminderNotes = try c.decodeIfPresent([String].self, forKey: .reminderNotes)
+            self.subtitle = try c.decodeIfPresent(String.self, forKey: .subtitle)
         }
 
         enum CodingKeys: String, CodingKey {
-            case title, time, endTime, date, location, reminderOffsets, reminderNotes
+            case title, time, endTime, date, location, reminderOffsets, reminderNotes, subtitle
         }
 
         func toModel() -> BackendEventUpdates {
@@ -675,7 +731,8 @@ private struct RawAction: Decodable {
                 dateString: date,
                 location: location,
                 reminderOffsets: reminderOffsets,
-                reminderNotes: reminderNotes
+                reminderNotes: reminderNotes,
+                subtitle: subtitle
             )
         }
     }

@@ -245,7 +245,13 @@ struct MiDiaView: View {
                 dictationService.cancel()
             }
         }
-        .alert("Sin permiso de voz", isPresented: .constant(dictationDeniedMessage != nil), actions: {
+        // Binding derivado REAL (no `.constant`): con `.constant` SwiftUI
+        // no puede escribir el cierre y el alert queda INMORTAL (bug
+        // QA-closure 2026-06-10 — mismo fix que NovaView).
+        .alert("Dictado no disponible", isPresented: Binding(
+            get: { dictationDeniedMessage != nil },
+            set: { if !$0 { dictationDeniedMessage = nil } }
+        ), actions: {
             Button("Abrir Ajustes") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
                     UIApplication.shared.open(url)
@@ -469,6 +475,19 @@ struct MiDiaView: View {
             withAnimation(.easeInOut(duration: 0.20)) {
                 inlineResponse = response
             }
+            // Registrar el turno en el historial compartido (`novaMessages`)
+            // para que el SIGUIENTE mensaje le mande el contexto al backend.
+            // Sin esto, Mi Día solo leía el historial y nunca escribía → el
+            // backend no podía resolver "muévela", "ponle…", "esa llamada".
+            // (Bug de memoria multi-turno reportado 2026-06-13.) No registramos
+            // estados de carga; sí registramos respuestas finales (incluido
+            // fallback/clarify) porque son lo que el usuario "habló" con Nova.
+            if !response.isLoading {
+                let reply = [response.summary, response.details]
+                    .compactMap { $0 }
+                    .joined(separator: " ")
+                store.recordInlineNovaTurn(userText: trimmed, assistantReply: reply)
+            }
         }
     }
 
@@ -553,7 +572,15 @@ struct MiDiaView: View {
         // 1. Short-circuit: intents que requieren contexto local que el
         //    backend no tiene (corrige/borra último ítem, follow-up
         //    pending resuelto, comandos meta del cliente).
-        if shouldShortCircuit(preIntent) {
+        //    EXCEPCIÓN (2026-06-13, "Nova más humana"): si el intent es un
+        //    resumen/meta (reviewToday/reviewPending/organizeDay) pero el
+        //    mensaje es claramente conversacional/de consejo/emocional, NO
+        //    cortamos local — lo manda la IA. Bug: "lo que tengo mañana me
+        //    siento abrumado, cómo me recomiendas organizar" matcheaba la
+        //    subcadena "que tengo mañana" → resumen robótico "0 eventos hoy"
+        //    sin empatía ni el día correcto. La IA da una respuesta humana.
+        if shouldShortCircuit(preIntent),
+           !shouldDeferToBackendForHumanAnswer(preIntent, text: trimmed) {
             return executeIntent(preIntent, userText: trimmed)
         }
 
@@ -653,9 +680,12 @@ struct MiDiaView: View {
             // ni eso logra, devuelve un mensaje útil mostrando lo que SÍ
             // entendió en vez del genérico "no pude separar".
             if error.canFallbackToLocal {
+                // LOG CLARO del error REAL (user spec 2026-06-13): el fallback
+                // logueado debe verse en consola, no pasar desapercibido.
+                print("[Nova] ⚠️ FALLBACK LOGUEADO (Mi Día): backend falló → \(error.debugLabel). Usando parser local de respaldo.")
                 await MainActor.run {
                     NovaDevLog.shared.recordModelSelection(id: logId, model: .localFallback,
-                                                          reason: "backend error: \(error)")
+                                                          reason: "backend error: \(error.debugLabel)")
                     NovaDevLog.shared.finishRequest(id: logId, outcome: .actionApplied,
                                                     error: nil)
                 }
@@ -674,16 +704,18 @@ struct MiDiaView: View {
                 tone: .clarify
             )
         } catch {
-            // Caer al parser local sin nota — el usuario no necesita saber
-            // que hubo un error técnico si la acción se ejecutó. Si el
-            // local tampoco entiende, `runLocalFallback` ya devuelve un
-            // mensaje humano pidiendo aclaración.
+            // Error inesperado (no NovaServiceError): también visible + logueado.
+            // El fallback logueado NUNCA es silencioso (user spec 2026-06-13).
+            print("[Nova] ⚠️ FALLBACK LOGUEADO (Mi Día): error inesperado → \(error). Usando parser local de respaldo.")
             await MainActor.run {
                 NovaDevLog.shared.recordModelSelection(id: logId, model: .localFallback,
                                                       reason: "unknown error fallback")
                 NovaDevLog.shared.finishRequest(id: logId, outcome: .actionApplied)
             }
-            return runLocalFallback(for: trimmed, withNote: nil)
+            return runLocalFallback(
+                for: trimmed,
+                withNote: "No pude contactar a Nova (IA) — usé el modo local de respaldo. Vuelve a intentarlo en un momento."
+            )
         }
     }
 
@@ -1160,6 +1192,35 @@ struct MiDiaView: View {
     /// True cuando el intent local SIEMPRE es mejor que el backend porque
     /// requiere contexto cliente o porque el backend lo entendería peor.
     /// Conservador: solo cubre casos donde tenemos alta confianza.
+    /// Cuando hay sesión, deja que la IA conteste (en vez del resumen local)
+    /// los pedidos conversacionales/de consejo/emocionales que el parser
+    /// local clasificó como resumen/meta por una subcadena suelta. Nova es
+    /// un ASISTENTE, no solo un calendario: "me siento abrumado, ¿cómo
+    /// organizo el día?" merece una respuesta humana de la IA, no
+    /// "0 eventos hoy". Las consultas PURAS y cortas ("¿qué tengo hoy?")
+    /// siguen resolviéndose local (rápido, sin gastar el backend).
+    private func shouldDeferToBackendForHumanAnswer(_ intent: NovaIntent, text: String) -> Bool {
+        // Sin sesión no hay IA real → conviene el resumen local.
+        guard store.syncCredentials != nil else { return false }
+        switch intent {
+        case .reviewToday, .reviewPending, .organizeDay:
+            break
+        default:
+            return false
+        }
+        let lower = text.lowercased()
+        let humanMarkers: [String] = [
+            "me siento", "abrumad", "estresad", "agobiad", "ansios",
+            "no sé", "no se ", "no doy abasto", "ayúdame", "ayudame",
+            "recomiend", "sugier", "qué hago", "que hago", "qué hacer",
+            "cómo organiz", "como organiz", "cómo lo hago", "como lo hago",
+            "qué opinas", "que opinas", "qué me dices", "que me dices",
+            "consejo", "por dónde empiezo", "por donde empiezo", "abruma",
+            "priorizar", "prioriza", "ayuda con"
+        ]
+        return humanMarkers.contains { lower.contains($0) }
+    }
+
     private func shouldShortCircuit(_ intent: NovaIntent) -> Bool {
         switch intent {
         case .correctLastEvent, .deleteLastItem, .convertLastToTask:
@@ -1486,7 +1547,7 @@ struct MiDiaView: View {
         var lastAction: InlineNovaAction? = nil
 
         for intent in intents {
-            let resp = executeIntent(intent, userText: trimmed)
+            let resp = executeIntent(intent, userText: trimmed, isMultiIntent: true)
             guard !resp.isError else { continue }
             if lastAction == nil { lastAction = resp.action }
             if let item = CreatedItem(intent: intent, userText: trimmed) {
@@ -1542,13 +1603,17 @@ struct MiDiaView: View {
 
         init?(intent: NovaIntent, userText: String) {
             switch intent {
-            case let .createEvent(rawTitle, when, _, _, _, _, _):
+            case let .createEvent(rawTitle, when, _, _, _, _, _, segReminderOffset, _):
                 let cleaned = NovaActionNormalizer.cleanTitle(rawTitle)
                 guard !cleaned.isEmpty else { return nil }
                 self.kind = .block
                 self.title = cleaned
                 self.date = when
-                self.reminderOffsetMinutes = NovaActionNormalizer.extractReminderOffset(from: userText)
+                // Offset PRE-EXTRAÍDO del segmento (multi-evento) gana sobre
+                // la extracción del userText completo (que daba el primer
+                // offset a todos los eventos).
+                self.reminderOffsetMinutes = segReminderOffset
+                    ?? NovaActionNormalizer.extractReminderOffset(from: userText)
             case let .createTask(rawTitle, dueDate, _, _):
                 let cleaned = NovaActionNormalizer.cleanTitle(rawTitle)
                 guard !cleaned.isEmpty else { return nil }
@@ -1679,23 +1744,12 @@ struct MiDiaView: View {
     /// usuario no debe leer "modo local", "Nova avanzada", "Error 500",
     /// "status code", etc. — es ruido de implementación.
     private func humanFallbackNote(for error: NovaServiceError) -> String? {
-        switch error {
-        case .unauthorized:
-            return "Tu sesión expiró. Vuelve a iniciar sesión cuando puedas."
-        case .quotaExceeded(let message):
-            return message
-        case .offline:
-            return "Sin conexión. Tus cambios se guardan en este iPhone hasta que vuelvas a tener internet."
-        case .timeout, .serviceUnavailable, .badLLMOutput, .network,
-             .server, .invalidResponse, .encoding, .decoding:
-            // Si el fallback local ejecutó las acciones, el `summary` ya
-            // dice qué se hizo — no agregamos nota. Para los casos donde
-            // el local tampoco entendió, el caller muestra una pregunta
-            // humana por separado.
-            return nil
-        default:
-            return nil
-        }
+        // Política 2026-06-13 (user spec): estando LOGUEADO, el fallback local
+        // NUNCA es silencioso. Antes los errores de servidor devolvían nil y
+        // el `summary` del local hacía parecer que Nova funcionó normal. Ahora
+        // SIEMPRE mostramos la nota honesta (vive en NovaServiceError).
+        let note = error.loggedInFallbackNote
+        return note.isEmpty ? nil : note
     }
 
     /// Split del reply del backend en (summary, details). El backend ya
@@ -1757,7 +1811,7 @@ struct MiDiaView: View {
         return (normalized, nil)
     }
 
-    private func executeIntent(_ intent: NovaIntent, userText: String) -> InlineNovaResponse {
+    private func executeIntent(_ intent: NovaIntent, userText: String, isMultiIntent: Bool = false) -> InlineNovaResponse {
         switch intent {
         case .createTask(let title, let dueDate, let recurrence, let wantsReminder):
             // Si hay fecha y es hoy/mañana/esta semana, usamos esa categoría;
@@ -1811,15 +1865,15 @@ struct MiDiaView: View {
                 action: .openTasksList
             )
 
-        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder, let recurrence):
+        case .createEvent(let rawTitle, let when, let explicitEnd, let location, let section, let wantsReminder, let recurrence, let segReminderOffset, let segReminderNote):
             // BUG-USER 2026-05-18: este path guardaba el título RAW del intent
             // parser sin pasarlo por cleanTitle, mientras que
             // FocusDataStore.applyLocalNovaIntent SÍ lo limpia. Resultado: el
             // mismo input creaba bloques con título tipo "Más tarde viene la
             // agustina 20 min antes" en vez de "Viene la agustina". Unificamos
             // el pipeline llamando cleanTitle acá también.
-            let title = NovaActionNormalizer.cleanTitle(rawTitle)
-            guard !title.isEmpty else {
+            let cleanedTitle = NovaActionNormalizer.cleanTitle(rawTitle)
+            guard !cleanedTitle.isEmpty else {
                 return InlineNovaResponse(
                     userText: userText,
                     summary: "Me falta el nombre del evento para agendarlo.",
@@ -1827,6 +1881,25 @@ struct MiDiaView: View {
                     tone: .clarify
                 )
             }
+            // Subtítulo/detalle, espejo de FocusDataStore.applyLocalNovaIntent:
+            // detalle trailing del userText ("…acuérdame de llevar la receta") →
+            // subtítulo del evento. En multi-intent solo se ancla al evento que
+            // el detalle nombra explícitamente ("…al dentista" → "Dentista");
+            // sin referencia (o auto-referencia) se suprime para no filtrarlo
+            // a todos. Antes este path inline JAMÁS seteaba subtítulo (2026-06-12).
+            let trailingDetail = NovaActionNormalizer.extractEventDetail(from: userText).detail
+            let (title, eventSubtitle): (String, String?) = {
+                if let detail = trailingDetail {
+                    if !isMultiIntent { return (cleanedTitle, detail) }
+                    if NovaActionNormalizer.detailTargetsTitle(detail: detail, title: cleanedTitle) {
+                        return (cleanedTitle, detail)
+                    }
+                }
+                if let split = NovaActionNormalizer.splitTitleSubtitle(cleanedTitle) {
+                    return (split.title, split.subtitle)
+                }
+                return (cleanedTitle, nil)
+            }()
             guard let date = when else {
                 return InlineNovaResponse(
                     userText: userText,
@@ -1893,16 +1966,21 @@ struct MiDiaView: View {
                     ?? NovaResponder.guessSection(for: title)
                     ?? .personal
             }
-            // Reminder offset SIEMPRE se extrae si está en userText, sin
-            // importar si es recordatorio puntual o evento con duración.
-            // Antes solo se pasaba en el path remote → el chip 🔔 nunca
-            // aparecía en eventos creados localmente.
+            // Reminder offset: PRIORIDAD al offset PRE-EXTRAÍDO del segmento
+            // de este evento (parseAll lo inyecta por-segmento), si no, del
+            // userText completo. Antes el offset del userText completo (el
+            // primero que aparecía) se aplicaba a TODOS los eventos del lote.
             let extractedOffsets: [Int]?
-            if let mins = NovaActionNormalizer.extractReminderOffset(from: userText) {
+            if let segOffset = segReminderOffset {
+                extractedOffsets = [segOffset]
+            } else if !isMultiIntent, let mins = NovaActionNormalizer.extractReminderOffset(from: userText) {
                 extractedOffsets = [mins]
             } else {
                 extractedOffsets = nil
             }
+            // Nota custom del recordatorio (segmento) → se persiste en el
+            // evento si vino del segmento.
+            let segReminderNotes: [String]? = (segReminderNote?.isEmpty == false) ? [segReminderNote!] : nil
             // Si hay recurrencia, expandir las próximas N ocurrencias.
             let occurrences: [Date]
             if let recurrence {
@@ -1922,7 +2000,9 @@ struct MiDiaView: View {
                     location: location,
                     isReminder: isReminderFlag,
                     inferredDuration: inferredFlag,
-                    reminderOffsets: extractedOffsets
+                    reminderOffsets: extractedOffsets,
+                    reminderNotes: segReminderNotes,
+                    subtitle: eventSubtitle
                 )
                 store.addEvent(event)
                 if idx == 0 { firstEventId = event.id }

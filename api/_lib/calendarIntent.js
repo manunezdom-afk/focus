@@ -13,9 +13,11 @@
 // También cuentan formas conjugadas comunes ("muevelo", "cambiame", etc).
 
 const EDIT_VERB_PATTERNS = [
-  /\bmuev[a-záéíóú]*\b/i,
+  // [uú]/[aá] en la raíz: las formas imperativas con clítico llevan tilde
+  // ("muévelo", "cámbialo") y antes NO matcheaban (bug pre-QA-closure).
+  /\bmu[eé]v[a-záéíóú]*\b/i,
   /\bmov[eé]r[a-záéíóú]*\b/i,
-  /\bcambi[a-záéíóú]*\b/i,
+  /\bc[aá]mbi[a-záéíóú]*\b/i,
   /\bedit[a-záéíóú]*\b/i,
   /\bmodific[a-záéíóú]*\b/i,
   /\breagend[a-záéíóú]*\b/i,
@@ -30,9 +32,64 @@ const EDIT_VERB_PATTERNS = [
   /\breagrup[a-záéíóú]*\b/i,
   /\bdesplaz[a-záéíóú]*\b/i,
   /\bdesagend[a-záéíóú]*\b/i,
+  // Correcciones conversacionales post-creación (QA-closure 2026-06-10).
+  // El usuario corrige lo que Nova acaba de crear sin usar un verbo de
+  // edición clásico: "mejor no", "no lo pongas", "mejor mañana", "ponlo
+  // una hora antes", "déjalo para el viernes", "que sea recordatorio",
+  // "olvida lo anterior / olvida eso". Sin estos patrones, el filtro
+  // strippeaba la edición legítima y Nova respondía con la nota técnica
+  // "No moví ni edité…".
+  /\bmejor no\b/i,
+  /\bno l[oa] (pongas|agendes|crees|guardes|anotes)\b/i,
+  /\bmejor\s+(mañana|manana|hoy|m[aá]s tarde|m[aá]s temprano|otro d[ií]a|a las?\b|el\s)/i,
+  /\b(p[oó]nl[oa]|d[eé]jal[oa]|c[oó]rrel[oa])\b/i,
+  // Ediciones con clítico "le" sobre un evento existente (fix 2026-06-11):
+  // "ponle subtítulo X al gym", "agrégale pierna", "añádele llevar la
+  // pelota", "quítale el subtítulo". Sin esto, el filtro strippeaba el
+  // edit_event legítimo (solo cubría "ponlo/ponla"). Las formas base
+  // "agrega"/"añade" NO van aquí — son intención de CREAR, no de editar.
+  // ("cámbiale" ya lo cubre /c[aá]mbi[a-záéíóú]*/ de arriba.)
+  /\bp[oó]nle\b/i,
+  /\bagr[eé]gale\b/i,
+  /\bañ[aá]dele\b/i,
+  /\bqu[ií]tale\b/i,
+  // "subtítulo" SOLO en contexto de corrección de un evento existente
+  // ("el subtítulo va en el otro", "el subtítulo del gym está mal",
+  // "corrige el subtítulo"), NO en una creación tipo "crea gym con
+  // subtítulo pierna" (esa frase emite add_event, no edit, y abrir el
+  // gate de edición ahí dejaba pasar deletes alucinados — review 2026-06-11).
+  /\bsubt[ií]tulo\b[^.!?]{0,40}\b(va\b|en el otro|est[aá]\s+mal|incorrect|equivocad|no corresponde|sobra)/i,
+  /\b(pon|p[oó]n|cambi|c[aá]mbi|qu[ií]t|arregl|corrig|edit|saca|borr)[a-záéíóú]*\s+(el\s+|le\s+el\s+)?subt[ií]tulo/i,
+  /\bque sea\s+(recordatorio|evento|tarea)\b/i,
+  /\bolvida\s+(eso|lo anterior|lo [uú]ltimo)\b/i,
+  /\buna hora (antes|despu[eé]s)\b/i,
+  // Correcciones declarativas sin verbo de edición (QA-closure 2026-06-10,
+  // pasada Anthropic): "me equivoqué, era a las 6", "no, era mañana",
+  // "eso era un evento", "era pierna no espalda". El modelo emite el
+  // edit_event correcto pero el filtro lo mataba por falta de verbo.
+  /\bme equivoqu[eé]\b/i,
+  /\beso (era|es)\b/i,
+  /\bno,?\s+era\b/i,
+  /\bera\s+(a las?\s|mañana|manana|hoy|el\s|para\s)/i,
+  /\bera\s+\S+\s+no\s+\S+/i, // "era pierna no espalda"
 ];
 
-const EDIT_ACTION_TYPES = new Set(['edit_event', 'update_event', 'delete_event']);
+// Verbos/locuciones que expresan intención de BORRAR (no solo editar). Un
+// delete_event es destructivo, así que exige una de estas — los verbos
+// "suaves" de edición (ponle, agrégale, subtítulo, cambia la hora…) NO
+// deben habilitar un delete alucinado (review 2026-06-11). "quítale" (clítico
+// "le") es edición de un campo, no borrado del evento; "quita/quítalo/quítame"
+// (objeto directo) sí es borrado.
+const DELETE_VERB_PATTERNS = [
+  /\bborr[a-záéíóú]*\b/i,
+  /\belimin[a-záéíóú]*\b/i,
+  /\bcancel[a-záéíóú]*\b/i,
+  /\bdesagend[a-záéíóú]*\b/i,
+  /\bqu[ií]ta(l[oa]|me|los|las)?\b/i, // quita / quítalo / quítala / quítame — NO "quítale"
+  /\bmejor no\b/i,
+  /\bno l[oa] (pongas|agendes|crees|guardes|anotes)\b/i,
+  /\bolvida\s+(eso|lo anterior|lo [uú]ltimo)\b/i,
+];
 
 /**
  * Devuelve true si el mensaje del usuario contiene un verbo de edición
@@ -48,6 +105,19 @@ export function hasExplicitEditIntent(userMessage) {
 }
 
 /**
+ * Devuelve true si el mensaje expresa intención explícita de BORRAR. Más
+ * estricto que la edición: solo verbos/locuciones de eliminación.
+ */
+export function hasExplicitDeleteIntent(userMessage) {
+  if (typeof userMessage !== 'string' || !userMessage.trim()) return false;
+  const m = userMessage.trim();
+  for (const re of DELETE_VERB_PATTERNS) {
+    if (re.test(m)) return true;
+  }
+  return false;
+}
+
+/**
  * Filtra acciones edit/update/delete cuando el usuario no expresó intención
  * de edición. Devuelve { actions, stripped } — actions es la lista limpia,
  * stripped son las acciones que se quitaron (para loggear o agregar nota
@@ -57,15 +127,23 @@ export function filterCalendarEditActions(actions, userMessage) {
   if (!Array.isArray(actions) || actions.length === 0) {
     return { actions: actions ?? [], stripped: [] };
   }
-  if (hasExplicitEditIntent(userMessage)) {
-    // El usuario sí pidió editar. No filtramos nada.
+  const canEdit = hasExplicitEditIntent(userMessage);
+  // El borrado se habilita SOLO con intención de borrar explícita. Un verbo
+  // de edición (incluido "quítale el subtítulo") NO basta para pasar un
+  // delete_event — evita que un delete alucinado se cuele por la puerta que
+  // abrió una edición legítima (review 2026-06-11).
+  const canDelete = hasExplicitDeleteIntent(userMessage);
+  if (canEdit && canDelete) {
     return { actions, stripped: [] };
   }
   const kept = [];
   const stripped = [];
   for (const a of actions) {
-    if (a && typeof a === 'object' && EDIT_ACTION_TYPES.has(a.type)) {
-      stripped.push(a);
+    const type = a && typeof a === 'object' ? a.type : null;
+    if (type === 'delete_event') {
+      if (canDelete) kept.push(a); else stripped.push(a);
+    } else if (type === 'edit_event' || type === 'update_event') {
+      if (canEdit) kept.push(a); else stripped.push(a);
     } else {
       kept.push(a);
     }

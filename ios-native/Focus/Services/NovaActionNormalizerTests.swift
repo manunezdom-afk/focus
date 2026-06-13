@@ -18,9 +18,38 @@ import Foundation
 /// dice que deben funcionar.
 enum NovaActionNormalizerTests {
 
+    /// Reloj fijo para tests: HOY a las 06:00. Mantiene la fecha real (los
+    /// labels today/mañana/weekday siguen correctos) pero fija la hora de la
+    /// mañana, de modo que la resolución AM/PM es DETERMINISTA: a las 6 AM no
+    /// dispara el night-context (≥19h) ni el future-first "hoy", así que las
+    /// horas ambiguas se resuelven por la regla coloquial estable (8-12→AM,
+    /// 1-7→PM). Esto elimina la flakiness de correr las suites en la tarde.
+    private static var fixedTestNow: Date {
+        Calendar.current.date(bySettingHour: 6, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+
     @discardableResult
     static func runAll() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
         var failures: [String] = []
+
+        // ───── Regresión 2026-06-12: parser LOCAL multi-intent ─────────
+        // Título sucio + recordatorio perdido al segmentar mensajes con
+        // varios eventos (path demo / sin sesión).
+        if Thread.isMainThread {
+            failures += MainActor.assumeIsolated {
+                localMultiIntentRegressionFailures()
+            }
+        } else {
+            failures.append("  ✗ local-multi-intent: runAll no corrió en main thread")
+        }
+
+        // ───── Regresión 2026-06-13: fallback logueado VISIBLE ──────────
+        // El fallback al parser local estando logueado NUNCA debe ser
+        // silencioso: cada error que hace fallback debe producir una nota
+        // honesta no-vacía (antes los errores de servidor devolvían nil).
+        fallbackVisibilityFailures(into: &failures)
 
         // ───── cleanTitle ──────────────────────────────────────────────
 
@@ -205,23 +234,25 @@ enum NovaActionNormalizerTests {
         // título de evento. Esta tanda valida que el normalizer extrae
         // un título humano y limpio en cada uno de los 8 inputs reales.
 
-        // Test 1: cumpleaños de Urrutia — sentence completa
+        // Test 1: cumpleaños de Urrutia — sentence completa.
+        // Expectativa alineada a la spec 2026-05-27 (step 8d): "cumpleaños
+        // de Person" → "Cumpleaños Person" (drop del conector "de").
         check(
-            label: "BETA-1: 'Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes' → 'Cumpleaños de Urrutia'",
+            label: "BETA-1: 'Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes' → 'Cumpleaños Urrutia'",
             actual: NovaActionNormalizer.cleanTitle("Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes"),
-            expected: "Cumpleaños de Urrutia",
+            expected: "Cumpleaños Urrutia",
             failures: &failures
         )
 
         // Test 1b: backend devolvió solo "Salir" — preferBetterTitle debe
         // reextraer del userText completo.
         check(
-            label: "BETA-1b: preferBetterTitle(backend='Salir', user='Tengo que salir al cumpleaños...') → 'Cumpleaños de Urrutia'",
+            label: "BETA-1b: preferBetterTitle(backend='Salir', user='Tengo que salir al cumpleaños...') → 'Cumpleaños Urrutia'",
             actual: NovaActionNormalizer.preferBetterTitle(
                 backendCleaned: "Salir",
                 userText: "Tengo que salir al cumpleaños de Urrutia tipo nueve acuérdame 1 hora antes"
             ),
-            expected: "Cumpleaños de Urrutia",
+            expected: "Cumpleaños Urrutia",
             failures: &failures
         )
 
@@ -265,11 +296,12 @@ enum NovaActionNormalizerTests {
             failures: &failures
         )
 
-        // Test 7: ya viene limpio el sustantivo, solo strippear hora/recordatorio
+        // Test 7: ya viene limpio el sustantivo, solo strippear hora/recordatorio.
+        // Igual que BETA-1: "de Person" → "Person" (spec 2026-05-27).
         check(
-            label: "BETA-7: 'Cumpleaños de Urrutia tipo 9 acuérdame una hora antes' → 'Cumpleaños de Urrutia'",
+            label: "BETA-7: 'Cumpleaños de Urrutia tipo 9 acuérdame una hora antes' → 'Cumpleaños Urrutia'",
             actual: NovaActionNormalizer.cleanTitle("Cumpleaños de Urrutia tipo 9 acuérdame una hora antes"),
-            expected: "Cumpleaños de Urrutia",
+            expected: "Cumpleaños Urrutia",
             failures: &failures
         )
 
@@ -1464,8 +1496,12 @@ enum NovaActionNormalizerTests {
         check(label: "casoB: 2 intents",
               actual: casoB.count, expected: 2, failures: &failures)
         if casoB.count == 2 {
-            check(label: "casoB[0] title contiene 'historia'",
-                  actual: casoB[0].title.lowercased().contains("historia"),
+            // "clases de historia" → "Clases" + subtítulo "Historia" (2026-06-13:
+            // ahora separa el tema). La info debe estar preservada en título O
+            // subtítulo.
+            let casoBInfo = (casoB[0].title + " " + (casoB[0].subtitle ?? "")).lowercased()
+            check(label: "casoB[0] preserva 'historia' (título o subtítulo)",
+                  actual: casoBInfo.contains("historia"),
                   expected: true, failures: &failures)
             check(label: "casoB[0] hour 17",
                   actual: casoB[0].hour, expected: 17, failures: &failures)
@@ -1777,7 +1813,7 @@ enum NovaActionNormalizerTests {
                 title: "Saturación", timeString: "3:00 PM", endTimeString: nil,
                 dateString: nil, section: nil, icon: nil,
                 reminderOffsets: nil, reminderNotes: nil,
-                location: nil, notes: nil
+                location: nil, notes: nil, subtitle: nil
             ))
             let decision = NovaActionValidator.applyAntiBasura(
                 userText: "estoy colapsado, no sé qué hacer",
@@ -1922,7 +1958,7 @@ enum NovaActionNormalizerTests {
             let addAction: BackendAction = .addEvent(BackendEventCreate(
                 title: "Test", timeString: nil, endTimeString: nil, dateString: nil,
                 section: nil, icon: nil, reminderOffsets: nil, reminderNotes: nil,
-                location: nil, notes: nil
+                location: nil, notes: nil, subtitle: nil
             ))
             let m3 = NovaService.Mode.fallback(actions: [addAction], shouldAskUser: false)
             check(label: "mode-fallback-3: con actions → chatWithAction",
@@ -2229,6 +2265,19 @@ enum NovaActionNormalizerTests {
 
         // ───── Validador post-IA ──────────────────────────────────────
         NovaActionValidatorTests.runAll(into: &failures)
+
+        // ───── Regresión 2026-06-11: subtitle con targeting por evento ─
+        // Bug del usuario: "si pongo dos eventos y solo a 1 le quiero
+        // poner subtítulo le pone a los dos". Ejecuta el pipeline REAL
+        // (applyBackendActions → makeEvent / applyUpdates) con el batch
+        // exacto del escenario.
+        if Thread.isMainThread {
+            failures += MainActor.assumeIsolated {
+                subtitleTargetingRegressionFailures()
+            }
+        } else {
+            failures.append("  ✗ subtitle-targeting: runAll no corrió en main thread")
+        }
 
         // ───── Attach-reminder: detectar "acuérdame N antes de X" ─────
         //
@@ -2705,7 +2754,7 @@ enum NovaActionNormalizerTests {
         let isMulti = intents.count > 1
         return intents.compactMap { intent -> ParsedAction? in
             switch intent {
-            case let .createEvent(rawTitle, when, explicitEnd, _, section, wantsReminder, _):
+            case let .createEvent(rawTitle, when, explicitEnd, _, section, wantsReminder, _, segReminderOffset, _):
                 let cleanedTitle = NovaActionNormalizer.cleanTitle(rawTitle)
                 // Subtítulo: detalle trailing > split "Reunión de X" > nil.
                 let (resolvedTitle, resolvedSubtitle): (String, String?) = {
@@ -2739,7 +2788,9 @@ enum NovaActionNormalizerTests {
                         || NovaActionNormalizer.isReminderTrigger(in: text)
                         || NovaActionNormalizer.impliesPunctualReminder(in: text)
                 }()
-                let offset = NovaActionNormalizer.extractReminderOffset(from: text)
+                // Offset PRE-EXTRAÍDO del segmento (multi-evento) gana sobre la
+                // extracción del texto completo — espejo de applyLocalNovaIntent.
+                let offset = segReminderOffset ?? NovaActionNormalizer.extractReminderOffset(from: text)
                 return ParsedAction(
                     kind: reminder ? .reminder : .event,
                     title: resolvedTitle, hour: hour, minute: minute, endHour: endHour, day: day,
@@ -2850,6 +2901,8 @@ enum NovaActionNormalizerTests {
     /// los casos {1, 2, 3, 6, 7, 11, 12, 21, 44}.
     @discardableResult
     static func runValidation50Cases() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
         typealias K = ParsedKind
         typealias D = DayLabel
         struct Case {
@@ -3203,6 +3256,8 @@ enum NovaActionNormalizerTests {
     /// Flag: `--run-50-final` o `FOCUS_RUN_TESTS=final50`.
     @discardableResult
     static func runValidation50FinalCases() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
         typealias K = ParsedKind
         typealias D = DayLabel
         struct Case {
@@ -3231,7 +3286,9 @@ enum NovaActionNormalizerTests {
         cases.append(Case(id: 2, input: "reunión con Juan a las 3", expectedKind: K.event, expectedTitleLower: "reunión con juan", expectedSubtitlePrefix: "", expectedHour: 15, expectedDay: D.today))
         cases.append(Case(id: 3, input: "gimnasio a las 7 de la mañana", expectedKind: K.event, expectedTitleLower: "gimnasio", expectedSubtitlePrefix: "", expectedHour: 7, expectedDay: D.tomorrow, notes: "7am ya pasó hoy → mañana"))
         cases.append(Case(id: 4, input: "almuerzo a la 1", expectedKind: K.event, expectedTitleLower: "almuerzo", expectedSubtitlePrefix: "", expectedHour: 13, expectedDay: D.today))
-        cases.append(Case(id: 5, input: "clase de historia a las 10", expectedKind: K.event, expectedTitleLower: "clase de historia", expectedSubtitlePrefix: "", expectedHour: 10, expectedDay: D.today))
+        // 2026-06-13: "clase de X" ahora separa tema → "Clase" + sub "Historia"
+        // (canónico del spec; antes quedaba "Clase de Historia" en el título).
+        cases.append(Case(id: 5, input: "clase de historia a las 10", expectedKind: K.event, expectedTitleLower: "clase", expectedSubtitlePrefix: "Historia", expectedHour: 10, expectedDay: D.today))
         cases.append(Case(id: 6, input: "cita médica el jueves a las 9 de la mañana", expectedKind: K.event, expectedTitleLower: "cita médica", expectedSubtitlePrefix: "", expectedHour: 9, notes: "valida fix 'de la mañana' residual"))
         cases.append(Case(id: 7, input: "café con Sofía a las 6", expectedKind: K.event, expectedTitleLower: "café con sofía", expectedSubtitlePrefix: "", expectedHour: 18, expectedDay: D.today))
         cases.append(Case(id: 8, input: "partido el sábado a las 5", expectedKind: K.event, expectedTitleLower: "partido", expectedSubtitlePrefix: "", expectedHour: 17))
@@ -3341,6 +3398,8 @@ enum NovaActionNormalizerTests {
 
     @discardableResult
     static func runValidationSubtitle50Cases() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
         typealias K = ParsedKind
         typealias D = DayLabel
         struct Case {
@@ -3820,6 +3879,8 @@ enum NovaActionNormalizerTests {
     /// Idempotente: limpia el store al final.
     @discardableResult
     static func runValidationMemoryCases() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
         var out = "===== NOVA MEMORY VALIDATION =====\n"
         out += "Fecha: \(Date())\n\n"
         var passCount = 0
@@ -3978,6 +4039,483 @@ enum NovaActionNormalizerTests {
         out += rows.joined(separator: "\n")
         out += "\n===== END =====\n"
         return out
+    }
+
+    // MARK: - Regresión: subtitle con targeting por evento (2026-06-11)
+
+    /// Reproduce el escenario exacto del bug reportado contra el pipeline
+    /// real del store: dos `add_event` en un batch (subtitle solo en uno)
+    /// + un `edit_event` posterior con `updates.subtitle`. Antes del fix:
+    /// el detalle trailing del userText ("llevar las zapatillas...") se
+    /// untaba como subtítulo de AMBOS eventos, y el edit de subtitle se
+    /// descartaba en silencio. Limpia los eventos creados al terminar.
+    @MainActor
+    private static func subtitleTargetingRegressionFailures() -> [String] {
+        var fails: [String] = []
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+            if ok {
+                print("  ✓ \(label)")
+            } else {
+                let msg = "  ✗ \(label)\(detail.isEmpty ? "" : " — \(detail)")"
+                print(msg)
+                fails.append(msg)
+            }
+        }
+
+        let store = FocusDataStore()
+        let userText = "mañana gym a las 7 y clase a las 10, acuérdame de llevar las zapatillas al gym"
+        let cal = Calendar.current
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let tomorrowISO = fmt.string(from: tomorrow)
+
+        func create(_ title: String, time: String, subtitle: String?) -> BackendEventCreate {
+            BackendEventCreate(
+                title: title, timeString: time, endTimeString: nil,
+                dateString: tomorrowISO, section: "focus", icon: "event",
+                reminderOffsets: nil, reminderNotes: nil,
+                location: nil, notes: nil, subtitle: subtitle
+            )
+        }
+
+        // 1. Batch de creación: el backend manda subtitle SOLO para Gym.
+        let outcome = store.applyBackendActions(
+            [
+                .addEvent(create("Gym", time: "7:00 AM", subtitle: "Llevar zapatillas")),
+                .addEvent(create("Clase", time: "10:00 AM", subtitle: nil)),
+            ],
+            userText: userText
+        )
+        let gym = outcome.createdEvents.first { $0.title.lowercased().contains("gym") }
+        let clase = outcome.createdEvents.first { $0.title.lowercased().contains("clase") }
+        check("subtitle-targeting: batch creó 2 eventos",
+              outcome.createdEvents.count == 2,
+              "creó \(outcome.createdEvents.count): \(outcome.createdEvents.map(\.title)) ignored=\(outcome.ignored)")
+        check("subtitle-targeting: Gym conserva el subtitle del backend",
+              gym?.subtitle == "Llevar zapatillas",
+              "subtitle=\(gym?.subtitle ?? "nil")")
+        check("subtitle-targeting: Clase NO hereda el detalle del userText",
+              clase != nil && clase?.subtitle == nil,
+              "subtitle=\(clase?.subtitle ?? "nil")")
+        // El "acuérdame …" mid-sentence pertenece a UN segmento: NINGÚN
+        // evento del batch debe quedar marcado como recordatorio (finding 3).
+        check("subtitle-targeting: Gym NO es recordatorio",
+              gym != nil && gym?.isReminder != true,
+              "isReminder=\(String(describing: gym?.isReminder))")
+        check("subtitle-targeting: Clase NO es recordatorio",
+              clase != nil && clase?.isReminder != true,
+              "isReminder=\(String(describing: clase?.isReminder))")
+
+        // 2. Edit posterior: "ponle subtítulo matemáticas a la clase".
+        if let clase {
+            let updates = BackendEventUpdates(
+                title: nil, timeString: nil, endTimeString: nil,
+                dateString: nil, location: nil,
+                reminderOffsets: nil, reminderNotes: nil,
+                subtitle: "Matemáticas"
+            )
+            _ = store.applyBackendActions(
+                [.editEvent(id: clase.id.uuidString, updates: updates)],
+                userText: "ponle subtítulo matemáticas a la clase"
+            )
+            let claseAfter = store.events.first { $0.id == clase.id }
+            check("subtitle-targeting: edit_event aplica updates.subtitle",
+                  claseAfter?.subtitle == "Matemáticas",
+                  "subtitle=\(claseAfter?.subtitle ?? "nil")")
+            if let gymId = gym?.id {
+                let gymAfter = store.events.first { $0.id == gymId }
+                check("subtitle-targeting: el edit NO toca el otro evento",
+                      gymAfter?.subtitle == "Llevar zapatillas",
+                      "subtitle=\(gymAfter?.subtitle ?? "nil")")
+            }
+        }
+
+        // 3. Limpieza: no dejar los eventos de prueba en el estado real.
+        for ev in outcome.createdEvents {
+            store.deleteEvent(ev.id)
+        }
+        return fails
+    }
+
+    // MARK: - Batería integral: eventos + subtítulos + recordatorios (2026-06-13)
+
+    /// Expectativa de UN ítem creado por un caso de la batería.
+    /// `key` = substring (lowercased) que debe contener el título. Los demás
+    /// campos se chequean SOLO si están seteados (sentinelas explícitos).
+    private struct BatExp {
+        let key: String
+        var hour: Int? = nil          // chequea hora si != nil
+        var subHas: String? = nil     // título-subtítulo debe CONTENER esto
+        var noSub: Bool = false       // subtítulo debe ser nil/vacío
+        var offset: Int? = nil        // reminderOffsets.first == esto
+        var noOffset: Bool = false    // sin reminderOffsets
+        var isTask: Bool = false      // es tarea (sin hora), no evento
+    }
+
+    private struct BatCase {
+        let input: String
+        let expect: [BatExp]
+        init(_ input: String, _ expect: [BatExp]) { self.input = input; self.expect = expect }
+    }
+
+    /// Batería integral del user spec 2026-06-13: 35 peticiones complejas
+    /// (multi-evento, recordatorios distintos por evento, subtítulos,
+    /// subtítulos en multi-evento, notas de recordatorio, recurrencia) + 15
+    /// simples cotidianas. Corre el PIPELINE LOCAL REAL (parseAll →
+    /// applyLocalNovaIntent) sobre un store efímero y verifica por evento:
+    /// título limpio (sin coma/trigger residual), hora, subtítulo (presencia/
+    /// anclaje) y offset de recordatorio (por-evento, no el primero del texto).
+    @discardableResult
+    static func runEventReminderBattery() -> String {
+        NovaResponder.testReferenceDate = fixedTestNow
+        defer { NovaResponder.testReferenceDate = nil }
+        guard Thread.isMainThread else { return "BATERÍA: requiere main thread\n" }
+
+        return MainActor.assumeIsolated { () -> String in
+            let cases = batteryCases()
+            var pass = 0, fail = 0
+            var rows: [String] = []
+
+            for (i, c) in cases.enumerated() {
+                let n = i + 1
+                let store = FocusDataStore()
+                for ev in store.events { store.deleteEvent(ev.id) }
+                for t in store.tasks { store.deleteTask(t.id) }
+                let before = Set(store.events.map(\.id))
+                let beforeTasks = Set(store.tasks.map(\.id))
+                let intents = NovaResponder.parseAll(c.input)
+                for it in intents {
+                    _ = store.applyLocalNovaIntent(it, userText: c.input, isMultiIntent: intents.count > 1)
+                }
+                let createdEvents = store.events.filter { !before.contains($0.id) }
+                let createdTasks = store.tasks.filter { !beforeTasks.contains($0.id) }
+
+                var problems: [String] = []
+
+                // 1. Conteo de ítems creados == esperado.
+                let totalCreated = createdEvents.count + createdTasks.count
+                if totalCreated != c.expect.count {
+                    problems.append("conteo \(totalCreated)≠\(c.expect.count)")
+                }
+
+                // 2. Ningún título con basura (coma colgante / trigger residual).
+                for ev in createdEvents {
+                    let tl = ev.title.lowercased()
+                    if ev.title.contains(" ,") || tl.contains("acuérdame") || tl.contains("acuerdame") || tl.contains("recuérdame") || tl.contains("recuerdame") {
+                        problems.append("título sucio '\(ev.title)'")
+                    }
+                }
+
+                // 3. Cada expectativa debe matchear un ítem creado.
+                for exp in c.expect {
+                    if exp.isTask {
+                        guard let t = createdTasks.first(where: { $0.title.lowercased().contains(exp.key) }) else {
+                            problems.append("falta tarea '\(exp.key)'"); continue
+                        }
+                        _ = t
+                        continue
+                    }
+                    guard let ev = createdEvents.first(where: {
+                        $0.title.lowercased().contains(exp.key) || ($0.subtitle ?? "").lowercased().contains(exp.key)
+                    }) else {
+                        problems.append("falta evento '\(exp.key)'"); continue
+                    }
+                    if let h = exp.hour {
+                        let gotH = Calendar.current.component(.hour, from: ev.startTime)
+                        if gotH != h { problems.append("'\(exp.key)' hora \(gotH)≠\(h)") }
+                    }
+                    if let sh = exp.subHas {
+                        // La info debe estar PRESERVADA (en título o subtítulo) —
+                        // el parser local a veces deja "X de Y" en el título y eso
+                        // es aceptable; lo que NO se permite es perder la info.
+                        let hay = (ev.title + " " + (ev.subtitle ?? "")).lowercased()
+                        if !hay.contains(sh.lowercased()) { problems.append("'\(exp.key)' info '\(sh)' perdida (título='\(ev.title)' sub='\(ev.subtitle ?? "nil")')") }
+                    }
+                    if exp.noSub {
+                        if let s = ev.subtitle, !s.isEmpty { problems.append("'\(exp.key)' subtítulo inesperado '\(s)'") }
+                    }
+                    if let off = exp.offset {
+                        let got = ev.reminderOffsets?.first
+                        if got != off { problems.append("'\(exp.key)' offset \(String(describing: got))≠\(off)") }
+                    }
+                    if exp.noOffset {
+                        if let offs = ev.reminderOffsets, !offs.isEmpty { problems.append("'\(exp.key)' offset inesperado \(offs)") }
+                    }
+                }
+
+                if problems.isEmpty {
+                    pass += 1
+                    rows.append("  \(n) ✓ | \(c.input.prefix(60))")
+                } else {
+                    fail += 1
+                    let got = createdEvents.sorted { $0.startTime < $1.startTime }.map { "\($0.title)·h\(Calendar.current.component(.hour, from: $0.startTime))·off\($0.reminderOffsets?.first.map(String.init) ?? "-")·sub[\($0.subtitle ?? "-")]" }.joined(separator: " ")
+                        + createdTasks.map { " TASK[\($0.title)]" }.joined()
+                    rows.append("  \(n) ✗ FAIL | \(c.input.prefix(55)) → \(got) ⟵ \(problems.joined(separator: "; "))")
+                }
+
+                for ev in createdEvents { store.deleteEvent(ev.id) }
+                for t in createdTasks { store.deleteTask(t.id) }
+            }
+
+            // Guard del short-circuit absoluto (bug "10/11 h antes" 2026-06-13):
+            // en multi-evento con offset RELATIVO, extractReminderAbsoluteIntent
+            // NO debe matchear (si no, malinterpreta "a las 9" como aviso
+            // absoluto, calcula ~10 h y pierde la reunión). Un recordatorio
+            // absoluto PURO ("acuérdame a las 6:30") SÍ debe seguir detectándose.
+            let gAbs1 = NovaResponder.extractReminderAbsoluteIntent(
+                from: "gym a las 7 acuerdame 30 min antes y reunion a las 9 acuerdame una hora antes") == nil
+            let gAbs2 = NovaResponder.extractReminderAbsoluteIntent(
+                from: "futbol a las 7 acuerdame a las 6:30") != nil
+            if gAbs1 { pass += 1; rows.append("  G1 ✓ | multi-evento+relativo NO dispara aviso absoluto") }
+            else { fail += 1; rows.append("  G1 ✗ FAIL | absoluteIntent disparó en multi-evento (bug 10h)") }
+            if gAbs2 { pass += 1; rows.append("  G2 ✓ | aviso absoluto puro SÍ se detecta") }
+            else { fail += 1; rows.append("  G2 ✗ FAIL | aviso absoluto puro dejó de detectarse") }
+
+            var out = "===== BATERÍA EVENTOS+SUBTÍTULOS+RECORDATORIOS =====\n"
+            out += "RESULTADO: \(pass)/\(pass + fail) PASS  (\(fail) FAIL)\n"
+            out += fail == 0 ? "✅ TODOS PASS\n" : "⚠️  Hay fallos\n"
+            out += "\n--- DETALLE ---\n" + rows.joined(separator: "\n") + "\n===== END =====\n"
+            return out
+        }
+    }
+
+    /// Los 50 casos (35 complejos + 15 simples). Horas con marcador explícito
+    /// (de la mañana/tarde/noche) cuando importa, para que la expectativa sea
+    /// determinista e independiente de la regla coloquial.
+    private static func batteryCases() -> [BatCase] {
+        return [
+            // ───────── 35 COMPLEJAS ─────────
+            // Multi-evento con recordatorios DISTINTOS por evento (el bug).
+            BatCase("gym a las 7 de la mañana acuérdame 30 min antes y reunión a las 9 de la mañana acuérdame una hora antes",
+                    [BatExp(key: "gym", hour: 7, offset: 30), BatExp(key: "reunión", hour: 9, offset: 60)]),
+            BatCase("dentista a las 8 de la mañana acuérdame 30 min antes y almuerzo a la 1 de la tarde acuérdame 15 min antes",
+                    [BatExp(key: "dentista", hour: 8, offset: 30), BatExp(key: "almuerzo", hour: 13, offset: 15)]),
+            BatCase("clase a las 10 de la mañana acuérdame 15 min antes y gym a las 6 de la tarde acuérdame 10 min antes",
+                    [BatExp(key: "clase", hour: 10, offset: 15), BatExp(key: "gym", hour: 18, offset: 10)]),
+            BatCase("partido a las 3 de la tarde acuérdame una hora antes y cena a las 9 de la noche acuérdame dos horas antes",
+                    [BatExp(key: "partido", hour: 15, offset: 60), BatExp(key: "cena", hour: 21, offset: 120)]),
+            BatCase("reunión a las 11 de la mañana acuérdame 5 min antes y terapia a las 5 de la tarde acuérdame media hora antes",
+                    [BatExp(key: "reunión", hour: 11, offset: 5), BatExp(key: "terapia", hour: 17, offset: 30)]),
+            // Subtítulos en evento único.
+            BatCase("gym pierna a las 7 de la mañana", [BatExp(key: "gym", hour: 7, subHas: "pierna")]),
+            BatCase("reunión de mindfulness a las 8 de la noche", [BatExp(key: "reunión", hour: 20, subHas: "mindfulness")]),
+            BatCase("clase de álgebra a las 10 de la mañana", [BatExp(key: "clase", hour: 10, subHas: "álgebra")]),
+            BatCase("terapia de ansiedad a las 4 de la tarde", [BatExp(key: "terapia", hour: 16, subHas: "ansiedad")]),
+            BatCase("entrenamiento de espalda a las 8 de la mañana", [BatExp(key: "entrenamiento", hour: 8, subHas: "espalda")]),
+            // Subtítulos en MULTI-evento (targeting por evento).
+            BatCase("clase de álgebra a las 10 de la mañana y clase de historia a las 12 de la tarde",
+                    [BatExp(key: "álgebra", hour: 10), BatExp(key: "historia", hour: 12)]),
+            BatCase("gym pierna a las 7 de la mañana y gym brazo a las 6 de la tarde",
+                    [BatExp(key: "pierna", hour: 7), BatExp(key: "brazo", hour: 18)]),
+            // Detalle/recordatorio anclado al evento que nombra.
+            BatCase("dentista a las 4 de la tarde y comprar remedios a las 5 de la tarde, acuérdame de llevar la receta al dentista",
+                    [BatExp(key: "dentista", hour: 16, subHas: "receta"), BatExp(key: "remedios", hour: 17, noSub: true)]),
+            BatCase("fútbol a las 5 de la tarde acuérdame de llevar la pelota",
+                    [BatExp(key: "fútbol", hour: 17, subHas: "pelota")]),
+            BatCase("reunión con Cristina a las 4 de la tarde revisar el portafolio",
+                    [BatExp(key: "cristina", hour: 16, subHas: "portafolio")]),
+            // Recordatorio con nota custom ("N antes de X") → offset + nota.
+            BatCase("partido a las 3 de la tarde acuérdame 20 min antes de echar las zapatillas",
+                    [BatExp(key: "partido", hour: 15, offset: 20)]),
+            // Recordatorio compartido "de cada uno" / "de ambos".
+            BatCase("partido a las 3 de la tarde y cena a las 9 de la noche, acuérdame 30 min antes de cada uno",
+                    [BatExp(key: "partido", hour: 15, offset: 30), BatExp(key: "cena", hour: 21, offset: 30)]),
+            BatCase("clase a las 10 de la mañana y reunión a las 4 de la tarde, avísame 15 min antes de ambas",
+                    [BatExp(key: "clase", hour: 10, offset: 15), BatExp(key: "reunión", hour: 16, offset: 15)]),
+            // Triple multi-evento.
+            BatCase("gym a las 7 de la mañana, desayuno a las 8 de la mañana y reunión a las 10 de la mañana",
+                    [BatExp(key: "gym", hour: 7), BatExp(key: "desayuno", hour: 8), BatExp(key: "reunión", hour: 10)]),
+            // Multi-evento, solo UNO con recordatorio.
+            BatCase("dentista a las 9 de la mañana y gym a las 6 de la tarde acuérdame 30 min antes",
+                    [BatExp(key: "dentista", hour: 9, noOffset: true), BatExp(key: "gym", hour: 18, offset: 30)]),
+            BatCase("reunión a las 2 de la tarde acuérdame 10 min antes y café con Ana a las 5 de la tarde",
+                    [BatExp(key: "reunión", hour: 14, offset: 10), BatExp(key: "café", hour: 17, noOffset: true)]),
+            // Offsets en palabras.
+            BatCase("reunión a las 5 de la tarde acuérdame media hora antes", [BatExp(key: "reunión", hour: 17, offset: 30)]),
+            BatCase("clase a las 11 de la mañana acuérdame una hora antes", [BatExp(key: "clase", hour: 11, offset: 60)]),
+            BatCase("examen a las 9 de la mañana acuérdame dos horas antes", [BatExp(key: "examen", hour: 9, offset: 120)]),
+            BatCase("vuelo a las 6 de la mañana acuérdame tres horas antes", [BatExp(key: "vuelo", hour: 6, offset: 180)]),
+            // Evento + tarea en un mensaje.
+            BatCase("reunión a las 3 de la tarde y comprar pan",
+                    [BatExp(key: "reunión", hour: 15), BatExp(key: "pan", isTask: true)]),
+            BatCase("gym a las 7 de la mañana y llamar al banco",
+                    [BatExp(key: "gym", hour: 7), BatExp(key: "llamar", isTask: true)]),
+            // Subtítulo + recordatorio juntos.
+            BatCase("clase de cálculo a las 10 de la mañana acuérdame 15 min antes",
+                    [BatExp(key: "clase", hour: 10, subHas: "cálculo", offset: 15)]),
+            BatCase("reunión de proyecto a las 4 de la tarde acuérdame 20 min antes",
+                    [BatExp(key: "reunión", hour: 16, subHas: "proyecto", offset: 20)]),
+            // Multi-evento con subtítulo en uno y recordatorio en el otro.
+            BatCase("gym pierna a las 7 de la mañana y reunión a las 9 de la mañana acuérdame 30 min antes",
+                    [BatExp(key: "gym", hour: 7, subHas: "pierna"), BatExp(key: "reunión", hour: 9, offset: 30)]),
+            // Hora explícita 24h.
+            BatCase("reunión a las 14:30", [BatExp(key: "reunión", hour: 14)]),
+            BatCase("gym a las 19:00 acuérdame 30 min antes", [BatExp(key: "gym", hour: 19, offset: 30)]),
+            // Recurrencia con recordatorio.
+            BatCase("todos los lunes clase a las 10 de la mañana acuérdame 15 min antes",
+                    [BatExp(key: "clase", hour: 10, offset: 15)]),
+            // Dos eventos mismo tipo, distinto subtítulo y hora.
+            BatCase("reunión de marketing a las 9 de la mañana y reunión de ventas a las 3 de la tarde",
+                    [BatExp(key: "marketing", hour: 9), BatExp(key: "ventas", hour: 15)]),
+            // Evento de noche con recordatorio largo.
+            BatCase("cena con Pedro a las 9 de la noche acuérdame una hora antes",
+                    [BatExp(key: "cena", hour: 21, subHas: "pedro", offset: 60)]),
+
+            // ───────── 15 SIMPLES (cotidianas) ─────────
+            BatCase("dentista mañana a las 4 de la tarde", [BatExp(key: "dentista", hour: 16)]),
+            BatCase("gym a las 6 de la tarde", [BatExp(key: "gym", hour: 18)]),
+            BatCase("reunión a las 3 de la tarde", [BatExp(key: "reunión", hour: 15)]),
+            BatCase("almuerzo a la 1 de la tarde", [BatExp(key: "almuerzo", hour: 13)]),
+            BatCase("cena a las 8 de la noche", [BatExp(key: "cena", hour: 20)]),
+            BatCase("comprar pan", [BatExp(key: "pan", isTask: true)]),
+            BatCase("llamar a Juan", [BatExp(key: "llamar", isTask: true)]),
+            BatCase("clase a las 10 de la mañana", [BatExp(key: "clase", hour: 10)]),
+            BatCase("estudiar a las 9 de la noche", [BatExp(key: "estudiar", hour: 21)]),
+            BatCase("café con Pedro a las 5 de la tarde", [BatExp(key: "café", hour: 17)]),
+            BatCase("médico a las 11 de la mañana", [BatExp(key: "médico", hour: 11)]),
+            BatCase("yoga a las 7 de la mañana", [BatExp(key: "yoga", hour: 7)]),
+            BatCase("reunión con Ana a las 2 de la tarde", [BatExp(key: "ana", hour: 14)]),
+            BatCase("desayuno a las 8 de la mañana", [BatExp(key: "desayuno", hour: 8)]),
+            BatCase("comprar leche", [BatExp(key: "leche", isTask: true)]),
+        ]
+    }
+
+    // MARK: - Regresión: fallback logueado visible (2026-06-13)
+
+    /// Verifica que NINGÚN error que dispara fallback al parser local deje al
+    /// usuario sin aviso (loggedInFallbackNote no-vacía). Antes los errores de
+    /// servidor (timeout/serviceUnavailable/server/...) caían en silencio.
+    private static func fallbackVisibilityFailures(into failures: inout [String]) {
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+            if ok { print("  ✓ \(label)") }
+            else {
+                let msg = "  ✗ \(label)\(detail.isEmpty ? "" : " — \(detail)")"
+                print(msg); failures.append(msg)
+            }
+        }
+        // Errores que SÍ hacen fallback → nota visible obligatoria.
+        let recoverable: [(String, NovaServiceError)] = [
+            ("unauthorized", .unauthorized),
+            ("quotaExceeded", .quotaExceeded(message: nil)),
+            ("offline", .offline),
+            ("timeout", .timeout),
+            ("serviceUnavailable", .serviceUnavailable),
+            ("badLLMOutput", .badLLMOutput),
+            ("invalidResponse", .invalidResponse),
+            ("server", .server(status: 500)),
+        ]
+        for (name, err) in recoverable {
+            check("fallback-visible: \(name) tiene nota honesta no-vacía",
+                  !err.loggedInFallbackNote.isEmpty && err.canFallbackToLocal,
+                  "note='\(err.loggedInFallbackNote)' canFallback=\(err.canFallbackToLocal)")
+            // La nota debe dejar claro que NO es la IA real (menciona respaldo
+            // local / sesión / conexión), no un "Listo" que parezca normal.
+            let n = err.loggedInFallbackNote.lowercased()
+            check("fallback-visible: \(name) deja claro que es respaldo/local",
+                  n.contains("local") || n.contains("sesión") || n.contains("conexión") || n.contains("límite"),
+                  "note='\(err.loggedInFallbackNote)'")
+        }
+        // Errores client-side que NO hacen fallback → sin nota.
+        for (name, err) in [("emptyMessage", NovaServiceError.emptyMessage), ("messageTooLong", .messageTooLong)] {
+            check("fallback-visible: \(name) no hace fallback",
+                  !err.canFallbackToLocal && err.loggedInFallbackNote.isEmpty,
+                  "canFallback=\(err.canFallbackToLocal)")
+        }
+    }
+
+    // MARK: - Regresión: parser LOCAL multi-intent (2026-06-12)
+
+    /// Reproduce el bug del parser local (modo demo / sin sesión): al
+    /// segmentar un mensaje con varios eventos, el segundo título salía
+    /// sucio (coma colgante + residuo del trigger de recordatorio) para la
+    /// clase de inputs "X a las N, acuérdame de Y", y el "acuérdame de … al
+    /// dentista" se perdía sin anclarse al evento que nombra. Corre el path
+    /// REAL (NovaResponder.parseAll → applyLocalNovaIntent) y limpia al final.
+    @MainActor
+    private static func localMultiIntentRegressionFailures() -> [String] {
+        var fails: [String] = []
+        func check(_ label: String, _ ok: Bool, _ detail: String = "") {
+            if ok {
+                print("  ✓ \(label)")
+            } else {
+                let msg = "  ✗ \(label)\(detail.isEmpty ? "" : " — \(detail)")"
+                print(msg)
+                fails.append(msg)
+            }
+        }
+
+        // Helper: corre el path local real y devuelve los eventos creados.
+        // Sanea fixtures preexistentes (de corridas previas persistidas en
+        // UserDefaults) para que el guard anti-duplicado no bloquee la
+        // creación.
+        func runLocal(_ text: String) -> (store: FocusDataStore, events: [FocusEvent], replies: [String], intentCount: Int) {
+            let store = FocusDataStore()
+            let fixtureNeedles = ["dentista", "comprar remedios", "remedios"]
+            for ev in store.events where fixtureNeedles.contains(where: { ev.title.lowercased().contains($0) }) {
+                store.deleteEvent(ev.id)
+            }
+            let before = Set(store.events.map(\.id))
+            let intents = NovaResponder.parseAll(text)
+            var replies: [String] = []
+            for intent in intents {
+                if let r = store.applyLocalNovaIntent(
+                    intent, userText: text, isMultiIntent: intents.count > 1
+                ) { replies.append(r) }
+            }
+            let created = store.events
+                .filter { !before.contains($0.id) }
+                .sorted { $0.startTime < $1.startTime }
+            return (store, created, replies, intents.count)
+        }
+
+        // ── Caso 1: el input exacto del bug reportado.
+        let (store1, evs1, replies1, ic1) = runLocal(
+            "dentista a las 4 y comprar remedios a las 5, acuérdame de llevar la receta al dentista"
+        )
+        let dentista = evs1.first { $0.title.lowercased().contains("dentista") }
+        let remedios = evs1.first { $0.title.lowercased().contains("remedios") }
+        check("local-multi: crea 2 eventos", evs1.count == 2,
+              "creó \(evs1.count) (intents=\(ic1)) titles=\(evs1.map(\.title)) replies=\(replies1)")
+        check("local-multi: título 2 LIMPIO ('Comprar remedios')",
+              remedios?.title == "Comprar remedios",
+              "title='\(remedios?.title ?? "nil")'")
+        check("local-multi: sin coma/trigger colgante en ningún título",
+              evs1.allSatisfy { !$0.title.contains(",") && !$0.title.lowercased().contains("acuérdame") && !$0.title.lowercased().contains("acuerdame") },
+              "titles=\(evs1.map(\.title))")
+        // El recordatorio "…al dentista" se ancla al Dentista, no a Remedios.
+        check("local-multi: detalle anclado al Dentista",
+              dentista?.subtitle?.lowercased().contains("receta") == true,
+              "dentista.sub='\(dentista?.subtitle ?? "nil")'")
+        check("local-multi: el detalle NO contamina Comprar remedios",
+              remedios?.subtitle == nil,
+              "remedios.sub='\(remedios?.subtitle ?? "nil")'")
+        for ev in evs1 { store1.deleteEvent(ev.id) }
+
+        // ── Caso 2: el bug ORIGINAL no debe reaparecer — un detalle SIN
+        // referencia explícita no se filtra a ningún evento.
+        let (store2, evs2, _, _) = runLocal("dentista a las 4 y comprar remedios a las 5")
+        let dent2 = evs2.first { $0.title.lowercased().contains("dentista") }
+        let rem2 = evs2.first { $0.title.lowercased().contains("remedios") }
+        check("local-multi: bug original sigue arreglado (Dentista sin subtítulo ajeno)",
+              dent2?.subtitle == nil,
+              "dentista.sub='\(dent2?.subtitle ?? "nil")'")
+        check("local-multi: Comprar remedios sin subtítulo auto-referencial",
+              rem2?.subtitle == nil,
+              "remedios.sub='\(rem2?.subtitle ?? "nil")'")
+        for ev in evs2 { store2.deleteEvent(ev.id) }
+
+        // ── Caso 3 (unidad): cleanTitle limpia la clase coma+trigger aunque
+        // lo que siga NO sea un verbo de detalle reconocido.
+        check("cleanTitle: 'comprar remedios a las 5, acuérdame de algo' → 'Comprar remedios'",
+              NovaActionNormalizer.cleanTitle("comprar remedios a las 5, acuérdame de algo") == "Comprar remedios",
+              "='\(NovaActionNormalizer.cleanTitle("comprar remedios a las 5, acuérdame de algo"))'")
+        // ── Caso 4 (unidad): trigger SIN coma al inicio NO se trunca de más.
+        check("cleanTitle: 'hoy recuérdame llamar a Juan' → 'Llamar a Juan'",
+              NovaActionNormalizer.cleanTitle("hoy recuérdame llamar a Juan") == "Llamar a Juan",
+              "='\(NovaActionNormalizer.cleanTitle("hoy recuérdame llamar a Juan"))'")
+
+        return fails
     }
 }
 

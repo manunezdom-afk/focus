@@ -1,5 +1,72 @@
+import Combine
 import SwiftUI
 import UIKit
+
+/// Observador global del teclado iOS. Objeto (no view-modifier) a propósito:
+/// los `onReceive` montados dentro de las páginas del pager horizontal de
+/// MainTabView demostraron NO recibir las notificaciones de teclado en
+/// iOS 26.4 (QA-closure 2026-06-10), mientras que el observer de
+/// MainTabView (root) sí las recibe. Suscribirse en un ObservableObject
+/// desacopla la recepción de la posición del view en la jerarquía.
+///
+/// `overlap` = puntos de teclado que invaden la pantalla por encima del
+/// safe area inferior, calculado con `minY` del frame FINAL en coordenadas
+/// de ventana (`keyboardWillChangeFrame` + `keyboardWillHide`). Robusto a
+/// frames interinos del accessory bar (~55 pt) que rompían el cálculo
+/// `height - safeArea` del workaround anterior.
+@MainActor
+final class KeyboardObserver: ObservableObject {
+    @Published var overlap: CGFloat = 0
+    /// Y global (coordenadas de ventana) del borde SUPERIOR del teclado,
+    /// o `nil` si está oculto. Permite a las vistas calcular cuánto deben
+    /// elevarse midiendo su propia posición — robusto frente a contenedores
+    /// que redimensionan (el pager horizontal agranda la página con el
+    /// content-inset del teclado, así que un offset fijo no sirve).
+    @Published var keyboardTopY: CGFloat? = nil
+
+    private var cancellables: Set<AnyCancellable> = []
+
+    init() {
+        // willShow Y willChangeFrame: el runtime del simulador iOS 26.4
+        // postea willShow pero NO siempre willChangeFrame (verificado con
+        // instrumentación — un sink solo-willChangeFrame jamás corrió
+        // mientras el onReceive de willShow de MainTabView sí). En device
+        // real ambas llegan; la matemática por minY es idempotente así
+        // que recibir las dos no causa doble aplicación.
+        for name in [UIResponder.keyboardWillShowNotification,
+                     UIResponder.keyboardWillChangeFrameNotification] {
+            NotificationCenter.default
+                .publisher(for: name)
+                .sink { [weak self] notification in
+                    self?.update(from: notification)
+                }
+                .store(in: &cancellables)
+        }
+        NotificationCenter.default
+            .publisher(for: UIResponder.keyboardWillHideNotification)
+            .sink { [weak self] _ in
+                self?.overlap = 0
+                self?.keyboardTopY = nil
+            }
+            .store(in: &cancellables)
+    }
+
+    private func update(from notification: Notification) {
+        guard let endFrame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .keyWindow
+            ?? UIApplication.shared.connectedScenes
+                .compactMap { ($0 as? UIWindowScene)?.windows.first }
+                .first
+        guard let window else { return }
+        let frameInWindow = window.convert(endFrame, from: nil)
+        let overlapPoints = max(0, window.bounds.maxY - frameInWindow.minY)
+        overlap = max(0, overlapPoints - window.safeAreaInsets.bottom)
+        keyboardTopY = overlapPoints > 0 ? frameInWindow.minY : nil
+    }
+}
 
 /// Nova como tab principal. Tres segmentos internos:
 /// - **Bandeja** (default): cards de decisiones de Nova con Aprobar/Posponer/Descartar.
@@ -27,15 +94,22 @@ struct NovaView: View {
     @State private var isDictating: Bool = false
     @State private var dictationDeniedMessage: String? = nil
 
-    /// Altura del teclado por encima del safe area inferior. Se actualiza
-    /// vía `NotificationCenter` (keyboardWillShow/Hide). Necesario porque
-    /// SwiftUI `safeAreaInset(edge: .bottom)` no eleva el composer del
-    /// chat de forma confiable cuando hay un sibling con
-    /// `.ignoresSafeArea()` (FocusAmbientCanvas) — bug visible en iOS 26.4
-    /// simulator: el composer queda atrapado detrás del teclado, solo se
-    /// ve el toolbar "Listo" nativo. Con observación manual + offset
-    /// aplicado al overlay del composer, garantizamos elevación correcta.
-    @State private var keyboardOverlap: CGFloat = 0
+    /// Teclado iOS — ver doc de `KeyboardObserver` arriba.
+    @StateObject private var keyboard = KeyboardObserver()
+
+    /// Y global del borde inferior del VStack raíz (medida por el anchor
+    /// invisible del overlay). El pager horizontal AGRANDA la página con
+    /// el content-inset del teclado, así que este borde puede quedar muy
+    /// por debajo de la pantalla — por eso el lift se calcula contra la
+    /// posición REAL medida y no con la altura del teclado a secas.
+    @State private var containerBottomY: CGFloat = 0
+
+    /// Cuántos puntos hay que subir el composer para que su borde inferior
+    /// quede exactamente en el borde superior del teclado.
+    private var composerLift: CGFloat {
+        guard let kbTop = keyboard.keyboardTopY else { return 0 }
+        return max(0, containerBottomY - kbTop)
+    }
 
     /// **Feature flag Nova Live**. La V1 actual (Speech framework + STT
     /// + envío a Nova) NO es la experiencia conversacional tipo
@@ -72,40 +146,46 @@ struct NovaView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // Composer del chat al final del VStack root.
+                // En chat: el viewport del scroll termina sobre el composer
+                // flotante (88 ≈ alto del inputBar) y sobre el teclado
+                // cuando está abierto — así el último mensaje nunca queda
+                // tapado y scrollToBottom ancla visible.
+                .padding(.bottom, nav.novaSegment == .chat ? 88 + composerLift : 0)
+            }
+            // Anchor invisible: mide la Y global REAL del borde inferior
+            // del VStack. Dentro del pager horizontal de MainTabView la
+            // página se agranda con el content-inset del teclado (el borde
+            // puede quedar cientos de puntos bajo la pantalla), así que
+            // cualquier offset fijo basado en la altura del teclado falla.
+            .overlay(alignment: .bottom) {
+                Color.clear
+                    .frame(height: 1)
+                    .background(GeometryReader { proxy in
+                        Color.clear
+                            .onAppear { containerBottomY = proxy.frame(in: .global).maxY }
+                            .onChange(of: proxy.frame(in: .global).maxY) { _, maxY in
+                                containerBottomY = maxY
+                            }
+                    })
+                    .allowsHitTesting(false)
+            }
+            // Composer flotante del chat, fuera del flow del VStack: un
+            // overlay no participa del keyboard avoidance del sistema, y
+            // el lift se auto-corrige midiendo anchor vs tope del teclado
+            // (composerLift) — el borde inferior del composer queda
+            // EXACTAMENTE en el borde superior del teclado (QA-closure
+            // 2026-06-10, bug "composer atrapado detrás del teclado").
+            .overlay(alignment: .bottom) {
                 if nav.novaSegment == .chat {
                     inputBar
+                        .offset(y: -composerLift)
                 }
             }
-            // Elevación manual del VStack completo cuando aparece el
-            // keyboard. Approach last-resort porque SwiftUI default
-            // keyboard avoidance NO funcionaba aquí en iOS 26.4 sim
-            // (composer quedaba detrás del teclado pese a múltiples
-            // intentos con safeAreaInset, overlay+offset, background
-            // modifier). Con `.padding(.bottom, keyboardOverlap)` +
-            // `.ignoresSafeArea(.keyboard)` aplicado al VStack
-            // garantizamos que el composer se eleve consistentemente.
-            // Branding y segmented control se comprimen visualmente
-            // arriba (mismo patrón que WhatsApp/iMessage con scroll).
-            .padding(.bottom, keyboardOverlap)
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-            .animation(.easeOut(duration: 0.25), value: keyboardOverlap)
+            .animation(.easeOut(duration: 0.25), value: composerLift)
             .background(
                 FocusAmbientCanvas(state: store.isNovaTyping ? .thinking : .idle)
             )
             .navigationBarHidden(true)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
-            guard let frame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
-            let scene = UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .first(where: { $0.activationState == .foregroundActive })
-            let bottomSafeArea = scene?.windows.first?.safeAreaInsets.bottom ?? 0
-            keyboardOverlap = max(0, frame.height - bottomSafeArea)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            keyboardOverlap = 0
         }
         // Coach mark de Nova la primera vez que el usuario llega a esta
         // tab. Mismo patrón que Mi Día y Calendario.
@@ -190,7 +270,14 @@ struct NovaView: View {
                 dictationService.cancel()
             }
         }
-        .alert("Sin permiso de voz", isPresented: .constant(dictationDeniedMessage != nil), actions: {
+        // Binding derivado REAL (no `.constant`): con `.constant` SwiftUI
+        // no puede escribir el cierre y el alert queda INMORTAL — el botón
+        // Cerrar no hace nada y la app queda bloqueada (bug QA-closure
+        // 2026-06-10, reproducido en simulador).
+        .alert("Dictado no disponible", isPresented: Binding(
+            get: { dictationDeniedMessage != nil },
+            set: { if !$0 { dictationDeniedMessage = nil } }
+        ), actions: {
             Button("Abrir Ajustes") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
                     UIApplication.shared.open(url)
@@ -557,6 +644,23 @@ struct NovaView: View {
                 .animation(Theme.Spring.entrance, value: store.novaMessages.count)
                 .animation(Theme.Spring.entrance, value: store.isNovaTyping)
             }
+            // FIX teclado pegado (QA-closure 2026-06-10): con mensajes en
+            // el chat, este ScrollView cubre al NovaChatBackdrop y se traga
+            // los taps — el tap-para-cerrar del backdrop solo funcionaba en
+            // el estado vacío, y el toolbar "Listo" se quitó a propósito.
+            // Sin esto NO existía gesto alguno para cerrar el teclado.
+            //
+            // `.immediately` (no `.interactively`) a propósito: el composer
+            // se eleva con el tracking MANUAL de keyboardOverlap (padding +
+            // ignoresSafeArea(.keyboard) en el VStack root, ver arriba), no
+            // con el avoidance nativo. Un dismiss interactivo dejaría el
+            // padding manual desincronizado del frame real del teclado
+            // durante el drag (hueco fantasma bajo el composer). Con
+            // `.immediately`, el gesto de scroll dispara un willHide
+            // discreto y el padding anima a 0 en sincronía. Si algún día
+            // se migra a keyboard avoidance nativo, cambiar a
+            // `.interactively`.
+            .scrollDismissesKeyboard(.immediately)
             .onChange(of: store.novaMessages.count) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true)
             }
