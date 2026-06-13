@@ -5770,6 +5770,10 @@ final class FocusDataStore: ObservableObject {
     }
 
     func addTask(_ task: FocusTask) {
+        // SOLO-EVENTOS (temporal 2026-06-13): tareas deshabilitadas. No-op —
+        // ningún path (Nova chat, Mi Día, backend, TareasView) puede crear
+        // tareas. Reactivar con FocusConfig.tasksEnabled = true.
+        guard FocusConfig.tasksEnabled else { return }
         tasks.insert(task, at: 0)
         persistTasks()
         uploadTask(task)

@@ -1814,6 +1814,16 @@ struct MiDiaView: View {
     private func executeIntent(_ intent: NovaIntent, userText: String, isMultiIntent: Bool = false) -> InlineNovaResponse {
         switch intent {
         case .createTask(let title, let dueDate, let recurrence, let wantsReminder):
+            // SOLO-EVENTOS (temporal 2026-06-13): no creamos tareas. En vez de
+            // anotar una tarea, pedimos la hora para agendarlo como EVENTO.
+            if !FocusConfig.tasksEnabled {
+                return InlineNovaResponse(
+                    userText: userText,
+                    summary: "¿A qué hora lo agendo?",
+                    details: "Lo pongo como evento en tu día.",
+                    tone: .clarify
+                )
+            }
             // Si hay fecha y es hoy/mañana/esta semana, usamos esa categoría;
             // si es más lejos, .algunDia. La category se mantiene compatible
             // con el modelo existente; dueDate es metadata adicional.

@@ -23,6 +23,15 @@ enum FocusConfig {
 
     static let apiOrigin = URL(string: "https://www.usefocus.me")!
 
+    /// SOLO-EVENTOS (temporal, 2026-06-13): mientras las tareas estén mal
+    /// resueltas, la app NO maneja tareas — todo es evento. Con esto en
+    /// false, `addTask` es no-op (no se crea ni se guarda ninguna tarea),
+    /// el composer redirige los intents de tarea a "¿a qué hora?" (evento)
+    /// y las superficies de tareas no muestran nada. El backend además
+    /// tiene MODO SOLO-EVENTOS en el system prompt (nunca emite add_task).
+    /// Volver a poner en true para reactivar las tareas.
+    static let tasksEnabled = false
+
     /// Si no es nil, inyecta el header `x-vercel-protection-bypass` en
     /// CADA request a apiOrigin para saltar la SSO de Vercel Preview.
     /// SOLO debe estar set durante QA local; nil en builds productivas.

@@ -506,9 +506,13 @@ struct NovaView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
 
-                tasksLink
-                    .padding(.horizontal, Theme.Spacing.xl)
-                    .padding(.top, Theme.Spacing.sm)
+                // SOLO-EVENTOS (temporal): ocultar el acceso a la lista de
+                // tareas mientras las tareas estén deshabilitadas.
+                if FocusConfig.tasksEnabled {
+                    tasksLink
+                        .padding(.horizontal, Theme.Spacing.xl)
+                        .padding(.top, Theme.Spacing.sm)
+                }
 
                 Spacer(minLength: Theme.Spacing.bottomBarSafety)
             }
