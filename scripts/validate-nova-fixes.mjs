@@ -95,6 +95,44 @@ const scenarios = [
     },
   },
   {
+    name: 'HOY multi-subtítulo (eventos de hoy mismo, c/u su subtítulo)',
+    input: 'Hoy agéndame dentista a las 4 y gimnasio a las 6 enfocado en pierna',
+    check: (out) => {
+      const fails = []
+      const dent = out.actions.find(a => a.type === 'add_event' && norm(a.event?.title).includes('dentista'))
+      const gym = out.actions.find(a => a.type === 'add_event' && norm(a.event?.title).includes('gimnasio'))
+      if (!dent) fails.push('falta evento dentista')
+      else {
+        const d = dent.event?.date ?? dateContext.todayISO
+        if (d !== dateContext.todayISO) fails.push(`dentista.date=${d} (esperaba HOY ${dateContext.todayISO})`)
+        if (!/4:00\s*PM/i.test(dent.event?.time || '')) fails.push(`dentista.time=${dent.event?.time} (esperaba 4:00 PM)`)
+      }
+      if (!gym) fails.push('falta evento gimnasio')
+      else {
+        const d = gym.event?.date ?? dateContext.todayISO
+        if (d !== dateContext.todayISO) fails.push(`gimnasio.date=${d} (esperaba HOY)`)
+        if (!norm(gym.event?.subtitle).includes('pierna')) fails.push(`gimnasio.subtitle="${gym.event?.subtitle}" (esperaba ~pierna)`)
+      }
+      return fails
+    },
+  },
+  {
+    name: 'memoria recall ("¿a qué hora es...?")',
+    events: [{ id: 'ev-banco', title: 'Reunión con el banco', time: '3:00 PM', date: 'today' }],
+    discussed: ['ev-banco'],
+    history: [
+      { role: 'user', content: 'agéndame reunión con el banco hoy a las 3 de la tarde' },
+      { role: 'assistant', content: 'Listo, Reunión con el banco hoy a las 3:00 PM.' },
+    ],
+    input: '¿a qué hora me quedó la reunión con el banco?',
+    check: (out) => {
+      const fails = []
+      if (out.actions.length !== 0) fails.push(`emitió acciones (${out.actions.length}) — debía solo responder`)
+      if (!/3\b|3:00|tres/i.test(out.reply)) fails.push(`reply no menciona las 3: "${out.reply.slice(0,80)}"`)
+      return fails
+    },
+  },
+  {
     name: 'editar-por-pronombre ("muévela una hora antes")',
     events: [{ id: 'ev-plomero', title: 'Llamada con el plomero', time: '5:00 PM', date: 'today' }],
     discussed: ['ev-plomero'],
