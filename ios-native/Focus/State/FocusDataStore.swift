@@ -3324,10 +3324,19 @@ enum NovaResponder {
         ]) {
             return .foco
         }
+        // Entrenamiento/deporte → sección .entrenamiento (NO descanso). Antes
+        // gym/correr/yoga caían en .descanso y la tarjeta mostraba "Descanso"
+        // (☕) en vez de "Entrenamiento" — bug reportado 2026-06-13.
         if matches(lower, [
-            "gym", "correr", "yoga", "pilates", "running", "siesta", "pausa", "descanso",
-            "entrenar", "entreno", "spinning", "crossfit", "natación", "natacion"
+            "gym", "gimnasio", "correr", "yoga", "pilates", "running", "trotar", "trote",
+            "entrenar", "entreno", "entrenamiento", "spinning", "crossfit",
+            "natación", "natacion", "nadar", "pesas", "fútbol", "futbol", "partido",
+            "básquet", "basquet", "tenis", "padel", "pádel", "ciclismo", "bici", "boxeo"
         ]) {
+            return .entrenamiento
+        }
+        // Descanso real (no deporte): siesta, pausa, descanso.
+        if matches(lower, ["siesta", "pausa", "descanso", "descansar", "relajar"]) {
             return .descanso
         }
         return nil
@@ -6778,8 +6787,14 @@ final class FocusDataStore: ObservableObject {
 
     /// Mapeo conservador del `icon` del backend a `EventSection`.
     private func sectionFromIcon(_ icon: String) -> EventSection? {
-        switch icon.lowercased() {
-        case "fitness_center":          return .descanso
+        let key = icon.lowercased()
+        // Familia deporte/entrenamiento (directions_run, sports_*, pool…) →
+        // .entrenamiento. Bug 2026-06-13: solo "fitness_center" matcheaba.
+        if key.hasPrefix("sports_") { return .entrenamiento }
+        switch key {
+        case "fitness_center", "directions_run", "directions_bike",
+             "directions_walk", "pool", "hiking", "sports":
+                                        return .entrenamiento
         case "groups":                  return .reunion
         case "menu_book":               return .estudio
         case "work":                    return .foco

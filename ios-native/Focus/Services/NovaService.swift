@@ -931,8 +931,16 @@ extension TaskCategory {
 /// arriba.
 extension EventSection {
     static func fromBackendIcon(_ icon: String?) -> EventSection {
-        switch (icon ?? "").lowercased() {
-        case "fitness_center":     return .descanso
+        let key = (icon ?? "").lowercased()
+        // Familia deporte/entrenamiento: el modelo usa variantes
+        // (directions_run, sports_tennis, sports_soccer, pool, etc.).
+        // Todas → .entrenamiento. Antes solo "fitness_center" matcheaba y el
+        // resto caía en .personal (categoría incorrecta). Bug 2026-06-13.
+        if key.hasPrefix("sports_") { return .entrenamiento }
+        switch key {
+        case "fitness_center", "directions_run", "directions_bike",
+             "directions_walk", "pool", "hiking", "sports":
+                                   return .entrenamiento
         case "groups":             return .reunion
         case "menu_book":          return .estudio
         case "work":               return .foco

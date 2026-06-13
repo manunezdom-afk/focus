@@ -142,6 +142,8 @@ enum Theme {
         static let sectionEstudio = Color(red: 0.545, green: 0.361, blue: 0.965)  // #8B5CF6
         /// Descanso — teal PROFUNDO. Antes #14B8A6 brighter.
         static let sectionDescanso = Color(red: 0.051, green: 0.580, blue: 0.533) // #0D9488
+        /// Entrenamiento — verde vivo (salud/energía), distinto del teal de descanso.
+        static let sectionEntrenamiento = Color(red: 0.086, green: 0.639, blue: 0.290) // #16A34A
         /// Reminder — amber OSCURO. Antes #F59E0B brighter.
         static let sectionReminder = Color(red: 0.851, green: 0.467, blue: 0.024) // #D97706
 

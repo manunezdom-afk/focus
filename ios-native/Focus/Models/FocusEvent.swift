@@ -7,6 +7,7 @@ enum EventSection: String, Codable, CaseIterable, Hashable, Identifiable {
     case personal
     case estudio
     case descanso
+    case entrenamiento
     case reminder
 
     var id: String { rawValue }
@@ -18,6 +19,7 @@ enum EventSection: String, Codable, CaseIterable, Hashable, Identifiable {
         case .personal: return "Personal"
         case .estudio: return "Estudio"
         case .descanso: return "Descanso"
+        case .entrenamiento: return "Entrenamiento"
         case .reminder: return "Recordatorio"
         }
     }
@@ -29,6 +31,7 @@ enum EventSection: String, Codable, CaseIterable, Hashable, Identifiable {
         case .personal: return Theme.Colors.sectionPersonal
         case .estudio: return Theme.Colors.sectionEstudio
         case .descanso: return Theme.Colors.sectionDescanso
+        case .entrenamiento: return Theme.Colors.sectionEntrenamiento
         case .reminder: return Theme.Colors.sectionReminder
         }
     }
@@ -40,6 +43,7 @@ enum EventSection: String, Codable, CaseIterable, Hashable, Identifiable {
         case .personal: return "person.fill"
         case .estudio: return "book.fill"
         case .descanso: return "cup.and.saucer.fill"
+        case .entrenamiento: return "figure.run"
         case .reminder: return "bell.fill"
         }
     }
